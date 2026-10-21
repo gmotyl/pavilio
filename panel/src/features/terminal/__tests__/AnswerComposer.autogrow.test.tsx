@@ -16,11 +16,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { AnswerComposer } from "../AnswerComposer";
 import { __resetComposerDraftsForTests } from "../composerDrafts";
 import { __resetPtySubmitForTests } from "../ptySubmit";
 import type { ConnectionState } from "../terminalInstances";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The pool is somebody else's subject, and jsdom has no socket under any of
 // this — see `AnswerComposer.pendingRow.test.tsx` for the fuller version of
@@ -36,26 +36,6 @@ vi.mock("../terminalInstances", () => ({
 }));
 
 const SESSION = "cell-a";
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** jsdom has no `matchMedia`, and the composer's grip hook asks it for the viewport. */
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 const isField = (element: Element): boolean =>
   element.classList.contains("answer-pane-composer-field");
@@ -136,7 +116,7 @@ afterEach(() => {
 
 describe("the mobile composer grows with the reply", () => {
   it("on mobile the field grows with scrollHeight", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     renderComposer();
 
     // A reply that wraps to four rows: the browser would report a taller
@@ -148,7 +128,7 @@ describe("the mobile composer grows with the reply", () => {
   });
 
   it("on mobile the field caps at six rows", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     renderComposer();
 
     // Far more than six rows' worth — the field must not follow it past the cap.
@@ -159,7 +139,7 @@ describe("the mobile composer grows with the reply", () => {
   });
 
   it("sending returns the field to its minimum", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     const send = vi.fn((_data: string) => true);
     renderComposer(send);
 
@@ -180,7 +160,7 @@ describe("the mobile composer grows with the reply", () => {
   });
 
   it("on desktop the field height is left to the grip", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     renderComposer();
 
     // Whatever a real browser would report here, the desktop field's own

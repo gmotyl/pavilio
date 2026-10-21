@@ -16,6 +16,7 @@ import {
 } from "./projectColors.harness";
 import { INERT_SPEECH } from "./speech.harness";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
+import { installMatchMedia } from "../../../test-utils";
 
 // Connection state is per-browser and lives in the terminal instance pool.
 // Stub the two leaf reads the disconnected badge makes so a cell can be put
@@ -99,21 +100,7 @@ vi.mock("../TerminalActivityLed", () => ({
 
 beforeAll(() => {
   // jsdom does not implement matchMedia
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent: () => false,
-        onchange: null,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {

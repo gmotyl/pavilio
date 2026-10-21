@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
+import { makeApp } from "../../test-kit";
 
 vi.mock("../../lib/tailscale", () => ({
   detectTailscale: vi.fn(),
@@ -36,13 +36,6 @@ import * as listener from "../../lib/panel-listener";
 import * as hostPlatform from "../../lib/host-platform";
 import mobileAccessRouter from "../mobile-access";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/mobile-access", mobileAccessRouter);
-  return app;
-}
-
 const tailscaleOn = {
   state: "on" as const,
   selfHost: "mac.foo.ts.net",
@@ -58,7 +51,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue("192.168.1.42");
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status");
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -80,7 +73,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue("192.168.1.42");
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("0.0.0.0");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status");
 
     expect(res.body.lan).toEqual({
       state: "on",
@@ -96,7 +89,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue(null);
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status");
 
     expect(res.body.lan).toEqual({ state: "off", lanIp: null });
   });
@@ -110,7 +103,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.getWslVmIp).mockReturnValueOnce("172.26.5.42");
     vi.mocked(hostPlatform.detectHostPlatform).mockReturnValueOnce("wsl");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status");
 
     expect(res.status).toBe(200);
     expect(res.body.host).toEqual({
@@ -126,7 +119,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue(null);
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status");
 
     // The mock ignores its arguments, so a route that pinned the platform
     // itself — detectHostPlatform("win32", () => false) — would still produce a
@@ -143,7 +136,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue(null);
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status?fresh=1");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status?fresh=1");
 
     expect(res.status).toBe(200);
     expect(tailscale.detectTailscale).toHaveBeenCalledWith(3010, { fresh: true });
@@ -155,7 +148,7 @@ describe("GET /api/mobile-access/status", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue(null);
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).get("/api/mobile-access/status");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).get("/api/mobile-access/status");
 
     expect(res.status).toBe(200);
     expect(tailscale.detectTailscale).toHaveBeenCalledWith(3010);
@@ -172,7 +165,7 @@ describe("POST /api/mobile-access/enable", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue(null);
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).post("/api/mobile-access/enable");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/enable");
 
     expect(res.status).toBe(200);
     expect(auth.ensureToken).toHaveBeenCalled();
@@ -192,7 +185,7 @@ describe("POST /api/mobile-access/disable", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue(null);
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("127.0.0.1");
 
-    const res = await request(makeApp()).post("/api/mobile-access/disable");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/disable");
 
     expect(res.status).toBe(200);
     expect(tailscale.disableServe).toHaveBeenCalled();
@@ -216,7 +209,7 @@ describe("host platform on the mutating routes", () => {
       .mockReturnValueOnce("darwin")
       .mockReturnValueOnce("darwin");
 
-    const app = makeApp();
+    const app = makeApp(mobileAccessRouter, "/api/mobile-access");
     const enabled = await request(app).post("/api/mobile-access/enable");
     const disabled = await request(app).post("/api/mobile-access/disable");
 
@@ -235,7 +228,7 @@ describe("POST /api/mobile-access/rotate", () => {
     vi.mocked(lan.detectLanIp).mockReturnValue("192.168.1.42");
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("0.0.0.0");
 
-    const res = await request(makeApp()).post("/api/mobile-access/rotate");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/rotate");
 
     expect(res.status).toBe(200);
     expect(auth.rotateToken).toHaveBeenCalled();
@@ -257,7 +250,7 @@ describe("POST /api/mobile-access/lan/enable", () => {
     vi.mocked(auth.getCurrentToken).mockReturnValue("T");
     vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
 
-    const res = await request(makeApp()).post("/api/mobile-access/lan/enable");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/lan/enable");
 
     expect(res.status).toBe(200);
     expect(auth.ensureToken).toHaveBeenCalled();
@@ -275,7 +268,7 @@ describe("POST /api/mobile-access/lan/enable", () => {
     vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
     vi.mocked(auth.getCurrentToken).mockReturnValue(null);
 
-    const res = await request(makeApp()).post("/api/mobile-access/lan/enable");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/lan/enable");
 
     expect(res.status).toBe(200);
     expect(listener.rebindPanel).not.toHaveBeenCalled();
@@ -289,7 +282,7 @@ describe("POST /api/mobile-access/lan/enable", () => {
     vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
     vi.mocked(auth.getCurrentToken).mockReturnValue("T");
 
-    const res = await request(makeApp()).post("/api/mobile-access/lan/enable");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/lan/enable");
 
     expect(res.status).toBe(500);
     expect(res.body.lan.state).toBe("off");
@@ -307,7 +300,7 @@ describe("POST /api/mobile-access/lan/disable", () => {
     vi.mocked(tailscale.detectTailscale).mockResolvedValue({ state: "off", selfHost: "x" });
     vi.mocked(auth.getCurrentToken).mockReturnValue("T");
 
-    const res = await request(makeApp()).post("/api/mobile-access/lan/disable");
+    const res = await request(makeApp(mobileAccessRouter, "/api/mobile-access")).post("/api/mobile-access/lan/disable");
 
     expect(res.status).toBe(200);
     expect(listener.rebindPanel).toHaveBeenCalledWith("127.0.0.1");
@@ -331,7 +324,7 @@ describe("cached detection on the non-status routes", () => {
     vi.mocked(listener.rebindPanel).mockResolvedValue();
     vi.mocked(listener.getCurrentBindHost).mockReturnValue("0.0.0.0");
 
-    const app = makeApp();
+    const app = makeApp(mobileAccessRouter, "/api/mobile-access");
     for (const path of [
       "/api/mobile-access/rotate",
       "/api/mobile-access/lan/enable",

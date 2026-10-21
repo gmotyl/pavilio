@@ -1,29 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { configMock, makeApp } from "../../test-kit";
 
 let tmpRoot = "";
 let projectsDir = "";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir }),
-}));
+vi.mock("../../config", () => configMock(() => projectsDir));
 vi.mock("../../lib/discovery", async () => {
   const actual = await vi.importActual<typeof import("../../lib/discovery")>("../../lib/discovery");
   return { ...actual, discoverProjects: () => [] };
 });
 
 import projectsRouter from "../projects";
-
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/projects", projectsRouter);
-  return app;
-}
 
 function seedFile(abs: string, content = "x") {
   mkdirSync(join(abs, ".."), { recursive: true });
@@ -45,7 +36,7 @@ afterEach(() => {
 describe("GET /api/projects/:name/plans-tree", () => {
   it("always returns the project source (even when empty)", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.status).toBe(200);
     const project = res.body.sources.find((s: { id: string }) => s.id === "project");
     expect(project).toBeTruthy();
@@ -55,7 +46,7 @@ describe("GET /api/projects/:name/plans-tree", () => {
   it("lists project plans with relativeToProjectsDir set", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-foo.md"), "# foo");
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const project = res.body.sources.find((s: { id: string }) => s.id === "project");
     expect(project.files).toHaveLength(1);
     expect(project.files[0].filename).toBe("2026-01-01-foo.md");
@@ -66,7 +57,7 @@ describe("GET /api/projects/:name/plans-tree", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-active.md"), "# active");
     seedFile(join(projectsDir, "alokai", "plans", "archived", "2026-01-01-old-design.md"), "# old");
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const project = res.body.sources.find((s: { id: string }) => s.id === "project");
     const archived = res.body.sources.find((s: { id: string }) => s.id === "project:archived");
     // The active plan stays in the project source; the subdir file is not double-listed there.
@@ -79,12 +70,12 @@ describe("GET /api/projects/:name/plans-tree", () => {
   it("omits the archived source when there are no archived plans", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-active.md"), "# active");
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.body.sources.find((s: { id: string }) => s.id === "project:archived")).toBeUndefined();
   });
 
   it("returns 404 for unknown project", async () => {
-    const res = await request(makeApp()).get("/api/projects/ghost/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/ghost/plans-tree");
     expect(res.status).toBe(404);
   });
 });
@@ -94,7 +85,7 @@ describe("GET /api/projects/:name/plans/read", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const target = join(projectsDir, "alokai", "plans", "foo.md");
     seedFile(target, "# foo body");
-    const res = await request(makeApp()).get(
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
     );
     expect(res.status).toBe(200);
@@ -105,7 +96,7 @@ describe("GET /api/projects/:name/plans/read", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const target = join(projectsDir, "alokai", "plans", "archived", "2026-01-01-old-design.md");
     seedFile(target, "# archived body");
-    const res = await request(makeApp()).get(
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
     );
     expect(res.status).toBe(200);
@@ -114,7 +105,7 @@ describe("GET /api/projects/:name/plans/read", () => {
 
   it("rejects a path outside the allowlist with 403", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const res = await request(makeApp()).get(
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent("/etc/passwd")}`,
     );
     expect(res.status).toBe(403);
@@ -122,7 +113,7 @@ describe("GET /api/projects/:name/plans/read", () => {
 
   it("returns 400 when path is missing", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const res = await request(makeApp()).get("/api/projects/alokai/plans/read");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans/read");
     expect(res.status).toBe(400);
   });
 
@@ -133,7 +124,7 @@ describe("GET /api/projects/:name/plans/read", () => {
     const link = join(projectsDir, "alokai", "plans", "link.md");
     mkdirSync(join(link, ".."), { recursive: true });
     symlinkSync(secret, link);
-    const res = await request(makeApp()).get(
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent(link)}`,
     );
     expect(res.status).toBe(403);
@@ -146,13 +137,13 @@ describe("/api/projects/:name/plans/current/:planFile (retired)", () => {
     seedFile(join(projectsDir, "alokai", "plans", "foo.md"), "# foo");
     const currentMd = join(projectsDir, "alokai", "plans", "CURRENT.md");
 
-    const post = await request(makeApp()).post("/api/projects/alokai/plans/current/foo.md");
+    const post = await request(makeApp(projectsRouter, "/api/projects")).post("/api/projects/alokai/plans/current/foo.md");
     expect(post.status).toBe(404);
     expect(existsSync(currentMd)).toBe(false);
 
     // Seed a legacy CURRENT.md so a live DELETE handler would answer 200 and rewrite it.
     writeFileSync(currentMd, "projects/alokai/plans/foo.md\n");
-    const del = await request(makeApp()).delete("/api/projects/alokai/plans/current/foo.md");
+    const del = await request(makeApp(projectsRouter, "/api/projects")).delete("/api/projects/alokai/plans/current/foo.md");
     expect(del.status).toBe(404);
     expect(readFileSync(currentMd, "utf-8")).toBe("projects/alokai/plans/foo.md\n");
   });
@@ -180,7 +171,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.status).toBe(200);
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src).toBeTruthy();
@@ -211,7 +202,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "store" } }]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src).toBeTruthy();
     expect(src.mode).toBe("store");
@@ -244,7 +235,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       ]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src).toBeTruthy();
     expect(src.missing).toBe(true);
@@ -267,7 +258,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       ]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src).toBeTruthy();
     expect(src.kind).toBe("openspec-error");
@@ -289,7 +280,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       ]),
     );
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(projectsRouter, "/api/projects"))
       .get("/api/projects/alokai/plans/read")
       .query({ path: outside });
     expect(res.status).toBe(403);
@@ -304,7 +295,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       ]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src.kind).toBe("openspec-error");
     expect(src.configuredRoot).toBeNull();
@@ -320,13 +311,13 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "store" } }]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio")).toBeUndefined();
   });
 
   it("never reports the implicit project store as missing", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     // plans/openspec/ was never created and was never configured — not a typo.
     expect(res.body.sources.find((s: { id: string }) => s.id === "openspec:project")).toBeUndefined();
   });
@@ -342,7 +333,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const projectSrc = res.body.sources.find((s: { id: string }) => s.id === "openspec:project");
     const repoSrc = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     const projChange = projectSrc.changes.find((c: { changeId: string }) => c.changeId === "add-foo");
@@ -359,7 +350,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     seedFile(join(openspecDir, "changes", "live-change", "proposal.md"), "# live");
     seedFile(join(openspecDir, "changes", "archive", "2026-08-01-done-change", "proposal.md"), "# done");
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:project");
     const live = src.changes.find((c: { changeId: string }) => c.changeId === "live-change");
     const done = src.changes.find((c: { changeId: string }) => c.changeId === "2026-08-01-done-change");
@@ -371,10 +362,10 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const target = join(projectsDir, "alokai", "plans", "2026-01-01-foo.md");
     seedFile(target, "# legacy body");
-    const tree = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const tree = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const project = tree.body.sources.find((s: { id: string }) => s.id === "project");
     expect(project.files.map((f: { filename: string }) => f.filename)).toContain("2026-01-01-foo.md");
-    const read = await request(makeApp()).get(
+    const read = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent(target)}`,
     );
     expect(read.status).toBe(200);
@@ -390,7 +381,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       join(projectsDir, "alokai", "repos.json"),
       JSON.stringify([{ name: "pavilio", path: repoPath }]),
     );
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const ids = res.body.sources.map((s: { id: string }) => s.id);
     expect(ids).not.toContain("workspace");
     expect(ids).not.toContain("claude");
@@ -407,14 +398,14 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
       join(projectsDir, "alokai", "repos.json"),
       JSON.stringify([{ name: "pavilio", path: repoPath }]),
     );
-    const res = await request(makeApp()).get(
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent(rogue)}`,
     );
     expect(res.status).toBe(403);
 
     // Traversal that resolves outside the project store openspec root.
     const traversal = join(projectsDir, "alokai", "plans", "openspec", "..", "..", "..", "..", "etc", "passwd.md");
-    const res2 = await request(makeApp()).get(
+    const res2 = await request(makeApp(projectsRouter, "/api/projects")).get(
       `/api/projects/alokai/plans/read?path=${encodeURIComponent(traversal)}`,
     );
     expect(res2.status).toBe(403);
@@ -432,7 +423,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.status).toBe(200);
     // The OpenSpec store really did contribute a change …
     const os = res.body.sources.find((s: { id: string }) => s.id === "openspec:project");
@@ -451,7 +442,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
       JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.status).toBe(200);
     // The project store contributed nothing …
     expect(
@@ -469,7 +460,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
   it("keeps the empty legacy flat source when no OpenSpec source contributed changes", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const project = findProject(res.body);
     expect(project).toBeTruthy();
     expect(project!.files).toHaveLength(0);
@@ -480,7 +471,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
     seedFile(join(projectsDir, "alokai", "plans", "2026-01-01-foo.md"), "# foo");
     seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const project = findProject(res.body);
     expect(project).toBeTruthy();
     expect(project!.files.map((f: { filename: string }) => f.filename)).toEqual(["2026-01-01-foo.md"]);
@@ -491,7 +482,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
     mkdirSync(join(projectsDir, "alokai", "plans", "archived"), { recursive: true });
     seedChange(join(projectsDir, "alokai", "plans", "openspec"), "add-checkout");
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     expect(res.body.sources.find((s: { id: string }) => s.id === "project:archived")).toBeUndefined();
   });
 
@@ -508,7 +499,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
       ]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src.missing).toBe(true);
     expect(src.changes).toHaveLength(0);
@@ -527,7 +518,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
       ]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const src = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
     expect(src.kind).toBe("openspec-error");
     const project = findProject(res.body);
@@ -547,7 +538,7 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
       ]),
     );
 
-    const res = await request(makeApp()).get("/api/projects/alokai/plans-tree");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
     const sources = res.body.sources as { id: string; kind?: string }[];
     expect(sources.map((s) => s.id)).toContain("project");
     expect(sources.map((s) => s.id)).toContain("project:archived");

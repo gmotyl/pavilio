@@ -4,9 +4,9 @@ import { MemoryRouter } from "react-router-dom";
 import { cssRule, DRAWER_GAP, HAMBURGER } from "./hamburgerGeometry";
 import { Layout, FloatingActionProvider } from "../Layout";
 import { TerminalDrawerProvider } from "../../terminal/useTerminalDrawer";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
+import { installMatchMedia } from "../../../test-utils";
 
 vi.mock("../LeftSidebar", () => ({ __esModule: true, default: () => <div /> }));
 vi.mock("../RightSidebar", () => ({ __esModule: true, default: () => <div /> }));
@@ -76,27 +76,13 @@ function placement() {
 const leftAside = () => screen.getByTestId("layout-sidebar-left");
 const collapsed = () => leftAside().className.includes("sidebar-collapsed");
 
-/** Controllable matchMedia stub — jsdom has none, so desktop is the default. */
-function installMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
-
 describe("SidebarHamburger", () => {
   beforeEach(() => {
     localStorage.clear();
     // Desktop, said out loud. `installMatchMedia` defines the property rather
     // than mocking it, so a mobile case leaks into every test after it in the
     // file unless each run starts from a known viewport.
-    installMatchMedia(false);
+    installMatchMedia();
     // jsdom implements neither, and the drawer's drag surface calls both.
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
@@ -256,7 +242,7 @@ describe("SidebarHamburger", () => {
     // That is the stronger guarantee, and it is what is asserted here: not
     // that the corner is reserved, but that there is no header row in the
     // corner at all.
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     setup({ drawer: "left", drawerWidth: 400 });
     // Open it whichever way this viewport starts — the claim is about an OPEN
     // sidebar, and mobile does not have to start from the stored value.
@@ -286,7 +272,7 @@ describe("SidebarHamburger", () => {
   });
 
   it("the hamburger is present on a mobile viewport", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     setup({ leftExpanded: false });
     const el = screen.getByTestId("sidebar-hamburger");
 

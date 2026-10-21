@@ -453,6 +453,7 @@ import { prepare } from "../prepare";
 import { setStoredSpeechMode, setStoredVoice } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
+import { installMatchMedia } from "../../../test-utils";
 
 /** The newest alert, which is the one a failure under test just raised. */
 function lastAlert() {
@@ -712,21 +713,7 @@ function longResponse(): string {
 beforeAll(() => {
   // jsdom implements neither of these; the grid reads matchMedia on its first
   // render to decide whether it is the mobile branch.
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent: () => false,
-        onchange: null,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
 beforeEach(() => {

@@ -3,10 +3,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import GitBranchDiff from "../GitBranchDiff";
 import GitChanges from "../GitChanges";
 import GitHistory from "../GitHistory";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 import { TREE_BOUNDS } from "../repoTree";
+import { dragBy, installMatchMedia, stubFetch } from "../../../test-utils";
 
 const FILES = [
   { status: "M", path: "src/a.ts" },
@@ -25,49 +25,25 @@ const COMMITS = [
 
 const BRANCHES = { current: "feature/search", branches: ["main", "develop"] };
 
-const json = (body: unknown) =>
-  ({ ok: true, json: async () => body }) as unknown as Response;
-
 /**
  * One stub for all three views: the cross-scope test renders them side by
  * side, and a per-view stub would have to be merged there anyway.
  *
- * The order of the tests below is load-bearing — `/api/git/branch-diff-files`
+ * The order of the keys below is load-bearing — `/api/git/branch-diff-files`
  * is a prefix-mate of `/api/git/branch-diff`, and `/api/git/branches` of
  * `/api/git/branch?`.
  */
-function stubFetch() {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string) => {
-      if (url.startsWith("/api/git/branch-diff-files"))
-        return json({ files: FILES, commitsAhead: 1 });
-      if (url.startsWith("/api/git/branch-diff")) return json({ diff: "" });
-      if (url.startsWith("/api/git/branches")) return json(BRANCHES);
-      if (url.startsWith("/api/git/branch?")) return json({ branch: "main" });
-      if (url.startsWith("/api/git/status")) return json(FILES);
-      if (url.startsWith("/api/git/log")) return json(COMMITS);
-      if (url.startsWith("/api/git/commit-files")) return json(FILES);
-      if (url.startsWith("/api/git/suggest-message"))
-        return json({ suggestion: "" });
-      if (url.startsWith("/api/git/diff")) return json({ diff: "" });
-      return json(null);
-    }),
-  );
-}
-
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
+const GIT_ROUTES = {
+  "/api/git/branch-diff-files": { files: FILES, commitsAhead: 1 },
+  "/api/git/branch-diff": { diff: "" },
+  "/api/git/branches": BRANCHES,
+  "/api/git/branch?": { branch: "main" },
+  "/api/git/status": FILES,
+  "/api/git/log": COMMITS,
+  "/api/git/commit-files": FILES,
+  "/api/git/suggest-message": { suggestion: "" },
+  "/api/git/diff": { diff: "" },
+};
 
 const doc = () =>
   (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
@@ -104,21 +80,13 @@ function scroller(box: HTMLElement): HTMLElement {
   return found[0];
 }
 
-/** Drag the rail by `dx` pixels and let go. */
-function dragBy(dx: number) {
-  const handle = rail();
-  fireEvent.pointerDown(handle, { pointerId: 1, clientX: 600 });
-  fireEvent.pointerMove(handle, { pointerId: 1, clientX: 600 + dx });
-  fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 + dx });
-}
-
 describe("resizing the git-branch-diff tree", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    stubMatchMedia(false);
-    stubFetch();
+    installMatchMedia();
+    stubFetch(GIT_ROUTES);
   });
 
   afterEach(() => {
@@ -138,7 +106,7 @@ describe("resizing the git-branch-diff tree", () => {
 
   it("widens the Branch Diff tree when the rail is dragged", async () => {
     await renderTree();
-    dragBy(60);
+    dragBy(rail(), 60);
 
     expect(tree()).toHaveStyle({ width: "340px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
@@ -146,17 +114,17 @@ describe("resizing the git-branch-diff tree", () => {
     // And the drag stops where the shared bounds say it does — the same
     // object the other two trees are given, so a bound that drifted here
     // would be a difference only a drag to each stop could find.
-    dragBy(600);
+    dragBy(rail(), 600);
     expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.max}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.max);
 
-    dragBy(-600);
+    dragBy(rail(), -600);
     expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.min}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.min);
   });
 
   it("leaves the Branch Diff tree's width unapplied on a narrow viewport", async () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     await renderTree();
 
     expect(screen.queryByTestId("pane-resize-git-branch-diff")).toBeNull();

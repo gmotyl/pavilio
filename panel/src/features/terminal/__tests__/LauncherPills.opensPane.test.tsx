@@ -47,6 +47,7 @@ import { prepare } from "../../speech/prepare";
 import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
+import { StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in. `send` is the only part that matters here:
@@ -190,12 +191,6 @@ const cell = (speech: GridSpeech, speechBarVisible = true) => (
     <TerminalView sessionId={SESSION} speech={speech} speechBarVisible={speechBarVisible} />
   </MemoryRouter>
 );
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const pane = (): HTMLElement | null => screen.queryByTestId(`answer-pane-${SESSION}`);
 const wave = (): HTMLElement | null => screen.queryByTestId(`answer-pane-waiting-${SESSION}`);

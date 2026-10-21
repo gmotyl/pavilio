@@ -27,6 +27,7 @@ import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests, beginWaiting, noteTransport } from "../answerWaiting";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../../speech/voices";
 import { refreshSessions } from "../sessionStore";
+import { StubResizeObserver } from "../../../test-utils";
 
 // mermaid pulls in a browser-only rendering stack; what matters here is that
 // the fence reaches the diagram component, not what mermaid draws.
@@ -327,16 +328,6 @@ const BLOCK_TOP = 100;
 const BLOCK_HEIGHT = 80;
 const layout = { scrollHeight: 0, clientHeight: 0 };
 const scrollTo = vi.fn();
-/** What the pane's ResizeObserver was asked to watch. */
-const observed: Element[] = [];
-
-class StubResizeObserver {
-  observe(element: Element): void {
-    observed.push(element);
-  }
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const blockIndexOf = (element: Element): number | null => {
   const prose = element.closest(".prose");
@@ -439,7 +430,7 @@ beforeEach(() => {
   cacheListeners.clear();
   bodyRenders.count = 0;
   scrollTo.mockClear();
-  observed.length = 0;
+  StubResizeObserver.observed.length = 0;
   fitting();
   installLayout();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
@@ -1122,7 +1113,7 @@ describe("AnswerPane", () => {
 
       // Re-laid when the body's box changes — the observer watches the body,
       // never the xterm container.
-      expect(observed).toContain(body());
+      expect(StubResizeObserver.observed).toContain(body());
     });
   });
 

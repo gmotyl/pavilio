@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubFetch } from "../../test-utils";
 import { bool, json, num, oneOf, str } from "../codecs";
 import { definePreference } from "../types";
 import {
@@ -94,13 +95,6 @@ const sessionPath = definePreference<string | null>({
   browserStore: "session",
 });
 
-/** A fetch spy that never resolves unless a test makes it. */
-function stubFetch(): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true })));
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
 beforeEach(() => {
   globals.__PAVILIO_PREFS__ = { version: 1 };
 });
@@ -151,7 +145,7 @@ describe("reading", () => {
   });
 
   it("a non-portable value is read from localStorage without a network call", () => {
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
     const getItem = vi.spyOn(localStorage, "getItem");
     localStorage.setItem("test.localFlag", "true");
 
@@ -188,7 +182,7 @@ describe("reading", () => {
 
 describe("clearing", () => {
   it("clearPreference restores the declared default", async () => {
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
 
     writePreference(sessionPath, "/notes/today.md");
     writePreference(portableWidth, 320);
@@ -319,7 +313,7 @@ describe("writing", () => {
     // Real timers on purpose. Under fake timers the debounce can never fire
     // unless a test advances them, so "not sent yet" holds for *any* debounce
     // length and the assertion below proves nothing.
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
 
     writePreference(portableFlag, false);
     writePreference(portableWidth, 320);
@@ -346,7 +340,7 @@ describe("writing", () => {
   it("a portable write stores the value in its JSON shape, not as text", async () => {
     // The file is hand-readable and hand-seeded: `"shell.leftSidebar.width":
     // 240`, never `"240"`. A string-valued preference stays a string.
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
 
     writePreference(portableWidth, 320);
     writePreference(portableSort, { by: "name", dir: "asc" });
@@ -370,7 +364,7 @@ describe("writing", () => {
     // exactly: `"hello"` stored unquoted, then `JSON.parse("hello")` throwing
     // on the way back and the read answering `null` — a silent data loss with
     // no warning anywhere.
-    stubFetch();
+    stubFetch({}, { ok: true });
 
     writePreference(portableNote, "hello");
 
@@ -381,7 +375,7 @@ describe("writing", () => {
     // `String(NaN)` is not JSON, so the fallback would put the literal text
     // "NaN" into the hand-readable workspace file under a `num` key — where it
     // reads back as the default anyway, having displaced nothing but clarity.
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
     globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 320 };
 
     writePreference(portableWidth, Number.NaN);
@@ -396,7 +390,7 @@ describe("writing", () => {
     // The blocking script 401'd, so nothing is known about the stored file.
     // Writing defaults over it would be data loss, not degradation.
     delete globals.__PAVILIO_PREFS__;
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
 
     writePreference(portableFlag, false);
     writePreference(portableWidth, 320);
@@ -412,7 +406,7 @@ describe("writing", () => {
   it("an empty document is a document — writes work normally", async () => {
     // `{ version: 1 }` is a legitimately empty file, not an absent global.
     globals.__PAVILIO_PREFS__ = { version: 1 };
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
 
     writePreference(portableFlag, false);
     expect(readPreference(portableFlag)).toBe(false);
@@ -427,7 +421,7 @@ describe("writing", () => {
     // echoing its own value) now costs a round trip and a file write. The
     // comparison is on the STORED representation, so a structurally equal
     // object does not count as a change either.
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
     globals.__PAVILIO_PREFS__ = {
       version: 1,
       "test.width": 320,
@@ -447,7 +441,7 @@ describe("writing", () => {
   });
 
   it("a genuine change still PATCHes exactly once", async () => {
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
     globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 320 };
 
     writePreference(portableWidth, 320);
@@ -464,7 +458,7 @@ describe("writing", () => {
     // The unchanged-value skip compares against what the DOCUMENT holds, not
     // against the declared default: a cleared key is absent, so putting the
     // same value back is a real change the server has to hear about.
-    const fetchMock = stubFetch();
+    const fetchMock = stubFetch({}, { ok: true });
     globals.__PAVILIO_PREFS__ = { version: 1, "test.width": 320 };
 
     clearPreference(portableWidth);

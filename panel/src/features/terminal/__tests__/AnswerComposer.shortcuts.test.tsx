@@ -24,6 +24,7 @@ import type { SkillEntry } from "../commandSource";
 import { __resetComposerDraftsForTests, getDraft } from "../composerDrafts";
 import { __resetPtySubmitForTests } from "../ptySubmit";
 import type { ConnectionState } from "../terminalInstances";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 let connectionState: ConnectionState = "connected";
 const listeners = new Map<string, Set<(state: ConnectionState) => void>>();
@@ -61,25 +62,6 @@ const fetchFn = vi.fn((url: string) => {
   const body = String(url).includes("/api/skills") ? SKILLS : { path: "/tmp/pavilio-pastes/shot.png" };
   return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
 });
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 function withShortcuts(list: ComposerShortcut[]): void {
   writePreference(preferences.composerShortcuts, list);

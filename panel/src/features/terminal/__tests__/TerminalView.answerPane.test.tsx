@@ -21,6 +21,7 @@ import {
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
+import { StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in: `fit()` refreshes AND sends a resize frame,
@@ -32,8 +33,7 @@ const term = vi.hoisted(() => {
   const sent: string[] = [];
   /** Everything written to the PTY — what the composer's Enter has to reach. */
   const writes: string[] = [];
-  const observed: Element[] = [];
-  return { fit, focus, sent, writes, observed };
+  return { fit, focus, sent, writes };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -109,14 +109,6 @@ const { TerminalView } = await import("../TerminalView");
 const { forgetAnswerPane, markSeenUtterances } = await import("../answerPaneState");
 
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
-
-class StubResizeObserver {
-  observe(element: Element): void {
-    term.observed.push(element);
-  }
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const MARKDOWN = [
   "# Deploy plan",
@@ -226,7 +218,7 @@ beforeEach(() => {
   term.focus.mockClear();
   term.sent.length = 0;
   term.writes.length = 0;
-  term.observed.length = 0;
+  StubResizeObserver.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   // The pane's state outlives the view on purpose (see `answerPaneState.ts`),
   // so every test starts the cell from a fresh entry.
@@ -245,7 +237,7 @@ describe("TerminalView and the answer pane", () => {
     expect(pane()).toBeNull();
 
     // The xterm container is the first thing observed, before any pane exists.
-    const observedContainer = term.observed[0];
+    const observedContainer = StubResizeObserver.observed[0];
     expect(observedContainer).toBeDefined();
     const fitsBefore = term.fit.mock.calls.length;
     const resizesBefore = resizeFrames().length;
@@ -306,7 +298,7 @@ describe("TerminalView and the answer pane", () => {
   it("mounts the pane inside the terminal area so the row stays uncovered", async () => {
     render(cell(makeSpeech()));
     await settleTerminal();
-    const observedContainer = term.observed[0];
+    const observedContainer = StubResizeObserver.observed[0];
     expect(observedContainer).toBeDefined();
 
     fireEvent.click(eye());

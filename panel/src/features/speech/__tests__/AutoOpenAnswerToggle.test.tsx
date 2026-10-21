@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -7,6 +7,7 @@ import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../autoOpenAns
 import AgentSettings from "../../agents/AgentSettings";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
+import { stubFetch } from "../../../test-utils";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -15,14 +16,6 @@ const globals = globalThis as unknown as PrefGlobals;
 const KEY = storageKey(preferences.answerPaneAutoOpen);
 
 const LABEL = "Open the answer pane on a new answer";
-
-/** The settings page lists agent config files over `fetch`; it needs none here. */
-function stubEmptyAgentSettingsApi(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => [] }) as unknown as Response),
-  );
-}
 
 const toggle = (): HTMLInputElement =>
   screen.getByRole("checkbox", { name: LABEL }) as HTMLInputElement;
@@ -77,7 +70,7 @@ describe("AutoOpenAnswerToggle", () => {
     // With the pane's own switch gone, this box on the Settings page is the
     // only control for the preference — and it still writes the same key.
     const user = userEvent.setup();
-    stubEmptyAgentSettingsApi();
+    stubFetch({}, []);
     expect(KEY).toBe("speech.answerPane.autoOpen");
     setStoredAutoOpenAnswer(false);
 
@@ -111,7 +104,7 @@ describe("AutoOpenAnswerToggle", () => {
   });
 
   it("sits in the Settings page's Speech section, under the voice", async () => {
-    stubEmptyAgentSettingsApi();
+    stubFetch({}, []);
 
     render(<AgentSettings />);
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();

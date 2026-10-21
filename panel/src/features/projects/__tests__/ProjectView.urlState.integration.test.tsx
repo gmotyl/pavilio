@@ -16,6 +16,7 @@ import ProjectRedirect from "../ProjectRedirect";
 import ProjectView from "../ProjectView";
 import { useLastPath } from "../../shell/useLastPath";
 import { readLastPath, writeLastPath } from "../../shell/lastPath";
+import { jsonResponse, stubFetch } from "../../../test-utils";
 
 /** Minimal stand-in for ProjectView: just calls useLastPath so storage is written. */
 function FakeProjectView() {
@@ -24,26 +25,20 @@ function FakeProjectView() {
   return <div data-testid="project-view" />;
 }
 
-function stubFetch() {
-  return vi.fn(async (url: string | URL) => {
-    const u = typeof url === "string" ? url : url.toString();
-    if (u.includes("/api/files/read/")) {
-      return new Response(
-        JSON.stringify({ content: "stub content", absolutePath: u }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }
-    return new Response("[]", {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  });
-}
+/** File reads answer with a body; every list endpoint answers empty. */
+const stubProjectFetch = () =>
+  stubFetch(
+    {
+      "/api/files/read/": (url: string) =>
+        jsonResponse({ content: "stub content", absolutePath: url }),
+    },
+    [],
+  );
 
 describe("ProjectView URL state persistence", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    vi.stubGlobal("fetch", stubFetch());
+    stubProjectFetch();
   });
 
   afterEach(() => {
@@ -109,12 +104,12 @@ describe("ProjectView URL state persistence", () => {
  * shared useFileListControls bar. The archived checkbox is composed by PlansTab
  * alone (ContextTab.test.tsx pins the same guard for the context tab), so no
  * section tab may grow one. The real component renders here on the same
- * `stubFetch()` the tests above use.
+ * `stubProjectFetch()` the tests above use.
  */
 describe("ProjectView file-list controls", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    vi.stubGlobal("fetch", stubFetch());
+    stubProjectFetch();
   });
 
   afterEach(() => {

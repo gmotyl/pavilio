@@ -20,7 +20,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
@@ -31,6 +30,7 @@ import { __resetAnswerWaitingForTests } from "../answerWaiting";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: this file draws no units at all.
@@ -78,30 +78,6 @@ function makeSpeech(): GridSpeech {
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   } satisfies GridSpeech;
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/**
- * jsdom has no `matchMedia`, and the grip's hook asks it whether this is a
- * touch viewport. Installed before every render so both verdicts go down the
- * same path rather than one of them being "the API was missing".
- */
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 }
 
 /** A live socket: the write landed. `send` reports delivery now, and a stub
@@ -240,7 +216,7 @@ beforeEach(async () => {
   cellKeys.mockClear();
   documentKeys.mockClear();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
-  installMatchMedia(false);
+  installMatchMedia();
   // Without a session list the pane cannot name its project, and a height
   // written here would land under a different key than the one the composer
   // reads.
@@ -392,7 +368,7 @@ describe("AnswerComposer", () => {
   });
 
   it("drops the grip and starts at two rows on a narrow viewport", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     writePreference(preferences.answerComposerHeight, 140, PROJECT);
     renderPane();
 
@@ -741,7 +717,7 @@ describe("AnswerComposer", () => {
     });
 
     it("drops the grip and the hint on a narrow viewport", () => {
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       renderPane();
 
       // There is no Shift+Enter on a phone, so the hint has nothing to say;

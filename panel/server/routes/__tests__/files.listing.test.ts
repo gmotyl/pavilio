@@ -1,48 +1,29 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { configMock, fileIndexMock, makeApp, withProjectsDir } from "../../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
+const projects = withProjectsDir("pavilio-listing-test-");
 
-vi.mock("../../config", () => ({ getConfig: () => ({ projectsDir }) }));
-vi.mock("../../lib/file-index", () => ({
-  getFileIndex: () => [],
-  rebuildIndex: vi.fn(),
-}));
+vi.mock("../../config", () => configMock(() => projects.dir()));
+vi.mock("../../lib/file-index", () => fileIndexMock());
 
 import filesRouter from "../files";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/files", filesRouter);
-  return app;
-}
-
 describe("GET /api/files/listing", () => {
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-listing-test-"));
-    projectsDir = join(tmpRoot, "projects");
-    mkdirSync(projectsDir, { recursive: true });
-    mkdirSync(join(tmpRoot, "skills", "memo"), { recursive: true });
-    writeFileSync(join(tmpRoot, "skills", "memo", "SKILL.md"), "---\nname: memo\n---\n");
-    writeFileSync(join(tmpRoot, "skills", "memo", "EXTRA.md"), "extra notes\n");
-    mkdirSync(join(tmpRoot, ".claude", "commands"), { recursive: true });
-    writeFileSync(join(tmpRoot, ".claude", "commands", "memo.md"), "claude memo\n");
-    mkdirSync(join(tmpRoot, ".opencode", "commands"), { recursive: true });
-    writeFileSync(join(tmpRoot, ".opencode", "commands", "note.md"), "opencode note\n");
-  });
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    mkdirSync(join(projects.root(), "skills", "memo"), { recursive: true });
+    writeFileSync(join(projects.root(), "skills", "memo", "SKILL.md"), "---\nname: memo\n---\n");
+    writeFileSync(join(projects.root(), "skills", "memo", "EXTRA.md"), "extra notes\n");
+    mkdirSync(join(projects.root(), ".claude", "commands"), { recursive: true });
+    writeFileSync(join(projects.root(), ".claude", "commands", "memo.md"), "claude memo\n");
+    mkdirSync(join(projects.root(), ".opencode", "commands"), { recursive: true });
+    writeFileSync(join(projects.root(), ".opencode", "commands", "note.md"), "opencode note\n");
   });
 
   it("lists every file in skills/ (not just SKILL.md)", async () => {
-    const app = makeApp();
+    const app = makeApp(filesRouter, "/api/files");
     const res = await request(app).get("/api/files/listing?root=skills");
     expect(res.status).toBe(200);
     const paths = res.body.map((f: { relativePath: string }) => f.relativePath).sort();
@@ -51,13 +32,13 @@ describe("GET /api/files/listing", () => {
   });
 
   it("returns 400 for an unknown root", async () => {
-    const app = makeApp();
+    const app = makeApp(filesRouter, "/api/files");
     const res = await request(app).get("/api/files/listing?root=bogus");
     expect(res.status).toBe(400);
   });
 
   it("lists .claude/commands and .opencode/commands when present", async () => {
-    const app = makeApp();
+    const app = makeApp(filesRouter, "/api/files");
     const cc = await request(app).get("/api/files/listing?root=claude-commands");
     expect(cc.status).toBe(200);
     expect(cc.body.map((f: { relativePath: string }) => f.relativePath)).toContain("memo.md");

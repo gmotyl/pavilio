@@ -29,6 +29,7 @@ import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../../speech/voices";
 import { CellSpeakButton } from "../CellSpeakButton";
 import { refreshSessions } from "../sessionStore";
 import { SpeechControlBar } from "../SpeechControlBar";
+import { StubResizeObserver } from "../../../test-utils";
 
 /**
  * A terminal instance stand-in whose `fit()` does exactly what the real one
@@ -38,8 +39,7 @@ import { SpeechControlBar } from "../SpeechControlBar";
 const term = vi.hoisted(() => {
   const fit = vi.fn();
   const sent: string[] = [];
-  const observed: Element[] = [];
-  return { fit, sent, observed };
+  return { fit, sent };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -168,14 +168,6 @@ const noop = (): void => {};
 const noSend = (): boolean => true;
 
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
-
-class StubResizeObserver {
-  observe(element: Element): void {
-    term.observed.push(element);
-  }
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const units = (...chars: number[]): SpeechUnit[] =>
   chars.map((count) => {
@@ -307,7 +299,7 @@ beforeEach(() => {
   cacheListeners.clear();
   term.fit.mockClear();
   term.sent.length = 0;
-  term.observed.length = 0;
+  StubResizeObserver.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
 });
 
@@ -365,7 +357,7 @@ describe("SpeechControlBar", () => {
 
     // What has NOT changed: the row is a sibling of the observed container, so
     // no fit is ever provoked from inside the box the observer measures.
-    const observedContainer = term.observed[0];
+    const observedContainer = StubResizeObserver.observed[0];
     expect(observedContainer).toBeDefined();
     expect(observedContainer.contains(screen.getByTestId("speech-bar-cell-a"))).toBe(false);
   });

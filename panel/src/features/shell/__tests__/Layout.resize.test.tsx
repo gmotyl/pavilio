@@ -3,31 +3,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Layout, FloatingActionProvider } from "../Layout";
 import { TerminalDrawerProvider } from "../../terminal/useTerminalDrawer";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
+import { dragBy, installMatchMedia } from "../../../test-utils";
 
 vi.mock("../LeftSidebar", () => ({ __esModule: true, default: () => <div /> }));
 vi.mock("../RightSidebar", () => ({ __esModule: true, default: () => <div /> }));
 vi.mock("../Breadcrumbs", () => ({ Breadcrumbs: () => <div /> }));
-
-/**
- * Answers only the one query the panel asks. A stub that said `mobile` to every
- * query would also be answering for anything else that reaches `matchMedia`,
- * and a later `matches` read would then be testing the stub.
- */
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: query === MOBILE_QUERY ? mobile : false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 function setup(opts: { leftExpanded?: boolean; rightExpanded?: boolean } = {}) {
   if (opts.leftExpanded === false) {
@@ -60,12 +42,6 @@ function dragTo(handle: HTMLElement, dx: number) {
   fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 + dx });
 }
 
-/** Drag a rail by `dx` pixels and let go. */
-function dragBy(handle: HTMLElement, dx: number) {
-  dragTo(handle, dx);
-  fireEvent.pointerUp(handle, { pointerId: 1, clientX: 500 + dx });
-}
-
 const rightToggle = () => screen.getByTestId("sidebar-toggle-right");
 
 describe("resizing the shell's sidebars", () => {
@@ -73,7 +49,7 @@ describe("resizing the shell's sidebars", () => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    stubMatchMedia(false);
+    installMatchMedia();
   });
 
   afterEach(() => {
@@ -298,7 +274,7 @@ describe("resizing the shell's sidebars", () => {
   });
 
   it("mobile sidebars have no handle and keep a fixed width", () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     setup();
 
     expect(screen.queryByTestId("pane-resize-sidebar-left")).toBeNull();

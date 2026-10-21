@@ -22,7 +22,6 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
@@ -38,6 +37,7 @@ import {
 } from "../AnswerPane";
 import { __resetSessionStoreForTests, refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
 // reconnect timer whenever that socket closes. A socket that never closes
@@ -151,26 +151,6 @@ function makeSpeech(): GridSpeech {
   } satisfies GridSpeech;
 }
 
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** Controllable matchMedia stub — jsdom has none. */
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: query === MOBILE_QUERY ? mobile : false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
-
 function session(id: string, project: string): SessionMeta {
   return {
     id,
@@ -276,7 +256,7 @@ beforeEach(async () => {
   Element.prototype.releasePointerCapture = vi.fn();
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
     StubResizeObserver;
-  installMatchMedia(false);
+  installMatchMedia();
   // Both cells belong to one project, because that is the scope both heights
   // are now kept per: without a list the pane cannot name its project.
   await seedSessions([session(SESSION, PROJECT), session(SIBLING, PROJECT)]);
@@ -334,7 +314,7 @@ describe("the answer pane's bottom edge", () => {
   });
 
   it("drops the handle on a narrow viewport", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     // Stored, so that the absence below is the viewport's doing and not an
     // empty preference's.
     writePreference(preferences.answerPaneHeight, 240, PROJECT);

@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AnswerComposer } from "../AnswerComposer";
 import type { SkillEntry } from "../commandSource";
 import { __resetPtySubmitForTests } from "../ptySubmit";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 const SKILLS: SkillEntry[] = [
   { name: "pavilio-grill", description: "Stress-test an idea", path: "skills/pavilio-grill/SKILL.md" },
@@ -48,25 +49,6 @@ const fetchFn = vi.fn((url: string) => {
   const body = String(url).includes("/api/skills") ? SKILLS : { path: SAVED };
   return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
 });
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 function renderComposer() {
   return render(<AnswerComposer sessionId="cell-a" send={send} onSubmitted={onSubmitted} />);

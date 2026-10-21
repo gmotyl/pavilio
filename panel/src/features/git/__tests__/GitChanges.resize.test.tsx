@@ -1,46 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import GitChanges from "../GitChanges";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 import { TREE_BOUNDS } from "../repoTree";
+import { dragBy, installMatchMedia, stubFetch } from "../../../test-utils";
 
 const FILES = [
   { status: "M", path: "src/a.ts" },
   { status: "??", path: "src/b.ts" },
 ];
 
-const json = (body: unknown) =>
-  ({ ok: true, json: async () => body }) as unknown as Response;
-
-function stubFetch() {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string) => {
-      if (url.startsWith("/api/git/status")) return json(FILES);
-      if (url.startsWith("/api/git/branch?")) return json({ branch: "main" });
-      if (url.startsWith("/api/git/branches")) return json({ branches: [] });
-      if (url.startsWith("/api/git/suggest-message"))
-        return json({ suggestion: "" });
-      if (url.startsWith("/api/git/diff")) return json({ diff: "" });
-      return json(null);
-    }),
-  );
-}
-
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
+const GIT_ROUTES = {
+  "/api/git/status": FILES,
+  "/api/git/branch?": { branch: "main" },
+  "/api/git/branches": { branches: [] },
+  "/api/git/suggest-message": { suggestion: "" },
+  "/api/git/diff": { diff: "" },
+};
 
 /**
  * The tree only exists beside an open diff, so the file is supplied through
@@ -73,21 +50,13 @@ function scroller(): HTMLElement {
   return found[0];
 }
 
-/** Drag the rail by `dx` pixels and let go. */
-function dragBy(dx: number) {
-  const handle = rail();
-  fireEvent.pointerDown(handle, { pointerId: 1, clientX: 600 });
-  fireEvent.pointerMove(handle, { pointerId: 1, clientX: 600 + dx });
-  fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 + dx });
-}
-
 describe("resizing the git-changes tree", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    stubMatchMedia(false);
-    stubFetch();
+    installMatchMedia();
+    stubFetch(GIT_ROUTES);
   });
 
   afterEach(() => {
@@ -107,7 +76,7 @@ describe("resizing the git-changes tree", () => {
 
   it("widens the Changes tree when the rail is dragged", async () => {
     await renderTree();
-    dragBy(60);
+    dragBy(rail(), 60);
 
     expect(tree()).toHaveStyle({ width: "340px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
@@ -115,17 +84,17 @@ describe("resizing the git-changes tree", () => {
 
   it("clamps the Changes tree to the shared bounds", async () => {
     await renderTree();
-    dragBy(600);
+    dragBy(rail(), 600);
     expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.max}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.max);
 
-    dragBy(-600);
+    dragBy(rail(), -600);
     expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.min}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.min);
   });
 
   it("leaves the width unapplied on a narrow viewport", async () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     await renderTree();
 
     expect(screen.queryByTestId("pane-resize-git-changes")).toBeNull();

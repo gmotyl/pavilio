@@ -5,7 +5,7 @@ import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import TerminalDrawer from "../TerminalDrawer";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { installMatchMedia } from "../../../test-utils";
 
 /**
  * The drawer's open intent, width and side are PORTABLE: the shape of the
@@ -455,19 +455,7 @@ describe("TerminalDrawer", () => {
    */
   it("stands down entirely on a phone", () => {
     const native = Object.getOwnPropertyDescriptor(window, "matchMedia");
-    const mql = {
-      matches: true,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-    };
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      configurable: true,
-      value: () => mql,
-    });
+    installMatchMedia({ mobile: true });
     try {
       renderAt("/project/vector/memo", true, 480, "left");
       expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();

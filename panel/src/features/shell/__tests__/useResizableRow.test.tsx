@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { num } from "../../../preferences/codecs";
 import { definePreference } from "../../../preferences/types";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { useResizableRow, type RowBounds } from "../useResizableRow";
+import { installMatchMedia } from "../../../test-utils";
 
 /**
  * Every write that reached the store, so the settled height can be read as the
@@ -28,34 +28,6 @@ vi.mock("../../../preferences/store", async (importOriginal) => {
     },
   };
 });
-
-/** Controllable matchMedia stub — jsdom has none. */
-function installMatchMedia(mobile: boolean) {
-  const listeners = new Set<(e: MediaQueryListEvent) => void>();
-  let matches = mobile;
-  const mql = {
-    get matches() {
-      return matches;
-    },
-    media: MOBILE_QUERY,
-    addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
-    removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-  };
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => mql,
-  });
-  return {
-    setMobile(next: boolean) {
-      matches = next;
-      act(() => {
-        listeners.forEach((cb) => cb({ matches: next } as MediaQueryListEvent));
-      });
-    },
-  };
-}
 
 const HEIGHT_KEY = "test.row.height";
 
@@ -105,7 +77,7 @@ describe("useResizableRow", () => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    installMatchMedia(false);
+    installMatchMedia();
   });
 
   it("grows the row when a top-edge drag moves the pointer up", () => {
@@ -188,7 +160,7 @@ describe("useResizableRow", () => {
   });
 
   it("reports isMobile and leaves the height unapplied on a narrow viewport", () => {
-    const media = installMatchMedia(true);
+    const media = installMatchMedia({ mobile: true });
     render(<Probe />);
 
     expect(screen.getByTestId("mobile").textContent).toBe("true");
@@ -249,7 +221,7 @@ describe("useResizableRow with an unresolved scope", () => {
     writes.length = 0;
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    installMatchMedia(false);
+    installMatchMedia();
   });
 
   it("drags from the declared default and stores nothing", () => {

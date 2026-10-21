@@ -3,24 +3,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { num } from "../../../preferences/codecs";
 import { definePreference } from "../../../preferences/types";
 import PaneResizer from "../PaneResizer";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { useResizablePane, type PaneBounds } from "../useResizablePane";
 import { useResizableRow, type RowBounds } from "../useResizableRow";
-
-/** Controllable matchMedia stub — jsdom has none. */
-function installMatchMedia(mobile: boolean) {
-  const mql = {
-    matches: mobile,
-    media: MOBILE_QUERY,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-  };
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => mql,
-  });
-}
+import { installMatchMedia } from "../../../test-utils";
 
 const paneWidth = definePreference({
   key: "test.pane.width",
@@ -84,7 +69,7 @@ describe("PaneResizer", () => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    installMatchMedia(false);
+    installMatchMedia();
   });
 
   it("renders a focusable vertical separator carrying the pane's bounds", () => {
@@ -218,7 +203,7 @@ describe("PaneResizer", () => {
   });
 
   it("no handle is rendered on a mobile viewport", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     render(<Pane />);
     expect(screen.queryByTestId("pane-resize-files")).not.toBeInTheDocument();
     expect(screen.getByTestId("pane")).toBeInTheDocument();

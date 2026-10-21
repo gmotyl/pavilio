@@ -18,6 +18,7 @@ import {
 } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests, beginWaiting } from "../answerWaiting";
+import { StubResizeObserver } from "../../../test-utils";
 
 const copyToClipboard = vi.fn(async (_text: string) => true);
 vi.mock("../../../lib/clipboard", () => ({
@@ -81,12 +82,6 @@ function renderPane(speech: GridSpeech) {
       <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={() => true} />
     </MemoryRouter>,
   );
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
 }
 
 beforeEach(() => {

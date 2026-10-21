@@ -37,6 +37,7 @@ import {
 import { forgetAnswerPane } from "../answerPaneState";
 import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in. `fit()` refreshes AND sends a resize frame,
@@ -46,10 +47,9 @@ import type { SessionMeta } from "../useTerminalSessions";
 const term = vi.hoisted(() => {
   const fit = vi.fn();
   const sent: string[] = [];
-  const observed: Element[] = [];
   /** Every byte written to the PTY through `inst.send` — the launcher path. */
   const writes: string[] = [];
-  return { fit, sent, observed, writes };
+  return { fit, sent, writes };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -219,30 +219,8 @@ function columnShape(container: Element): string[] {
 }
 
 beforeAll(() => {
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }),
-    });
-  }
+  installMatchMedia();
 });
-
-class StubResizeObserver {
-  observe(element: Element): void {
-    term.observed.push(element);
-  }
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 beforeEach(() => {
   // Fake clock, still advancing in real time so `waitFor` polls as before;
@@ -251,7 +229,7 @@ beforeEach(() => {
   forgetAnswerPane("cell-a");
   term.fit.mockClear();
   term.sent.length = 0;
-  term.observed.length = 0;
+  StubResizeObserver.observed.length = 0;
   term.writes.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
 });
@@ -305,7 +283,7 @@ describe("the speech row", () => {
     render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
     await settle();
 
-    const container = term.observed[0];
+    const container = StubResizeObserver.observed[0];
     expect(container).toBeDefined();
     // A sibling, still — never a child of the observed box.
     expect(container.contains(bar())).toBe(false);
@@ -337,7 +315,7 @@ describe("the speech row", () => {
     const view = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
     await settle();
 
-    const container = term.observed[0];
+    const container = StubResizeObserver.observed[0];
     const shapeBefore = columnShape(container);
     const fitsBefore = term.fit.mock.calls.length;
     const resizesBefore = resizeFrames().length;
@@ -354,7 +332,7 @@ describe("the speech row", () => {
     // jsdom lays nothing out, so the height is asserted as what determines it:
     // the same container node, in the same column, with the same siblings in
     // the same order. Nothing entered or left the flow.
-    expect(term.observed[0]).toBe(container);
+    expect(StubResizeObserver.observed[0]).toBe(container);
     expect(columnShape(container)).toEqual(shapeBefore);
     // And nothing refit it, so no SIGWINCH reached the PTY mid-answer.
     expect(term.fit.mock.calls.length).toBe(fitsBefore);

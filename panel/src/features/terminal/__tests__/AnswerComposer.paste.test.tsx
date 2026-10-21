@@ -18,6 +18,7 @@ import AlertHost from "../../alerts/AlertHost";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { AnswerComposer } from "../AnswerComposer";
 import { __resetPtySubmitForTests } from "../ptySubmit";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /** What the server answers with — the same shape `uploadPastedImage` reads. */
 const SAVED = "/tmp/pavilio-pastes/paste-1.png";
@@ -41,26 +42,6 @@ const uploads = (): unknown[][] => fetchFn.mock.calls.filter(([url]) => url !== 
 const expectSubmitted = async (body: string): Promise<void> => {
   await waitFor(() => expect(send.mock.calls).toEqual([[body], ["\r"]]));
 };
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** jsdom has no `matchMedia`, and the grip's hook asks it for the viewport. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 function renderComposer() {
   return render(

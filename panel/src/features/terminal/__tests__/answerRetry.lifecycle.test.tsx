@@ -54,20 +54,16 @@ vi.hoisted(() => {
     send(): void {}
   }
   (globalThis as unknown as { WebSocket: unknown }).WebSocket = QuietSocket;
-  // The pane measures its own rail, and jsdom has no observer to measure it
-  // with. Assigned rather than stubbed because the pane's effect can run on a
-  // teardown flush, after a per-test stub would already have been lifted.
-  class StubResizeObserver {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  }
-  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = StubResizeObserver;
   // The reconnect log is fire-and-forget over `fetch`, and jsdom has no server
   // behind its relative URL.
   (globalThis as unknown as { fetch: unknown }).fetch = () =>
     Promise.resolve({ ok: true } as unknown as Response);
 });
+
+// The pane measures its own rail, and jsdom has no observer to measure it
+// with. Assigned rather than stubbed because the pane's effect can run on a
+// teardown flush, after a per-test stub would already have been lifted.
+(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = StubResizeObserver;
 
 // `terminalInstances` is a SUBJECT here, not a stub — the destroy criterion is
 // about what that function does — so xterm has to be survivable instead. jsdom
@@ -137,6 +133,7 @@ import {
   destroyTerminal,
 } from "../terminalInstances";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 const SESSION = "cell-a";
 
@@ -208,20 +205,6 @@ class FakeSocket {
   close(): void {
     this.readyState = 3;
   }
-}
-
-/** The composer's grip asks jsdom whether this is a touch viewport. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 }
 
 /** The row — mounted from the cell whether or not the eye is open. */

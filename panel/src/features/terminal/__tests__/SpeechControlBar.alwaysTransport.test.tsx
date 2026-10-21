@@ -44,6 +44,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepare } from "../../speech/prepare";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
+import { StubResizeObserver } from "../../../test-utils";
 
 /** The terminal instance stand-in, for the one test that drives the whole cell. */
 const term = vi.hoisted(() => ({ writes: [] as string[] }));
@@ -172,12 +173,6 @@ function spokenSpeech(): GridSpeech {
     },
     units: prepare(ANSWER).units,
   });
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
 }
 
 const noop = (): void => {};

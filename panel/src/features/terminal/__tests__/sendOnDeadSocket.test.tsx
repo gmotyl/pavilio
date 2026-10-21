@@ -40,7 +40,6 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import AlertHost from "../../alerts/AlertHost";
@@ -54,6 +53,7 @@ import { getDraft, __resetComposerDraftsForTests } from "../composerDrafts";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests, submitToPty } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The pane's rail peeks into the synthesis cache; nothing here is warm and
 // nothing subscribes, exactly as in the other composer suites.
@@ -99,25 +99,6 @@ function makeSpeech(state: CellSpeechState = "ready"): GridSpeech {
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   } satisfies GridSpeech;
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 }
 
 function session(id: string, project: string): SessionMeta {
@@ -183,7 +164,7 @@ beforeEach(async () => {
   __resetComposerDraftsForTests();
   __resetAlertsForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
-  installMatchMedia(false);
+  installMatchMedia();
   await seedSessions([session(SESSION, PROJECT)]);
 });
 

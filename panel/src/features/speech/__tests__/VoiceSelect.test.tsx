@@ -14,6 +14,7 @@ import AgentSettings from "../../agents/AgentSettings";
 import LeftSidebar from "../../shell/LeftSidebar";
 import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
 import { Breadcrumbs as ShellBreadcrumbs } from "../../shell/Breadcrumbs";
+import { stubFetch } from "../../../test-utils";
 
 /**
  * LeftSidebar pulls in the whole project/terminal/git data layer; the sidebar
@@ -123,14 +124,6 @@ function prefsDocument(): Record<string, unknown> {
 
 function engineSelect(): HTMLSelectElement {
   return screen.getByRole("combobox", { name: "Engine" }) as HTMLSelectElement;
-}
-
-/** The settings page lists agent config files over `fetch`; it needs none here. */
-function stubEmptyAgentSettingsApi(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => [] }) as unknown as Response),
-  );
 }
 
 function routeSelect(): HTMLSelectElement {
@@ -327,7 +320,7 @@ describe("VoiceSelect", () => {
   });
 
   it("labels the page, sidebar entry and breadcrumb Settings", async () => {
-    stubEmptyAgentSettingsApi();
+    stubFetch({}, []);
 
     const page = render(<AgentSettings />);
     expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();

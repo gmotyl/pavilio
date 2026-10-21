@@ -132,6 +132,7 @@ import { __resetComposerDraftsForTests } from "../composerDrafts";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 import type { ConnectionState } from "../terminalInstances";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /** A cell whose socket the pool would be willing to rebuild. */
 let connectionState: ConnectionState = "connected";
@@ -149,26 +150,6 @@ vi.mock("../terminalInstances", () => ({
 }));
 
 const SESSION = "cell-a";
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** jsdom has no `matchMedia`, and the composer's grip asks it for the viewport. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 const onSubmitted = vi.fn();
 

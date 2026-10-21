@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import GitHistory from "../GitHistory";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
+import { dragBy, installMatchMedia, stubFetch } from "../../../test-utils";
 
 const COMMITS = [
   {
@@ -17,33 +17,11 @@ const COMMITS = [
 
 const FILES = [{ status: "M", path: "src/a.ts" }];
 
-const json = (body: unknown) =>
-  ({ ok: true, json: async () => body }) as unknown as Response;
-
-function stubFetch() {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string) => {
-      if (url.startsWith("/api/git/log")) return json(COMMITS);
-      if (url.startsWith("/api/git/commit-files")) return json(FILES);
-      if (url.startsWith("/api/git/diff")) return json({ diff: "" });
-      return json(null);
-    }),
-  );
-}
-
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
+const GIT_ROUTES = {
+  "/api/git/log": COMMITS,
+  "/api/git/commit-files": FILES,
+  "/api/git/diff": { diff: "" },
+};
 
 const doc = () =>
   (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
@@ -84,21 +62,13 @@ function scroller(): HTMLElement {
   return found[0];
 }
 
-/** Drag the rail by `dx` pixels and let go. */
-function dragBy(dx: number) {
-  const handle = rail();
-  fireEvent.pointerDown(handle, { pointerId: 1, clientX: 600 });
-  fireEvent.pointerMove(handle, { pointerId: 1, clientX: 600 + dx });
-  fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 + dx });
-}
-
 describe("resizing the git-history tree", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    stubMatchMedia(false);
-    stubFetch();
+    installMatchMedia();
+    stubFetch(GIT_ROUTES);
   });
 
   afterEach(() => {
@@ -124,7 +94,7 @@ describe("resizing the git-history tree", () => {
 
   it("dragging the handle changes and persists the width", async () => {
     await renderTree();
-    dragBy(60);
+    dragBy(rail(), 60);
 
     expect(tree()).toHaveStyle({ width: "340px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
@@ -132,11 +102,11 @@ describe("resizing the git-history tree", () => {
 
   it("the drag stops at the widths this tree was given", async () => {
     await renderTree();
-    dragBy(600);
+    dragBy(rail(), 600);
     expect(tree()).toHaveStyle({ width: "480px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(480);
 
-    dragBy(-600);
+    dragBy(rail(), -600);
     expect(tree()).toHaveStyle({ width: "200px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(200);
   });
@@ -149,14 +119,14 @@ describe("resizing the git-history tree", () => {
 
     // ...and dragging the tree must not reach the file list. Sharing one
     // declaration would fail one of these two whichever key it borrowed.
-    dragBy(-40);
+    dragBy(rail(), -40);
     expect(tree()).toHaveStyle({ width: "240px" });
     expect(readPreference(preferences.fileListPaneWidth)).toBe(420);
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(240);
   });
 
   it("no handle on a mobile viewport", async () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     await renderTree();
 
     expect(screen.queryByTestId("pane-resize-git-history")).toBeNull();

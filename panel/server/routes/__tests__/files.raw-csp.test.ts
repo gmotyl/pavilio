@@ -1,33 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { configMock, fileIndexMock, makeApp, withProjectsDir } from "../../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
+const projects = withProjectsDir("pavilio-raw-csp-test-");
 
-vi.mock("../../config", () => ({ getConfig: () => ({ projectsDir }) }));
-vi.mock("../../lib/file-index", () => ({
-  getFileIndex: () => [],
-  rebuildIndex: vi.fn(),
-}));
+vi.mock("../../config", () => configMock(() => projects.dir()));
+vi.mock("../../lib/file-index", () => fileIndexMock());
 
 import filesRouter from "../files";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/files", filesRouter);
-  return app;
-}
-
 describe("GET /api/files/raw CSP", () => {
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-raw-csp-test-"));
-    projectsDir = join(tmpRoot, "projects");
-    const mockups = join(projectsDir, "p", "mockups");
+    const mockups = join(projects.dir(), "p", "mockups");
     mkdirSync(mockups, { recursive: true });
     writeFileSync(
       join(mockups, "a.svg"),
@@ -44,10 +30,6 @@ describe("GET /api/files/raw CSP", () => {
     writeFileSync(join(mockups, "a.xml"), '<?xml version="1.0"?><root/>');
   });
 
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
-  });
-
   // `sandbox` stops a served svg/xml from running script on the panel origin;
   // html mockups may run their own scripts, but still in an opaque origin.
   it.each<[string, string, string | undefined]>([
@@ -59,7 +41,7 @@ describe("GET /api/files/raw CSP", () => {
     ["xml (without scripts)", "a.xml", "sandbox"],
     ["raw png (no csp)", "a.png", undefined],
   ])("%s is served with csp %j", async (_label, name, csp) => {
-    const res = await request(makeApp()).get(`/api/files/raw/p/mockups/${name}`);
+    const res = await request(makeApp(filesRouter, "/api/files")).get(`/api/files/raw/p/mockups/${name}`);
     expect(res.status).toBe(200);
     expect(res.headers["content-security-policy"]).toBe(csp);
   });

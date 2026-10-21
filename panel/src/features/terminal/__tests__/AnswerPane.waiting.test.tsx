@@ -34,6 +34,7 @@ import { __resetAnswerWaitingForTests, isAnswerHeld } from "../answerWaiting";
 import { fakeOnNext, fakeOnPrevious } from "../../speech/__tests__/fakeTransportHost";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
 // reconnect timer whenever that socket closes. jsdom would really try to dial
@@ -183,26 +184,6 @@ const commandsOf = (host: GridSpeech): Mock[] =>
   (Object.keys(host) as (keyof GridSpeech)[])
     .filter((key) => typeof host[key] === "function" && !READERS.has(key))
     .map((key) => host[key] as unknown as Mock);
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** The composer's grip asks jsdom whether this is a touch viewport. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 /** A live socket: the write landed. `send` reports delivery now, and a stub
  *  that returned nothing would read as a socket that is not OPEN. */

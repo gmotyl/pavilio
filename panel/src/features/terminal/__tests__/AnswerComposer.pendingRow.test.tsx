@@ -62,6 +62,7 @@ import { AnswerComposer } from "../AnswerComposer";
 import { __resetComposerDraftsForTests } from "../composerDrafts";
 import { __resetPtySubmitForTests, SUBMIT_RETURN_MS } from "../ptySubmit";
 import type { ConnectionState } from "../terminalInstances";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /** Connection-state subscribers, by session — the retry's wake-up signal. */
 const listeners = new Map<string, Set<(state: ConnectionState) => void>>();
@@ -93,26 +94,6 @@ vi.mock("../terminalInstances", () => ({
 }));
 
 const SESSION = "cell-a";
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** jsdom has no `matchMedia`, and the composer's grip asks it for the viewport. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 /**
  * Hand a connection verdict to everything subscribed for the cell.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express, { type Express } from "express";
+import express from "express";
 import request from "supertest";
 import { spawn } from "node:child_process";
 import {
@@ -15,6 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
+import { makeApp } from "../../test-kit";
 
 // The route's only side effect beyond the store is the WS fan-out.
 const { broadcast } = vi.hoisted(() => ({ broadcast: vi.fn() }));
@@ -38,13 +39,6 @@ const PANEL_DIR = resolve(SERVER_DIR, "..");
  * script route is `/api/preferences.js`, and express's mount matching only
  * splits on `/`, so a `/api/preferences` prefix would never see it.
  */
-function makeApp(): Express {
-  const app = express();
-  app.use(express.json());
-  app.use("/api", preferencesRouter);
-  return app;
-}
-
 let dir = "";
 const target = () => join(dir, "preferences.json");
 
@@ -83,7 +77,7 @@ describe("GET /api/preferences.js", () => {
   it("the script route returns parseable JavaScript assigning the global", async () => {
     patchPreferences({ "shell.leftSidebar.expanded": "false", "panes.left": "240" });
 
-    const res = await request(makeApp()).get("/api/preferences.js");
+    const res = await request(makeApp(preferencesRouter)).get("/api/preferences.js");
 
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toMatch(/^application\/javascript\b/);
@@ -97,7 +91,7 @@ describe("GET /api/preferences.js", () => {
   });
 
   it("the script route publishes the server home directory", async () => {
-    const res = await request(makeApp()).get("/api/preferences.js");
+    const res = await request(makeApp(preferencesRouter)).get("/api/preferences.js");
 
     // The browser bundle has no `process`, so this global is the client's only
     // source for the home path — without it a `~`-spelled repo path and its
@@ -108,7 +102,7 @@ describe("GET /api/preferences.js", () => {
   });
 
   it("an empty doc still yields a valid assignment", async () => {
-    const res = await request(makeApp()).get("/api/preferences.js");
+    const res = await request(makeApp(preferencesRouter)).get("/api/preferences.js");
 
     expect(res.status).toBe(200);
     const window = evaluateScript(res.text);
@@ -128,7 +122,7 @@ describe("GET /api/preferences.js", () => {
     const ampersand = "tom & jerry <tag>";
     patchPreferences({ nasty, separators, ampersand });
 
-    const res = await request(makeApp()).get("/api/preferences.js");
+    const res = await request(makeApp(preferencesRouter)).get("/api/preferences.js");
 
     expect(res.status).toBe(200);
     // Nothing that can terminate a script element, and no raw JS line
@@ -154,7 +148,7 @@ describe("GET /api/preferences.js", () => {
     expect(window.pwned).toBeUndefined();
   });
   it("preferences.js declares the read-only flag", async () => {
-    const app = makeApp();
+    const app = makeApp(preferencesRouter);
 
     // A newer panel's file: this panel will not write it, and the page must
     // know before any application code runs.
@@ -175,7 +169,7 @@ describe("PATCH /api/preferences", () => {
     patchPreferences({ stale: "gone" });
     broadcast.mockClear();
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(preferencesRouter))
       .patch("/api/preferences")
       .send({ "shell.leftSidebar.expanded": "false", "panes.left": "240", stale: null });
 
@@ -205,7 +199,7 @@ describe("PATCH /api/preferences", () => {
     patchPreferences({ keep: "me" });
     broadcast.mockClear();
     const before = { ...getPreferences() };
-    const app = makeApp();
+    const app = makeApp(preferencesRouter);
 
     // An array IS an object in JS — it is rejected all the same, because a
     // preferences patch is a key/value map and `[…]` names no keys.
@@ -231,7 +225,7 @@ describe("PATCH /api/preferences", () => {
     // anyway marks the document dirty and schedules a byte-identical write, and
     // the broadcast wakes every open tab to re-read a list of no keys.
     const before = { ...getPreferences() };
-    const app = makeApp();
+    const app = makeApp(preferencesRouter);
 
     for (const body of [{}, { version: 2 }]) {
       const res = await request(app).patch("/api/preferences").send(body);
@@ -255,7 +249,7 @@ describe("PATCH /api/preferences", () => {
     try {
       const raw = loadFile({ version: 2, newShape: { left: 240 } });
 
-      const res = await request(makeApp()).patch("/api/preferences").send({ theme: "dark" });
+      const res = await request(makeApp(preferencesRouter)).patch("/api/preferences").send({ theme: "dark" });
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ ok: true, persisted: false });
@@ -274,14 +268,14 @@ describe("PATCH /api/preferences", () => {
   it("PATCH against a current file answers persisted true", async () => {
     loadFile({ version: 1 });
 
-    const res = await request(makeApp()).patch("/api/preferences").send({ theme: "dark" });
+    const res = await request(makeApp(preferencesRouter)).patch("/api/preferences").send({ theme: "dark" });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, persisted: true });
   });
 
   it("an empty PATCH still reports persisted", async () => {
-    const app = makeApp();
+    const app = makeApp(preferencesRouter);
 
     // The early return for a patch that names no keys must carry the flag too,
     // in both directions.

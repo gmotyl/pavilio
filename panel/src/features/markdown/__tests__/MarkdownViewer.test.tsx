@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { buildReadUrl } from "../MarkdownViewer";
 import MarkdownViewer from "../MarkdownViewer";
+import { jsonResponse, stubFetch } from "../../../test-utils";
 
 // ---------- unit tests for the pure helper ----------
 
@@ -22,23 +23,15 @@ describe("buildReadUrl", () => {
 
 // ---------- integration: viewer fetches the right URL ----------
 
-function stubFetch(captured: string[]) {
-  return vi.fn(async (url: string | URL) => {
-    const u = typeof url === "string" ? url : url.toString();
-    captured.push(u);
-    return new Response(
-      JSON.stringify({ content: "# Hello", absolutePath: "/fake/path.md" }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  });
-}
-
 describe("MarkdownViewer cross-root fetch", () => {
   let fetchedUrls: string[];
 
   beforeEach(() => {
     fetchedUrls = [];
-    vi.stubGlobal("fetch", stubFetch(fetchedUrls));
+    stubFetch({}, (url: string) => {
+      fetchedUrls.push(url);
+      return jsonResponse({ content: "# Hello", absolutePath: "/fake/path.md" });
+    });
     // Stub WebSocket so the component doesn't throw
     vi.stubGlobal(
       "WebSocket",

@@ -37,6 +37,7 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 import { AnswerPane } from "../AnswerPane";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // jsdom has none of the surface xterm measures itself against, and this file
 // cares only about the ws lifecycle behind the pool — the same stubs
@@ -133,26 +134,6 @@ class FakeWebSocket implements FakeWs {
     this.url = url;
     createdSockets.push(this);
   }
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** jsdom has no `matchMedia`, and the composer's grip hook asks it. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 }
 
 /** Referentially stable — a fresh array per call is a `useSyncExternalStore` loop. */

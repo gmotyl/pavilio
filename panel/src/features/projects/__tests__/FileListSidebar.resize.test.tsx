@@ -1,22 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import FileListSidebar from "../FileListSidebar";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
-
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
+import { dragBy, installMatchMedia } from "../../../test-utils";
 
 const doc = () =>
   (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
@@ -39,20 +26,12 @@ function renderSidebar() {
 const aside = () => screen.getByTestId("file-list-sidebar");
 const rail = () => screen.getByTestId("pane-resize-file-list");
 
-/** Drag the rail by `dx` pixels and let go. */
-function dragBy(dx: number) {
-  const handle = rail();
-  fireEvent.pointerDown(handle, { pointerId: 1, clientX: 600 });
-  fireEvent.pointerMove(handle, { pointerId: 1, clientX: 600 + dx });
-  fireEvent.pointerUp(handle, { pointerId: 1, clientX: 600 + dx });
-}
-
 describe("resizing the file-list sidebar", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    stubMatchMedia(false);
+    installMatchMedia();
   });
 
   it("the desktop file list renders a resize handle", () => {
@@ -73,7 +52,7 @@ describe("resizing the file-list sidebar", () => {
 
   it("dragging the handle changes and persists the width", () => {
     renderSidebar();
-    dragBy(60);
+    dragBy(rail(), 60);
 
     expect(aside()).toHaveStyle({ width: "348px" });
     expect(readPreference(preferences.fileListPaneWidth)).toBe(348);
@@ -85,18 +64,18 @@ describe("resizing the file-list sidebar", () => {
     // suite would stay green — including to a floor that leaves a column of
     // ellipses, or a ceiling that takes the detail pane's larger half.
     renderSidebar();
-    dragBy(600);
+    dragBy(rail(), 600);
     expect(aside()).toHaveStyle({ width: "560px" });
     expect(readPreference(preferences.fileListPaneWidth)).toBe(560);
 
-    dragBy(-600);
+    dragBy(rail(), -600);
     expect(aside()).toHaveStyle({ width: "200px" });
     expect(readPreference(preferences.fileListPaneWidth)).toBe(200);
   });
 
   it("collapsing and expanding restores the chosen width", () => {
     renderSidebar();
-    dragBy(40);
+    dragBy(rail(), 40);
     expect(aside()).toHaveStyle({ width: "328px" });
 
     // Collapse to the rail, then pin it open again. The width preference is
@@ -117,14 +96,14 @@ describe("resizing the file-list sidebar", () => {
 
     // ...and dragging the file list must not reach the history tree. Sharing
     // one declaration would fail one of these two whichever key it borrowed.
-    dragBy(-50);
+    dragBy(rail(), -50);
     expect(aside()).toHaveStyle({ width: "238px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(420);
     expect(readPreference(preferences.fileListPaneWidth)).toBe(238);
   });
 
   it("no handle on a mobile viewport", () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     render(
       <FileListSidebar
         testId="plans-tab"

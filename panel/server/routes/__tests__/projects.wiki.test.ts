@@ -1,25 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { configMock, makeApp } from "../../test-kit";
 
 let tmpRoot = "";
 let projectsDir = "";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir }),
-}));
+vi.mock("../../config", () => configMock(() => projectsDir));
 
 import projectsRouter, { type WikiTree, type WikiPageInfo } from "../projects";
-
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/projects", projectsRouter);
-  return app;
-}
 
 function seed(rel: string, content = "x") {
   const abs = join(projectsDir, rel);
@@ -104,7 +95,7 @@ describe("GET /api/projects (wiki)", () => {
   it("discovery reports hasWiki", async () => {
     seedWiki();
     seed("beta/PROJECT.md", "# beta");
-    const res = await request(makeApp()).get("/api/projects");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects");
     expect(res.status).toBe(200);
     const byName = Object.fromEntries(res.body.map((p: { name: string; hasWiki: boolean }) => [p.name, p.hasWiki]));
     expect(byName).toEqual({ alpha: true, beta: false });
@@ -113,7 +104,7 @@ describe("GET /api/projects (wiki)", () => {
   it("a plain file named wiki is not a wiki", async () => {
     seed("gamma/PROJECT.md", "# gamma");
     seed("gamma/wiki", "not a dir");
-    const res = await request(makeApp()).get("/api/projects");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects");
     expect(res.body.find((p: { name: string }) => p.name === "gamma").hasWiki).toBe(false);
   });
 });
@@ -121,7 +112,7 @@ describe("GET /api/projects (wiki)", () => {
 describe("GET /api/projects/:name/wiki", () => {
   it("returns the wiki tree with counts", async () => {
     seedWiki();
-    const res = await request(makeApp()).get("/api/projects/alpha/wiki");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alpha/wiki");
     expect(res.status).toBe(200);
     const tree = res.body as WikiTree;
     expect(tree.project).toBe("alpha");
@@ -186,7 +177,7 @@ describe("GET /api/projects/:name/wiki", () => {
 
   it("returns backlinks and source pages per page", async () => {
     seedWiki();
-    const res = await request(makeApp()).get("/api/projects/alpha/wiki");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alpha/wiki");
     const tree = res.body as WikiTree;
 
     const caching = findPage(tree, "wiki/concepts/caching.md")!;
@@ -217,7 +208,7 @@ describe("GET /api/projects/:name/wiki", () => {
   it("reports a null open-questions count without open-questions.md", async () => {
     seed("beta/PROJECT.md", "# beta");
     seed("beta/wiki/overview.md", page({ type: "overview" }, "# O\n"));
-    const tree = (await request(makeApp()).get("/api/projects/beta/wiki")).body as WikiTree;
+    const tree = (await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/beta/wiki")).body as WikiTree;
     expect(tree.interaction.openQuestions).toBeNull();
     expect(tree.interaction.openQuestionsCount).toBeNull();
   });
@@ -226,7 +217,7 @@ describe("GET /api/projects/:name/wiki", () => {
     projectsDir = join(tmpRoot, "workspace", "store");
     mkdirSync(projectsDir, { recursive: true });
     seedWiki();
-    const tree = (await request(makeApp()).get("/api/projects/alpha/wiki")).body as WikiTree;
+    const tree = (await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alpha/wiki")).body as WikiTree;
     expect(findPage(tree, "wiki/concepts/caching.md")!.backlinks).toEqual([
       "wiki/questions/q1.md",
       "wiki/repos/pavilio/server.md",
@@ -235,7 +226,7 @@ describe("GET /api/projects/:name/wiki", () => {
 
   it("404s without a wiki", async () => {
     seed("beta/PROJECT.md", "# beta");
-    const app = makeApp();
+    const app = makeApp(projectsRouter, "/api/projects");
     expect((await request(app).get("/api/projects/beta/wiki")).status).toBe(404);
     expect((await request(app).get("/api/projects/missing/wiki")).status).toBe(404);
     expect((await request(app).get("/api/projects/..%2F..%2Fetc/wiki")).status).toBe(404);

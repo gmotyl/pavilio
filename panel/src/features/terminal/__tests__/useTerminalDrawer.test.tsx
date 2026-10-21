@@ -8,7 +8,7 @@ import {
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import { storageKey } from "../../../preferences/types";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { installMatchMedia } from "../../../test-utils";
 
 /**
  * Every write that reached the preference store, so "a phone never wrote the
@@ -63,7 +63,6 @@ const setRawSide = (raw: string) => {
   ] = raw;
 };
 
-
 function Probe() {
   const {
     open,
@@ -113,48 +112,6 @@ function Probe() {
 }
 
 const JSDOM_VIEWPORT = 1024;
-
-/**
- * A controllable `matchMedia`, the shape the resizable-row and sidebar suites
- * use. jsdom's own — where it has one at all — answers a fixed viewport and
- * dispatches no `change`, so the widening half of this feature could not be
- * driven through it.
- */
-function installMatchMedia(mobile: boolean) {
-  const listeners = new Set<(e: MediaQueryListEvent) => void>();
-  let matches = mobile;
-  const mql = {
-    get matches() {
-      return matches;
-    },
-    media: MOBILE_QUERY,
-    addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
-    removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-    // The deprecated pair, feeding the same listener set. `useIsMobile` reaches
-    // only for the modern one today, but a stub that omits these answers
-    // `undefined` to a caller that uses the legacy form — a silent no-op rather
-    // than a failure, which is exactly the shape of bug a stub should not be
-    // able to hide.
-    addListener: (cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
-    removeListener: (cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-  };
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => mql,
-  });
-  return {
-    setMobile(next: boolean) {
-      matches = next;
-      act(() => {
-        listeners.forEach((cb) => cb({ matches: next } as MediaQueryListEvent));
-      });
-    },
-  };
-}
 
 /** Whatever this environment had before a test installed the stub. */
 const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
@@ -384,7 +341,7 @@ describe("useTerminalDrawer", () => {
   describe("on a narrow viewport", () => {
     it("does not render the drawer on a narrow viewport", () => {
       setOpenPref(true);
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       setup("/project/vector/memo");
 
       expect(screen.getByTestId("visible")).toHaveTextContent("false");
@@ -398,7 +355,7 @@ describe("useTerminalDrawer", () => {
       // First, prove the spy is live: a path that MUST write the open intent,
       // driven on a desktop viewport. Without this the silence asserted below
       // would be indistinguishable from a spy that is never reached at all.
-      installMatchMedia(false);
+      installMatchMedia();
       setup("/project/vector/memo");
       act(() => {
         fireEvent.keyDown(window, { key: "b", metaKey: true });
@@ -413,7 +370,7 @@ describe("useTerminalDrawer", () => {
       // Now the phone. Nothing it does may reach that key.
       setOpenPref(true);
       writes.length = 0;
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       setup("/project/vector/memo");
       expect(screen.getByTestId("visible")).toHaveTextContent("false");
 
@@ -423,7 +380,7 @@ describe("useTerminalDrawer", () => {
 
     it("renders again when the viewport widens", () => {
       setOpenPref(true);
-      const media = installMatchMedia(true);
+      const media = installMatchMedia({ mobile: true });
       setup("/project/vector/memo");
       expect(screen.getByTestId("visible")).toHaveTextContent("false");
       writes.length = 0;
@@ -439,7 +396,7 @@ describe("useTerminalDrawer", () => {
 
     it("is unchanged on a desktop viewport", () => {
       setOpenPref(true);
-      installMatchMedia(false);
+      installMatchMedia();
       setup("/project/vector/memo");
       expect(screen.getByTestId("visible")).toHaveTextContent("true");
 

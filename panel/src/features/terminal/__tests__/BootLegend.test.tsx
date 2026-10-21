@@ -53,12 +53,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in. `send` reports delivery the way the real one
@@ -190,12 +190,6 @@ const cell = (speech: GridSpeech, sessionId = SESSION, speechBarVisible = true) 
     <TerminalView sessionId={sessionId} speech={speech} speechBarVisible={speechBarVisible} />
   </MemoryRouter>
 );
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const legend = (sessionId = SESSION): HTMLElement | null =>
   screen.queryByTestId(`boot-legend-${sessionId}`);
@@ -883,16 +877,7 @@ describe("the boot legend and the command picker", () => {
   });
 
   it("a touch viewport renders no hint line but does render the chip", () => {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      configurable: true,
-      value: (query: string) => ({
-        matches: query === MOBILE_QUERY,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      }),
-    });
+    installMatchMedia({ mobile: true });
     try {
       openLegend();
 

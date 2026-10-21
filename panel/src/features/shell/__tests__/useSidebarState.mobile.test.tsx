@@ -1,42 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { useSidebarState } from "../useSidebarState";
 import { preferences } from "../../../preferences/declarations";
 import type { PreferenceDef } from "../../../preferences/types";
-
-/**
- * A controllable `matchMedia`, the shape `useFileListSidebar`'s suite uses.
- * jsdom has none, so desktop is what a test gets by saying nothing — and the
- * point of this file is that the two viewports answer differently.
- */
-function installMatchMedia(mobile: boolean) {
-  const listeners = new Set<(e: MediaQueryListEvent) => void>();
-  let matches = mobile;
-  const mql = {
-    get matches() {
-      return matches;
-    },
-    media: MOBILE_QUERY,
-    addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
-    removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-  };
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => mql,
-  });
-  return {
-    setMobile(next: boolean) {
-      matches = next;
-      act(() => {
-        listeners.forEach((cb) => cb({ matches: next } as MediaQueryListEvent));
-      });
-    },
-  };
-}
+import { installMatchMedia } from "../../../test-utils";
 
 type Doc = Record<string, unknown>;
 const prefsDoc = () =>
@@ -81,7 +48,7 @@ function spyPreferenceWrites(): string[] {
 
 describe("useSidebarState on a mobile viewport", () => {
   it("both sidebars start closed on a mobile viewport", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     const left = renderHook(() => useSidebarState("leftSidebar"));
     const right = renderHook(() => useSidebarState("rightSidebar"));
 
@@ -94,7 +61,7 @@ describe("useSidebarState on a mobile viewport", () => {
   });
 
   it("a stored expanded value does not open a sidebar on mobile", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     // Not the default this time but a value someone's desktop wrote into the
     // workspace file — the preference is portable, so it arrives on the phone.
     seed(preferences.leftSidebarExpanded, true);
@@ -106,7 +73,7 @@ describe("useSidebarState on a mobile viewport", () => {
   });
 
   it("toggling on mobile writes no preference", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     // COLLAPSED, and the seed is load-bearing. `setExpanded` below asks for
     // `true`, and the store's desktop path is an idempotent updater: seeded
     // `true` it would return its own argument and write nothing, so a leaked
@@ -129,7 +96,7 @@ describe("useSidebarState on a mobile viewport", () => {
   });
 
   it("crossing back to desktop restores the stored value", () => {
-    const mm = installMatchMedia(true);
+    const mm = installMatchMedia({ mobile: true });
     // The desktop chose COLLAPSED, so "restores the stored value" cannot be
     // confused with "went back to the default".
     seed(preferences.leftSidebarExpanded, false);
@@ -149,7 +116,7 @@ describe("useSidebarState on a mobile viewport", () => {
     // stale one: there `expanded` is the stored value and ignores the fold
     // entirely. So the reset is observable only on the way BACK, and a suite
     // that crosses once can never see it.
-    const mm = installMatchMedia(true);
+    const mm = installMatchMedia({ mobile: true });
     // The desktop chose EXPANDED, so the middle leg is unambiguously the
     // stored value and the last leg is unambiguously the reset.
     seed(preferences.leftSidebarExpanded, true);
@@ -173,7 +140,7 @@ describe("useSidebarState on a mobile viewport", () => {
     // `TerminalDrawer` both hold the LEFT sidebar: one renders it, the other
     // decides how much room to leave for it. Per-hook state lets those two
     // disagree, and the sidebar is then open for one and closed for the other.
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     const layout = renderHook(() => useSidebarState("leftSidebar"));
     const drawer = renderHook(() => useSidebarState("leftSidebar"));
     expect(drawer.result.current.expanded).toBe(false);
@@ -195,7 +162,7 @@ describe("useSidebarState on a mobile viewport", () => {
   });
 
   it("toggling on desktop still persists", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     const written = spyPreferenceWrites();
     const { result, unmount } = renderHook(() =>
       useSidebarState("rightSidebar"),

@@ -21,6 +21,7 @@ import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteran
 import type { SessionMeta } from "../useTerminalSessions";
 import { forgetAnswerPane } from "../answerPaneState";
 import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 vi.mock("../terminalInstances", () => {
   const holders = new Map<string, HTMLDivElement>();
@@ -83,28 +84,8 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 // Imported after the mocks so it picks them up.
 const { TerminalLayoutGrid } = await import("../TerminalLayoutGrid");
 
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
 beforeAll(() => {
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
 const MARKDOWN = "# Deploy plan\n\nThe first paragraph explains why the deploy waits.\n";

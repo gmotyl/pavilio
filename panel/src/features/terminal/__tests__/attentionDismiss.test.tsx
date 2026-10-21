@@ -51,7 +51,6 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
 import type { MediaSessionTransportTarget } from "../../speech/useMediaSessionTransport";
@@ -67,6 +66,7 @@ import {
   getActivityState,
   type ActivityState,
 } from "../useTerminalActivityChannel";
+import { installMatchMedia } from "../../../test-utils";
 
 const sendDismiss = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
 const reconnectOnActivate = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
@@ -128,20 +128,6 @@ function makeSpeech(state: CellSpeechState): GridSpeech {
   } satisfies GridSpeech;
 }
 
-/** jsdom has no `matchMedia`, and the composer's grip asks it for the viewport. */
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
-
 /** What the activity channel would have been told by the server. */
 function setActivity(sessionId: string, state: ActivityState): void {
   _applyEventForTests({
@@ -190,7 +176,7 @@ const field = (sessionId: string): HTMLElement =>
 function resetArrivalHarness(): void {
   _resetForTests();
   __resetAnswerWaitingForTests();
-  installMatchMedia(false);
+  installMatchMedia();
   reconnectOnActivate.mockReset();
   sendDismiss.mockReset();
   // The server's half of the round trip — see the note on this file.

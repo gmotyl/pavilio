@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ClipboardList } from "lucide-react";
 import FileListSidebar from "../FileListSidebar";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import { usePeekTriggerProps } from "../peekTrigger";
+import { installMatchMedia } from "../../../test-utils";
 
 /** Stand-in for the open-file name inside `detail` — the real peek trigger. */
 function PeekProbe() {
@@ -20,19 +20,6 @@ function PeekProbe() {
   );
 }
 
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
-
 const single = [{ id: "project", label: "projects (current)", count: 2, rows: <p>rows</p> }];
 const multi = [
   ...single,
@@ -42,7 +29,7 @@ const multi = [
 describe("FileListSidebar", () => {
   beforeEach(() => {
     localStorage.clear();
-    stubMatchMedia(false);
+    installMatchMedia();
   });
 
   it("shows title, total count and the detail pane", () => {
@@ -138,7 +125,7 @@ describe("FileListSidebar", () => {
   });
 
   it("starts collapsed on mobile", () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     writePreference(preferences.fileListSidebarCollapsed, false);
     render(
       <FileListSidebar testId="plans-tab" title="Plans" sources={single} detail={null} />,
@@ -299,7 +286,7 @@ describe("FileListSidebar", () => {
   });
 
   it("does not peek on mobile hover", () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     render(
       <FileListSidebar
         testId="plans-tab"

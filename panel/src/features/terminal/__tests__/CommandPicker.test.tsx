@@ -19,7 +19,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import type { GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
@@ -29,6 +28,7 @@ import type { SkillEntry } from "../commandSource";
 import { __resetPtySubmitForTests } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, jsonResponse, StubResizeObserver, stubFetch } from "../../../test-utils";
 
 vi.mock("../../speech/synth", () => ({
   isSpeechSynthesized: () => false,
@@ -65,25 +65,6 @@ function makeSpeech(): GridSpeech {
     onJumpToUnit: vi.fn(),
     onSeekWithinUnit: vi.fn(),
   } satisfies GridSpeech;
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 }
 
 /** Served out of order on purpose: the picker must impose its own order. */
@@ -139,19 +120,13 @@ const NOTE_BATCH: SkillEntry = {
 let served: SkillEntry[] | null = SKILLS;
 
 /** One fetch for both endpoints this tree reaches: the session list and the skills. */
-function stubFetch(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((url: string) => {
-      const isSkills = String(url).includes("/api/skills");
-      if (isSkills && served === null) return new Promise<Response>(() => {});
-      const body = isSkills ? served : [session("cell-a")];
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(body),
-      }) as unknown as Promise<Response>;
-    }),
+function stubSkillsFetch() {
+  stubFetch(
+    {
+      "/api/skills": () =>
+        served === null ? new Promise<Response>(() => {}) : jsonResponse(served),
+    },
+    [session("cell-a")],
   );
 }
 
@@ -191,8 +166,8 @@ beforeEach(async () => {
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
-  installMatchMedia(false);
-  stubFetch();
+  installMatchMedia();
+  stubSkillsFetch();
   await refreshSessions();
 });
 
@@ -616,7 +591,7 @@ describe("CommandPicker", () => {
   });
 
   it("the picker opens on a touch viewport", async () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     const user = userEvent.setup();
     renderPane();
 

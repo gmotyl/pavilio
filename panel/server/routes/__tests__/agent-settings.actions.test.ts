@@ -13,20 +13,15 @@
 // setup script against this machine. The workspace root is a fresh temp dir per
 // case, so the real package.json is never read either.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { writeFileSync } from "fs";
 import { join } from "path";
+import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
-let workspaceRoot = "";
+const projects = withProjectsDir("pavilio-agent-actions-");
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir }),
-}));
+vi.mock("../../config", () => configMock(() => projects.dir()));
 vi.mock("node:child_process", () => ({
   exec: vi.fn(),
 }));
@@ -79,13 +74,6 @@ function maxBufferError(): NodeJS.ErrnoException {
   return err;
 }
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/agent-settings", agentSettingsRouter);
-  return app;
-}
-
 /** The scripts an upstream clone of pavilio defines, verbatim in spirit. */
 const UPSTREAM_SCRIPTS: Record<string, string> = {
   bootstrap: "./scripts/bootstrap",
@@ -102,27 +90,19 @@ const UPSTREAM_SCRIPTS: Record<string, string> = {
 
 function seedPackageJson(scripts: Record<string, string>): void {
   writeFileSync(
-    join(workspaceRoot, "package.json"),
+    join(projects.root(), "package.json"),
     JSON.stringify({ name: "workspace-under-test", scripts }),
   );
 }
 
 async function listedActionIds(): Promise<string[]> {
-  const res = await request(makeApp()).get("/api/agent-settings/actions");
+  const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings")).get("/api/agent-settings/actions");
   expect(res.status).toBe(200);
   return (res.body as Array<{ id: string }>).map((a) => a.id);
 }
 
 beforeEach(() => {
-  tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-agent-actions-"));
-  workspaceRoot = tmpRoot;
-  projectsDir = join(tmpRoot, "projects");
-  mkdirSync(projectsDir, { recursive: true });
   execMock.mockReset();
-});
-
-afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
 });
 
 describe("GET /api/agent-settings/actions", () => {
@@ -141,7 +121,7 @@ describe("GET /api/agent-settings/actions", () => {
     // Every entry names the package script it runs. Asserted positively and
     // pairwise: a `script` that went missing would make the negative checks
     // below pass trivially while production ran `pm_in . undefined`.
-    const res = await request(makeApp()).get("/api/agent-settings/actions");
+    const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings")).get("/api/agent-settings/actions");
     const pairs = (res.body as Array<{ id: string; script: string }>).map((a) => [a.id, a.script]);
     expect(pairs).toEqual([
       ["setup", "bootstrap"],
@@ -192,7 +172,7 @@ describe("POST /api/agent-settings/run-action", () => {
   it("rejects an unknown action id with 400 before spawning", async () => {
     seedPackageJson(UPSTREAM_SCRIPTS);
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings"))
       .post("/api/agent-settings/run-action")
       .send({ action: "setup; rm -rf /" });
 
@@ -204,7 +184,7 @@ describe("POST /api/agent-settings/run-action", () => {
     // An upstream clone has no backup/restore scripts, but the id is a real one.
     seedPackageJson(UPSTREAM_SCRIPTS);
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings"))
       .post("/api/agent-settings/run-action")
       .send({ action: "setup:backup" });
 
@@ -217,7 +197,7 @@ describe("POST /api/agent-settings/run-action", () => {
     seedPackageJson(UPSTREAM_SCRIPTS);
     execSucceedsOnce("claude commands synced");
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings"))
       .post("/api/agent-settings/run-action")
       .send({ action: "init:claude" });
 
@@ -236,7 +216,7 @@ describe("POST /api/agent-settings/run-action", () => {
     expect(command).not.toMatch(/\bpnpm\b/);
     expect(command).not.toMatch(/\bnpm\b/);
 
-    expect(options.cwd).toBe(workspaceRoot);
+    expect(options.cwd).toBe(projects.root());
     expect(options.timeout).toBe(120_000);
     // `scripts/pm` is bash, and exec's default shell is /bin/sh.
     expect(options.shell).toMatch(/bash$/);
@@ -262,7 +242,7 @@ describe("POST /api/agent-settings/run-action", () => {
       execMock.mockClear();
       execSucceedsOnce("done");
 
-      const res = await request(makeApp())
+      const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings"))
         .post("/api/agent-settings/run-action")
         .send({ action: id });
 
@@ -280,7 +260,7 @@ describe("POST /api/agent-settings/run-action", () => {
     // 300 s branch is a branch and not the only value this can take.
     execMock.mockClear();
     execSucceedsOnce("done");
-    await request(makeApp()).post("/api/agent-settings/run-action").send({ action: "install:speech" });
+    await request(makeApp(agentSettingsRouter, "/api/agent-settings")).post("/api/agent-settings/run-action").send({ action: "install:speech" });
     const [, shortOpts] = execMock.mock.calls[0] as [string, { timeout?: number }];
     expect(shortOpts.timeout).toBe(120_000);
   });
@@ -289,7 +269,7 @@ describe("POST /api/agent-settings/run-action", () => {
     seedPackageJson(UPSTREAM_SCRIPTS);
     execFailsOnce(timeoutError(), "installing dependencies\n", "");
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings"))
       .post("/api/agent-settings/run-action")
       .send({ action: "setup" });
 
@@ -304,7 +284,7 @@ describe("POST /api/agent-settings/run-action", () => {
     seedPackageJson(UPSTREAM_SCRIPTS);
     execFailsOnce(maxBufferError(), "a lot of build output\n", "");
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(agentSettingsRouter, "/api/agent-settings"))
       .post("/api/agent-settings/run-action")
       .send({ action: "setup" });
 

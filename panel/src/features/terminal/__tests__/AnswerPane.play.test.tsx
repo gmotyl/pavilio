@@ -23,6 +23,7 @@ import {
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
 import { AnswerPane } from "../AnswerPane";
+import { StubResizeObserver } from "../../../test-utils";
 
 vi.mock("../../markdown/MermaidDiagram", () => ({
   default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
@@ -140,12 +141,6 @@ const blockIndexOf = (element: Element): number | null => {
   if (!parent?.classList.contains("prose")) return null;
   return Array.from(parent.children).indexOf(element);
 };
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 beforeEach(() => {
   for (const name of ["offsetTop", "offsetHeight"]) {

@@ -1,43 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { configMock, fileIndexMock, makeApp, withProjectsDir } from "../../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
+const projects = withProjectsDir("pavilio-exists-test-");
 
-vi.mock("../../config", () => ({ getConfig: () => ({ projectsDir }) }));
-vi.mock("../../lib/file-index", () => ({
-  getFileIndex: () => [],
-  rebuildIndex: vi.fn(),
-}));
+vi.mock("../../config", () => configMock(() => projects.dir()));
+vi.mock("../../lib/file-index", () => fileIndexMock());
 
 import filesRouter from "../files";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/files", filesRouter);
-  return app;
-}
-
 describe("POST /api/files/exists", () => {
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-exists-test-"));
-    projectsDir = join(tmpRoot, "projects");
+    const projectsDir = projects.dir();
     mkdirSync(join(projectsDir, "pavilio", "progress"), { recursive: true });
     writeFileSync(join(projectsDir, "pavilio", "progress", "a.md"), "# a");
-    writeFileSync(join(tmpRoot, "secret.md"), "outside");
-  });
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    writeFileSync(join(projects.root(), "secret.md"), "outside");
   });
 
   it("reports each path as present or missing", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(filesRouter, "/api/files"))
       .post("/api/files/exists")
       .send({ paths: ["pavilio/progress/a.md", "pavilio/progress/b.md", "pavilio/progress"] });
     expect(res.status).toBe(200);
@@ -49,7 +32,7 @@ describe("POST /api/files/exists", () => {
   });
 
   it("reports a path outside projectsDir as missing", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(filesRouter, "/api/files"))
       .post("/api/files/exists")
       .send({ paths: ["../secret.md", "/etc/passwd"] });
     expect(res.status).toBe(200);
@@ -57,7 +40,7 @@ describe("POST /api/files/exists", () => {
   });
 
   it("rejects a body without a string array", async () => {
-    const res = await request(makeApp()).post("/api/files/exists").send({ paths: "x" });
+    const res = await request(makeApp(filesRouter, "/api/files")).post("/api/files/exists").send({ paths: "x" });
     expect(res.status).toBe(400);
   });
 });
