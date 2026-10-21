@@ -47,6 +47,8 @@ const PORTABLE = [
   "time.form.resetAutoOnSave",
   "time.report",
   "view.wide",
+  "wiki.sessionStartIngest",
+  "wiki.writerModel",
 ];
 
 /**
@@ -188,6 +190,9 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["time.form.resetAutoOnSave", false, "project"],
   ["time.report", { period: "this-week", format: "text", detail: "detailed" }, "project"],
   ["view.wide", true, "project"],
+  // On unless the user opts out: design.md's Cost section names `false` as the escape hatch.
+  ["wiki.sessionStartIngest", true, "global"],
+  ["wiki.writerModel", "haiku", "global"],
 ];
 
 function keyOf(key: string) {
@@ -573,5 +578,22 @@ describe("the alert display time", () => {
     expect(readPreference(preferences.alertsDurationSeconds)).toBe(60);
     writePreference(preferences.alertsDurationSeconds, 30);
     expect(readPreference(preferences.alertsDurationSeconds)).toBe(30);
+  });
+});
+
+describe("the wiki's preferences", () => {
+  it("declares wiki preferences as portable", () => {
+    // The CLI reads both straight off `.pavilio/preferences.json`, so a
+    // machine-local declaration would be a value the CLI can never see.
+    const ingest = keyOf("wiki.sessionStartIngest");
+    expect(ingest.portable).toBe(true);
+    expect(ingest.scope).toBe("global");
+    expect(ingest.default).toBe(true);
+    const model = keyOf("wiki.writerModel");
+    expect(model.portable).toBe(true);
+    expect(model.scope).toBe("global");
+    expect(model.default).toBe("haiku");
+    expect(preferences.wikiSessionStartIngest).toBe(ingest);
+    expect(preferences.wikiWriterModel).toBe(model);
   });
 });

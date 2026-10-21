@@ -1,0 +1,109 @@
+import { realpathSync } from "fs";
+import { isAbsolute, join, relative, resolve, sep } from "path";
+
+import { isProjectDir } from "../project-dir";
+import { readActiveProjects, readArchivedProjects } from "../registry";
+
+/** Same default the speech hooks use when the panel did not publish its URL. */
+const DEFAULT_PANEL_URL = "http://127.0.0.1:3010";
+const SESSIONS_TIMEOUT_MS = 2000;
+
+export type FetchLike = (
+  url: string,
+  init?: { signal?: AbortSignal; headers?: Record<string, string> },
+) => Promise<Response>;
+
+export type ResolveProjectInput = {
+  workspaceRoot: string; // the dir that contains `projects/` and `.projects.local.md`
+  name?: string; // explicit `--name`, optionally in `<project>:` form
+  cwd: string;
+  env: Record<string, string | undefined>;
+  fetch: FetchLike;
+};
+
+export type ProjectResolution =
+  | { ok: true; project: string; via: "arg" | "cwd" | "cell" }
+  | { ok: false; ask: true; reason: string }; // the CLI maps this to exit 2 — never a guess
+
+const ask = (reason: string): ProjectResolution => ({ ok: false, ask: true, reason });
+
+/** Canonical path, so a symlinked workspace or cwd still compares equal; plain resolve if missing. */
+function canonical(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
+/** `projects/<name>/…` → `<name>` when cwd sits inside the workspace's projects dir. */
+function projectFromCwd(workspaceRoot: string, cwd: string): string | null {
+  const rel = relative(canonical(join(workspaceRoot, "projects")), canonical(cwd));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+  return rel.split(sep)[0] || null;
+}
+
+/** The project of the panel cell `terminalId`, or a reason it could not be read. */
+async function projectFromCell(
+  env: ResolveProjectInput["env"],
+  terminalId: string,
+  fetch: FetchLike,
+): Promise<{ project: string } | { reason: string }> {
+  const base = (env.PAVILIO_PANEL_URL || DEFAULT_PANEL_URL).replace(/\/+$/, "");
+  let sessions: unknown;
+  try {
+    // `/api/terminal` sits behind the panel's auth middleware; the token is never logged.
+    const headers: Record<string, string> = {};
+    if (env.PANEL_TOKEN) headers.authorization = `Bearer ${env.PANEL_TOKEN}`;
+    const res = await fetch(`${base}/api/terminal/sessions`, {
+      headers,
+      signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS),
+    });
+    if (!res.ok) return { reason: `sessions api answered ${res.status}` };
+    sessions = await res.json();
+  } catch (err) {
+    return { reason: `sessions api failed: ${(err as Error).message}` };
+  }
+  if (!Array.isArray(sessions)) return { reason: "sessions api returned no list" };
+  const cell = sessions.find((s) => s && typeof s === "object" && s.id === terminalId);
+  if (!cell) return { reason: `panel cell ${terminalId} is not listed` };
+  if (typeof cell.project !== "string" || !cell.project) {
+    return { reason: `panel cell ${terminalId} has no project` };
+  }
+  return { project: cell.project };
+}
+
+/**
+ * Resolve the target project: explicit name → cwd under `projects/<name>/` → the panel cell
+ * (`PAVILIO_TERMINAL_ID` looked up in `GET <PAVILIO_PANEL_URL>/api/terminal/sessions`). Every
+ * candidate must be a known project: a `projects/<name>/PROJECT.md` (the panel's discovery rule)
+ * or an active row in `.projects.local.md` — the registry is optional — and never one the
+ * registry lists under `## Archived Projects`. An explicit name that does not match asks rather
+ * than falling through, and so does a failed sessions call.
+ */
+export async function resolveProject(input: ResolveProjectInput): Promise<ProjectResolution> {
+  const projectsDir = join(input.workspaceRoot, "projects");
+  const active = readActiveProjects(projectsDir);
+  const archived = readArchivedProjects(projectsDir);
+  const isKnown = (p: string) =>
+    !archived.includes(p) && (active.includes(p) || isProjectDir(projectsDir, p));
+
+  if (input.name !== undefined) {
+    const name = input.name.trim().replace(/:$/, "");
+    return isKnown(name)
+      ? { ok: true, project: name, via: "arg" }
+      : ask(`"${input.name}" is not a known project`);
+  }
+
+  const fromCwd = projectFromCwd(input.workspaceRoot, input.cwd);
+  if (fromCwd && isKnown(fromCwd)) return { ok: true, project: fromCwd, via: "cwd" };
+
+  const terminalId = input.env.PAVILIO_TERMINAL_ID;
+  if (!terminalId) return ask("no --name, cwd is not inside a project, and no panel cell");
+
+  const cell = await projectFromCell(input.env, terminalId, input.fetch);
+  if ("reason" in cell) return ask(cell.reason);
+  return isKnown(cell.project)
+    ? { ok: true, project: cell.project, via: "cell" }
+    : ask(`panel cell project "${cell.project}" is not a known project`);
+}

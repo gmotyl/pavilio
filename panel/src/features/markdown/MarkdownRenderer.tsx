@@ -1,11 +1,18 @@
 import { useNavigate } from "react-router-dom";
-import { Children, cloneElement, isValidElement, lazy, Suspense, useMemo, type MouseEvent, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, lazy, Suspense, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
+import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
+import remarkWikiLinks, {
+  owningProject,
+  wikiLinkPath,
+  WIKILINK_ATTR,
+  WIKILINK_MISSING_CLASS,
+} from "./remarkWikiLinks";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -111,8 +118,69 @@ function markBlockCode(children: ReactNode): ReactNode {
   });
 }
 
+/**
+ * The projectsDir-relative paths of every wikilink target in `content`, deduplicated and
+ * sorted — joined with newlines so it is a stable effect dependency.
+ */
+function wikiLinkTargets(content: string, basePath: string | undefined): string {
+  // Typed as a string, but it comes straight from a JSON response: a reply without
+  // `content` must render as nothing (as react-markdown does), not crash the tab.
+  if (typeof content !== "string" || !content.includes("[[")) return "";
+  const fromProject = owningProject(basePath);
+  const paths = new Set<string>();
+  for (const link of extractWikiLinks(content)) {
+    const path = wikiLinkPath(link, fromProject);
+    if (path) paths.add(path);
+  }
+  return [...paths].sort().join("\n");
+}
+
+/** Quiet period before an existence check, so typing in a live preview does not fire a request per keystroke. */
+const WIKILINK_CHECK_DEBOUNCE_MS = 250;
+
+const NO_MISSING: ReadonlySet<string> = new Set();
+
+/**
+ * Which wikilink targets do not exist. Links render optimistically; once the server answers,
+ * the missing ones turn into warning text. The previous answer stays until the next one
+ * arrives (no flashing while editing), and a failed check leaves the current marks in place.
+ */
+function useMissingWikiLinks(targets: string): ReadonlySet<string> {
+  const [missing, setMissing] = useState<ReadonlySet<string>>(NO_MISSING);
+  useEffect(() => {
+    if (!targets) {
+      // Same identity when already empty, so a document without wikilinks never re-renders.
+      setMissing(NO_MISSING);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/files/exists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: targets.split("\n") }),
+        });
+        if (!res.ok) return;
+        const { exists } = (await res.json()) as { exists?: Record<string, boolean> };
+        if (cancelled || !exists) return;
+        const next = Object.keys(exists).filter((p) => exists[p] === false);
+        setMissing(next.length ? new Set(next) : NO_MISSING);
+      } catch {
+        // Offline or no endpoint: keep the current marks.
+      }
+    }, WIKILINK_CHECK_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [targets]);
+  return missing;
+}
+
 export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
   const navigate = useNavigate();
+  const missingWikiLinks = useMissingWikiLinks(useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]));
 
   const components = useMemo<Components>(() => {
     // Fenced-code handling does not depend on where the file lives. Keep it out
@@ -216,6 +284,14 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
     // basePath too (e.g. a design doc from an OpenSpec backend outside projectsDir).
     const a: Components["a"] = ({ href, children, ...props }) => {
       if (!href) return <a {...props}>{children}</a>;
+      const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
+      if (typeof wikiTarget === "string" && missingWikiLinks.has(wikiTarget)) {
+        return (
+          <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>
+            {children}
+          </span>
+        );
+      }
       if (isAppRoute(href)) return inAppLink(href, children, props);
       if (!basePath) return <a href={href} {...props}>{children}</a>;
 
@@ -246,12 +322,12 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
         return <img src={rawFileUrl(resolved)} alt={alt} {...props} />;
       },
     };
-  }, [basePath, navigate]);
+  }, [basePath, navigate, missingWikiLinks]);
 
   return (
     <div className="prose prose-invert prose-zinc max-w-none">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath }]]}
         rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw]}
         components={components}
       >

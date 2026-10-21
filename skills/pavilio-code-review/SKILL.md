@@ -25,7 +25,7 @@ Determine the project name (in order):
 Read, if present:
 
 - `projects/<name>/PROJECT.md` — overview, repos, conventions.
-- `projects/<name>/CONTEXT.md` — domain glossary, project-specific terms.
+- `projects/<name>/CONTEXT.md` — domain glossary, project-specific terms. With `projects/<name>/wiki/`, walk the reading ladder (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`) for the rationale the diff touches instead of reading notes or CONTEXT.md for it; no `wiki/` → `CONTEXT.md` whole, as before.
 
 ### 2. Pin the fixed point
 
@@ -40,7 +40,7 @@ Capture once: `git diff <fixed-point>...HEAD` (three-dot, against the merge-base
 Collect every file that documents how code should be written for this project:
 
 - `projects/<name>/qa/REVIEW_RULES.md` — **project-specific review rules** (conventions, preferred libraries, patterns, anti-patterns). Primary source.
-- `projects/<name>/PROJECT.md`, `projects/<name>/CONTEXT.md`.
+- `projects/<name>/PROJECT.md`, the `CONTEXT.md` glossary, and the wiki pages the reading ladder surfaced in step 1 (`repos/<repo>/` pages are code conventions, so they count here).
 - Repo-level `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `STYLE.md` / `STANDARDS.md` / `STYLEGUIDE.md`.
 - `projects/<project>/adr/`, plus the reviewed repo's own ADR directory if it keeps one (architectural decisions are standards).
 - `.editorconfig`, `eslint.config.*`, `biome.json`, `prettier.config.*`, `tsconfig.json` — machine-enforced; **note them but don't re-check what tooling already enforces**.

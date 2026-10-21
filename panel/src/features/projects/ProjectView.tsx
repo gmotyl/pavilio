@@ -18,6 +18,7 @@ import MockupImportDialog from "./MockupImportDialog";
 import { useMockupDrop } from "./useMockupImport";
 import ContextTab from "./ContextTab";
 import PlansTab from "./PlansTab";
+import WikiTab from "./WikiTab";
 import ReviewRules from "../qa/ReviewRules";
 import { SPECIAL_SECTIONS } from "./sections";
 import ScriptButton from "./ScriptButton";
@@ -62,6 +63,7 @@ export default function ProjectView() {
   const navTo = useNavigate();
   const project = projects.find((p) => p.name === name);
   const hasRepos = (project?.repos?.length ?? 0) > 0;
+  const hasWiki = project?.hasWiki ?? false;
 
   // Per-tab scroll memory
   const scrollContainerRef = useScrollContainer();
@@ -209,11 +211,12 @@ export default function ProjectView() {
     projectName: name,
     section,
     hasRepos,
+    hasWiki,
   });
 
   useBreadcrumbActions(
     <ProjectTabsMenu tabs={tabs} activeTab={activeTab} />,
-    [name, section, hasRepos],
+    [name, section, hasRepos, hasWiki],
   );
 
   // Same predicate the detail pane already branches on, guarded by the same
@@ -360,6 +363,9 @@ export default function ProjectView() {
 
       {/* Plans tab — legacy plan files plus coordinated OpenSpec changes */}
       {section === "plans" && <PlansTab projectName={name || ""} />}
+
+      {/* Wiki tab — the project's LLM wiki, read-only (only listed with wiki/) */}
+      {section === "wiki" && <WikiTab projectName={name || ""} />}
 
       {/* File sections (notes, memo, progress, qa) — list beside the viewer.
           On mockups the whole list + detail is a drop target for imports. */}

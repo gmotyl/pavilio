@@ -67,7 +67,16 @@ export interface FileListControls {
   controlsBar: ReactNode;
 }
 
-export function useFileListControls(): FileListControls {
+export interface FileListControlsOptions {
+  /** Show the Date / Name sort pills. Off for lists with a fixed order (the wiki tree). */
+  sortable?: boolean;
+  placeholder?: string;
+}
+
+export function useFileListControls({
+  sortable = true,
+  placeholder = "Filter files…",
+}: FileListControlsOptions = {}): FileListControls {
   const [initial] = useState(readSort);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -122,7 +131,7 @@ export function useFileListControls(): FileListControls {
           data-testid="file-list-filter-input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter files…"
+          placeholder={placeholder}
           className="flex-1 min-w-0 bg-transparent outline-none text-xs"
           style={{ color: "var(--text-primary)" }}
         />
@@ -138,17 +147,21 @@ export function useFileListControls(): FileListControls {
           </button>
         )}
       </div>
-      {pill("date", "Date")}
-      {pill("name", "Name")}
-      <button
-        data-testid="file-list-sort-dir"
-        onClick={toggleDir}
-        title={sortDir === "asc" ? "Ascending" : "Descending"}
-        className="shrink-0 p-1 rounded"
-        style={{ color: "var(--text-muted)" }}
-      >
-        {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
-      </button>
+      {sortable && (
+        <>
+          {pill("date", "Date")}
+          {pill("name", "Name")}
+          <button
+            data-testid="file-list-sort-dir"
+            onClick={toggleDir}
+            title={sortDir === "asc" ? "Ascending" : "Descending"}
+            className="shrink-0 p-1 rounded"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {sortDir === "asc" ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+          </button>
+        </>
+      )}
     </div>
   );
 

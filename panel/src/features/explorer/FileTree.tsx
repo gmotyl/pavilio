@@ -11,6 +11,7 @@ import { useGitStatus } from "../git/useGitStatus";
 import { useActiveFile } from "./useActiveFile";
 import { useFileIndex, FileEntry, RootId } from "./useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "./useFileDrag";
+import { decodePathSegments, encodePathSegments, viewFilePath } from "../markdown/viewRoute";
 
 /**
  * Repo-relative on-disk path for a file under the given root.
@@ -98,11 +99,31 @@ export function buildTree(files: FileEntry[]): Record<string, ProjectNode> {
   return tree;
 }
 
-/** Parse /view/project/subfolder/file.md into segments */
+/** Parse /view/project/subfolder/file.md into (decoded) segments */
 export function parseViewPath(pathname: string) {
-  const m = pathname.match(/^\/view\/([^/]+)(?:\/([^/]+))?/);
+  const m = decodePathSegments(pathname).match(/^\/view\/([^/]+)(?:\/([^/]+))?/);
   if (!m) return null;
   return { project: m[1], subfolder: m[2] || "" };
+}
+
+/**
+ * The `/view/<raw path>` a FileButton matches as active: the URL's file (decoded, since the route
+ * may be percent-encoded while file paths are raw), else the inline viewer's active file.
+ */
+export function activeViewPath(pathname: string, activeFile: string | null): string {
+  if (pathname.startsWith("/view/")) return `/view/${viewFilePath(pathname)}`;
+  return activeFile ? `/view/${activeFile}` : pathname;
+}
+
+/** The raw (decoded) `/view/` key of a tree file, the form `activeViewPath` compares against. */
+export function fileViewKey(root: RootId, relativePath: string): string {
+  return root === "projects" ? `/view/${relativePath}` : `/view/_root/${root}/${relativePath}`;
+}
+
+/** The `/view/` href of a tree file, each raw segment percent-encoded (`a%20b` stays literal). */
+export function fileViewHref(root: RootId, relativePath: string): string {
+  const path = root === "projects" ? relativePath : `_root/${root}/${relativePath}`;
+  return `/view/${encodePathSegments(path)}`;
 }
 
 function FileButton({
@@ -119,10 +140,7 @@ function FileButton({
   root?: RootId;
 }) {
   const fileName = file.relativePath.split("/").pop() ?? file.relativePath;
-  const viewPath =
-    root === "projects"
-      ? `/view/${file.relativePath}`
-      : `/view/_root/${root}/${file.relativePath}`;
+  const viewPath = fileViewHref(root, file.relativePath);
   const ref = useRef<HTMLButtonElement>(null);
   const drag = useFileDragSource(file.relativePath);
 
@@ -223,10 +241,7 @@ function SubfolderSection({
           style={{ borderLeft: "1px solid var(--border-subtle)" }}
         >
           {files.map((file) => {
-            const fp =
-              root === "projects"
-                ? `/view/${file.relativePath}`
-                : `/view/_root/${root}/${file.relativePath}`;
+            const fp = fileViewKey(root, file.relativePath);
             return (
               <FileButton
                 key={file.relativePath}
@@ -312,10 +327,7 @@ function ProjectTreeSection({
             />
           ))}
           {node.root.map((file) => {
-            const fp =
-              root === "projects"
-                ? `/view/${file.relativePath}`
-                : `/view/_root/${root}/${file.relativePath}`;
+            const fp = fileViewKey(root, file.relativePath);
             return (
               <FileButton
                 key={file.relativePath}
@@ -355,11 +367,7 @@ export default function FileTree({ root = "projects" }: FileTreeProps = {}) {
 
   // Build the "current path" that FileButton uses for isActive matching
   // Either the real URL path or a synthetic /view/ path from context
-  const currentPath = location.pathname.startsWith("/view/")
-    ? location.pathname
-    : activeFile
-      ? `/view/${activeFile}`
-      : location.pathname;
+  const currentPath = activeViewPath(location.pathname, activeFile);
 
   return (
     <div className="text-sm">

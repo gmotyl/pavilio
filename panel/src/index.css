@@ -2554,3 +2554,11 @@ input[type="checkbox"] {
     transition: none;
   }
 }
+
+/* An unresolved wikilink (D14): plain text, flagged in the warning colour. */
+.wikilink-missing {
+  color: var(--yellow);
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
+  cursor: help;
+}

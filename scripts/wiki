@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Pavilio wiki CLI — the deterministic half of the LLM wiki, for skills and agents.
+#
+#   scripts/wiki <command> [args]     # run `scripts/wiki help` for the commands
+#
+# Every command prints one JSON object on stdout; exit 0 ok, 1 error, 2 "ask the user".
+# The implementation is panel/server/lib/wiki/cli.ts, run with the panel's own tsx.
+#
+# Works from any cwd: the panel is found relative to this file, and node is found
+# the same way every other entry point finds it (scripts/pm). The workspace root
+# (the dir holding projects/) defaults to the dir above scripts/ — in an installed
+# workspace scripts/ is synced to the workspace root — and can be pointed elsewhere
+# with PAVILIO_WORKSPACE_ROOT.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# stdout carries JSON only, so failures before the CLI runs are reported as JSON too.
+wiki_fail() {
+  local msg="${1//\\/\\\\}"
+  msg="${msg//\"/\\\"}"
+  printf '{"error":"%s"}\n' "$msg"
+  exit 1
+}
+
+# shellcheck source=scripts/pm
+. "$SCRIPT_DIR/pm" || wiki_fail "cannot load scripts/pm"
+pm_resolve || wiki_fail "node not found (see stderr)"
+
+TSX="$REPO_ROOT/panel/node_modules/.bin/tsx"
+[ -x "$TSX" ] || wiki_fail "panel dependencies missing: run pnpm install in $REPO_ROOT/panel"
+
+export PAVILIO_WORKSPACE_ROOT="${PAVILIO_WORKSPACE_ROOT:-$REPO_ROOT}"
+exec "$TSX" --tsconfig "$REPO_ROOT/panel/tsconfig.json" "$REPO_ROOT/panel/server/lib/wiki/cli.ts" "$@"

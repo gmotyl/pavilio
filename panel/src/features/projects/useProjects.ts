@@ -13,6 +13,7 @@ export interface Project {
   hasNotes: boolean;
   hasProgress: boolean;
   hasPlans: boolean;
+  hasWiki: boolean;
   latestProgressDate: string | null;
   repos: RepoEntry[];
 }

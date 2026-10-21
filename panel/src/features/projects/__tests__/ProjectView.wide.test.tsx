@@ -49,6 +49,7 @@ const PROJECTS = [
     hasNotes: true,
     hasProgress: true,
     hasPlans: true,
+    hasWiki: false,
     latestProgressDate: null,
     repos: [{ name: "pavilio", path: "/root/git/prv/pavilio" }],
   },

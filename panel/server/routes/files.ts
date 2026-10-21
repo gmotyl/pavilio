@@ -261,6 +261,33 @@ router.post("/move", async (req, res) => {
   });
 });
 
+// Batch existence check for files under projectsDir — the markdown renderer's wikilinks.
+// Body: { paths: string[] } (projectsDir-relative). Response: { exists: { [path]: boolean } }.
+// A path that escapes projectsDir is reported missing rather than failing the batch.
+const EXISTS_MAX_PATHS = 500;
+router.post("/exists", (req, res) => {
+  const paths: unknown = req.body?.paths;
+  if (!Array.isArray(paths) || !paths.every((p) => typeof p === "string")) {
+    return res.status(400).json({ error: "'paths' must be an array of strings" });
+  }
+  if (paths.length > EXISTS_MAX_PATHS) {
+    return res.status(400).json({ error: `At most ${EXISTS_MAX_PATHS} paths per request` });
+  }
+  const { projectsDir } = getConfig();
+  const exists: Record<string, boolean> = {};
+  for (const relPath of paths as string[]) {
+    // Per path, so one unreadable entry (EACCES, a file removed mid-check) cannot fail the batch.
+    try {
+      const absolutePath = resolve(projectsDir, relPath);
+      exists[relPath] = !!relPath && isPathUnder(absolutePath, projectsDir) && absolutePath !== projectsDir
+        && !!statSync(absolutePath, { throwIfNoEntry: false })?.isFile();
+    } catch {
+      exists[relPath] = false;
+    }
+  }
+  return res.json({ exists });
+});
+
 // Write a file's content (create or overwrite) within projectsDir.
 // Body: { path: string, content: string }
 // Response: { ok: true, path } where `path` is the final relativePath.

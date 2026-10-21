@@ -13,6 +13,11 @@ describe("buildReadUrl", () => {
     );
   });
 
+  it("percent-encodes each path segment", () => {
+    expect(buildReadUrl("p/notes/a b#c?.md")).toBe("/api/files/read/p/notes/a%20b%23c%3F.md");
+    expect(buildReadUrl("_root/skills/a b/SKILL.md")).toBe("/api/files/read/a%20b/SKILL.md?root=skills");
+  });
+
   it("maps _root/<rootId>/<rest> to ?root= query param", () => {
     expect(buildReadUrl("_root/skills/memo/SKILL.md")).toBe(
       "/api/files/read/memo/SKILL.md?root=skills",
