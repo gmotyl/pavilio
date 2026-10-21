@@ -104,6 +104,14 @@ vi.mock("../../../lib/clipboard", () => ({
  * store is driven by hand, which is what lets the "nothing re-renders inside a
  * unit" test notify with the same index and count.
  */
+/** Empty every collection the writable synth stub reads, so no section inherits one. */
+function clearSynthStub(): void {
+  warm.clear();
+  warming.clear();
+  voiced.clear();
+  cacheListeners.clear();
+}
+
 describe("rendering", () => {
   const MARKDOWN = [
     "# Deploy plan",
@@ -434,10 +442,7 @@ describe("rendering", () => {
   });
 
   beforeEach(() => {
-    warm.clear();
-    warming.clear();
-    voiced.clear();
-    cacheListeners.clear();
+    clearSynthStub();
     bodyRenders.count = 0;
     scrollTo.mockClear();
     StubResizeObserver.observed.length = 0;
@@ -1300,6 +1305,7 @@ describe("rendering", () => {
  */
 describe("copy as markdown", () => {
   beforeEach(() => {
+    clearSynthStub();
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
     copyToClipboard.mockClear();
   });
@@ -1436,6 +1442,7 @@ describe("play buttons", () => {
   };
 
   beforeEach(() => {
+    clearSynthStub();
     for (const name of ["offsetTop", "offsetHeight"]) {
       saved[name] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
     }

@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SkillEntry } from "../commandSource";
 import { __resetPtySubmitForTests } from "../ptySubmit";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
-import { onSubmitted, renderComposer, pool } from "./answerPane.harness";
+import { onSubmitted, renderComposer, pool, resetPool } from "./answerPane.harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { preferences, type ComposerShortcut } from "../../../preferences/declarations";
@@ -76,6 +76,7 @@ describe("slash trigger", () => {
   }
 
   beforeEach(() => {
+    resetPool();
     send.mockClear();
     onSubmitted.mockClear();
     fetchFn.mockClear();
@@ -300,6 +301,7 @@ describe("command chip", () => {
   };
 
   beforeEach(() => {
+    resetPool();
     fieldAtWrite = [];
     send.mockClear();
     onSubmitted.mockClear();
@@ -655,8 +657,7 @@ describe("shortcut chips", () => {
   }
 
   beforeEach(() => {
-    pool.connectionState = "connected";
-    pool.listeners.clear();
+    resetPool();
     send.mockClear();
     onSubmitted.mockClear();
     fetchFn.mockClear();
@@ -898,6 +899,7 @@ describe("paste", () => {
   }
 
   beforeEach(() => {
+    resetPool();
     send.mockClear();
     onSubmitted.mockClear();
     __resetPtySubmitForTests();

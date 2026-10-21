@@ -575,7 +575,7 @@ describe("arrival closes the session's notification", () => {
 
   const notification = (tag: string): FakeNotification => ({ tag, close: vi.fn() });
 
-  async function settle(): Promise<void> {
+  async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 5; i += 1) await Promise.resolve();
   }
 
@@ -594,7 +594,7 @@ describe("arrival closes the session's notification", () => {
 
     // Through a real door, not the helper: every door gets this for free.
     fireEvent.click(play("cell-a"));
-    await settle();
+    await flushMicrotasks();
 
     expect(sendDismiss).toHaveBeenCalledWith("cell-a");
     expect(getNotifications).toHaveBeenCalledWith({ tag: "cell-a" });
@@ -611,7 +611,7 @@ describe("arrival closes the session's notification", () => {
 
     dismissAttentionOnArrival("cell-busy");
     dismissAttentionOnArrival("cell-idle");
-    await settle();
+    await flushMicrotasks();
 
     expect(sendDismiss).not.toHaveBeenCalled();
     expect(getRegistration).not.toHaveBeenCalled();
@@ -628,7 +628,7 @@ describe("arrival closes the session's notification", () => {
     setActivity("cell-a", "attention");
 
     expect(() => dismissAttentionOnArrival("cell-a")).not.toThrow();
-    await settle();
+    await flushMicrotasks();
 
     expect(sendDismiss).toHaveBeenCalledWith("cell-a");
   });

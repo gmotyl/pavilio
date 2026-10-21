@@ -340,6 +340,21 @@ describe("the exemption window", () => {
 
     expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([1]);
   });
+
+  /**
+   * The other side of the window: it must still reach PAST the identifier's
+   * own line, or every wrapped call to a pending key turns red. Pins
+   * `STATEMENT_LOOKAHEAD > 1`.
+   */
+  it("still excuses a wrapped call whose key sits on the next line", () => {
+    const source = [
+      "const v = localStorage.getItem(",
+      "  `panel-example-pending-${project}`,",
+      ");",
+    ].join("\n");
+
+    expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([]);
+  });
 });
 
 /**

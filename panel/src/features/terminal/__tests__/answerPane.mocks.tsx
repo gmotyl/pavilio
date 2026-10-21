@@ -41,6 +41,15 @@ export const pool = {
 };
 
 /**
+ * Put the pool back to `state` with no subscribers. Every section's
+ * `beforeEach` calls it, so neither field leaks in from the section before.
+ */
+export function resetPool(state: ConnectionState = "connected"): void {
+  pool.connectionState = state;
+  pool.listeners.clear();
+}
+
+/**
  * The pool is somebody else's subject, and jsdom has no socket under any of
  * this. What is replaced is exactly the entry points the composer reaches —
  * its own focus repair and dismiss, and the three `ptySubmit` asks the pool

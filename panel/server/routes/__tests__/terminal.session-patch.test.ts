@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { makeApp } from "../../test-kit";
+import { configMock, makeApp } from "../../test-kit";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/unused" }),
-}));
+vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
   listSessions: vi.fn(() => []),

@@ -152,7 +152,7 @@ function cacheChanged(): void {
 }
 
 /** One unit's synthesis landing, announced. */
-function settle(text: string): void {
+function landSynthesis(text: string): void {
   warming.delete(text);
   warm.add(text);
   cacheChanged();
@@ -276,7 +276,7 @@ function declarationsOf(selector: string): Record<string, string> {
 
 beforeEach(() => {
   // Fake clock, still advancing in real time so `waitFor` polls as before;
-  // the settle helpers step it instead of sleeping.
+  // settleTerminal steps it instead of sleeping.
   vi.useFakeTimers({ shouldAdvanceTime: true });
   warm.clear();
   warming.clear();
@@ -615,7 +615,7 @@ describe("SpeechControlBar", () => {
       // publishes nothing in either state — and `cascadeWarm` keeps warming
       // through a pause, because a pause does not clear `run.active` — so the
       // cache's own notification is the only thing that can move this segment.
-      act(() => settle(all[0].text));
+      act(() => landSynthesis(all[0].text));
 
       expect(segmentAt("cell-a", 0)).toBe("ready");
     });
@@ -633,10 +633,10 @@ describe("SpeechControlBar", () => {
       expect(row()).toEqual(["warming", "warming", "warming", "cold"]);
 
       // One landing is one step of the ladder, not the whole staircase.
-      act(() => settle(all[0].text));
+      act(() => landSynthesis(all[0].text));
       expect(row()).toEqual(["ready", "warming", "warming", "cold"]);
 
-      act(() => settle(all[1].text));
+      act(() => landSynthesis(all[1].text));
       expect(row()).toEqual(["ready", "ready", "warming", "cold"]);
     });
 

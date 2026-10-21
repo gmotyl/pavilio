@@ -126,11 +126,11 @@ export type FetchHandler = (
 
 /** A 200 JSON `Response` carrying `body`. */
 export function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  // Merge rather than spread: an `init.headers` must add to the JSON
+  // Content-Type, not silently drop it.
+  const headers = new Headers({ "Content-Type": "application/json" });
+  new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  return new Response(JSON.stringify(body), { status: 200, ...init, headers });
 }
 
 function answer(route: unknown, url: string, init?: RequestInit) {

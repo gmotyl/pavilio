@@ -28,16 +28,14 @@ import {
 } from "fs";
 import { tmpdir, userInfo } from "os";
 import { basename, join } from "path";
-import { makeApp } from "../../test-kit";
+import { configMock, makeApp } from "../../test-kit";
 
 const state = vi.hoisted(() => ({
   ids: [] as string[],
   owner: undefined as { uid: number; gid: number } | undefined,
 }));
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/unused" }),
-}));
+vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
   listSessions: vi.fn(() => state.ids.map((id) => ({ id }))),

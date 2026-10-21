@@ -92,8 +92,10 @@ const MACHINE_LOCAL = [
  *
  * EMPTY, and kept rather than deleted: every row of the design's table is
  * declared as of `2026-09-21-panel-ui-polish` Task 4, so this is where the
- * next one goes. The test below it still runs, over nothing — which is the
- * honest reading of "nothing is outstanding".
+ * next one goes. "the portable set matches the design's portability table"
+ * filters it out of PORTABLE, so an empty list means the table and the
+ * declarations must match exactly — the honest reading of "nothing is
+ * outstanding".
  */
 const NOT_YET_DECLARED: readonly string[] = [];
 

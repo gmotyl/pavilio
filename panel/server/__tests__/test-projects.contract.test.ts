@@ -97,8 +97,9 @@ describe("test projects", () => {
       readFileSync(join(PANEL, file), "utf8")
         .split("\n")
         .forEach((line, i) => {
-          // `}, 30_000);` closing an it/test, or `it("…", { timeout: 30_000 }, …)`
-          const closing = line.match(/^\s*\},\s*([\d_]+)\);?\s*$/);
+          // `}, 30_000);` or `}, { timeout: 30_000 });` closing an it/test,
+          // or `it("…", { timeout: 30_000 }, …)`
+          const closing = line.match(/^\s*\},\s*(?:\{\s*timeout:\s*)?([\d_]+)(?:\s*\})?\);?\s*$/);
           const options = line.match(/^\s*(?:it|test)(?:\.\w+)*\(.*\{\s*timeout:\s*([\d_]+)/);
           const ms = Number((closing?.[1] ?? options?.[1] ?? "0").replace(/_/g, ""));
           if (ms >= 1000) offenders.push(`${file}:${i + 1}: ${line.trim()}`);

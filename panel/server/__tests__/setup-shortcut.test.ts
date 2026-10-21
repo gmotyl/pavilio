@@ -20,7 +20,6 @@ import { join, resolve } from "node:path";
  */
 
 const SETUP_SHORTCUT = resolve(__dirname, "../../../scripts/setup:shortcut");
-const REPO_ROOT = resolve(__dirname, "../../..");
 
 // Absolute, because the script runs on a PATH that could not resolve `bash`.
 const BASH =

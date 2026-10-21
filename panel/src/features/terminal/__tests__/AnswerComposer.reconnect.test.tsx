@@ -19,7 +19,7 @@ import { getDraft, __resetComposerDraftsForTests } from "../composerDrafts";
 import { __resetPtySubmitForTests, SUBMIT_RETURN_MS } from "../ptySubmit";
 import type { ConnectionState } from "../terminalInstances";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
-import { onSubmitted, pool, renderComposer } from "./answerPane.harness";
+import { onSubmitted, pool, renderComposer, resetPool } from "./answerPane.harness";
 import {
   RETRY_OFFER_MS,
   __resetAnswerRetryForTests,
@@ -200,8 +200,7 @@ describe("reconnect wait", () => {
   beforeEach(() => {
     __resetPtySubmitForTests();
     __resetComposerDraftsForTests();
-    pool.listeners.clear();
-    pool.connectionState = "disconnected";
+    resetPool("disconnected");
     onSubmitted.mockClear();
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
     installMatchMedia();
@@ -444,7 +443,7 @@ describe("retry", () => {
     trace.steps = [];
     watches.opened = 0;
     watches.closed = 0;
-    pool.connectionState = "connected";
+    resetPool();
     onSubmitted.mockClear();
     _resetForTests();
     __resetAnswerRetryForTests();
@@ -854,8 +853,7 @@ describe("pending row", () => {
   beforeEach(() => {
     __resetPtySubmitForTests();
     __resetComposerDraftsForTests();
-    pool.listeners.clear();
-    pool.connectionState = "disconnected";
+    resetPool("disconnected");
     onSubmitted.mockClear();
     vi.useFakeTimers();
     vi.stubGlobal("ResizeObserver", StubResizeObserver);

@@ -1,10 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import request from "supertest";
-import { makeApp } from "../../test-kit";
+import { configMock, makeApp } from "../../test-kit";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/h/git/prv/notes" }),
-}));
+vi.mock("../../config", () => configMock(() => "/h/git/prv/notes"));
 
 import systemRouter from "../system";
 

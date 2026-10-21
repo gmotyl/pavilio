@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { HTMLAttributes } from "react";
 import { FileText } from "lucide-react";
 
 export interface FileRowProps {
@@ -14,8 +14,6 @@ export interface FileRowProps {
   title?: string;
   /** Pre-built drag handlers — plans and sections use different drag hooks. */
   dragProps?: HTMLAttributes<HTMLButtonElement>;
-  /** Star control, filled in by the star plan. */
-  star?: ReactNode;
   onSelect: () => void;
 }
 
@@ -28,7 +26,6 @@ export default function FileRow({
   selected = false,
   title,
   dragProps,
-  star,
   onSelect,
 }: FileRowProps) {
   return (
@@ -80,7 +77,6 @@ export default function FileRow({
           </span>
         )}
       </button>
-      {star}
     </div>
   );
 }

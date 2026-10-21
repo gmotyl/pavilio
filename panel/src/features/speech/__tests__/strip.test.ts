@@ -146,7 +146,7 @@ describe("stripToSpeakableText", () => {
     // The control: no list marker, so the output is byte for byte what it was
     // before list items became paragraphs — inline reductions included.
     [
-      "prose without lists strips exactly as before",
+      "prose without lists keeps its paragraphs, drops inline markup and collapses code to a sentinel",
       lines("First paragraph with `prepare` inside.", "", "Second paragraph, see [the plan](https://pavil.io/plan).", "Continued on a second line.", "", "```ts", "const x = 1;", "```", "", "Closing line."),
       lines("First paragraph with prepare inside.", "", "Second paragraph, see the plan.", "Continued on a second line.", "", "⟦code⟧", "", "Closing line."),
     ],

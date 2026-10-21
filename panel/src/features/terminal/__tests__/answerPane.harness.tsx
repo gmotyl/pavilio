@@ -32,7 +32,7 @@ import {
 import { AnswerComposer, type AnswerComposerProps } from "../AnswerComposer";
 import { AnswerPane, type AnswerPaneProps } from "../AnswerPane";
 
-export { mermaidMock, pool, synthMock, terminalInstancesMock } from "./answerPane.mocks";
+export { mermaidMock, pool, resetPool, synthMock, terminalInstancesMock } from "./answerPane.mocks";
 
 // ---------------------------------------------------------------------------
 // Speech hosts

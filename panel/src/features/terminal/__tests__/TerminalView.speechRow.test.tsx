@@ -170,7 +170,7 @@ const grid = (speech: GridSpeech) => (
 );
 
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
-async function settle(): Promise<void> {
+async function settleMount(): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(400);
   });
@@ -201,7 +201,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   // Fake clock, still advancing in real time so `waitFor` polls as before;
-  // the settle helpers step it instead of sleeping.
+  // the settleMount helper steps it instead of sleeping.
   vi.useFakeTimers({ shouldAdvanceTime: true });
   forgetAnswerPane("cell-a");
   term.fit.mockClear();
@@ -230,7 +230,7 @@ describe("the speech row", () => {
   // -------------------------------------------------------------------------
   it("hands the row the cell's own PTY write", async () => {
     render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
-    await settle();
+    await settleMount();
 
     // A silent cell shows the launchers; the first is the `claude` default.
     const pill = screen.getByTestId("speech-bar-launch-cell-a-0");
@@ -251,14 +251,14 @@ describe("the speech row", () => {
     // there anyway. That is what "reserved from mount" means: the height is
     // spent before the cell has anything to say, so an arrival cannot claim it.
     render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
-    await settle();
+    await settleMount();
 
     expect(bar()).toBeInTheDocument();
   });
 
   it("places the row before the terminal container, not over it", async () => {
     render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
-    await settle();
+    await settleMount();
 
     const container = StubResizeObserver.observed[0];
     expect(container).toBeDefined();
@@ -290,7 +290,7 @@ describe("the speech row", () => {
     // nothing is the arrival ITSELF.
     setStoredAutoOpenAnswer(false);
     const view = render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
-    await settle();
+    await settleMount();
 
     const container = StubResizeObserver.observed[0];
     const shapeBefore = columnShape(container);
@@ -299,7 +299,7 @@ describe("the speech row", () => {
 
     // The cell's first answer lands.
     view.rerender(<TerminalView sessionId="cell-a" speech={spokenSpeech()} />);
-    await settle();
+    await settleMount();
 
     // The transport is live — the arrival was seen.
     expect(screen.getByTestId("speech-bar-playpause-cell-a")).toHaveAttribute(
@@ -330,7 +330,7 @@ describe("the speech row", () => {
     // what prevents it — seed it with anything else and the counts below go to
     // four. So the number is the point, not an incidental total.
     const shown = render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
-    await settle();
+    await settleMount();
 
     expect(bar()).toBeInTheDocument();
     expect(term.fit).toHaveBeenCalledTimes(3);
@@ -345,7 +345,7 @@ describe("the speech row", () => {
     render(
       <TerminalView sessionId="cell-b" speech={speechIn("empty")} speechBarVisible={false} />,
     );
-    await settle();
+    await settleMount();
 
     expect(screen.queryByTestId("speech-bar-cell-b")).not.toBeInTheDocument();
     expect(term.fit).toHaveBeenCalledTimes(3);
@@ -355,7 +355,7 @@ describe("the speech row", () => {
   it("refits once when the row is hidden", async () => {
     const speech = speechIn("empty");
     const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
-    await settle();
+    await settleMount();
 
     term.fit.mockClear();
     term.sent.length = 0;
@@ -364,7 +364,7 @@ describe("the speech row", () => {
     // genuinely grows, so a fit and a resize frame are the correct response —
     // exactly once, not per render.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />);
-    await settle();
+    await settleMount();
 
     expect(screen.queryByTestId("speech-bar-cell-a")).not.toBeInTheDocument();
     expect(term.fit).toHaveBeenCalledTimes(1);
@@ -390,11 +390,11 @@ describe("the speech row", () => {
   it("an arriving answer opens the pane when the stored preference is on", async () => {
     setStoredAutoOpenAnswer(true);
     const view = render(cell(speechIn("empty")));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
 
     view.rerender(cell(spokenSpeech()));
-    await settle();
+    await settleMount();
     expect(answerPane()).not.toBeNull();
   });
 
@@ -402,28 +402,28 @@ describe("the speech row", () => {
     // The cell and its pane entry exist while the preference is still on…
     setStoredAutoOpenAnswer(true);
     const view = render(cell(speechIn("empty")));
-    await settle();
+    await settleMount();
 
     // …then Settings clears it, and only afterwards does the answer land.
     setStoredAutoOpenAnswer(false);
     view.rerender(cell(spokenSpeech()));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
   });
 
   it("a hidden speech bar still outranks the preference", async () => {
     setStoredAutoOpenAnswer(true);
     const view = render(cell(speechIn("empty"), false));
-    await settle();
+    await settleMount();
 
     const spoken = spokenSpeech();
     view.rerender(cell(spoken, false));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
 
     // Nor is the arrival held back for the bar's return.
     view.rerender(cell(spoken));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
   });
 
@@ -432,11 +432,11 @@ describe("the speech row", () => {
     const spoken = spokenSpeech();
     // The queue already holds the utterance on the very first render.
     const view = render(cell(spoken));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
 
     view.rerender(cell(spoken));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
   });
 
@@ -445,13 +445,13 @@ describe("the speech row", () => {
     // view: `speechBarVisible` used to read the session's speech state, which
     // made the row's EXISTENCE conditional on having spoken. It no longer does.
     const silent = render(grid(speechIn("empty")));
-    await settle();
+    await settleMount();
     expect(bar()).toBeInTheDocument();
     silent.unmount();
 
     forgetAnswerPane("cell-a");
     render(grid(spokenSpeech()));
-    await settle();
+    await settleMount();
     expect(bar()).toBeInTheDocument();
   });
 });

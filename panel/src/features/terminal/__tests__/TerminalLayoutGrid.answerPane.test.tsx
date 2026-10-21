@@ -121,7 +121,7 @@ const grid = (speech: GridSpeech, maximized: boolean) => (
 );
 
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
-async function settle(): Promise<void> {
+async function settleMount(): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(400);
   });
@@ -132,7 +132,7 @@ const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a"
 
 beforeEach(() => {
   // Fake clock, still advancing in real time so `waitFor` polls as before;
-  // the settle helpers step it instead of sleeping.
+  // the settleMount helper steps it instead of sleeping.
   vi.useFakeTimers({ shouldAdvanceTime: true });
   forgetAnswerPane("cell-a");
   forgetAnswerPane("cell-b");
@@ -149,7 +149,7 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
     setStoredAutoOpenAnswer(false);
     const speech = answeredSpeech();
     const view = render(grid(speech, false));
-    await settle();
+    await settleMount();
     expect(screen.getByTestId("terminal-grid")).toBeInTheDocument();
 
     fireEvent.click(eye());
@@ -157,14 +157,14 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
 
     // Maximize: the grid body is replaced by the fullscreen stack.
     view.rerender(grid(speech, true));
-    await settle();
+    await settleMount();
     expect(screen.queryByTestId("terminal-grid")).toBeNull();
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
 
     // And back.
     view.rerender(grid(speech, false));
-    await settle();
+    await settleMount();
     expect(screen.getByTestId("terminal-grid")).toBeInTheDocument();
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
@@ -173,13 +173,13 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
   it("a pane closed before MAX stays closed after it", async () => {
     const speech = answeredSpeech();
     const view = render(grid(speech, false));
-    await settle();
+    await settleMount();
     fireEvent.click(eye());
     fireEvent.click(eye());
     expect(pane()).toBeNull();
 
     view.rerender(grid(speech, true));
-    await settle();
+    await settleMount();
     expect(pane()).toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "false");
   });

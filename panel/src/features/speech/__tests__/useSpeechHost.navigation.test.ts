@@ -510,21 +510,31 @@ describe("useSpeechHost — the wave step on the surfaces the row used to guard"
       // wave for the rest of the session.
       press: "takes no hold on a backward press the list refuses",
       answers: [FIRST],
+      preHeld: false,
       held: false,
       cursor: 0,
     },
     {
       // The other half: moving the hold below the refusal must not lose it on
-      // the presses that do land. The hold is a claim on the pane's body, not
-      // on playback, so silencing the press must not touch it either — the
-      // guard against "fixed" meaning "the answer flashes up and the wave
-      // takes it back".
+      // the presses that do land.
       press: "still takes the hold on a backward press that moves",
       answers: [FIRST, SECOND, THIRD],
+      preHeld: false,
       held: true,
       cursor: 1,
     },
-  ])("$press", async ({ answers, held, cursor }) => {
+    {
+      // The hold is taken by the BAR, right before it calls `onPrevious` — it
+      // is a claim on the pane's body, not on playback, so silencing the press
+      // must not touch it. This is the guard against "fixed" meaning "the
+      // answer flashes up and the wave takes it back".
+      press: "keeps the bar's hold on a backward press that moves",
+      answers: [FIRST, SECOND, THIRD],
+      preHeld: true,
+      held: true,
+      cursor: 1,
+    },
+  ])("$press", async ({ answers, preHeld, held, cursor }) => {
     const { result } = renderHook(() =>
       useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
     );
@@ -533,6 +543,7 @@ describe("useSpeechHost — the wave step on the surfaces the row used to guard"
     }
     played.length = 0;
 
+    if (preHeld) holdAnswer("cell-a");
     await settle(() => result.current.onPrevious("cell-a"));
 
     expect(isAnswerHeld("cell-a")).toBe(held);
