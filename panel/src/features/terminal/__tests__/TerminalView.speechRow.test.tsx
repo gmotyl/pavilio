@@ -26,7 +26,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepare } from "../../speech/prepare";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import {
@@ -195,7 +195,7 @@ const grid = (speech: GridSpeech) => (
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
 async function settle(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -245,12 +245,19 @@ class StubResizeObserver {
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   forgetAnswerPane("cell-a");
   term.fit.mockClear();
   term.sent.length = 0;
   term.observed.length = 0;
   term.writes.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("the speech row", () => {

@@ -634,7 +634,7 @@ describe("TerminalLayoutGrid — project colour", () => {
   });
 });
 
-describe("TerminalLayoutGrid — what the cell header no longer carries", () => {
+describe("TerminalLayoutGrid — the cell header's controls", () => {
   beforeEach(() => installProjectColors());
 
   // jsdom's DragEvent has no real DataTransfer; the header's own onDragStart
@@ -656,32 +656,14 @@ describe("TerminalLayoutGrid — what the cell header no longer carries", () => 
    */
   const settleColors = () => act(async () => {});
 
-  it("cell header renders no maximize control", async () => {
-    const session = makeSession({ id: "s-max", project: "alpha" });
-    const restored = renderGrid({ sessions: [session], focusedId: session.id });
-    await settleColors();
-
-    expect(screen.queryByTestId("terminal-cell-maximize-s-max")).toBeNull();
-    expect(screen.queryByTitle("Maximize")).toBeNull();
-    restored.unmount();
-
-    // The same control was the restore control while maximized — also gone.
-    renderGrid({ sessions: [session], focusedId: session.id, maximized: true });
-    await settleColors();
-    expect(screen.queryByTestId("terminal-cell-maximize-s-max")).toBeNull();
-    expect(screen.queryByTitle("Restore")).toBeNull();
-  });
-
-  it("cell header renders no standing colour control", async () => {
+  it("cell header group holds speak, speech controls, eye and kill, in order", async () => {
     const session = makeSession({ id: "s-nc", project: "alpha" });
     renderGrid({ sessions: [session], focusedId: session.id });
     await settleColors();
 
-    expect(screen.queryByTestId("terminal-cell-color-s-nc")).toBeNull();
-    expect(screen.queryByLabelText("Set colour for alpha")).toBeNull();
-
-    // What the group holds instead, in order: speak · speech-controls · eye ·
-    // kill. (The disconnected badge leads it but renders nothing while healthy.)
+    // The whole group, in order: speak · speech-controls · eye · kill. An
+    // exact list, so a control added to it (a colour swatch, a maximize) fails
+    // here. (The disconnected badge leads it but renders nothing while healthy.)
     const eye = screen.getByTestId("terminal-cell-eye-s-nc");
     const group = Array.from(eye.parentElement!.children) as HTMLElement[];
     expect(group.map((el) => el.dataset.testid)).toEqual([

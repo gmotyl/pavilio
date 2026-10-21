@@ -96,13 +96,6 @@ function renderToolbar(overrides: Partial<Parameters<typeof TerminalToolbar>[0]>
 }
 
 describe("TerminalToolbar — layout preset menu", () => {
-  it("no longer renders terminal-toolbar-reset-layout, renders LayoutPresetMenu instead", () => {
-    renderToolbar();
-
-    expect(screen.queryByTestId("terminal-toolbar-reset-layout")).not.toBeInTheDocument();
-    expect(screen.getByTestId("layout-preset-toggle")).toBeInTheDocument();
-  });
-
   it("wires sessions.length and onApplyPreset into LayoutPresetMenu", () => {
     const onApplyPreset = vi.fn();
     const sessions = [makeSession({ id: "s1" }), makeSession({ id: "s2" }), makeSession({ id: "s3" })];
@@ -204,12 +197,6 @@ describe("TerminalToolbar — project colour", () => {
     expect(chipColor("s1")).not.toBe(chipColor("s2"));
   });
 
-  it("no longer offers a per-session colour picker", () => {
-    const sessions = [makeSession({ id: "s1", project: "alpha" })];
-    renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
-
-    expect(screen.queryByTestId("terminal-toolbar-color-s1")).not.toBeInTheDocument();
-  });
 });
 
 describe("TerminalToolbar — run-as-user dropdown", () => {

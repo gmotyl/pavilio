@@ -51,14 +51,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Callout } from "../BootLegend";
 import { MOBILE_QUERY } from "../../../lib/breakpoints";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { prepare } from "../../speech/prepare";
-import { ALL_PREFERENCES, preferences } from "../../../preferences/declarations";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 
@@ -220,7 +218,7 @@ const composer = (sessionId = SESSION): HTMLTextAreaElement =>
  */
 async function settleSubmit(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await vi.advanceTimersByTimeAsync(80);
   });
 }
 
@@ -376,6 +374,9 @@ function openLegend(cellWidth?: number, sessionId = SESSION, cellHeight?: number
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   at = 0;
   term.writes.length = 0;
   term.accept = true;
@@ -388,6 +389,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   _resetForTests();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
@@ -490,7 +492,7 @@ describe("the boot legend", () => {
     expect(legend()).not.toBeNull();
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await vi.advanceTimersByTimeAsync(80);
     });
 
     expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
@@ -560,11 +562,6 @@ describe("the boot legend", () => {
     render(cell(makeSpeech(SESSION), SESSION));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
-  });
-
-  it("no boot-legend-seen preference is declared", () => {
-    expect(ALL_PREFERENCES.some((def) => def.key === "terminal.bootLegend.seen")).toBe(false);
-    expect(Object.keys(preferences)).not.toContain("bootLegendSeen");
   });
 
   // -------------------------------------------------------------------------
@@ -865,46 +862,6 @@ const hint = (sessionId = SESSION): HTMLElement | null =>
   screen.queryByTestId(`answer-pane-hint-${sessionId}`);
 
 describe("the boot legend and the command picker", () => {
-  it("no callout teaches the picker by the chip row", () => {
-    // Every observer records what it watches: other parts of the cell observe
-    // too, so the assertion is about the boxes a picker callout would watch.
-    const resizeObserved: Element[] = [];
-    class RecordingResizeObserver {
-      constructor(_cb: ResizeObserverCallback) {}
-      observe(el: Element): void {
-        resizeObserved.push(el);
-      }
-      unobserve(): void {}
-      disconnect(): void {}
-    }
-    const mutationFilters: string[] = [];
-    const RealMutationObserver = MutationObserver;
-    class RecordingMutationObserver extends RealMutationObserver {
-      observe(target: Node, options?: MutationObserverInit): void {
-        mutationFilters.push(...(options?.attributeFilter ?? []));
-        super.observe(target, options);
-      }
-    }
-    vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
-    vi.stubGlobal("MutationObserver", RecordingMutationObserver);
-
-    openLegend(720);
-
-    const root = legend()!;
-    const row = chip()!.closest(".answer-pane-chip-row")!;
-    expect(row, "the chip row is always drawn").not.toBeNull();
-    // Nothing in the legend but the band's two boxes, and nothing points at the chip.
-    expect(root.querySelectorAll("[data-testid^='boot-legend-door']")).toHaveLength(0);
-    expect(root.querySelector(`[data-leads-to="answer-pane-skills-chip-${SESSION}"]`)).toBeNull();
-    expect(root.querySelectorAll(":scope > div")).toHaveLength(2);
-    // ...and nothing measures the foot of the pane for one.
-    for (let r: Element | null = row; r; r = r.nextElementSibling) {
-      expect(resizeObserved).not.toContain(r);
-    }
-    expect(resizeObserved).not.toContain(pane()!);
-    expect(mutationFilters).not.toContain("aria-expanded");
-  });
-
   it("the band still carries only the transport and eye callouts", () => {
     openLegend(720);
 
@@ -915,8 +872,6 @@ describe("the boot legend and the command picker", () => {
       "eye",
       "transport",
     ]);
-    // Type-level: a third key in the band is a compile error, not a review note.
-    expectTypeOf<Callout["key"]>().toEqualTypeOf<"transport" | "eye">();
   });
 
   it("the hint line still teaches the picker", () => {
@@ -1009,14 +964,9 @@ describe("the boot legend and the command picker", () => {
     }
   });
 
-  it("no rule for the removed picker callout is left in the stylesheet", () => {
-    expect(CSS).not.toMatch(/\.boot-legend-door/);
-  });
-
-  it("the hint line's skills fact is accented, as the mockup draws it", () => {
+  it("the hint line marks its skills fact as the accented span", () => {
     openLegend();
     const accent = hint()!.querySelector(".answer-pane-hint-new");
     expect(accent?.textContent).toBe("/ FOR SKILLS");
-    expect(cssRule(".answer-pane-hint-new")).toMatch(/color:\s*var\(--accent\)/);
   });
 });

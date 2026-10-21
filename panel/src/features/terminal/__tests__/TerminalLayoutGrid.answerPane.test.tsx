@@ -14,7 +14,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteranceQueue";
@@ -165,7 +165,7 @@ const grid = (speech: GridSpeech, maximized: boolean) => (
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
 async function settle(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -173,9 +173,16 @@ const eye = (): HTMLElement => screen.getByTestId("speech-bar-eye-cell-a");
 const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   forgetAnswerPane("cell-a");
   forgetAnswerPane("cell-b");
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("TerminalLayoutGrid — the answer pane across a layout change", () => {

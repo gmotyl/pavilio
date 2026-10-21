@@ -208,7 +208,7 @@ const launcher = (): HTMLElement => screen.getByRole("button", { name: "claude" 
  */
 async function settleSubmit(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await vi.advanceTimersByTimeAsync(80);
   });
 }
 
@@ -222,6 +222,9 @@ function activity(state: "idle" | "busy" | "attention"): void {
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   at = 0;
   term.writes.length = 0;
   term.accept = true;
@@ -235,6 +238,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   _resetForTests();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();

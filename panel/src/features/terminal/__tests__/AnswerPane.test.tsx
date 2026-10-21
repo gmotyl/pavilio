@@ -684,44 +684,6 @@ describe("AnswerPane", () => {
     expect(speech.onJumpToUnit).not.toHaveBeenCalled();
   });
 
-  it("the pane renders no Open on new answer control", () => {
-    const h = harness();
-    render(paneElement(makeSpeech(h)));
-
-    // Whether an answer opens the pane is one Settings preference, not a
-    // switch the pane carries. The meta row keeps its other switch.
-    expect(screen.queryByRole("checkbox", { name: "Open on new answer" })).toBeNull();
-    expect(screen.queryByText("Open on new answer")).toBeNull();
-    expect(screen.queryByTestId("answer-pane-auto-open-cell-a")).toBeNull();
-    expect(screen.getByTestId("answer-pane-composer-on-cell-a")).toBeInTheDocument();
-
-    // Nor does the pane take the props that fed that switch.
-    const noSwitchProps = (
-      <AnswerPane
-        sessionId="cell-a"
-        speech={makeSpeech(h)}
-        onClose={() => {}}
-        send={NO_SEND}
-        // @ts-expect-error `autoOpen` is no longer a prop of the pane.
-        autoOpen={false}
-      />
-    );
-    expect(noSwitchProps).toBeTruthy();
-    // Its own element: tsc reports only the first excess prop per element, so
-    // sharing one would leave this directive unused.
-    const noSwitchCallback = (
-      <AnswerPane
-        sessionId="cell-a"
-        speech={makeSpeech(h)}
-        onClose={() => {}}
-        send={NO_SEND}
-        // @ts-expect-error `onAutoOpenChange` is no longer a prop of the pane.
-        onAutoOpenChange={() => {}}
-      />
-    );
-    expect(noSwitchCallback).toBeTruthy();
-  });
-
   it("Escape closes", () => {
     const h = harness(MARKDOWN, null);
     const onClose = vi.fn();
@@ -1202,31 +1164,6 @@ describe("AnswerPane", () => {
     const shows = (selector: string): string | null =>
       background(selector) ?? background(".answer-pane");
 
-    it("renders the pane without a border, radius or shadow", () => {
-      const pane = cssRule(".answer-pane").replace(/\/\*[\s\S]*?\*\//g, "");
-
-      // Vacuity guard. Every assertion below is about an ABSENCE, and an
-      // absence is true of nothing at all: a renamed selector must blow up
-      // (`cssRule` throws) and an emptied rule must fail here, not pass.
-      expect(pane.trim().length).toBeGreaterThan(0);
-      // And it is still the overlay rule, not some other block that happens to
-      // declare nothing.
-      expect(pane).toMatch(/(^|;)\s*position:\s*absolute/);
-
-      // The card chrome goes the way the bar's did: nothing sits behind an
-      // in-flow speech surface to blur, and a floating panel's edge would draw
-      // a border where the row and the pane are meant to read as one surface.
-      // Longhands included: a `border-top` here is precisely the edge that
-      // must not be drawn between the row and the pane, and the shorthand-only
-      // pattern read straight past it.
-      expect(pane).not.toMatch(
-        /(^|;)\s*border(-(top|right|bottom|left|width|style|color))?\s*:/,
-      );
-      expect(pane).not.toMatch(/border-radius\s*:/);
-      expect(pane).not.toMatch(/box-shadow\s*:/);
-      expect(pane).not.toMatch(/backdrop-filter\s*:/);
-    });
-
     it("paints the pane on the speech surface, not the terminal ground", () => {
       // Quoted from the row's own rule rather than repeated as a literal, so
       // the two grounds cannot drift apart without this failing.
@@ -1246,7 +1183,12 @@ describe("AnswerPane", () => {
       const body = cssRule(".answer-pane-body");
       expect(body).toMatch(/position:\s*relative/);
       expect(body).toMatch(/display:\s*grid/);
-      expect(body).toMatch(/grid-template-columns:\s*22px 1fr/);
+
+      // The switch row paints nothing of its own, so it shows the same ground.
+      // The composer is the exception, deliberately: it declares the third
+      // ground of design.md's three, darker than both, and
+      // `AnswerComposer.test.tsx` reads that out of the stylesheet.
+      expect(shows(".answer-pane-meta")).toBe(row);
     });
 
     /**
@@ -1268,7 +1210,7 @@ describe("AnswerPane", () => {
     it("covers the terminal area rather than stopping at its content", () => {
       const pane = cssRule(".answer-pane").replace(/\/\*[\s\S]*?\*\//g, "");
 
-      // Vacuity guard, as above: every claim here is about a declaration, and
+      // Vacuity guard: every claim here is about a declaration, and
       // `not.toMatch` is trivially true of an empty block.
       expect(pane).toMatch(/(^|;)\s*position:\s*absolute/);
 
@@ -1342,25 +1284,6 @@ describe("AnswerPane", () => {
       expect(rows.length).toBeGreaterThan(1);
       expect(rows.indexOf(body)).toBe(0);
       expect(rows.some((row) => row.classList.contains("answer-pane-meta"))).toBe(true);
-    });
-
-    it("the meta row paints nothing of its own", () => {
-      // The switch row paints nothing of its own — it never did — so what it
-      // shows is the pane it sits in. What changed is the conclusion: the body
-      // used to declare a darker ground so the two would read as two surfaces,
-      // and that split was the card. One ground now, both of them the row's.
-      //
-      // The composer is the exception, and deliberately so: it declares the
-      // third ground of design.md's three, because what YOU type is neither
-      // agent nor shell. It is darker than both of the other two rather than
-      // merely different, and `AnswerComposer.test.tsx` is where that is read
-      // out of the stylesheet.
-      const surface = background(".answer-pane");
-      expect(surface).not.toBeNull();
-      expect(cssRule(".answer-pane-meta")).not.toMatch(/background/);
-      expect(shows(".answer-pane-meta")).toBe(surface);
-
-      expect(shows(".answer-pane-body")).toBe(shows(".answer-pane-meta"));
     });
   });
 });

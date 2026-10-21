@@ -9,7 +9,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import { prepare } from "../../speech/prepare";
 import { preferences } from "../../../preferences/declarations";
@@ -202,7 +202,7 @@ const cell = (speech: GridSpeech | undefined, speechBarVisible = true) => (
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
 async function settleTerminal(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -219,6 +219,9 @@ type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   term.fit.mockClear();
   term.focus.mockClear();
   term.sent.length = 0;
@@ -228,6 +231,10 @@ beforeEach(() => {
   // The pane's state outlives the view on purpose (see `answerPaneState.ts`),
   // so every test starts the cell from a fresh entry.
   forgetAnswerPane("cell-a");
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("TerminalView and the answer pane", () => {

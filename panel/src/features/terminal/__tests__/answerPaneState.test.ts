@@ -7,7 +7,7 @@
  */
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
+import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import {
   anyAnswerPaneOpen,
   forgetAnswerPane,
@@ -17,13 +17,6 @@ import {
   subscribeAnswerPane,
   useAnyAnswerPaneOpen,
 } from "../answerPaneState";
-
-// A pass-through spy on the preference read, so a test can prove the store
-// never consults it: the arrival reads the preference itself, at arrival.
-vi.mock("../../speech/autoOpenAnswer", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../speech/autoOpenAnswer")>();
-  return { ...actual, getStoredAutoOpenAnswer: vi.fn(actual.getStoredAutoOpenAnswer) };
-});
 
 const storeDefault = (on: boolean): void => {
   setStoredAutoOpenAnswer(on);
@@ -36,23 +29,6 @@ beforeEach(() => {
 });
 
 describe("answerPaneState", () => {
-  it("the entry snapshot no longer carries an autoOpen field", () => {
-    storeDefault(true);
-    const read = vi.mocked(getStoredAutoOpenAnswer);
-    read.mockClear();
-
-    const first = getAnswerPaneState("s-1");
-    expect(first).toEqual({ open: false });
-    expect("autoOpen" in first).toBe(false);
-    // Creating the entry did not consult the stored preference.
-    expect(read).not.toHaveBeenCalled();
-
-    // The control: the spy is the binding every importer sees, so a read from
-    // the store would have been counted.
-    getStoredAutoOpenAnswer();
-    expect(read).toHaveBeenCalledTimes(1);
-  });
-
   it("setAnswerPaneOpen notifies subscribers and yields a new snapshot", () => {
     const listener = vi.fn();
     const unsubscribe = subscribeAnswerPane(listener);

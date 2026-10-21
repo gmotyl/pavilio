@@ -265,7 +265,7 @@ function boxFor(element: HTMLElement, left: number, width: number): void {
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
 async function settleTerminal(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -298,6 +298,9 @@ function declarationsOf(selector: string): Record<string, string> {
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   warm.clear();
   warming.clear();
   voiced.clear();
@@ -306,6 +309,10 @@ beforeEach(() => {
   term.sent.length = 0;
   term.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("SpeechControlBar", () => {

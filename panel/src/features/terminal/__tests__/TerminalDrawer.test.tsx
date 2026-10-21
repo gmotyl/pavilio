@@ -22,8 +22,10 @@ const sidePref = () => readPreference(preferences.terminalDrawerSide);
 
 vi.mock("../ProjectTerminalsSurface", () => ({
   __esModule: true,
-  default: ({ projectName }: { projectName: string }) => (
-    <div data-testid="surface">{projectName}</div>
+  default: ({ projectName, fill }: { projectName: string; fill?: boolean }) => (
+    <div data-testid="surface" data-fill={String(Boolean(fill))}>
+      {projectName}
+    </div>
   ),
 }));
 
@@ -101,6 +103,9 @@ describe("TerminalDrawer", () => {
     expect(drawer).toBeInTheDocument();
     expect(drawer).toHaveStyle({ width: "520px" });
     expect(screen.getByTestId("surface")).toHaveTextContent("vector");
+    // The drawer sizes the surface itself, so it asks for fill mode: no
+    // viewport-height (100dvh / --vv-height) cap inside a docked panel.
+    expect(screen.getByTestId("surface")).toHaveAttribute("data-fill", "true");
   });
 
   it("closes when the close button is clicked", () => {

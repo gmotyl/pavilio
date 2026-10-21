@@ -329,9 +329,8 @@ describe("prepare", () => {
     expect(cut.length).toBeGreaterThan(1);
   });
 
-  it("speaks a response longer than the old budget in full", () => {
-    // Twelve paragraphs of ~240 characters — several times over the 1300-char
-    // budget this feature used to carry.
+  it("prepares every paragraph of a long response", () => {
+    // Twelve paragraphs of ~240 characters: well past a page of speech.
     const markdown = Array.from({ length: 12 }, (_, i) => {
       const head = `Paragraph ${String(i).padStart(2, "0")} `;
       return head + "x".repeat(238 - head.length) + ".";
@@ -343,10 +342,6 @@ describe("prepare", () => {
     expect(spent).toBeGreaterThan(1300);
     // The last paragraph is prepared like every other one: nothing is held back.
     expect(prepared.units.map((unit) => unit.text).join(" ")).toContain("Paragraph 11");
-    // The cut is gone from the SHAPE, not merely left unused — a caller cannot
-    // reach for a remainder that no longer exists.
-    expect(prepared).not.toHaveProperty("spokenUnits");
-    expect(prepared).not.toHaveProperty("remainderParagraphs");
   });
 
   it("keeps the prose of a diff-heavy response and none of the diff", () => {

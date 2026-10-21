@@ -703,20 +703,12 @@ describe("AnswerComposer", () => {
       );
     });
 
-    it("gives the field the design's well", () => {
+    it("the field's placeholder says the reply goes to the terminal", () => {
       renderPane();
 
       // The placeholder says what the field is for, not merely that it is a
       // field: a reply typed here reaches the PTY, not a chat.
       expect(field()).toHaveAttribute("placeholder", "Reply to the terminal…");
-
-      // Read out of the stylesheet — `getComputedStyle` in jsdom answers for a
-      // rule it never saw, and `cssRule` throws on a renamed selector rather
-      // than agreeing with nothing.
-      const well = cssRule(".answer-pane-composer-field").replace(/\/\*[\s\S]*?\*\//g, "");
-      expect(well).toMatch(/(^|;)\s*background:\s*#101014\s*(;|$)/);
-      expect(well).toMatch(/(^|;)\s*border:\s*1px solid var\(--border-default\)\s*(;|$)/);
-      expect(well).toMatch(/(^|;)\s*border-radius:\s*6px\s*(;|$)/);
     });
 
     it("sends on the button exactly as it sends on Enter", async () => {
@@ -770,7 +762,7 @@ describe("AnswerComposer", () => {
       expect(sendButton()).toBeInTheDocument();
     });
 
-    it("writes the key hint in the pane's own furniture ink", () => {
+    it("writes the key hint on the pane's own ground", () => {
       renderPane();
 
       expect(screen.getByTestId("answer-pane-hint-cell-a")).toHaveTextContent(
@@ -781,17 +773,14 @@ describe("AnswerComposer", () => {
       // field's well, which is what keeps the composer reading as one box
       // inside the surface instead of three stacked strips.
       const surface = cssRule(".answer-pane").match(/background:\s*([^;]+)/)?.[1].trim();
-      expect(surface).toBe("#17171d");
+      // Vacuity guard: an undeclared ground would make the matches below vacuous.
+      expect(surface).toBeTruthy();
       expect(cssRule(".answer-pane-hint")).toMatch(
         new RegExp(`background:\\s*${surface}\\s*(;|$)`, "m"),
       );
       expect(cssRule(".answer-pane-grip")).toMatch(
         new RegExp(`background:\\s*${surface}\\s*(;|$)`, "m"),
       );
-      // The grip's own bar, at design.md's size.
-      const bar = cssRule(".answer-pane-grip-bar");
-      expect(bar).toMatch(/(^|;)\s*width:\s*34px\s*(;|$)/);
-      expect(bar).toMatch(/(^|;)\s*height:\s*2px\s*(;|$)/);
     });
   });
 

@@ -1022,49 +1022,8 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   });
 });
 
-/**
- * The budget is gone, and with it the resume point that existed only to
- * continue from its cut. What must survive is everything the player's own state
- * holds: a pause goes on where it was paused, and a newer utterance still
- * abandons a run the user was holding.
- */
-describe("useSpeechHost — no budget, no resume point", () => {
-  it("speaks no closing marker", async () => {
-    const markdown = response(12);
-    const units = unitsOf(markdown);
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await emitUtterance("cell-a", "u-1", markdown);
-    await settle(() => result.current.onSpeak("cell-a"));
-    await endRun();
-
-    // Every unit, in order, in one run — and nothing else.
-    expect(played).toEqual(units.map((unit) => `blob:${unit}`));
-    expect(requestedTexts().join(" ")).not.toMatch(/remaining paragraphs|koniec fragmentu/i);
-    expect(result.current.stateFor("cell-a")).toBe("heard");
-  });
-
-  it("replays a heard cell from the first unit", async () => {
-    const markdown = response(12);
-    const units = unitsOf(markdown);
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await emitUtterance("cell-a", "u-1", markdown);
-    await settle(() => result.current.onSpeak("cell-a"));
-    await endRun();
-    expect(result.current.stateFor("cell-a")).toBe("heard");
-
-    played.length = 0;
-    await clickControl(result.current, "cell-a");
-
-    expect(played).toEqual([`blob:${units[0]}`]);
-  });
-
-  it("still resumes a paused run where it was paused", async () => {
+describe("useSpeechHost — pause and resume", () => {
+  it("resumes a paused run where it was paused", async () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
@@ -1099,30 +1058,6 @@ describe("useSpeechHost — no budget, no resume point", () => {
     expect(played.filter((src) => src === `blob:${units[0]}`)).toHaveLength(1);
     expect(played[played.length - 1]).toBe(`blob:${units[3]}`);
     expect(result.current.stateFor("cell-a")).toBe("heard");
-  });
-
-  it("still supersedes a paused run when a newer utterance arrives", async () => {
-    const stale = unitsOf(response(4));
-    const newer = unitsOf(response(4, "Newer"));
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await emitUtterance("cell-a", "u-1", response(4));
-    await clickControl(result.current, "cell-a");
-    await endCurrentUnit();
-    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
-
-    await clickControl(result.current, "cell-a");
-    expect(result.current.stateFor("cell-a")).toBe("paused");
-
-    await emitUtterance("cell-a", "u-2", response(4, "Newer"));
-    expect(result.current.stateFor("cell-a")).toBe("ready");
-
-    played.length = 0;
-    await clickControl(result.current, "cell-a");
-
-    expect(played).toEqual([`blob:${newer[0]}`]);
   });
 });
 

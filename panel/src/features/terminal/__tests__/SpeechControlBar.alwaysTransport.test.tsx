@@ -258,6 +258,9 @@ const rowOf = (): HTMLElement =>
   screen.getByTestId(`speech-bar-${SESSION}`).querySelector(".speech-bar-row") as HTMLElement;
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   term.writes.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   __resetAnswerWaitingForTests();
@@ -266,6 +269,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   forgetAnswerPane(SESSION);
@@ -353,7 +357,7 @@ describe("the bar always carries the eye and the transport", () => {
     // ...and they still run their command.
     fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await vi.advanceTimersByTimeAsync(80);
     });
     expect(send).toHaveBeenCalled();
     expect(send.mock.calls.map(([data]) => data)).toEqual(["claude", "\r"]);
@@ -406,13 +410,13 @@ describe("the bar always carries the eye and the transport", () => {
       </MemoryRouter>,
     );
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await vi.advanceTimersByTimeAsync(400);
     });
 
     // A launcher press is what opens the pane on a cell that has never spoken.
     fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await vi.advanceTimersByTimeAsync(80);
     });
     expect(screen.queryByTestId(`answer-pane-${SESSION}`)).not.toBeNull();
 
