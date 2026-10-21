@@ -7,6 +7,7 @@ import {
   type ComposerShortcut,
 } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { useSyncedDraft } from "./useSyncedDraft";
 
 /**
  * The composer shortcuts' editor: one row per stored quick reply, plus a form
@@ -77,33 +78,24 @@ function ShortcutRow({
   onCommit: (next: ComposerShortcut) => void;
   onRemove: () => void;
 }) {
-  const [label, setLabel] = useState(entry.label);
-  const [text, setText] = useState(entry.text);
-  // The list the drafts were last filled from.
-  const [syncedKey, setSyncedKey] = useState(listKey);
-
-  const restoreDrafts = (from: ComposerShortcut) => {
-    setLabel(from.label);
-    setText(from.text);
-  };
-
   /**
    * ANY change of the stored list — this tab's own commit or another tab's
    * write — puts every row's drafts back to the stored entry, a row being
    * edited included: its edit is dropped rather than risk landing on a
    * different shortcut, since rows are keyed by position. Compared by value:
-   * the codec hands back a fresh array on every read. Adjusted during render,
-   * so stale drafts never paint.
+   * the codec hands back a fresh array on every read.
    */
-  if (listKey !== syncedKey) {
-    setSyncedKey(listKey);
-    restoreDrafts(entry);
-  }
+  const [drafts, setDrafts] = useSyncedDraft<Drafts>(
+    { label: entry.label, text: entry.text },
+    listKey,
+  );
+  const { label, text } = drafts;
+  const restoreDrafts = () => setDrafts({ label: entry.label, text: entry.text });
 
   const commit = () => {
-    const next = toRowEntry(entry, { label, text });
+    const next = toRowEntry(entry, drafts);
     if (!next) {
-      restoreDrafts(entry);
+      restoreDrafts();
       return;
     }
     if (sameShortcut(next, entry)) return;
@@ -120,7 +112,7 @@ function ShortcutRow({
         data-testid={`shortcut-label-${index}`}
         maxLength={COMPOSER_SHORTCUT_LABEL_MAX}
         value={label}
-        onChange={(e) => setLabel(e.target.value)}
+        onChange={(e) => setDrafts({ ...drafts, label: e.target.value })}
         onBlur={commit}
         className="text-sm px-2 py-1 rounded w-32 shrink-0"
         style={inputStyle}
@@ -130,7 +122,7 @@ function ShortcutRow({
         aria-label={`Shortcut ${index + 1} text`}
         data-testid={`shortcut-text-${index}`}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setDrafts({ ...drafts, text: e.target.value })}
         onBlur={commit}
         className="text-sm px-2 py-1 rounded grow basis-32 min-w-0 font-mono"
         style={inputStyle}

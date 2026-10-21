@@ -8,6 +8,7 @@ import {
 } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { fixWholeLine, resolveRunLoop } from "./launcherRunLoop";
+import { useSyncedDraft } from "./useSyncedDraft";
 
 /**
  * The launcher row's editor: one row per stored entry, plus a form that appends
@@ -86,6 +87,16 @@ function promptFlagDraftOf(entry: TerminalLauncher): string {
 
 type Drafts = { name: string; command: string; promptFlag: string; runLoop: string };
 
+/** A row's drafts as filled from its stored entry. */
+function draftsOf(entry: TerminalLauncher): Drafts {
+  return {
+    name: entry.name,
+    command: entry.command,
+    promptFlag: promptFlagDraftOf(entry),
+    runLoop: runLoopDraftOf(entry),
+  };
+}
+
 /**
  * Builds a row's next entry from its drafts, or `null` when a required half is
  * blank. The drafts were filled from `entry` — every change of the stored list
@@ -146,20 +157,6 @@ function LauncherRow({
   onCommit: (next: TerminalLauncher) => void;
   onRemove: () => void;
 }) {
-  const [name, setName] = useState(entry.name);
-  const [command, setCommand] = useState(entry.command);
-  const [promptFlag, setPromptFlag] = useState(promptFlagDraftOf(entry));
-  const [runLoop, setRunLoop] = useState(runLoopDraftOf(entry));
-  // The list the drafts were last filled from.
-  const [syncedKey, setSyncedKey] = useState(listKey);
-
-  const restoreDrafts = (from: TerminalLauncher) => {
-    setName(from.name);
-    setCommand(from.command);
-    setPromptFlag(promptFlagDraftOf(from));
-    setRunLoop(runLoopDraftOf(from));
-  };
-
   /**
    * ANY change of the stored list — this tab's own commit or another tab's
    * write — puts every row's drafts back to the stored entry, a row being
@@ -167,18 +164,16 @@ function LauncherRow({
    * position says which launcher it holds only until the list changes, so an
    * edit kept across a change could land on a different launcher. Dropped,
    * never misdirected. Compared by value, not reference: the codec hands back
-   * a fresh array on every read. Adjusted during render rather than in an
-   * effect, so the stale drafts never paint.
+   * a fresh array on every read.
    */
-  if (listKey !== syncedKey) {
-    setSyncedKey(listKey);
-    restoreDrafts(entry);
-  }
+  const [drafts, setDrafts] = useSyncedDraft(draftsOf(entry), listKey);
+  const { name, command, promptFlag, runLoop } = drafts;
+  const restoreDrafts = () => setDrafts(draftsOf(entry));
 
   const commit = () => {
-    const next = toRowEntry(entry, { name, command, promptFlag, runLoop });
+    const next = toRowEntry(entry, drafts);
     if (!next) {
-      restoreDrafts(entry);
+      restoreDrafts();
       return;
     }
     if (sameEntry(next, entry)) return;
@@ -241,7 +236,7 @@ function LauncherRow({
         aria-label={`Launcher ${index + 1} name`}
         data-testid={`launcher-name-${index}`}
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => setDrafts({ ...drafts, name: e.target.value })}
         onBlur={commit}
         className="text-sm px-2 py-1 rounded w-32 shrink-0"
         style={inputStyle}
@@ -251,7 +246,7 @@ function LauncherRow({
         aria-label={`Launcher ${index + 1} command`}
         data-testid={`launcher-command-${index}`}
         value={command}
-        onChange={(e) => setCommand(e.target.value)}
+        onChange={(e) => setDrafts({ ...drafts, command: e.target.value })}
         onBlur={commit}
         className="text-sm px-2 py-1 rounded grow basis-32 min-w-0 font-mono"
         style={inputStyle}
@@ -262,7 +257,7 @@ function LauncherRow({
           aria-label={`Launcher ${index + 1} prompt flag`}
           data-testid={`launcher-prompt-flag-${index}`}
           value={promptFlag}
-          onChange={(e) => setPromptFlag(e.target.value)}
+          onChange={(e) => setDrafts({ ...drafts, promptFlag: e.target.value })}
           onBlur={commit}
           placeholder={promptFlagPlaceholder}
           className="text-sm px-2 py-1 rounded w-full font-mono"
@@ -301,7 +296,7 @@ function LauncherRow({
           aria-label={`Launcher ${index + 1} run loop`}
           data-testid={`launcher-run-loop-${index}`}
           value={runLoop}
-          onChange={(e) => setRunLoop(e.target.value)}
+          onChange={(e) => setDrafts({ ...drafts, runLoop: e.target.value })}
           onBlur={commit}
           placeholder={runLoopPlaceholder}
           className="text-sm px-2 py-1 rounded w-full font-mono"

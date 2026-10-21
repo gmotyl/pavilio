@@ -135,78 +135,39 @@ describe("ShortcutSettings", () => {
     expect(stored()).toEqual(SHIPPED);
   });
 
-  describe("a write from elsewhere", () => {
+  /**
+   * The rows' drafts come from `useSyncedDraft` (its own suite holds the
+   * matrix). Here: a write from another tab refills every row, the one being
+   * typed into included, and a blur afterwards writes nothing — `A`'s edit
+   * must not land on `B2`, which now sits where `A` was.
+   */
+  it("a write from another tab refills the rows and drops an edit in progress", async () => {
+    const user = userEvent.setup();
     const a = { label: "A", text: "alpha" };
     const b = { label: "B", text: "beta" };
     const c = { label: "C", text: "gamma" };
+    const textFields = () =>
+      screen.getAllByRole("textbox", { name: /^Shortcut \d+ text$/ }) as HTMLInputElement[];
+    writePreference(preferences.composerShortcuts, [a, b, c]);
+    render(<ShortcutSettings />);
+
+    await user.click(textFields()[0]);
+    await user.type(textFields()[0], " X");
+    act(() => writePreference(preferences.composerShortcuts, [{ label: "B2", text: "beta" }, c]));
+
+    expect(labelFields().map((f) => f.value)).toEqual(["B2", "C"]);
+    expect(textFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
+    await user.click(document.body);
+    expect(stored()).toEqual([{ label: "B2", text: "beta" }, c]);
+  });
+
+  describe("write guards", () => {
+    const a = { label: "A", text: "alpha" };
+    const b = { label: "B", text: "beta" };
 
     function textFields(): HTMLInputElement[] {
       return screen.getAllByRole("textbox", { name: /^Shortcut \d+ text$/ }) as HTMLInputElement[];
     }
-
-    /**
-     * Any change of the stored list resets every row's drafts, the row being
-     * typed into included — even when the write left that row's own shortcut
-     * alone. An edit is dropped rather than risk landing on another entry.
-     */
-    it("an outside change resets a row being edited", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.composerShortcuts, [a, b]);
-      render(<ShortcutSettings />);
-
-      await user.click(textFields()[0]);
-      await user.type(textFields()[0], " X");
-      act(() => writePreference(preferences.composerShortcuts, [a, { label: "B2", text: "beta" }]));
-
-      expect(textFields()[0]).toHaveValue("alpha");
-      expect(textFields()[0]).toHaveFocus();
-      expect(labelFields().map((f) => f.value)).toEqual(["A", "B2"]);
-    });
-
-    it("a blur after an outside change writes nothing", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.composerShortcuts, [a, b]);
-      render(<ShortcutSettings />);
-
-      await user.click(textFields()[0]);
-      await user.type(textFields()[0], " X");
-      act(() => writePreference(preferences.composerShortcuts, [a, { label: "B2", text: "beta" }]));
-      await user.click(document.body);
-
-      expect(stored()).toEqual([a, { label: "B2", text: "beta" }]);
-    });
-
-    it("an edit to a row removed elsewhere is dropped and writes nothing", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.composerShortcuts, [a, b, c]);
-      render(<ShortcutSettings />);
-
-      await user.click(textFields()[1]);
-      await user.type(textFields()[1], " --edited");
-      act(() => writePreference(preferences.composerShortcuts, [a, c]));
-
-      expect(textFields().map((f) => f.value)).toEqual(["alpha", "gamma"]);
-      await user.click(document.body);
-      expect(stored()).toEqual([a, c]);
-    });
-
-    /** The probe: `A` removed and `B` renamed in one write while `A` is edited. */
-    it("an edit to a row removed elsewhere is not carried onto a renamed neighbour", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.composerShortcuts, [a, b, c]);
-      render(<ShortcutSettings />);
-
-      await user.click(textFields()[0]);
-      await user.type(textFields()[0], " X");
-      act(() =>
-        writePreference(preferences.composerShortcuts, [{ label: "B2", text: "beta" }, c]),
-      );
-
-      expect(labelFields().map((f) => f.value)).toEqual(["B2", "C"]);
-      expect(textFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
-      await user.click(document.body);
-      expect(stored()).toEqual([{ label: "B2", text: "beta" }, c]);
-    });
 
     /**
      * The write guards: a write elsewhere that the store has notified but React
