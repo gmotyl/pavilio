@@ -83,15 +83,9 @@ vi.mock("../../../preferences/store", async (importOriginal) => {
  * above it. Only the host is stubbed — an inert one, since this suite's subject
  * is the project link, not speech.
  */
-vi.mock("../../speech/useSpeechHost", async () => {
-  const { INERT_SPEECH_HOST } = await import(
-    "../../terminal/__tests__/speech.harness"
-  );
-  return {
-    useSpeechHost: () => INERT_SPEECH_HOST,
-    default: () => INERT_SPEECH_HOST,
-  };
-});
+vi.mock("../../speech/useSpeechHost", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useSpeechHost()),
+);
 
 import LeftSidebar from "../LeftSidebar";
 import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
@@ -102,39 +96,38 @@ import { useLastPath } from "../useLastPath";
 import { preferences } from "../../../preferences/declarations";
 import { installMatchMedia } from "../../../test-utils";
 
-vi.mock("../../projects/useProjects", () => ({
-  useProjects: () => [{ name: projectName.current, repos: [] }],
-}));
-vi.mock("../../projects/useArchivedProjects", () => ({
-  useArchivedProjects: () => ({ archive: [], archivedNames: new Set() }),
-}));
-vi.mock("../../projects/useFavorites", () => ({
-  useFavorites: () => ({
-    isFavorite: () => false,
-    toggleFavorite: () => {},
-    favorites: [],
-  }),
-}));
-vi.mock("../../terminal/useAllTerminalSessions", () => ({
+vi.mock("../../projects/useProjects", () =>
+  import("./leftSidebar.harness").then((m) =>
+    m.mockShellDeps.useProjects(() => [{ name: projectName.current, repos: [] }]),
+  ),
+);
+vi.mock("../../terminal/useAllTerminalSessions", () =>
   // The session belongs to whichever project the box currently holds. Pinning
   // it to the literal "vector" would leave the encoding tests rendering a
   // project with no session rows at all — a row that is absent looks exactly
   // like a row that failed to highlight, which is the one thing those tests
   // must be able to tell apart.
-  useAllTerminalSessions: () => ({
-    sessions: [{ ...SESSION, project: projectName.current }],
-    refresh: () => {},
-  }),
-}));
-vi.mock("../../mobile-access/useMobileAccessStatus", () => ({
-  useMobileAccessStatus: () => ({ enabled: false }),
-}));
-vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
-  useAutoSyncStatus: () => ({ status: null }),
-}));
-vi.mock("../../git/useGitStatus", () => ({
-  useGitStatus: () => ({ files: [], refetch: () => {} }),
-}));
+  import("./leftSidebar.harness").then((m) =>
+    m.mockShellDeps.useAllTerminalSessions(() => [
+      { ...SESSION, project: projectName.current },
+    ]),
+  ),
+);
+vi.mock("../../projects/useArchivedProjects", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useArchivedProjects()),
+);
+vi.mock("../../projects/useFavorites", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useFavorites()),
+);
+vi.mock("../../mobile-access/useMobileAccessStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useMobileAccessStatus()),
+);
+vi.mock("../../auto-sync/useAutoSyncStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useAutoSyncStatus()),
+);
+vi.mock("../../git/useGitStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useGitStatus()),
+);
 
 /** The writes the Last-open-view bookmark received, by the key the store uses. */
 const bookmarkWrites = () =>
