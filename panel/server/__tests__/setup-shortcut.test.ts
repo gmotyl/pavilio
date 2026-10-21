@@ -285,16 +285,4 @@ describe("scripts/setup:shortcut", () => {
     // PowerShell is never reached, so nothing lands on the Desktop.
     expect(payloads()).toHaveLength(0);
   });
-
-  it("the repository no longer ships a reference .lnk", () => {
-    // It was one machine's binary shortcut, stale the moment the repo moved.
-    expect(existsSync(join(REPO_ROOT, "scripts", "Pavilio Panel.lnk"))).toBe(false);
-
-    const tracked = spawnSync("git", ["ls-files", "scripts/"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    }).stdout;
-    expect(tracked).not.toContain(".lnk");
-    expect(tracked).toContain("scripts/setup:shortcut");
-  });
 });

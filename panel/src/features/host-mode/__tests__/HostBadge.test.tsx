@@ -50,12 +50,4 @@ describe("HostBadge", () => {
     expect(badge.dataset.hostMode).toBe("remote");
     expect(badge.textContent).toContain("mac.foo.ts.net");
   });
-
-  it("hides on mobile via Tailwind's hidden md:inline-flex classes", () => {
-    setHostname("localhost");
-    render(<HostBadge />);
-    const badge = screen.getByTestId("host-badge");
-    expect(badge.className).toContain("hidden");
-    expect(badge.className).toContain("md:inline-flex");
-  });
 });

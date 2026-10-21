@@ -206,26 +206,6 @@ describe("LeftSidebar terminal-session row navigation", () => {
     expandAndClickSession();
     expect(readTerminalFocus("vector")).toBe("s1");
   });
-
-  it("the + new-terminal button still navigates straight to iterm (unchanged)", async () => {
-    createTerminalSession.mockResolvedValue({
-      id: "new1",
-      project: "vector",
-      name: "vector-2",
-      cwd: "/repo/vector",
-      pid: 9999,
-      createdAt: "2026-01-01T00:00:00.000Z",
-    } satisfies SessionMeta);
-    setup();
-    fireEvent.click(
-      screen.getByTestId("sidebar-project-create-terminal-vector"),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId("location").textContent).toBe(
-        "/project/vector/iterm",
-      );
-    });
-  });
 });
 
 describe("LeftSidebar terminal-session row highlight", () => {

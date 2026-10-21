@@ -187,7 +187,7 @@ describe("README Quick Start", () => {
     );
   });
 
-  it("no hand-written shortcut snippet or reference .lnk remains", () => {
+  it("no hand-written shortcut snippet remains and every README link resolves", () => {
     // scripts/setup:shortcut writes the shortcut through powershell.exe. The
     // hand-typed PowerShell recipe it replaced told the reader to build a
     // shortcut around `bash -lc "npm start"` — the exact failure mode the
@@ -197,11 +197,7 @@ describe("README Quick Start", () => {
     expect(README).not.toMatch(/\$s(hortcut)?\.Arguments\s*=/);
     expect(README).not.toMatch(/bash -lc ["']npm start/);
 
-    // scripts/Pavilio Panel.lnk was deleted from the repo; the README linked to
-    // it until now, which is a 404 on GitHub.
-    expect(README).not.toMatch(/Pavilio(%20| )Panel\.lnk/);
-
-    // Generalised: every relative link in the document must resolve on disk.
+    // Every relative link in the document must resolve on disk.
     // A documented path that does not exist is the same defect in another spot.
     const broken: string[] = [];
     for (const m of README.matchAll(/\]\((\.[^)\s]+)\)/g)) {

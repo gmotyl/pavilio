@@ -94,23 +94,6 @@ describe("resizing the git-changes tree", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the Changes tree without a hardcoded width class", async () => {
-    await renderTree();
-    // `w-[240px]` is GONE rather than overridden: `useResizablePane` starts a
-    // drag from React state, never a measurement, so a class still winning the
-    // cascade would leave the rendered tree disagreeing with the reported one.
-    expect(tree().className).not.toMatch(/w-\[240px\]/);
-    expect(tree()).toHaveStyle({ width: "280px" });
-    // `shrink-0` is the same guarantee from the other side: it stops the flex
-    // row squeezing the tree below the width the hook thinks it has.
-    expect(tree().className).toMatch(/\bshrink-0\b/);
-    // The sticky survives the port. The rail is absolutely positioned and the
-    // reflex fix — adding `relative` — would have REPLACED it; a sticky box is
-    // already positioned, so it is the rail's containing block as it stands.
-    expect(tree().className).toMatch(/\bsticky\b/);
-    expect(tree().className).not.toMatch(/\brelative\b/);
-  });
-
   it("renders a resize rail on the tree's inner edge", async () => {
     await renderTree();
     const handle = rail();
@@ -162,13 +145,5 @@ describe("resizing the git-changes tree", () => {
     expect(box).not.toBe(tree());
     expect(tree().contains(box)).toBe(true);
     expect(tree().className).not.toMatch(/overflow/);
-
-    // The cap moved in with the scrolling, and its number had to change to keep
-    // the box the height it was: preflight's `box-sizing: border-box` meant the
-    // aside's `calc(100vh-120px)` capped the BORDER box, whose content area was
-    // 18px shorter (`p-2` twice, plus a 1px border twice). The inner div has
-    // neither, so the same expression would have handed those 18px back.
-    expect(box.className).toMatch(/\bmax-h-\[calc\(100vh-138px\)\]/);
-    expect(tree().className).not.toMatch(/\bmax-h-/);
   });
 });

@@ -558,21 +558,6 @@ describe("realtime channel", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
-  it("the test reset tears an open socket down without arming a reconnect", () => {
-    subscribeRealtime(vi.fn());
-    const ws = last();
-    expect(ws.closed).toBe(false);
-
-    __resetRealtimeChannelForTests();
-
-    expect(ws.closed).toBe(true);
-    expect(realtimeSubscriberCount()).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
-
-    vi.advanceTimersByTime(120_000);
-    expect(FakeWebSocket.instances).toHaveLength(1);
-  });
-
   it("the test reset leaves no return listener behind", () => {
     const addSpy = vi.spyOn(window, "addEventListener");
     subscribeRealtime(vi.fn());

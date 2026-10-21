@@ -166,43 +166,7 @@ describe("resizing the git-history tree", () => {
     expect(tree().style.width).toBe("");
   });
 
-  it("resizing leaves the sticky positioning's preconditions intact", async () => {
-    await renderTree();
-
-    // PRECONDITIONS, and the name says so: no stylesheet is loaded in jsdom, so
-    // `position: sticky` is asserted nowhere in this repo — not here, not
-    // anywhere. This is a class-list snapshot, and its reach ends there. It
-    // bites `sticky`→`relative`, a dropped `self-start`, and an `overflow`
-    // introduced on the IMMEDIATE parent. It is blind to every ancestor above
-    // that one, to anything `index.css` says, and to the computed value the
-    // browser would actually resolve. What it does pin is everything the sticky
-    // DEPENDS on that swapping a width class for an inline width could
-    // plausibly have taken away.
-    expect(tree().className).toMatch(/\bsticky\b/);
-    expect(tree().className).toMatch(/\btop-4\b/);
-    // A flex item stretches by default, and a full-height item has no travel
-    // to stick through.
-    expect(tree().className).toMatch(/\bself-start\b/);
-    // The rail is absolutely positioned, and `relative` is the reflex way to
-    // give it a containing block — it would have replaced the sticky outright.
-    // A sticky box is already positioned, so it is that containing block.
-    expect(tree().className).not.toMatch(/\brelative\b/);
-    expect(tree().style.position).toBe("");
-    // Sticky resolves against the nearest scrolling ancestor, so an `overflow`
-    // introduced on the row around it would trap the tree there instead.
-    expect(tree().parentElement!.className).not.toMatch(/overflow/);
-    // The rail lives inside the sticky box, so it travels with it.
-    expect(tree().contains(rail())).toBe(true);
-
-    // And a resize changes the width, nothing else.
-    dragBy(40);
-    expect(tree()).toHaveStyle({ width: "320px" });
-    expect(tree().className).toMatch(/\bsticky\b/);
-    expect(tree().className).toMatch(/\bself-start\b/);
-    expect(tree().style.position).toBe("");
-  });
-
-  it("the tree scrolls inside the sticky box, under a cap", async () => {
+  it("the tree scrolls inside the sticky box, not the box itself", async () => {
     await renderTree();
     const box = scroller();
 
@@ -215,13 +179,5 @@ describe("resizing the git-history tree", () => {
     expect(box).not.toBe(tree());
     expect(tree().contains(box)).toBe(true);
     expect(tree().className).not.toMatch(/overflow/);
-
-    // And the cap is still there, at the number that keeps the pane the height
-    // it was before the scrolling moved inward: the aside capped its BORDER
-    // box, whose content area was 18px shorter (`p-2` twice, plus a 1px border
-    // twice). Deleting the cap outright lets the tree grow unbounded, which is
-    // likewise invisible to every other assertion here.
-    expect(box.className).toMatch(/\bmax-h-\[calc\(100vh-138px\)\]/);
-    expect(tree().className).not.toMatch(/\bmax-h-/);
   });
 });

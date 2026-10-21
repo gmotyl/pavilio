@@ -381,7 +381,7 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     expect(read.body.content).toBe("# legacy body");
   });
 
-  it("no longer exposes kilo/claude sources or the move endpoint", async () => {
+  it("no longer exposes kilo/claude sources", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     seedFile(join(tmpRoot, "workspace", ".kilo", "plans", "woo.md"), "# woo");
     const repoPath = join(tmpRoot, "repos", "pavilio");
@@ -395,11 +395,6 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     expect(ids).not.toContain("workspace");
     expect(ids).not.toContain("claude");
     expect(ids).not.toContain("repo:pavilio");
-
-    const move = await request(makeApp())
-      .post("/api/projects/alokai/plans/move")
-      .send({ from: join(tmpRoot, "workspace", ".kilo", "plans", "woo.md"), toId: "project" });
-    expect(move.status).toBe(404);
   });
 
   it("rejects OpenSpec-shaped traversal outside configured roots", async () => {

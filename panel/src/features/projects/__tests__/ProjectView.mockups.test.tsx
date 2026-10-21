@@ -209,13 +209,6 @@ describe("the mockups empty state", () => {
     await screen.findByTestId("mockups-empty-state");
     expect(screen.queryByText("No files in this section.")).toBeNull();
   });
-
-  it("leaves the notes section's empty message unchanged", async () => {
-    renderMockups([], { section: "notes" });
-
-    expect(await screen.findByText("No files in this section.")).toBeTruthy();
-    expect(screen.queryByTestId("mockups-empty-state")).toBeNull();
-  });
 });
 
 /**
@@ -298,6 +291,8 @@ describe("the mockup fill chain", () => {
     renderMockups([], { section: "notes" });
 
     await screen.findByText("No files in this section.");
+    // The mockups how-to is that section's own empty state, not every section's.
+    expect(screen.queryByTestId("mockups-empty-state")).toBeNull();
     expect(classesOf(outer())).not.toContain("md:h-full");
     for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
   });

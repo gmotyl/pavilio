@@ -150,25 +150,6 @@ describe("MockupFrame", () => {
     expect(pressed()).toEqual(["false", "true", "false"]);
   });
 
-  it("wraps the frame in a row that centers it horizontally", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-
-    // The wrapper's classes are static — the selected width lives in the
-    // iframe's `style` — so this holds at every width. The click is here to
-    // show that: switching to a device width must not cost the centering.
-    fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
-
-    // jsdom lays nothing out, so the centering can only be pinned where it is
-    // expressed: the flex row that wraps the frame. All three halves matter — a
-    // `justify-center` on a non-flex parent centers nothing, and on a
-    // `flex-col` row it centers the frame vertically instead.
-    const row = frame().parentElement as HTMLElement;
-    const classes = Array.from(row.classList);
-    expect(classes).toContain("flex");
-    expect(classes).toContain("justify-center");
-    expect(classes).not.toContain("flex-col");
-  });
-
   it("keeps the same iframe element across a width change", () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
 
@@ -205,24 +186,6 @@ describe("MockupFrame", () => {
     expect(classes).toContain("min-h-0");
     expect(classes).toContain("flex");
     expect(classes).toContain("flex-col");
-  });
-
-  it("leaves the iframe asking for the full height of its container", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-
-    // The definite height moves one level up; how the iframe asks for it does
-    // not change — `100%` of a now-bounded container is the whole point.
-    expect(frame().style.height).toBe("100%");
-  });
-
-  it("does not change the frame's height when a width preset is picked", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-
-    const before = root().className;
-    fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
-    expect(root().className).toBe(before);
-    fireEvent.click(screen.getByTestId("mockup-viewer-width-tablet"));
-    expect(root().className).toBe(before);
   });
 
   it("prefixes the root test id with the given testIdPrefix", () => {

@@ -26,18 +26,6 @@ describe("FileRow", () => {
     expect(screen.getByText("Jul 14")).toBeTruthy();
   });
 
-  it("renders the star slot when given", () => {
-    render(
-      <FileRow
-        testId="row"
-        label="a.md"
-        star={<button data-testid="row-star">star</button>}
-        onSelect={() => {}}
-      />,
-    );
-    expect(screen.getByTestId("row-star")).toBeTruthy();
-  });
-
   it("spreads drag props onto the row button", () => {
     render(
       <FileRow

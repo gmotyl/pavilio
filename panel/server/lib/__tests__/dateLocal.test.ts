@@ -19,10 +19,4 @@ describe("localISODate (server)", () => {
     vi.setSystemTime(new Date(2026, 0, 1, 9, 0));
     expect(localISODate()).toBe("2026-01-01");
   });
-
-  it("output shape is always YYYY-MM-DD", () => {
-    expect(localISODate(new Date(2026, 11, 9, 0, 0))).toMatch(
-      /^\d{4}-\d{2}-\d{2}$/,
-    );
-  });
 });

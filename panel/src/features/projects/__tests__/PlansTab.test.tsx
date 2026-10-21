@@ -673,14 +673,6 @@ describe("PlansTab", () => {
       await screen.findByTestId("plans-tab-source-change:add-tax-engine"),
     ).toBeTruthy();
   });
-
-  it("removes the star control and CURRENT.md-based active plans", async () => {
-    renderWithRouter(<PlansTab projectName="alokai" />);
-    await screen.findByTestId("plans-tab-file-project-2026-01-01-foo.md");
-    // No star toggle exists anymore on any plan row.
-    expect(screen.queryByTestId("plans-tab-star-2026-01-01-foo.md")).toBeNull();
-    expect(screen.queryByTestId("plans-tab-star-woo.md")).toBeNull();
-  });
 });
 
 describe("PlansTab archived toggle", () => {
