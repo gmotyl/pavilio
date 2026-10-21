@@ -99,16 +99,23 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 4. **Pending** — the routed records with their hashes. A catch-up (no inputs) takes
    `scripts/wiki pending <p>` as is: it already includes unledgered or changed top-level
    `wiki/raw/*.md` snapshots (not migration's `context-snapshot-*.md`), so a snapshot left
-   unledgered by an interrupted run is retried. Nothing pending and no repo input →
-   release, report "nothing to ingest", stop.
+   unledgered by an interrupted run is retried. Nothing pending and no repo input → a catch-up
+   still checks `scripts/wiki backlog <p>`: anything in `create` or `update` → skip to **Page
+   writers** with it; else release, report "nothing to ingest", stop.
 5. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
-6. **Mentions** — `scripts/wiki mentions <p> --touched <slug>,<slug>,…` — every namespaced slug
-   from the receipts, comma-separated.
-7. **Page writers** — one `page_writer` per `qualifying` slug, given the slug, its existing page
-   (if any), only this run's source pages that name it, and the slug's `CONTEXT.md` glossary line
-   when it has one. Touched slugs that do not qualify are reported as "waiting at 1 mention".
+6. **Backlog** — `scripts/wiki backlog <p> --touched <slug>,<slug>,…` — every namespaced slug
+   from the receipts, comma-separated. Run it only after every source writer has returned. A
+   catch-up (no inputs) drops `--touched`, so it also pays what earlier runs left owed.
+7. **Page writers** — one `page_writer` per slug in `create` and `update`, given the slug, the
+   source pages the backlog lists for it (already project-root `wiki/sources/…` paths) and the
+   slug's `CONTEXT.md` glossary line when it has one. More than 12 sources for one slug → split
+   them into chunks of ≤12 and run that slug's writers one after another, never two on the same
+   page at once. Slugs in `waiting` are reported as "waiting for a second mention".
+   Then re-run the same `backlog` command once every writer has returned: a slug still listed
+   means its writer failed or edited nothing — re-run that writer once, then report it. Never
+   commit while a writer is still running; its edit would land in the next commit unrecorded.
 8. **Index** — `scripts/wiki index <p>`, so the overview sees this run's pages. Exit 1 → stop
    here: no ledger, no commit; report `error` and `page`, release the lock.
 9. **Overview** — one `overview_writer` when any knowledge page was created or updated, then
@@ -116,14 +123,16 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 10. **Record** — `scripts/wiki record <p> <path> <hash>` for each record whose source page landed
     (repo pages carry `commit` instead).
 11. **Log** — append the ingest entry (`PAGES.md § log.md`); append every `generic:` finding under
-    `## Knowledge candidates` in `wiki/open-questions.md`, and every `contradictions` item under
-    `## Gaps`.
+    `## Knowledge candidates` in `wiki/open-questions.md`, every `contradictions` item under
+    `## Gaps`, and every `collisions` item under `## Gaps` prefixed `Term collision:` (one word,
+    two meanings — a glossary `_Avoid_` note or a rename settles it).
 12. **Commit** — `git add projects/<p>/wiki` and commit `<p>: wiki ingest <n> records` right away;
     nothing else from the working tree.
 13. **Release** — `scripts/wiki lock release <p> --session <id>`, also on every early stop after
     step 2.
 
-Report: source pages written, knowledge pages created/updated, slugs waiting, failures, warnings.
+Report: source pages written, knowledge pages created/updated, slugs waiting, slugs whose backlog
+stayed after the re-run, failures, warnings.
 A checkpoint caller (note, session-start, archive-plan) gets the same report in one line.
 
 ### Writers
@@ -131,6 +140,23 @@ A checkpoint caller (note, session-start, archive-plan) gets the same report in 
 Spawn each writer with its agent file as instructions plus its inputs; never hand it more than the
 file allows. Claude Code: Agent tool with `model: <writerModel>`; other harnesses: their small-model
 tier. Each writer returns exactly one JSON receipt.
+
+Inputs go **inline in the prompt** as a short `key: value` list (a glossary line quoted) — never
+written to a file the writer is told to read first. "Read this file, it holds your instructions"
+is the shape of a prompt injection, and Claude Code's auto-mode classifier blocks such launches.
+The prompt names the agent file to follow and the inputs; nothing else:
+
+```
+You are the `page_writer` wiki writer. Workspace root: <root>; project paths are relative to
+projects/<p>/. Read skills/pavilio-wiki/agents/page_writer.md and follow it exactly. Today is
+<YYYY-MM-DD>. Do not run git. Reply with exactly one JSON receipt and nothing else.
+
+Inputs:
+- project: <p>
+- slug: concepts/relay
+- sources: wiki/sources/progress-2026-10-19-tts-relay-node20.md
+- glossary: "Relay — the panel server's synthesis endpoint … See wiki/concepts/relay."
+```
 
 ### Errors
 
@@ -147,8 +173,11 @@ tier. Each writer returns exactly one JSON receipt.
 `stale`, `codeIdentifiers`) with page paths and one remedy each — malformed frontmatter (the YAML
 error is given) is fixed by re-running that page's writer or quoting the offending value
 (`PAGES.md § Common frontmatter`), stale pages are refreshed by the next ingest, code identifiers
-move to `wiki/repos/<repo>/` on the next page write. Lint writes nothing
-and this skill does not fix the findings in the same run.
+move to `wiki/repos/<repo>/` on the next page write. Also run `scripts/wiki backlog <p>`: a
+`broken` target listed under `create` gets its page from the next ingest; any other broken target
+is fixed by turning the link into plain text (`CONVENTIONS.md § Links`). A long `update` list means
+page writers fell behind — the next ingest catches up. Lint writes nothing and this skill does not
+fix the findings in the same run.
 
 ## Non-goals
 

@@ -104,6 +104,14 @@ describe("wiki cli", () => {
     expect(mentions.json.qualifying).toEqual(["concepts/speech"]);
     expect(mentions.stderr).toMatch(/"greg" is not namespaced/);
 
+    const backlog = await cli(["backlog", "demo", "--touched", "concepts/speech"]);
+    expect(backlog.code).toBe(0);
+    expect(backlog.json).toEqual({
+      create: {},
+      update: { "concepts/speech": ["wiki/sources/a.md", "wiki/sources/b.md"] },
+      waiting: [],
+    });
+
     const index = await cli(["index", "demo"]);
     expect(index.code).toBe(0);
     expect(index.json.written).toContain("index.md");

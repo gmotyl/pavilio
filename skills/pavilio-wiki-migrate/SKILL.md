@@ -1,6 +1,6 @@
 ---
 name: pavilio-wiki-migrate
-description: Backfill a project's LLM wiki from its whole history — survey the records and estimate the cost, stop for confirmation, snapshot CONTEXT.md and rewrite it as a strict one-line glossary, seed a concept page per glossary term, then ingest every pending record oldest first in batches of ~10 cheap writers, committing after each batch; resumable from the ledger, ends with overview, lint and a report. Use when the user invokes `/pavilio-wiki-migrate <project>`, asks to "migrate the project to the wiki" or "backfill the wiki", or when a skill hints the project has no wiki or too many pending records.
+description: Backfill a project's LLM wiki from its whole history — survey the records and estimate the cost, stop for confirmation, snapshot CONTEXT.md and rewrite it as a strict one-line glossary, seed a concept page per glossary term, then ingest every pending record oldest first in batches of ~10 cheap writers, committing after each batch and flushing knowledge pages every 5 batches; resumable from the ledger, ends with overview, lint and a report. Use when the user invokes `/pavilio-wiki-migrate <project>`, asks to "migrate the project to the wiki" or "backfill the wiki", or when a skill hints the project has no wiki or too many pending records.
 ---
 
 # Pavilio Wiki Migrate
@@ -45,13 +45,19 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
    and `changed` separately; count ledger lines in `wiki/log.md` as done.
 3. Resume state: snapshot present (`wiki/raw/context-snapshot-*.md`)? `CONTEXT.md` rewritten
    (every term line carries `See [[wiki/concepts/`)? Snapshot sections all ledgered?
-4. Token estimate (writer input + output, rounded to 10k):
-   - records: Σ bytes of pending records ÷ 4 + 8k per record (agent file, conventions, page
-     contract, indexes, receipt) + 4k per record for page writers;
+4. Token estimate (writer input + output, rounded to 100k). A writer subagent costs ~60k tokens
+   before it reads its own inputs (harness, agent file, conventions, page contract, indexes,
+   tool turns) — measured on the pavilio migration, where source writers averaged ~65k and page
+   writers ~65k. Page writers dominate: flushing pages every batch cost ~3 page writes per record,
+   because the same hub pages were rewritten in nearly every batch; § 6 flushes every 5 batches.
+   - records: 60k per record + Σ bytes of pending records ÷ 4;
+   - pages: 65k × (1 page write per record + 1 per distinct slug `scripts/wiki backlog <p>`
+     already lists);
    - glossary (only if not yet rewritten): `CONTEXT.md` bytes ÷ 4 × 3 (rewrite + section source
-     writers) + 4k per glossary term for seeded concept pages.
+     writers) + 65k per glossary term for seeded concept pages.
 5. Show one table: kind | new | changed | KB | est. tokens; then totals, batch count
-   (⌈records ÷ 10⌉), resume state, writer model.
+   (⌈records ÷ 10⌉), page flush count (⌈batches ÷ 5⌉), resume state, writer model. Say the
+   estimate is ±50%.
 6. Nothing pending and glossary done → say the wiki is migrated, suggest `/pavilio-wiki <p> lint`,
    stop.
 7. Ask "Start the migration of `<p>`?" and **end the turn** (workspace `AGENTS.md` § Close the
@@ -128,17 +134,15 @@ skip the step when none are pending.
    (mechanism, reasons, gotchas, history) under a heading per term — this page is the only route
    from the old glossary prose to the concept pages; list each glossary term of the section in
    `concepts:` under its receipt slug.
-2. **Mentions** — `scripts/wiki mentions <p> --touched <slugs>`. First run: every
-   `concepts/<slug>` from the step 4 receipt. Resume (some sections already ledgered): only the
-   slugs from this run's section receipts plus glossary slugs (`See [[wiki/concepts/<slug>]]` in
-   `CONTEXT.md`) whose `wiki/concepts/<slug>.md` is missing — seeded pages are not rewritten.
-   Glossary terms qualify with one source (`CONVENTIONS.md § Two sources, and the glossary
-   exemption`).
-3. One `page_writer` per `qualifying` slug, ≤10 in parallel, refreshing the lock between groups:
-   `sources` = the section source pages `mentions.slugs[<slug>]` lists, each prefixed `wiki/`
-   (mentions paths are wiki-relative; writers take project-root paths), `glossary` = the term's
-   `CONTEXT.md` line.
-4. A glossary slug that did not qualify (its section page missed it) → list it in the report.
+2. **Backlog** — once every section writer has returned, `scripts/wiki backlog <p> --touched
+   <slugs>` with every glossary slug (`See [[wiki/concepts/<slug>]]` in `CONTEXT.md`). Glossary
+   terms qualify with one source (`CONVENTIONS.md § Two sources, and the glossary exemption`). On
+   a resume, seeded pages already cite their section page, so only the missing ones come back.
+3. One `page_writer` per `create` and `update` slug, ≤10 in parallel, refreshing the lock between
+   groups: `sources` = the paths the backlog lists, `glossary` = the term's `CONTEXT.md` line. Then
+   re-run the backlog check as `pavilio-wiki SKILL.md` **Page writers** says.
+4. A glossary slug in neither `create` nor `update` and without a page (its section page missed
+   it) → list it in the report.
 5. `scripts/wiki index <p>` (exit 1 → stop: no record, no commit, report, release).
 6. `scripts/wiki record` each section file whose source page landed.
 7. Append a log entry (`PAGES.md § log.md`) headed `ingest (migrate)`; commit `projects/<p>/wiki`
@@ -150,34 +154,51 @@ skip the step when none are pending.
 2. Sort oldest first: the first `YYYY-MM-DD` in the path (progress, notes, memo, change ids), else
    the date the file was added, `git log --diff-filter=A --format=%as -1 -- <path>` (ADRs). Ties
    by path.
-3. Cut into batches of 10. For each batch:
+3. Cut into batches of 10. Source pages land every batch; knowledge pages are **flushed** every 5
+   batches and after the last one. Hub pages (a person, the core concepts) are named by most
+   records, so updating them every batch rewrites the same page dozens of times — a flush folds 5
+   batches of sources into one write per page. Nothing is lost between flushes: the backlog is
+   read from the pages, so a stop or a crash before a flush only defers the work.
+4. For each batch:
    1. Refresh the lock.
    2. Run these steps of `pavilio-wiki SKILL.md § 4. Ingest § Sequence` for the batch:
-      **Source writers**, **Mentions** (`--touched` this batch's slugs), **Page writers**,
-      **Index**, **Record**, **Log** (entry headed `ingest (migrate)`; `generic:` and
-      contradictions into `open-questions.md`), **Commit**. Skip **Overview** and the second
-      index that follows it — the overview runs once in step 7.
-   3. Page writer inputs: a slug whose page already exists gets only this batch's source pages
-      that name it; a slug whose page is **new** gets every source page `mentions.slugs[<slug>]`
-      lists, each prefixed `wiki/`, so mentions from earlier batches are not lost.
-   4. Commit message: `<p>: wiki migrate batch <k>/<n> (<m> records)`.
-   5. One progress line: batch, records done/total, pages created/updated, failures.
-4. Errors follow `pavilio-wiki SKILL.md § 4. Ingest § Errors`: a failed record is not ledgered and
-   comes back on resume; `index` exit 1 stops the run after releasing the lock.
+      **Source writers**, **Index**, **Record**, **Log** (entry headed `ingest (migrate)`, pages
+      line omitted; `generic:` items into `open-questions.md`), **Commit**. Wait for every source
+      writer's receipt before **Index** — never commit with a writer still running.
+   3. Commit message: `<p>: wiki migrate batch <k>/<n> (<m> records)`.
+   4. Batch number divisible by 5, or the last batch → flush (step 5) before the next batch.
+   5. One progress line: batch, records done/total, failures.
+5. **Flush** — the knowledge pages for everything ingested so far:
+   1. Refresh the lock. `scripts/wiki backlog <p>` with no `--touched`: everything the pages owe,
+      which also catches slugs that qualified across batches and writers that failed before.
+   2. **Page writers** as `pavilio-wiki SKILL.md § 4. Ingest § Sequence` says (≤10 in parallel,
+      ≤12 sources per writer, the verifying backlog re-run), refreshing the lock between groups.
+   3. **Index**; a log entry headed `ingest (migrate)` with the pages line and `waiting:`;
+      contradictions and collisions into `open-questions.md`; commit
+      `<p>: wiki migrate pages <f>/<total flushes> (<n> pages)`.
+6. Errors follow `pavilio-wiki SKILL.md § 4. Ingest § Errors`: a failed record is not ledgered and
+   comes back on resume; `index` exit 1 stops the run after releasing the lock. On a resume, run a
+   flush first when `scripts/wiki backlog <p>` lists anything.
 
 Archived changes contribute only `proposal.md` and `design.md`. Never pass a `tasks.md`, a delta
 spec or an active change to a writer, even by hand.
 
 ## 7. Finish
 
-1. One `overview_writer` with every knowledge page created or updated during the run.
-2. `scripts/wiki index <p>`, then `scripts/wiki lint <p>`.
-3. Append a final `ingest (migrate)` log entry, commit `projects/<p>/wiki` as
+1. `scripts/wiki backlog <p>` must list nothing in `create` or `update` (the last flush ran);
+   anything left → one more flush, then report what still remains.
+2. One `overview_writer` with every knowledge page created or updated during the run — the flush
+   receipts, or `git diff --name-only <first migrate commit>^ HEAD -- projects/<p>/wiki/entities
+   projects/<p>/wiki/concepts` after a resume.
+3. `scripts/wiki index <p>`, then `scripts/wiki lint <p>`.
+4. `scripts/wiki pending <p>` once more: a record edited while the run ingested it (an open
+   progress file, auto-sync) shows up as `changed` — report it, do not chase it.
+5. Append a final `ingest (migrate)` log entry, commit `projects/<p>/wiki` as
    `<p>: wiki migrate — overview`, release the lock.
-4. Report: records ingested by kind, failed records (rerun to retry), source pages, knowledge
-   pages created, slugs waiting at 1 mention, glossary terms without a page, unresolved legacy
-   links, lint groups with counts (`pavilio-wiki SKILL.md § 5. Lint` for remedies), actual vs
-   estimated batches.
+6. Report: records ingested by kind, failed records (rerun to retry), records changed during the
+   run, source pages, knowledge pages created, `waiting` slugs from the last backlog, glossary
+   terms without a page, unresolved legacy links, lint groups with counts (`pavilio-wiki SKILL.md
+   § 5. Lint` for remedies), actual vs estimated batches and tokens.
 
 ## Non-goals
 
