@@ -2,80 +2,52 @@ import { describe, it, expect } from "vitest";
 import { fixAmbiguousLabels, subgraphTitlesInOrder, clusterPaletteOrder } from "../MermaidDiagram";
 
 describe("fixAmbiguousLabels", () => {
-  it("quotes labels starting with /", () => {
-    expect(fixAmbiguousLabels("A[/api/users]")).toBe('A["/api/users"]');
-  });
-
-  it("quotes labels starting with \\", () => {
-    expect(fixAmbiguousLabels("A[\\path\\to]")).toBe('A["\\path\\to"]');
-  });
-
-  it("leaves normal labels untouched", () => {
-    expect(fixAmbiguousLabels("A[normal label]")).toBe("A[normal label]");
-  });
-
-  it("handles multiple labels in one string", () => {
-    const input = "A[/first] --> B[/second]";
-    const result = fixAmbiguousLabels(input);
-    expect(result).toContain('A["/first"]');
-    expect(result).toContain('B["/second"]');
-  });
-
-  it("handles string with no labels", () => {
-    expect(fixAmbiguousLabels("A --> B")).toBe("A --> B");
+  it.each([
+    ["quotes labels starting with /", "A[/api/users]", 'A["/api/users"]'],
+    ["quotes labels starting with \\", "A[\\path\\to]", 'A["\\path\\to"]'],
+    ["leaves normal labels untouched", "A[normal label]", "A[normal label]"],
+    ["handles multiple labels in one string", "A[/first] --> B[/second]", 'A["/first"] --> B["/second"]'],
+    ["handles string with no labels", "A --> B", "A --> B"],
+  ])("%s", (_label, input, expected) => {
+    expect(fixAmbiguousLabels(input)).toBe(expected);
   });
 });
 
 describe("subgraphTitlesInOrder", () => {
-  it("reads bare multi-word titles in declaration order", () => {
-    const chart = [
-      "flowchart TD",
-      "  A --> B1",
-      "  subgraph Current broken path",
-      "    B1[x] --> B2[y]",
-      "  end",
-      "  subgraph Fixed path",
-      "    C1[p] --> C2[q]",
-      "  end",
-    ].join("\n");
-    expect(subgraphTitlesInOrder(chart)).toEqual(["Current broken path", "Fixed path"]);
-  });
-
-  it("unwraps explicit ids with quoted labels", () => {
-    const chart = 'flowchart TD\n  subgraph Broken["Current broken path"]\n  end\n  subgraph Fixed["Fixed path"]\n  end';
-    expect(subgraphTitlesInOrder(chart)).toEqual(["Current broken path", "Fixed path"]);
-  });
-
-  it("unwraps explicit ids with unquoted labels and a separating space", () => {
-    const chart = "flowchart TD\n  subgraph Broken [Old way]\n  end";
-    expect(subgraphTitlesInOrder(chart)).toEqual(["Old way"]);
-  });
-
-  it("keeps single-word titles as written", () => {
-    const chart = "flowchart TD\n  subgraph Before\n  end\n  subgraph Migration\n  end\n  subgraph After\n  end";
-    expect(subgraphTitlesInOrder(chart)).toEqual(["Before", "Migration", "After"]);
-  });
-
-  it("returns nothing for a flowchart without subgraphs", () => {
-    expect(subgraphTitlesInOrder("flowchart TD\n  A --> B")).toEqual([]);
-  });
-
-  it("ignores nodes whose label merely contains the word subgraph", () => {
-    expect(subgraphTitlesInOrder("flowchart TD\n  A[render subgraph later] --> B")).toEqual([]);
-  });
-});
-
-describe("subgraphTitlesInOrder — mermaid comments", () => {
-  it("ignores a commented-out subgraph declaration", () => {
-    const chart = "flowchart TD\n%% subgraph Ghost\n  subgraph Real one\n  end";
-    expect(subgraphTitlesInOrder(chart)).toEqual(["Real one"]);
-  });
-
-  it("keeps a trailing %% verbatim, because mermaid renders it in the label", () => {
+  it.each<[label: string, chart: string, titles: string[]]>([
+    [
+      "reads bare multi-word titles in declaration order",
+      [
+        "flowchart TD",
+        "  A --> B1",
+        "  subgraph Current broken path",
+        "    B1[x] --> B2[y]",
+        "  end",
+        "  subgraph Fixed path",
+        "    C1[p] --> C2[q]",
+        "  end",
+      ].join("\n"),
+      ["Current broken path", "Fixed path"],
+    ],
+    [
+      "unwraps explicit ids with quoted labels",
+      'flowchart TD\n  subgraph Broken["Current broken path"]\n  end\n  subgraph Fixed["Fixed path"]\n  end',
+      ["Current broken path", "Fixed path"],
+    ],
+    ["unwraps explicit ids with unquoted labels and a separating space", "flowchart TD\n  subgraph Broken [Old way]\n  end", ["Old way"]],
+    [
+      "keeps single-word titles as written",
+      "flowchart TD\n  subgraph Before\n  end\n  subgraph Migration\n  end\n  subgraph After\n  end",
+      ["Before", "Migration", "After"],
+    ],
+    ["returns nothing for a flowchart without subgraphs", "flowchart TD\n  A --> B", []],
+    ["ignores nodes whose label merely contains the word subgraph", "flowchart TD\n  A[render subgraph later] --> B", []],
+    ["ignores a commented-out subgraph declaration", "flowchart TD\n%% subgraph Ghost\n  subgraph Real one\n  end", ["Real one"]],
     // mermaid does not strip `%%` from a subgraph title — the cluster label is
     // literally "Foo %% legacy name", so the parsed title has to match it.
-    const chart = "flowchart TD\n  subgraph Foo %% legacy name\n  end";
-    expect(subgraphTitlesInOrder(chart)).toEqual(["Foo %% legacy name"]);
+    ["keeps a trailing %% verbatim, because mermaid renders it in the label", "flowchart TD\n  subgraph Foo %% legacy name\n  end", ["Foo %% legacy name"]],
+  ])("%s", (_label, chart, titles) => {
+    expect(subgraphTitlesInOrder(chart)).toEqual(titles);
   });
 });
 

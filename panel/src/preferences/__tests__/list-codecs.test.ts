@@ -23,12 +23,13 @@ function seed(key: string, value: unknown): void {
   globals.__PAVILIO_PREFS__![key] = value;
 }
 
-describe("composer.shortcuts codec", () => {
-  const def = preferences.composerShortcuts;
-  const KEY = storageKey(def);
-  const read = () => readPreference(def);
+const shortcuts = preferences.composerShortcuts;
+const launchers = preferences.terminalLaunchers;
 
+describe("composer.shortcuts codec", () => {
   it.each([
+    ["a stored null", null],
+    ["a non-array stored value", { label: "Yes", text: "yes" }],
     ["an object", {}],
     ["a number", 5],
     ["a string", "yes"],
@@ -38,100 +39,86 @@ describe("composer.shortcuts codec", () => {
     ["an entry of blanks", [{ label: "", text: "  " }]],
     ["an array of nulls", [null, null]],
   ])("%s falls back to the default", (_, value) => {
-    seed(KEY, value);
-    expect(read()).toEqual(DEFAULT_COMPOSER_SHORTCUTS);
-  });
-
-  it("a stored null falls back to the default", () => {
-    seed(KEY, null);
-    expect(read()).toEqual(DEFAULT_COMPOSER_SHORTCUTS);
-  });
-
-  it("a non-array stored value falls back to the default", () => {
-    seed(KEY, { label: "Yes", text: "yes" });
-    expect(read()).toEqual(DEFAULT_COMPOSER_SHORTCUTS);
-  });
-
-  it("a shortcut whose label or text is only whitespace is dropped", () => {
-    seed(KEY, [
-      { label: "  ", text: "yes" },
-      { label: "OK", text: "ok" },
-      { label: "Go", text: " \t " },
-    ]);
-    expect(read()).toEqual([{ label: "OK", text: "ok" }]);
-  });
-
-  it("an empty list stays empty", () => {
-    seed(KEY, []);
-    expect(read()).toEqual([]);
-  });
-
-  it("a mixed list keeps its valid entries, in order, and only their fields", () => {
-    seed(KEY, [
-      { label: "Go on", text: "continue" },
-      "nope",
-      { label: "X" },
-      { label: "Yes", text: "yes", extra: true },
-      { label: 1, text: "one" },
-    ]);
-    expect(read()).toEqual([
-      { label: "Go on", text: "continue" },
-      { label: "Yes", text: "yes" },
-    ]);
+    seed(storageKey(shortcuts), value);
+    expect(readPreference(shortcuts)).toEqual(DEFAULT_COMPOSER_SHORTCUTS);
   });
 });
 
 describe("terminal.launchers codec", () => {
-  const def = preferences.terminalLaunchers;
-  const KEY = storageKey(def);
-  const read = () => readPreference(def);
-
   it.each([
+    ["a stored null", null],
+    ["a non-array stored value", { name: "claude", command: "claude" }],
     ["an object", {}],
     ["a number", 5],
     ["an array of strings", ["claude"]],
     ["an entry missing its command", [{ name: "claude" }]],
     ["an entry of numbers", [{ name: 1, command: 2 }]],
   ])("%s falls back to the default", (_, value) => {
-    seed(KEY, value);
-    expect(read()).toEqual(DEFAULT_TERMINAL_LAUNCHERS);
+    seed(storageKey(launchers), value);
+    expect(readPreference(launchers)).toEqual(DEFAULT_TERMINAL_LAUNCHERS);
   });
+});
 
-  it("a stored null falls back to the default", () => {
-    seed(KEY, null);
-    expect(read()).toEqual(DEFAULT_TERMINAL_LAUNCHERS);
-  });
-
-  it("a non-array stored value falls back to the default", () => {
-    seed(KEY, { name: "claude", command: "claude" });
-    expect(read()).toEqual(DEFAULT_TERMINAL_LAUNCHERS);
-  });
-
-  it("a launcher whose name or command is only whitespace is dropped", () => {
-    seed(KEY, [
-      { name: "  ", command: "claude" },
-      { name: "codex", command: "codex" },
-      { name: "opencode", command: "  " },
-    ]);
-    expect(read()).toEqual([{ name: "codex", command: "codex" }]);
-  });
-
-  it("an empty list stays empty", () => {
-    seed(KEY, []);
-    expect(read()).toEqual([]);
-  });
-
-  it("a mixed list keeps valid entries and drops a non-string optional field", () => {
-    seed(KEY, [
-      { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
-      { name: "broken" },
-      { name: "codex", command: "codex", promptFlag: 5, runLoop: "" },
-      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: null },
-    ]);
-    expect(read()).toEqual([
-      { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
-      { name: "codex", command: "codex", runLoop: "" },
-      { name: "opencode", command: "opencode", promptFlag: "--prompt" },
-    ]);
+describe("list codecs keep the usable entries", () => {
+  it.each<[label: string, key: string, read: () => unknown, stored: unknown[], expected: unknown[]]>([
+    [
+      "shortcuts: an entry whose label or text is only whitespace is dropped",
+      storageKey(shortcuts),
+      () => readPreference(shortcuts),
+      [
+        { label: "  ", text: "yes" },
+        { label: "OK", text: "ok" },
+        { label: "Go", text: " \t " },
+      ],
+      [{ label: "OK", text: "ok" }],
+    ],
+    ["shortcuts: an empty list stays empty", storageKey(shortcuts), () => readPreference(shortcuts), [], []],
+    [
+      "shortcuts: a mixed list keeps its valid entries, in order, and only their fields",
+      storageKey(shortcuts),
+      () => readPreference(shortcuts),
+      [
+        { label: "Go on", text: "continue" },
+        "nope",
+        { label: "X" },
+        { label: "Yes", text: "yes", extra: true },
+        { label: 1, text: "one" },
+      ],
+      [
+        { label: "Go on", text: "continue" },
+        { label: "Yes", text: "yes" },
+      ],
+    ],
+    [
+      "launchers: an entry whose name or command is only whitespace is dropped",
+      storageKey(launchers),
+      () => readPreference(launchers),
+      [
+        { name: "  ", command: "claude" },
+        { name: "codex", command: "codex" },
+        { name: "opencode", command: "  " },
+      ],
+      [{ name: "codex", command: "codex" }],
+    ],
+    ["launchers: an empty list stays empty", storageKey(launchers), () => readPreference(launchers), [], []],
+    [
+      "launchers: a mixed list keeps valid entries and drops a non-string optional field",
+      storageKey(launchers),
+      () => readPreference(launchers),
+      [
+        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+        { name: "broken" },
+        { name: "codex", command: "codex", promptFlag: 5, runLoop: "" },
+        { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: null },
+      ],
+      [
+        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
+        { name: "codex", command: "codex", runLoop: "" },
+        { name: "opencode", command: "opencode", promptFlag: "--prompt" },
+      ],
+    ],
+  ])("%s", (_label, key, read, stored, expected) => {
+    seed(key, stored);
+    expect(read()).toEqual(expected);
   });
 });

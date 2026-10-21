@@ -217,47 +217,29 @@ describe("the session tier under a browser that refuses storage", () => {
    * Each case asserts the spy WAS called, so none of these tests can pass
    * vacuously with the refusing storage never actually consulted.
    */
-  it("a write that throws is swallowed and stores nothing", () => {
+  it.each<[label: string, method: "setItem" | "getItem" | "removeItem", act: () => void]>([
+    [
+      "a write that throws is swallowed and stores nothing",
+      "setItem",
+      () => writePreference(sessionPath, "/project/pavilio/notes"),
+    ],
+    [
+      "a read that throws answers the declared default",
+      "getItem",
+      () => expect(readPreference(sessionPath)).toBeNull(),
+    ],
+    ["a clear that throws is swallowed", "removeItem", () => clearPreference(sessionPath)],
+  ])("%s", (_label, method, act) => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const setItem = vi
-      .spyOn(globalThis.sessionStorage, "setItem")
-      .mockImplementation(() => {
-        throw new Error("quota");
-      });
+    const spy = vi.spyOn(globalThis.sessionStorage, method).mockImplementation(() => {
+      throw new Error("refused");
+    });
 
-    expect(() => writePreference(sessionPath, "/project/pavilio/notes")).not.toThrow();
+    expect(act).not.toThrow();
 
-    expect(setItem).toHaveBeenCalledTimes(1);
-    setItem.mockRestore();
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
     expect(globalThis.sessionStorage.getItem(sessionPath.key)).toBeNull();
-  });
-
-  it("a read that throws answers the declared default", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const getItem = vi
-      .spyOn(globalThis.sessionStorage, "getItem")
-      .mockImplementation(() => {
-        throw new Error("disabled");
-      });
-
-    expect(readPreference(sessionPath)).toBeNull();
-
-    expect(getItem).toHaveBeenCalledTimes(1);
-    getItem.mockRestore();
-  });
-
-  it("a clear that throws is swallowed", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const removeItem = vi
-      .spyOn(globalThis.sessionStorage, "removeItem")
-      .mockImplementation(() => {
-        throw new Error("disabled");
-      });
-
-    expect(() => clearPreference(sessionPath)).not.toThrow();
-
-    expect(removeItem).toHaveBeenCalledTimes(1);
-    removeItem.mockRestore();
   });
 });
 

@@ -1,70 +1,42 @@
 import { describe, it, expect } from "vitest";
 import { reorderIds, swapIds, mergeOrder } from "../sessionOrder";
 
+type Row = [label: string, ids: string[], a: string, b: string, expected: string[]];
+
 describe("reorderIds", () => {
-  it("moves fromId to just before toId", () => {
-    expect(reorderIds(["A","B","C","D"], "B", "D")).toEqual(["A","C","B","D"]);
-  });
-
-  it("moves first item to last position (before last)", () => {
-    expect(reorderIds(["A","B","C","D"], "A", "D")).toEqual(["B","C","A","D"]);
-  });
-
-  it("no-ops when fromId === toId", () => {
-    expect(reorderIds(["A","B","C"], "B", "B")).toEqual(["A","B","C"]);
-  });
-
-  it("no-ops when fromId is already just before toId", () => {
-    expect(reorderIds(["A","B","C"], "A", "B")).toEqual(["A","B","C"]);
-  });
-
-  it("returns original array if fromId not found", () => {
-    expect(reorderIds(["A","B"], "X", "B")).toEqual(["A","B"]);
-  });
-
-  it("returns original array if toId not found", () => {
-    expect(reorderIds(["A","B"], "A", "X")).toEqual(["A","B"]);
+  it.each<Row>([
+    ["moves fromId to just before toId", ["A", "B", "C", "D"], "B", "D", ["A", "C", "B", "D"]],
+    ["moves the first item to just before the last", ["A", "B", "C", "D"], "A", "D", ["B", "C", "A", "D"]],
+    ["no-ops when fromId === toId", ["A", "B", "C"], "B", "B", ["A", "B", "C"]],
+    ["no-ops when fromId is already just before toId", ["A", "B", "C"], "A", "B", ["A", "B", "C"]],
+    ["returns the original when fromId is not found", ["A", "B"], "X", "B", ["A", "B"]],
+    ["returns the original when toId is not found", ["A", "B"], "A", "X", ["A", "B"]],
+  ])("%s", (_label, ids, from, to, expected) => {
+    expect(reorderIds(ids, from, to)).toEqual(expected);
   });
 });
 
 describe("swapIds", () => {
-  it("swaps two items", () => {
-    expect(swapIds(["A","B","C","D"], "A", "D")).toEqual(["D","B","C","A"]);
-  });
-
-  it("swaps adjacent items", () => {
-    expect(swapIds(["A","B","C"], "A", "B")).toEqual(["B","A","C"]);
-  });
-
-  it("no-ops when idA === idB", () => {
-    expect(swapIds(["A","B","C"], "B", "B")).toEqual(["A","B","C"]);
-  });
-
-  it("returns original if either id not found", () => {
-    expect(swapIds(["A","B"], "A", "X")).toEqual(["A","B"]);
-    expect(swapIds(["A","B"], "X", "B")).toEqual(["A","B"]);
+  it.each<Row>([
+    ["swaps two items", ["A", "B", "C", "D"], "A", "D", ["D", "B", "C", "A"]],
+    ["swaps adjacent items", ["A", "B", "C"], "A", "B", ["B", "A", "C"]],
+    ["no-ops when idA === idB", ["A", "B", "C"], "B", "B", ["A", "B", "C"]],
+    ["returns the original when idB is not found", ["A", "B"], "A", "X", ["A", "B"]],
+    ["returns the original when idA is not found", ["A", "B"], "X", "B", ["A", "B"]],
+  ])("%s", (_label, ids, a, b, expected) => {
+    expect(swapIds(ids, a, b)).toEqual(expected);
   });
 });
 
 describe("mergeOrder", () => {
-  it("preserves stored order for known ids", () => {
-    expect(mergeOrder(["B","A","C"], ["A","B","C"])).toEqual(["B","A","C"]);
-  });
-
-  it("removes ids no longer in server list", () => {
-    expect(mergeOrder(["A","B","C"], ["A","C"])).toEqual(["A","C"]);
-  });
-
-  it("appends new ids not in stored order", () => {
-    expect(mergeOrder(["A","B"], ["A","B","C","D"])).toEqual(["A","B","C","D"]);
-  });
-
-  it("handles empty stored order (first load)", () => {
-    expect(mergeOrder([], ["A","B","C"])).toEqual(["A","B","C"]);
-  });
-
-  it("handles all ids being new", () => {
-    expect(mergeOrder(["X","Y"], ["A","B"])).toEqual(["A","B"]);
+  it.each<[label: string, stored: string[], server: string[], expected: string[]]>([
+    ["preserves stored order for known ids", ["B", "A", "C"], ["A", "B", "C"], ["B", "A", "C"]],
+    ["removes ids no longer in the server list", ["A", "B", "C"], ["A", "C"], ["A", "C"]],
+    ["appends new ids not in stored order", ["A", "B"], ["A", "B", "C", "D"], ["A", "B", "C", "D"]],
+    ["handles an empty stored order (first load)", [], ["A", "B", "C"], ["A", "B", "C"]],
+    ["handles all ids being new", ["X", "Y"], ["A", "B"], ["A", "B"]],
+  ])("%s", (_label, stored, server, expected) => {
+    expect(mergeOrder(stored, server)).toEqual(expected);
   });
 
   it("returns the same reference when the result is identical", () => {

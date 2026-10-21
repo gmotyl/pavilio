@@ -197,52 +197,29 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
-  it("Cmd+U on the focused cell opens the viewport modal", () => {
-    const session = makeSession({ id: "s-cmd-u" });
-    renderGrid({ sessions: [session], focusedId: session.id });
-
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "u", metaKey: true });
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-  });
-
-  it("Ctrl+U on the focused cell opens the viewport modal", () => {
-    const session = makeSession({ id: "s-ctrl-u" });
-    renderGrid({ sessions: [session], focusedId: session.id });
-
-    fireEvent.keyDown(window, { key: "u", ctrlKey: true });
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-  });
-
-  it("plain U (no modifier) does NOT open the modal", () => {
-    const session = makeSession({ id: "s-plain-u" });
-    renderGrid({ sessions: [session], focusedId: session.id });
-
-    fireEvent.keyDown(window, { key: "u" });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("Cmd+Shift+U is ignored (modifier set must be exact)", () => {
-    const session = makeSession({ id: "s-shift-u" });
-    renderGrid({ sessions: [session], focusedId: session.id });
-
-    fireEvent.keyDown(window, { key: "u", metaKey: true, shiftKey: true });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("Cmd+U on an unfocused cell does NOT open its modal", () => {
+  // Two cells, the first focused: the shortcut opens the focused cell's modal
+  // only (one dialog, never the unfocused cell's), and the modifier set must be
+  // exact. Pressing it again with the modal open toggles it closed.
+  it.each<[label: string, modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, opens: boolean]>([
+    ["Cmd+U opens the focused cell's modal and toggles it closed", { metaKey: true }, true],
+    ["Ctrl+U opens the focused cell's modal and toggles it closed", { ctrlKey: true }, true],
+    ["plain U (no modifier) does NOT open the modal", {}, false],
+    ["Cmd+Shift+U is ignored (modifier set must be exact)", { metaKey: true, shiftKey: true }, false],
+  ])("%s", (_label, modifiers, opens) => {
     const a = makeSession({ id: "s-a" });
     const b = makeSession({ id: "s-b" });
     renderGrid({ sessions: [a, b], focusedId: a.id });
 
-    fireEvent.keyDown(window, { key: "u", metaKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "u", ...modifiers });
 
-    // Only one dialog renders — for the focused session (a).
     const dialogs = screen.queryAllByRole("dialog");
-    expect(dialogs).toHaveLength(1);
-    expect(dialogs[0].getAttribute("aria-labelledby")).toBe(
-      "viewport-modal-title",
-    );
+    expect(dialogs).toHaveLength(opens ? 1 : 0);
+    if (!opens) return;
+    expect(dialogs[0].getAttribute("aria-labelledby")).toBe("viewport-modal-title");
+
+    fireEvent.keyDown(window, { key: "u", ...modifiers });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("Esc closes the modal even when an xterm-style bubble listener would swallow it", () => {
@@ -263,17 +240,6 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
     expect(xtermLikeHandler).not.toHaveBeenCalled();
 
     window.removeEventListener("keydown", xtermLikeHandler);
-  });
-
-  it("Cmd+U with modal open toggles it closed", () => {
-    const session = makeSession({ id: "s-toggle" });
-    renderGrid({ sessions: [session], focusedId: session.id });
-
-    fireEvent.keyDown(window, { key: "u", metaKey: true });
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-
-    fireEvent.keyDown(window, { key: "u", metaKey: true });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 
@@ -1010,58 +976,59 @@ describe("TerminalLayoutGrid — colour picker inside the rename edit", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
-  it("focus leaving the edit group commits the rename once", async () => {
-    const { user, onRename } = await enterRename();
+  type Rename = Awaited<ReturnType<typeof enterRename>>;
+  const focusHex = async ({ user }: Rename) => {
     await user.click(trigger());
     await user.click(screen.getByLabelText("Custom hex"));
+  };
 
-    // Focus goes nowhere (`relatedTarget` null) — the edit is over.
-    act(() => (document.activeElement as HTMLElement).blur());
+  it.each<[label: string, leave: (r: Rename) => Promise<void>, noDialog: boolean]>([
+    [
+      "focus leaving the edit group (relatedTarget null) from the hex field",
+      async (r) => {
+        await focusHex(r);
+        // Focus goes nowhere — the edit is over.
+        act(() => (document.activeElement as HTMLElement).blur());
+      },
+      true,
+    ],
+    [
+      "focus moving from the name field to an element outside the edit group",
+      async ({ input }) => {
+        fireEvent.blur(input, { relatedTarget: screen.getByTestId("terminal-cell-eye-e1") });
+      },
+      true,
+    ],
+    // The picker's outside-click close unmounts the popover — and the focused hex
+    // field with it — before the browser moves focus, so no focusout with an
+    // outside `relatedTarget` would ever reach the group without help.
+    [
+      "an outside click while the hex field is focused",
+      async (r) => {
+        await focusHex(r);
+        await r.user.click(document.body);
+      },
+      true,
+    ],
+    // The eye opens the viewport dialog, so only the picker is checked (by its hex field).
+    [
+      "clicking an outside button while the hex field is focused",
+      async (r) => {
+        await focusHex(r);
+        await r.user.click(screen.getByTestId("terminal-cell-eye-e1"));
+      },
+      false,
+    ],
+  ])("commits the rename once: %s", async (_label, leave, noDialog) => {
+    const r = await enterRename();
 
-    expect(onRename).toHaveBeenCalledTimes(1);
-    expect(onRename).toHaveBeenCalledWith("e1", "builder");
+    await leave(r);
+
+    expect(r.onRename).toHaveBeenCalledTimes(1);
+    expect(r.onRename).toHaveBeenCalledWith("e1", "builder");
     expect(nameInput()).toBeNull();
-    expect(dialog()).toBeNull();
-  });
-
-  it("focus moving to an element outside the edit group commits the rename once", async () => {
-    const { onRename, input } = await enterRename();
-
-    fireEvent.blur(input, { relatedTarget: screen.getByTestId("terminal-cell-eye-e1") });
-
-    expect(onRename).toHaveBeenCalledTimes(1);
-    expect(onRename).toHaveBeenCalledWith("e1", "builder");
-    expect(nameInput()).toBeNull();
-  });
-
-  // The picker's outside-click close unmounts the popover — and the focused hex
-  // field with it — before the browser moves focus, so no focusout with an
-  // outside `relatedTarget` would ever reach the group without help.
-  it("outside click while the hex field is focused commits once", async () => {
-    const { user, onRename } = await enterRename();
-    await user.click(trigger());
-    await user.click(screen.getByLabelText("Custom hex"));
-
-    await user.click(document.body);
-
-    expect(onRename).toHaveBeenCalledTimes(1);
-    expect(onRename).toHaveBeenCalledWith("e1", "builder");
-    expect(nameInput()).toBeNull();
-    expect(dialog()).toBeNull();
-  });
-
-  it("clicking an outside button while the hex field is focused commits once", async () => {
-    const { user, onRename } = await enterRename();
-    await user.click(trigger());
-    await user.click(screen.getByLabelText("Custom hex"));
-
-    await user.click(screen.getByTestId("terminal-cell-eye-e1"));
-
-    expect(onRename).toHaveBeenCalledTimes(1);
-    expect(onRename).toHaveBeenCalledWith("e1", "builder");
-    expect(nameInput()).toBeNull();
-    // The eye opens the viewport dialog, so check the picker by its hex field.
     expect(screen.queryByLabelText("Custom hex")).toBeNull();
+    if (noDialog) expect(dialog()).toBeNull();
   });
 
   it("clicking the name field while the hex field is focused closes the picker, keeps editing", async () => {

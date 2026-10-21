@@ -7,33 +7,16 @@ import MarkdownViewer from "../MarkdownViewer";
 // ---------- unit tests for the pure helper ----------
 
 describe("buildReadUrl", () => {
-  it("returns a plain read URL for normal paths", () => {
-    expect(buildReadUrl("pavilio/notes/foo.md")).toBe(
-      "/api/files/read/pavilio/notes/foo.md",
-    );
-  });
-
-  it("percent-encodes each path segment", () => {
-    expect(buildReadUrl("p/notes/a b#c?.md")).toBe("/api/files/read/p/notes/a%20b%23c%3F.md");
-    expect(buildReadUrl("_root/skills/a b/SKILL.md")).toBe("/api/files/read/a%20b/SKILL.md?root=skills");
-  });
-
-  it("maps _root/<rootId>/<rest> to ?root= query param", () => {
-    expect(buildReadUrl("_root/skills/memo/SKILL.md")).toBe(
-      "/api/files/read/memo/SKILL.md?root=skills",
-    );
-  });
-
-  it("URL-encodes the rootId", () => {
-    expect(buildReadUrl("_root/my root/file.md")).toBe(
-      "/api/files/read/file.md?root=my%20root",
-    );
-  });
-
-  it("handles _root with only rootId and no rest path", () => {
+  it.each([
+    ["a plain read URL for normal paths", "pavilio/notes/foo.md", "/api/files/read/pavilio/notes/foo.md"],
+    ["percent-encodes each path segment", "p/notes/a b#c?.md", "/api/files/read/p/notes/a%20b%23c%3F.md"],
+    ["percent-encodes each segment of a _root path", "_root/skills/a b/SKILL.md", "/api/files/read/a%20b/SKILL.md?root=skills"],
+    ["maps _root/<rootId>/<rest> to ?root= query param", "_root/skills/memo/SKILL.md", "/api/files/read/memo/SKILL.md?root=skills"],
+    ["URL-encodes the rootId", "_root/my root/file.md", "/api/files/read/file.md?root=my%20root"],
     // Edge case: _root/<id> with nothing after — rest is ""
-    const url = buildReadUrl("_root/skills");
-    expect(url).toBe("/api/files/read/?root=skills");
+    ["handles _root with only rootId and no rest path", "_root/skills", "/api/files/read/?root=skills"],
+  ])("%s", (_label, path, url) => {
+    expect(buildReadUrl(path)).toBe(url);
   });
 });
 
