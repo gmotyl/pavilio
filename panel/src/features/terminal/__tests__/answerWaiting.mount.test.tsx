@@ -45,7 +45,7 @@
  */
 import { render } from "@testing-library/react";
 import { useEffect } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // The activity channel dials a WebSocket at import time and re-arms a 2s
 // reconnect timer whenever that socket closes. Under fake timers a real dial
@@ -66,7 +66,6 @@ vi.hoisted(() => {
 });
 
 import {
-  __resetAnswerWaitingForTests,
   beginWaiting,
   getAnswerWaiting,
   holdAnswer,
@@ -75,40 +74,15 @@ import {
   releaseAnswer,
   watchSessionActivity,
 } from "../answerWaiting";
-import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
+import {
+  DEBOUNCE,
+  SESSION,
+  activity,
+  handedOver,
+  useWaitingClock,
+} from "./answerWaiting.harness";
 
-const SESSION = "cell-a";
-
-/** The window these tests are written against, pinned on the document — the
- *  number is a server-side knob, not something this suite may inherit. */
-const DEBOUNCE = 3000;
-
-/** The body's handover, as the pane reads it. */
-const handedOver = (sessionId = SESSION): boolean => getAnswerWaiting(sessionId).waiting;
-
-/** An activity broadcast for the cell, as the server sends it. */
-let at = 0;
-const activity = (state: "idle" | "busy" | "attention", sessionId = SESSION): void => {
-  at += 1;
-  _applyEventForTests({ sessionId, state, at });
-};
-
-beforeEach(() => {
-  at = 0;
-  _resetForTests();
-  __resetAnswerWaitingForTests();
-  vi.useFakeTimers();
-  (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__ = {
-    answerWaveDebounceMs: DEBOUNCE,
-  };
-});
-
-afterEach(() => {
-  _resetForTests();
-  __resetAnswerWaitingForTests();
-  vi.useRealTimers();
-  delete (globalThis as { __PAVILIO_TUNING__?: unknown }).__PAVILIO_TUNING__;
-});
+useWaitingClock();
 
 describe("the window a cell gets when it mounts onto a busy agent", () => {
   it("a cell mounting onto an already-busy session still gets a window", () => {
