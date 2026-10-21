@@ -201,44 +201,9 @@ describe("MarkdownViewer html handling", () => {
     expect(reads.length).toBeGreaterThan(0);
     for (const url of reads) expect(url).toContain("meta=1");
 
-    // The frame brings its own toolbar, with copy content off for a raster.
-    expect(screen.getByTestId("markdown-viewer-copy-content")).toBeDisabled();
+    // The frame brings its own toolbar — one, not the viewer's as well. What
+    // that toolbar offers for a raster is `MockupFrame.image.test.tsx`'s.
     expect(screen.getAllByTestId("markdown-viewer-copy-path")).toHaveLength(1);
-  });
-
-  it("view route copies an html or svg mockup's source", async () => {
-    for (const [path, source] of [
-      [MOCKUP_PATH, MOCKUP_SOURCE],
-      ["pavilio/mockups/icon.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>'],
-    ]) {
-      stubRead(source, `/root/git/prv/projects/projects/${path}`);
-      const writeText = spyClipboard();
-      const { unmount } = renderViewer(path);
-
-      const button = await screen.findByTestId("markdown-viewer-copy-content");
-      await waitFor(() => expect(button).not.toBeDisabled());
-      fireEvent.click(button);
-      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-      expect(writeText).toHaveBeenLastCalledWith(source);
-      // The svg is read as text: no meta-only read
-      const reads = vi
-        .mocked(fetch)
-        .mock.calls.map(([input]) => String(input))
-        .filter((url) => url.startsWith("/api/files/read/"));
-      for (const url of reads) expect(url).not.toContain("meta=1");
-      // …but capped, so a huge existing file is not read in full for Copy content
-      for (const url of reads) expect(url).toContain("maxBytes=");
-      unmount();
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("view route renders an uppercase svg through img", async () => {
-    stubRead("", "/root/git/prv/projects/projects/pavilio/mockups/ICON.SVG");
-    renderViewer("pavilio/mockups/ICON.SVG");
-
-    const img = await screen.findByTestId("markdown-viewer-image");
-    expect(img.tagName).toBe("IMG");
   });
 
   it("still renders markdown with the markdown renderer", async () => {

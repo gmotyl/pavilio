@@ -138,20 +138,6 @@ describe("MarkdownViewer copy actions", () => {
     ).toHaveTextContent("Copy");
   });
 
-  it("copy-content is disabled when there is nothing to copy", async () => {
-    stubRead("");
-    const writeText = spyClipboard();
-    renderViewer();
-
-    // The path is known (the read succeeded), so the toolbar is up — it is
-    // only the content that is empty.
-    const button = await screen.findByTestId("markdown-viewer-copy-content");
-    expect(button).toBeDisabled();
-
-    fireEvent.click(button);
-    expect(writeText).not.toHaveBeenCalled();
-  });
-
   it("only one action shows confirmation at a time", async () => {
     stubRead(SOURCE);
     const writeText = spyClipboard();

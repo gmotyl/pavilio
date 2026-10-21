@@ -36,26 +36,16 @@ const tree = () => screen.getByTestId("git-changes-tree");
 const rail = () => screen.getByTestId("pane-resize-git-changes");
 
 /**
- * The one box in the tree that scrolls — found by its `overflow-y-auto`
- * wherever it currently sits, deliberately NOT by a test id. A test id would
- * have to be attached to whichever element the implementation chose, and the
- * thing worth pinning is exactly that choice.
+ * Wiring only. The rail itself — separator semantics, drag, clamp, the hidden
+ * rail on a phone — is owned by `useResizablePane.test.tsx` and
+ * `PaneResizer.test.tsx`; the shared width and the inner scroller of all three
+ * trees by `GitBranchDiff.resize.test.tsx`.
  */
-function scroller(): HTMLElement {
-  const box = tree();
-  const found = [box, ...box.querySelectorAll<HTMLElement>("*")].filter((el) =>
-    el.classList.contains("overflow-y-auto"),
-  );
-  expect(found).toHaveLength(1);
-  return found[0];
-}
-
 describe("resizing the git-changes tree", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    installMatchMedia();
     stubFetch(GIT_ROUTES);
   });
 
@@ -63,56 +53,27 @@ describe("resizing the git-changes tree", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders a resize rail on the tree's inner edge", async () => {
+  it("drags from the tree's inner edge, within TREE_BOUNDS, into the repo-tree key", async () => {
+    const viewport = installMatchMedia();
     await renderTree();
-    const handle = rail();
-    expect(handle).toHaveAttribute("role", "separator");
-    expect(handle).toHaveAttribute("aria-orientation", "vertical");
-    // The inner edge — the seam with the diff, not the window edge.
-    expect(handle).toHaveAttribute("data-edge", "right");
-    // The rail lives inside the sticky box, so it travels with it.
-    expect(tree().contains(handle)).toBe(true);
-  });
 
-  it("widens the Changes tree when the rail is dragged", async () => {
-    await renderTree();
+    // The inner edge — the seam with the diff, not the window edge — inside
+    // the sticky box, so the rail travels with it.
+    expect(rail()).toHaveAttribute("data-edge", "right");
+    expect(tree().contains(rail())).toBe(true);
+
     dragBy(rail(), 60);
-
     expect(tree()).toHaveStyle({ width: "340px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
-  });
 
-  it("clamps the Changes tree to the shared bounds", async () => {
-    await renderTree();
     dragBy(rail(), 600);
-    expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.max}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.max);
-
     dragBy(rail(), -600);
-    expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.min}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.min);
-  });
 
-  it("leaves the width unapplied on a narrow viewport", async () => {
-    installMatchMedia({ mobile: true });
-    await renderTree();
-
-    expect(screen.queryByTestId("pane-resize-git-changes")).toBeNull();
-    // And no width either. The tree is `hidden md:block`, so a px width here
-    // would be a desktop habit written onto a box the phone never shows — and
-    // with no rail there is nothing to undo it with.
+    // The tree is `hidden md:block`, so a px width on a phone would be a
+    // desktop habit written onto a box it never shows, with no rail to undo it.
+    viewport.setMobile(true);
     expect(tree().style.width).toBe("");
-  });
-
-  it("scrolls the inner container, not the aside, so the rail stays put", async () => {
-    await renderTree();
-    const box = scroller();
-
-    // An absolute child of a SCROLL container scrolls away with the content, so
-    // leaving the `overflow-y-auto` on the aside — the tidy-looking option —
-    // makes the rail vanish the moment you scroll the tree.
-    expect(box).not.toBe(tree());
-    expect(tree().contains(box)).toBe(true);
-    expect(tree().className).not.toMatch(/overflow/);
   });
 });

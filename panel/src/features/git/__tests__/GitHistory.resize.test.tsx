@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import GitHistory from "../GitHistory";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
+import { TREE_BOUNDS } from "../repoTree";
 import { dragBy, installMatchMedia, stubFetch } from "../../../test-utils";
 
 const COMMITS = [
@@ -48,26 +49,18 @@ const tree = () => screen.getByTestId("git-history-tree");
 const rail = () => screen.getByTestId("pane-resize-git-history");
 
 /**
- * The one box in the tree that scrolls — found by its `overflow-y-auto`
- * wherever it currently sits, deliberately NOT by a test id. A test id would
- * have to be attached to whichever element the implementation chose, and the
- * thing worth pinning is exactly that choice.
+ * Wiring only. The rail itself — separator semantics, drag, clamp, the hidden
+ * rail on a phone — is owned by `useResizablePane.test.tsx` and
+ * `PaneResizer.test.tsx`; the shared width and the inner scroller of all three
+ * trees by `GitBranchDiff.resize.test.tsx`. What only this view can get wrong
+ * is which edge, which key, which bounds, and whether it writes a width on a
+ * phone.
  */
-function scroller(): HTMLElement {
-  const box = tree();
-  const found = [box, ...box.querySelectorAll<HTMLElement>("*")].filter((el) =>
-    el.classList.contains("overflow-y-auto"),
-  );
-  expect(found).toHaveLength(1);
-  return found[0];
-}
-
 describe("resizing the git-history tree", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    installMatchMedia();
     stubFetch(GIT_ROUTES);
   });
 
@@ -75,79 +68,36 @@ describe("resizing the git-history tree", () => {
     vi.unstubAllGlobals();
   });
 
-  it("the history tree renders a resize handle on desktop", async () => {
-    await renderTree();
-    const handle = rail();
-    expect(handle).toHaveAttribute("role", "separator");
-    expect(handle).toHaveAttribute("aria-orientation", "vertical");
-    // The inner edge — the seam with the diff, not the window edge.
-    expect(handle).toHaveAttribute("data-edge", "right");
-    // `w-[280px]` is GONE rather than overridden: `useResizablePane` starts a
-    // drag from React state, never a measurement, so a class still winning the
-    // cascade would leave the rendered tree disagreeing with the reported one.
-    expect(tree()).toHaveStyle({ width: "280px" });
-    expect(tree().className).not.toMatch(/w-\[280px\]/);
-    // `shrink-0` is the same guarantee from the other side: it stops the flex
-    // row squeezing the tree below the width the hook thinks it has.
-    expect(tree().className).toMatch(/\bshrink-0\b/);
-  });
-
-  it("dragging the handle changes and persists the width", async () => {
-    await renderTree();
-    dragBy(rail(), 60);
-
-    expect(tree()).toHaveStyle({ width: "340px" });
-    expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
-  });
-
-  it("the drag stops at the widths this tree was given", async () => {
-    await renderTree();
-    dragBy(rail(), 600);
-    expect(tree()).toHaveStyle({ width: "480px" });
-    expect(readPreference(preferences.repoTreePaneWidth)).toBe(480);
-
-    dragBy(rail(), -600);
-    expect(tree()).toHaveStyle({ width: "200px" });
-    expect(readPreference(preferences.repoTreePaneWidth)).toBe(200);
-  });
-
-  it("the history tree width is independent of the file list width", async () => {
+  it("drags from the tree's inner edge, within TREE_BOUNDS, into the repo-tree key alone", async () => {
+    const viewport = installMatchMedia();
     // A stored file-list width must not reach the tree...
     doc()[preferences.fileListPaneWidth.key] = 420;
     await renderTree();
+
+    // The inner edge — the seam with the diff, not the window edge — inside
+    // the sticky box, so the rail travels with it.
+    expect(rail()).toHaveAttribute("data-edge", "right");
+    expect(tree().contains(rail())).toBe(true);
     expect(tree()).toHaveStyle({ width: "280px" });
+    // `shrink-0` stops the flex row squeezing the tree below the width the
+    // hook thinks it has, or the rail jumps back on the next press.
+    expect(tree().className).toMatch(/\bshrink-0\b/);
 
     // ...and dragging the tree must not reach the file list. Sharing one
     // declaration would fail one of these two whichever key it borrowed.
     dragBy(rail(), -40);
     expect(tree()).toHaveStyle({ width: "240px" });
-    expect(readPreference(preferences.fileListPaneWidth)).toBe(420);
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(240);
-  });
+    expect(readPreference(preferences.fileListPaneWidth)).toBe(420);
 
-  it("no handle on a mobile viewport", async () => {
-    installMatchMedia({ mobile: true });
-    await renderTree();
+    dragBy(rail(), 600);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.max);
+    dragBy(rail(), -600);
+    expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.min);
 
-    expect(screen.queryByTestId("pane-resize-git-history")).toBeNull();
-    // And no width either. The tree is `hidden md:block`, so a px width here
-    // would be a desktop habit written onto a box the phone never shows — and
-    // with no rail there is nothing to undo it with.
+    // The tree is `hidden md:block`, so a px width on a phone would be a
+    // desktop habit written onto a box it never shows, with no rail to undo it.
+    viewport.setMobile(true);
     expect(tree().style.width).toBe("");
-  });
-
-  it("the tree scrolls inside the sticky box, not the box itself", async () => {
-    await renderTree();
-    const box = scroller();
-
-    // The rail is absolutely positioned, and an absolute child of a SCROLL
-    // container scrolls away with the content. Putting the cap and the
-    // `overflow-y-auto` back on the aside — the tidy-looking simplification —
-    // makes the rail vanish the moment you scroll the tree, and nothing else
-    // in this file notices. These two say the scroller is a descendant of the
-    // sticky box rather than the sticky box itself.
-    expect(box).not.toBe(tree());
-    expect(tree().contains(box)).toBe(true);
-    expect(tree().className).not.toMatch(/overflow/);
   });
 });

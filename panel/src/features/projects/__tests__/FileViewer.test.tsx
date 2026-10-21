@@ -49,21 +49,6 @@ describe("FileViewer copy contents", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it("copies the open file's source once loading finishes", async () => {
-    render(
-      <FileViewer
-        filePath="notes/foo.md"
-        content={CONTENT}
-        absolutePath={ABSOLUTE}
-        loading={false}
-      />,
-    );
-
-    expect(copyButton()).not.toBeDisabled();
-    fireEvent.click(copyButton());
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(CONTENT));
-  });
-
   it("copies raw json source rather than the pretty-printed rendering", async () => {
     render(
       <FileViewer

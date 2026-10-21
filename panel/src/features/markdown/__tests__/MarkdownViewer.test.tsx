@@ -21,7 +21,7 @@ describe("buildReadUrl", () => {
   });
 });
 
-// ---------- integration: viewer fetches the right URL ----------
+// ---------- wiring: the viewer reads through buildReadUrl (its table is above) ----------
 
 describe("MarkdownViewer cross-root fetch", () => {
   let fetchedUrls: string[];
@@ -62,20 +62,6 @@ describe("MarkdownViewer cross-root fetch", () => {
       expect(fetchedUrls).toContain(
         "/api/files/read/memo/SKILL.md?root=skills",
       ),
-    );
-  });
-
-  it("calls plain /api/files/read/<path> for a non-_root path", async () => {
-    render(
-      <MemoryRouter initialEntries={["/view/pavilio/notes/foo.md"]}>
-        <Routes>
-          <Route path="/view/*" element={<MarkdownViewer />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() =>
-      expect(fetchedUrls).toContain("/api/files/read/pavilio/notes/foo.md"),
     );
   });
 });

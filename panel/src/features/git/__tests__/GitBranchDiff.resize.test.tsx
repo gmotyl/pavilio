@@ -80,12 +80,17 @@ function scroller(box: HTMLElement): HTMLElement {
   return found[0];
 }
 
+/**
+ * Wiring only. The rail itself — separator semantics, drag, clamp, the hidden
+ * rail on a phone — is owned by `useResizablePane.test.tsx` and
+ * `PaneResizer.test.tsx`. This file also owns what the three repo trees share:
+ * one width, and a scroller inside the sticky box so the rail stays put.
+ */
 describe("resizing the git-branch-diff tree", () => {
   beforeEach(() => {
     // jsdom implements neither of these
     Element.prototype.setPointerCapture = vi.fn();
     Element.prototype.releasePointerCapture = vi.fn();
-    installMatchMedia();
     stubFetch(GIT_ROUTES);
   });
 
@@ -93,62 +98,37 @@ describe("resizing the git-branch-diff tree", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders a resize rail on the Branch Diff tree's inner edge", async () => {
+  it("drags from the tree's inner edge, within TREE_BOUNDS, into the repo-tree key", async () => {
+    const viewport = installMatchMedia();
     await renderTree();
-    const handle = rail();
-    expect(handle).toHaveAttribute("role", "separator");
-    expect(handle).toHaveAttribute("aria-orientation", "vertical");
-    // The inner edge — the seam with the diff, not the window edge.
-    expect(handle).toHaveAttribute("data-edge", "right");
-    // The rail lives inside the sticky box, so it travels with it.
-    expect(tree().contains(handle)).toBe(true);
-  });
 
-  it("widens the Branch Diff tree when the rail is dragged", async () => {
-    await renderTree();
+    // The inner edge — the seam with the diff, not the window edge — inside
+    // the sticky box, so the rail travels with it.
+    expect(rail()).toHaveAttribute("data-edge", "right");
+    expect(tree().contains(rail())).toBe(true);
+
     dragBy(rail(), 60);
-
     expect(tree()).toHaveStyle({ width: "340px" });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(340);
 
     // And the drag stops where the shared bounds say it does — the same
-    // object the other two trees are given, so a bound that drifted here
-    // would be a difference only a drag to each stop could find.
+    // object the other two trees are given.
     dragBy(rail(), 600);
     expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.max}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.max);
-
     dragBy(rail(), -600);
-    expect(tree()).toHaveStyle({ width: `${TREE_BOUNDS.min}px` });
     expect(readPreference(preferences.repoTreePaneWidth)).toBe(TREE_BOUNDS.min);
-  });
 
-  it("leaves the Branch Diff tree's width unapplied on a narrow viewport", async () => {
-    installMatchMedia({ mobile: true });
-    await renderTree();
-
-    expect(screen.queryByTestId("pane-resize-git-branch-diff")).toBeNull();
-    // And no width either. The tree is `hidden md:block`, so a px width here
-    // would be a desktop habit written onto a box the phone never shows — and
-    // with no rail there is nothing to undo it with.
+    // The tree is `hidden md:block`, so a px width on a phone would be a
+    // desktop habit written onto a box it never shows, with no rail to undo it.
+    viewport.setMobile(true);
     expect(tree().style.width).toBe("");
-  });
-
-  it("scrolls the inner container, not the aside", async () => {
-    await renderTree();
-    const box = scroller(tree());
-
-    // An absolute child of a SCROLL container scrolls away with the content, so
-    // leaving the `overflow-y-auto` on the aside — the tidy-looking option —
-    // makes the rail vanish the moment you scroll the tree.
-    expect(box).not.toBe(tree());
-    expect(tree().contains(box)).toBe(true);
-    expect(tree().className).not.toMatch(/overflow/);
   });
 
   it("renders all three scopes at a width stored by any one of them", async () => {
     // One stored value, written before anything mounts — whichever tree the
     // user happened to drag last is the one that wrote it.
+    installMatchMedia();
     doc()[preferences.repoTreePaneWidth.key] = 360;
 
     render(
@@ -176,8 +156,11 @@ describe("resizing the git-branch-diff tree", () => {
       expect(box).toHaveStyle({ width: "360px" });
       expect(box.className).not.toMatch(/\bw-\[\d+px\]/);
       // And the same structure under each: the scroller is the inner div, so
-      // the rail stays put in all three.
+      // the rail stays put in all three. An absolute child of a SCROLL
+      // container scrolls away with the content, so `overflow-y-auto` on the
+      // aside — the tidy-looking option — makes the rail vanish on scroll.
       expect(scroller(box)).not.toBe(box);
+      expect(box.className).not.toMatch(/overflow/);
     }
 
     // A drag on one of them moves the shared value, so the other two follow on
