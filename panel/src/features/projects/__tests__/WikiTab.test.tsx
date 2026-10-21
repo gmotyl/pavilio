@@ -324,8 +324,8 @@ describe("WikiTab", () => {
     expect(body.textContent).not.toContain("type: concept");
     expect(body.querySelector("h1")).toBeNull();
 
-    // Wikilinks: resolved → a viewer link, missing → amber warning text.
-    const resolved = body.querySelector('a[href="/view/pavilio/wiki/concepts/catch-up.md"]');
+    // Wikilinks: resolved → a wiki-tab link, missing → amber warning text.
+    const resolved = body.querySelector('a[href="/project/pavilio/wiki?file=pavilio%2Fwiki%2Fconcepts%2Fcatch-up.md"]');
     expect(resolved).not.toBeNull();
     await waitFor(() =>
       expect(container.querySelector(".wikilink-missing")?.textContent).toContain(

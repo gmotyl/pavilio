@@ -38,6 +38,20 @@ type MdNode = {
  */
 const viewerHref = (path: string) => `/view/${encodePathSegments(path)}`;
 
+/** `<project>/wiki/…`: a wiki page, which opens in its project's wiki tab. */
+const WIKI_PAGE = /^([^/]+)\/wiki\//;
+
+/**
+ * Where a wikilink target opens: a wiki page in its project's wiki tab (`?file=`), so the wiki
+ * tree stays beside it; any other file in the bare viewer.
+ */
+function linkHref(path: string): string {
+  const project = WIKI_PAGE.exec(path)?.[1];
+  return project
+    ? `/project/${encodeURIComponent(project)}/wiki?file=${encodeURIComponent(path)}`
+    : viewerHref(path);
+}
+
 const LINK = /\[\[([^[\]\n]+)\]\]/g;
 
 /** Nodes whose text must not become links: code is verbatim, and links cannot nest. */
@@ -57,7 +71,7 @@ function splitText(value: string, fromProject: string | undefined): MdNode[] | n
       path
         ? {
             type: "link",
-            url: viewerHref(path),
+            url: linkHref(path),
             children: [text],
             data: { hProperties: { [WIKILINK_ATTR]: path } },
           }
@@ -95,8 +109,8 @@ function transform(node: MdNode, fromProject: string | undefined): void {
 
 /**
  * Remark plugin: rewrites `[[…]]` in mdast `text` nodes into links to the viewer route
- * (`/view/<project>/<path>.md`). Code nodes carry `value`, not text children, so fences and
- * inline code stay verbatim.
+ * (`/view/<project>/<path>.md`), or to the wiki tab for wiki pages. Code nodes carry `value`,
+ * not text children, so fences and inline code stay verbatim.
  */
 export default function remarkWikiLinks(options: { basePath?: string } = {}) {
   const fromProject = owningProject(options.basePath);
