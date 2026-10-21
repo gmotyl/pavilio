@@ -163,6 +163,8 @@ describe("useSpeechHost warming", () => {
     // and the click that follows simply pays for the synthesis itself.
     await settle(() => synth.fail(units[0]));
     expect(result.current.preparingSessionIds.has("cell-a")).toBe(false);
+    // ...and it is swallowed: a warm nobody asked to hear raises no alert.
+    expect(getAlertsSnapshot()).toEqual([]);
 
     await settle(() => result.current.onSpeak("cell-a"));
     expect(timesRequested(units[0])).toBe(2);
@@ -1128,10 +1130,14 @@ describe("useSpeechHost — the idle transport", () => {
 
   it("idle previous keeps the transport on the same cell", async () => {
     const answerA1 = response(1, "AlphaOne");
+    const isSessionOpen = (): boolean => true;
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting, isSessionOpen }),
     );
     const host = (): SpeechHost => result.current;
+    // The panel's open-cell test is handed through for `idleTransportTarget`,
+    // whose closed-cell rule is pinned in `idleTransportTarget.test.ts`.
+    expect(host().isSessionOpen).toBe(isSessionOpen);
     await autoplay(host, "cell-a");
     await autoplay(host, "cell-b");
 
@@ -1159,58 +1165,6 @@ describe("useSpeechHost — the idle transport", () => {
     await settle(() => host().onSpeak(idleTransportTarget(host()) ?? ""));
     expect(played).toEqual([`blob:${unitsOf(answerA1)[0]}`]);
     expect(host().steppedSessionId).toBeNull();
-  });
-
-  it("an autoplay cell whose answer is heard is not an idle candidate", async () => {
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-    const host = (): SpeechHost => result.current;
-    await autoplay(host, "cell-a");
-
-    // A's answer autoplays to its end: heard, and older than anything else.
-    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
-    await endRun();
-    expect(host().stateFor("cell-a")).toBe("heard");
-    expect(host().oldestUnheardArrival("cell-a")).toBeNull();
-
-    // B is not in autoplay, and it is the one that spoke last.
-    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
-    await settle(() => host().onSpeak("cell-b"));
-    await endRun();
-
-    expect(host().autoplaySessionIds).toEqual(["cell-a"]);
-    expect(idleTransportTarget(host())).toBe("cell-b");
-  });
-
-  it("a closed cell is never the idle target", async () => {
-    const closed = new Set<string>();
-    const { result } = renderHook(() =>
-      useSpeechHost({
-        voiceFor: voiceForSession,
-        answerWaiting: storeAnswerWaiting,
-        isSessionOpen: (sessionId) => !closed.has(sessionId),
-      }),
-    );
-    const host = (): SpeechHost => result.current;
-
-    // A spoke last and B (autoplay) owes an answer: B is the target.
-    await autoplay(host, "cell-b");
-    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
-    await settle(() => host().onStop("cell-b"));
-    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
-    await settle(() => host().onSpeak("cell-a"));
-    await endRun();
-    expect(host().lastSpokenSessionId).toBe("cell-a");
-    expect(idleTransportTarget(host())).toBe("cell-b");
-
-    // B closes: the last speaker takes over.
-    closed.add("cell-b");
-    expect(idleTransportTarget(host())).toBe("cell-a");
-
-    // A closes too: nothing is left to play, rather than a cell nobody sees.
-    closed.add("cell-a");
-    expect(idleTransportTarget(host())).toBeNull();
   });
 });
 
@@ -1287,6 +1241,32 @@ describe("useSpeechHost — the voice's run events", () => {
 describe("useSpeechHost — the speech-stopped alert", () => {
   beforeEach(() => {
     __resetAlertsForTests();
+  });
+
+  it("a refused start leaves the cell ready and raises no alert", async () => {
+    // The browser refuses the start even though a gesture reached the element:
+    // `unlocked` says a gesture happened, never that playback is permitted. A
+    // refusal is not a natural end, so the cell is not heard — and it is
+    // reported by the pip, not by an alert.
+    // Only the audio is refused: the click's own source-less `unlock()` play
+    // goes through, so a plain `mockRejectedValueOnce` would be spent on it.
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play");
+    const harnessPlay = play.getMockImplementation();
+    play.mockImplementation(function (this: HTMLMediaElement) {
+      if (this.getAttribute("src")) {
+        return Promise.reject(new DOMException("blocked", "NotAllowedError"));
+      }
+      return harnessPlay ? harnessPlay.call(this) : Promise.resolve();
+    });
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await emitUtterance("cell-a", "u-1", response(1, "Refused"));
+    await settle(() => result.current.onSpeak("cell-a"));
+
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(getAlertsSnapshot()).toEqual([]);
   });
 
   it("onError raises the kind-specific alert", async () => {

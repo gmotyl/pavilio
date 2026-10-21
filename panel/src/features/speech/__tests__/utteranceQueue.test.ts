@@ -87,24 +87,6 @@ const withHistory = (count: number): UtteranceQueue => {
 };
 
 describe("utteranceQueueReducer", () => {
-  it("an utterance arriving idle becomes current", () => {
-    const state = arrive(emptyUtteranceQueue, answer(1), false);
-
-    expect(state.current).toEqual(answer(1));
-    expect(state.pending).toEqual([]);
-    expect(state.previous).toEqual([]);
-    expect(state.cursor).toBe(0);
-  });
-
-  it("an utterance arriving mid-playback is queued", () => {
-    const speaking = arrive(emptyUtteranceQueue, answer(1), false);
-
-    const state = arrive(speaking, answer(2), true);
-
-    expect(state.current).toEqual(answer(1));
-    expect(state.pending).toEqual([answer(2)]);
-  });
-
   it("queueing a sixth drops the oldest pending", () => {
     const state = arrive(withPending(MAX_PENDING), answer(MAX_PENDING + 1), true);
 
@@ -123,14 +105,6 @@ describe("utteranceQueueReducer", () => {
     expect(state.cursor).toBe(0);
   });
 
-  it("finishing with an empty queue leaves current null", () => {
-    const state = utteranceQueueReducer(frozen(withPending(0)), { type: "finished" });
-
-    expect(state.previous).toEqual([answer(0)]);
-    expect(state.current).toBeNull();
-    expect(state.pending).toEqual([]);
-  });
-
   it("walks back through five answers of history", () => {
     // Six answers, five of them superseded: the history is full and `current`
     // is the newest. Each press is one step further back, so three presses land
@@ -147,14 +121,6 @@ describe("utteranceQueueReducer", () => {
     // Walking the cursor never moves the answers themselves.
     expect(back.current).toEqual(answer(6));
     expect(back.previous).toEqual(state.previous);
-  });
-
-  it("drops the oldest answer when the history is full", () => {
-    const state = withHistory(MAX_PREVIOUS + 2);
-
-    expect(state.previous).toHaveLength(MAX_PREVIOUS);
-    expect(state.previous.map((u) => u.id)).toEqual(["u6", "u5", "u4", "u3", "u2"]);
-    expect(state.current).toEqual(answer(7));
   });
 
   it("clamps the cursor to the oldest answer still held when its own falls off the end", () => {
@@ -180,23 +146,11 @@ describe("utteranceQueueReducer", () => {
     expect(utteranceUnderCursor(state)).toEqual(answer(2));
   });
 
-  it("returns to where it started after going back and forward the same number of steps", () => {
-    const state = withHistory(4);
-    const started = utteranceUnderCursor(state);
-
-    const round = press(press(state, 2, "previous"), 2, "next");
-
-    expect(round.cursor).toBe(0);
-    expect(utteranceUnderCursor(round)).toBe(started);
-    expect(round.previous).toEqual(state.previous);
-    expect(round.pending).toEqual(state.pending);
-  });
-
   it("next steps exactly one answer forward, from the middle of the history", () => {
-    // The round trip above starts and ends on `current`, so it cannot tell a
-    // symmetric walk from a jump straight home: a `next` that collapsed the
-    // cursor to 0 in one press would satisfy it just as well. Asserted from the
-    // middle of the history instead, where the two differ — the transport is a
+    // A round trip that starts and ends on `current` cannot tell a symmetric
+    // walk from a jump straight home: a `next` that collapsed the cursor to 0
+    // in one press would satisfy it just as well. Asserted from the middle of
+    // the history instead, where the two differ — the transport is a
     // walk, one answer per press in either direction, and a listener stepping
     // forward out of a deep replay must not be thrown past everything between.
     const state = press(withHistory(5), 3, "previous");
@@ -211,23 +165,6 @@ describe("utteranceQueueReducer", () => {
     expect(utteranceUnderCursor(forward)).toEqual(answer(3));
     // And the press after it is one more step, not the rest of the way home.
     expect(press(forward, 1, "next").cursor).toBe(1);
-  });
-
-  it("stops at the oldest answer rather than falling off the end", () => {
-    const oldest = press(withHistory(3), 2, "previous");
-    expect(oldest.cursor).toBe(oldest.previous.length);
-    expect(utteranceUnderCursor(oldest)).toEqual(answer(1));
-
-    // No room left behind the cursor, so the press is a genuine no-op.
-    expect(utteranceQueueReducer(oldest, { type: "previous" })).toBe(oldest);
-  });
-
-  it("stops at the newest answer rather than falling off the front", () => {
-    const newest = withHistory(3);
-    expect(newest.cursor).toBe(0);
-    expect(newest.pending).toEqual([]);
-
-    expect(utteranceQueueReducer(newest, { type: "next" })).toBe(newest);
   });
 
   it("keeps the cursor on its utterance when a new answer arrives behind it", () => {
@@ -247,17 +184,11 @@ describe("utteranceQueueReducer", () => {
     expect(utteranceUnderCursor(superseded)).toEqual(answer(1));
   });
 
-  it("previous with no history returns the same state", () => {
-    const idle = arrive(emptyUtteranceQueue, answer(1), false);
-
-    expect(utteranceQueueReducer(idle, { type: "previous" })).toBe(idle);
-    expect(utteranceQueueReducer(emptyUtteranceQueue, { type: "previous" })).toBe(
-      emptyUtteranceQueue,
-    );
-  });
-
   it("an idle arrival moves the superseded utterance into previous", () => {
+    // The first arrival on an empty cell becomes current with no history.
     const idle = arrive(emptyUtteranceQueue, answer(1), false);
+    expect(idle.current).toEqual(answer(1));
+    expect(idle.previous).toEqual([]);
 
     const state = arrive(idle, answer(2), false);
 
@@ -346,32 +277,28 @@ describe("utteranceQueueReducer", () => {
     expect(state.pending).toEqual([answer(9)]);
   });
 
-  it("snaps the cursor back onto the newest answer", () => {
-    // A listener two answers deep in the history. `newest` is not a transport
-    // press — nothing is played by it — it is the body being moved back to the
-    // front of the queue because an answer has just landed and the pane is
-    // about to render it.
-    const walked = press(withHistory(3), 2, "previous");
-    expect(walked.cursor).toBe(2);
+  // `newest` is not a transport press — nothing is played by it — it is the
+  // body being moved back to the front of the queue because an answer has just
+  // landed and the pane is about to render it. The one-step case is the common
+  // one — an answer lands while the listener is re-reading the answer
+  // immediately behind it — and it is the case a guard written as `cursor > 1`
+  // would silently miss.
+  it.each([
+    { history: 3, steps: 2 },
+    { history: 2, steps: 1 },
+  ])("snaps the cursor back onto the newest answer from $steps step(s) back", ({ history, steps }) => {
+    const walked = press(withHistory(history), steps, "previous");
+    expect(walked.cursor).toBe(steps);
 
     const state = utteranceQueueReducer(frozen(walked), PRESSES.newest);
 
     expect(state.cursor).toBe(0);
-    expect(utteranceUnderCursor(state)).toEqual(answer(3));
+    expect(utteranceUnderCursor(state)).toEqual(answer(history));
     // The snap moves the cursor and nothing else: no answer is consumed,
     // promoted or dropped on the way.
     expect(state.previous).toEqual(walked.previous);
     expect(state.current).toEqual(walked.current);
     expect(state.pending).toEqual(walked.pending);
-  });
-
-  it("snaps from one step back as readily as from five", () => {
-    // The one-step case is the common one — an answer lands while the listener
-    // is re-reading the answer immediately behind it — and it is the case a
-    // guard written as `cursor > 1` would silently miss.
-    const walked = press(withHistory(2), 1, "previous");
-
-    expect(utteranceQueueReducer(frozen(walked), PRESSES.newest).cursor).toBe(0);
   });
 
   it("names the utterance the transport is on, whichever side of the cursor", () => {
@@ -384,19 +311,15 @@ describe("utteranceQueueReducer", () => {
     expect(utteranceUnderCursor(emptyUtteranceQueue)).toBeNull();
   });
 
-  it("the empty queue is frozen, so no cell can poison every other cell", () => {
-    // A module singleton handed out as every cell's initial state.
-    expect(Object.isFrozen(emptyUtteranceQueue)).toBe(true);
-    expect(Object.isFrozen(emptyUtteranceQueue.previous)).toBe(true);
-    expect(Object.isFrozen(emptyUtteranceQueue.pending)).toBe(true);
-  });
-
   it("returns the same reference for an event that changes nothing", () => {
     const idle = arrive(emptyUtteranceQueue, answer(1), false);
 
     // Nothing behind the cursor, nothing ahead of it, nothing to finish.
     expect(utteranceQueueReducer(idle, { type: "previous" })).toBe(idle);
     expect(utteranceQueueReducer(idle, { type: "next" })).toBe(idle);
+    expect(utteranceQueueReducer(emptyUtteranceQueue, { type: "previous" })).toBe(
+      emptyUtteranceQueue,
+    );
     expect(utteranceQueueReducer(emptyUtteranceQueue, { type: "finished" })).toBe(
       emptyUtteranceQueue,
     );

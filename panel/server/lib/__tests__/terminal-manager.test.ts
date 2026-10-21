@@ -213,66 +213,24 @@ describe("spawn env", () => {
 })
 
 describe("default session names", () => {
-  it("a new session defaults to project-scoped name alokai-1", () => {
-    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
-    expect(meta.name).toBe("alokai-1")
-    destroySession(meta.id)
-  })
-
-  it("default names are numbered per project", () => {
-    const alokai = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
-    const motyl = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "motyl" })
-    expect(motyl.name).toBe("motyl-1")
-    destroySession(alokai.id)
-    destroySession(motyl.id)
-  })
-
-  it("an explicit name overrides the default allocator", () => {
-    const meta = createSession({
-      cwd: process.cwd(),
-      cols: 80,
-      rows: 24,
-      project: "alokai",
-      name: "deploy-watch",
-    })
-    expect(meta.name).toBe("deploy-watch")
-    destroySession(meta.id)
-  })
-
-  it("an empty explicit name falls through to the project allocator", () => {
-    // Reset so this test's expected alokai-1 doesn't depend on how many
-    // alokai-project names earlier tests in this describe block already
-    // assigned.
+  // The numbering itself is `nextSessionName`'s (`terminal-identity.test.ts`:
+  // first session is 1, only the given project counts, lookalikes are
+  // ignored). What is the manager's own is which `name` input reaches it:
+  // absent or empty falls through to the allocator, anything else — "0"
+  // included, which a truthiness check would drop — is kept verbatim.
+  beforeEach(() => {
     _resetAssignedNamesForTests()
-    const meta = createSession({
-      cwd: process.cwd(),
-      cols: 80,
-      rows: 24,
-      project: "alokai",
-      name: "",
-    })
-    expect(meta.name).toBe("alokai-1")
-    destroySession(meta.id)
   })
 
-  it('an explicit name of "0" is kept verbatim', () => {
-    // Reset so this test's expected alokai-1 for the follow-up default
-    // session doesn't depend on earlier tests in this describe block.
-    _resetAssignedNamesForTests()
-    const zero = createSession({
-      cwd: process.cwd(),
-      cols: 80,
-      rows: 24,
-      project: "alokai",
-      name: "0",
-    })
-    expect(zero.name).toBe("0")
-
-    const next = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
-    expect(next.name).toBe("alokai-1")
-
-    destroySession(zero.id)
-    destroySession(next.id)
+  it.each([
+    { name: undefined, expected: "alokai-1" },
+    { name: "", expected: "alokai-1" },
+    { name: "deploy-watch", expected: "deploy-watch" },
+    { name: "0", expected: "0" },
+  ])("an explicit name of $name gives the session $expected", ({ name, expected }) => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai", name })
+    expect(meta.name).toBe(expected)
+    destroySession(meta.id)
   })
 })
 
@@ -414,8 +372,15 @@ describe("createSession with runAsUser", () => {
     destroySession(meta.id)
   })
 
-  it("createSession with a valid runAsUser on posix spawns the su form with a translated cwd", () => {
-    withWslDistroName(undefined, () => {
+  // wsl.exe -d <distro> -u <user>, invoked from a process already attached
+  // to a real pty, hangs indefinitely and never produces a shell. These
+  // accounts are plain Linux logins either way — WSL_DISTRO_NAME being set
+  // on the panel process must not change which spawn mechanism is used.
+  it.each([
+    { distro: undefined, where: "on posix" },
+    { distro: "Ubuntu", where: "under WSL_DISTRO_NAME" },
+  ])("createSession with a valid runAsUser $where spawns the su form with a translated cwd, never wsl.exe", ({ distro }) => {
+    withWslDistroName(distro, () => {
       const cwd = `${homedir()}/git/prv/pavilio`
       const meta = createSession({
         cwd,
@@ -440,45 +405,29 @@ describe("createSession with runAsUser", () => {
     })
   })
 
-  it("createSession with a valid runAsUser under WSL_DISTRO_NAME still spawns the su form, never wsl.exe", () => {
-    // wsl.exe -d <distro> -u <user>, invoked from a process already attached
-    // to a real pty, hangs indefinitely and never produces a shell. These
-    // accounts are plain Linux logins either way — WSL_DISTRO_NAME being set
-    // on the panel process must not change which spawn mechanism is used.
-    withWslDistroName("Ubuntu", () => {
-      const cwd = `${homedir()}/git/prv/pavilio`
-      const meta = createSession({
-        cwd,
-        cols: 80,
-        rows: 24,
-        project: "alokai",
-        runAsUser: RUN_AS_USER,
-      })
-
-      const translatedCwd = "/home/greg-ip/git/prv/pavilio"
-      const expected = buildRunAsSpawnCommand({
-        user: DEFAULT_TARGET_USER,
-        cwd: translatedCwd,
-        sessionId: meta.id,
-      })
-
-      expect(lastSpawnCall!.file).toBe("su")
-      expect(lastSpawnCall!.file).not.toBe("wsl.exe")
-      expect(lastSpawnCall!.args).toEqual(expected.args)
-      expect(lastSpawnCall!.options.cwd).toBe(translatedCwd)
-
-      destroySession(meta.id)
-    })
-  })
-
-  it("createSession falls back to the target's home + a visible notice when it has no ~/git link", () => {
-    // translateCwd blindly rewrites the path assuming every account reaches
-    // the shared tree via its own ~/git; an account that doesn't (e.g. a
-    // pre-existing home with its own unrelated content) would otherwise get
-    // a translated cwd that doesn't exist, which fails pty.spawn's own cwd
-    // chdir with a silent ENOENT before su/the shell ever run.
+  // The fallback is the manager's own decision (`terminal-run-as` only prints
+  // the notice it is handed). translateCwd blindly rewrites the path assuming
+  // every account reaches the shared tree via its own ~/git; an account that
+  // doesn't would otherwise get a translated cwd that doesn't exist, which
+  // fails pty.spawn's own cwd chdir with a silent ENOENT before su/the shell
+  // ever run. An account missing its ~/git link says nothing about a cwd that
+  // was never going to be rewritten under that link in the first place.
+  it.each([
+    {
+      label: "falls back to the target's home + a visible notice when it has no ~/git link",
+      cwd: `${homedir()}/git/prv/pavilio`,
+      spawnCwd: "/home/greg-ip",
+      notice:
+        "pavilio: greg-ip has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)",
+    },
+    {
+      label: "does not fall back when translateCwd never fired (no known owner-git prefix)",
+      cwd: "/opt/somewhere/else",
+      spawnCwd: "/opt/somewhere/else",
+      notice: undefined,
+    },
+  ])("createSession $label", ({ cwd, spawnCwd, notice }) => {
     mockOsUsers.hasGitBindMount = false
-    const cwd = `${homedir()}/git/prv/pavilio`
     const meta = createSession({
       cwd,
       cols: 80,
@@ -489,39 +438,14 @@ describe("createSession with runAsUser", () => {
 
     const expected = buildRunAsSpawnCommand({
       user: DEFAULT_TARGET_USER,
-      cwd: DEFAULT_TARGET_USER.homeDir,
+      cwd: spawnCwd,
       sessionId: meta.id,
-      notice: "pavilio: greg-ip has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)",
+      notice,
     })
 
     expect(lastSpawnCall!.args).toEqual(expected.args)
-    expect(lastSpawnCall!.args.join(" ")).toContain("echo ")
-    expect(lastSpawnCall!.options.cwd).toBe(DEFAULT_TARGET_USER.homeDir)
-
-    destroySession(meta.id)
-  })
-
-  it("createSession does not fall back when translateCwd never fired (no known owner-git prefix)", () => {
-    // An account missing its ~/git link says nothing about a cwd that was
-    // never going to be rewritten under that link in the first place.
-    mockOsUsers.hasGitBindMount = false
-    const cwd = "/opt/somewhere/else"
-    const meta = createSession({
-      cwd,
-      cols: 80,
-      rows: 24,
-      project: "alokai",
-      runAsUser: RUN_AS_USER,
-    })
-
-    const expected = buildRunAsSpawnCommand({
-      user: DEFAULT_TARGET_USER,
-      cwd,
-      sessionId: meta.id,
-    })
-
-    expect(lastSpawnCall!.args).toEqual(expected.args)
-    expect(lastSpawnCall!.options.cwd).toBe(cwd)
+    expect(lastSpawnCall!.args.join(" ").includes("echo ")).toBe(notice !== undefined)
+    expect(lastSpawnCall!.options.cwd).toBe(spawnCwd)
 
     destroySession(meta.id)
   })

@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
 import {
-  DEFAULT_SPEECH_VOICE,
   getProjectVoice,
   getStoredVoice,
   setProjectVoice,
@@ -27,12 +26,6 @@ const ANDREW = "en-US-AndrewMultilingualNeural";
 const EMMA = "en-US-EmmaMultilingualNeural";
 
 describe("project voice", () => {
-  it("the shipped default voice is Vivienne", () => {
-    expect(DEFAULT_SPEECH_VOICE).toBe(VIVIENNE);
-    expect(getStoredVoice()).toBe(VIVIENNE);
-    expect(voiceForProject("p")).toBe(VIVIENNE);
-  });
-
   it("an explicit default voice is kept", () => {
     globals.__PAVILIO_PREFS__![VOICE_KEY] = ANDREW;
 

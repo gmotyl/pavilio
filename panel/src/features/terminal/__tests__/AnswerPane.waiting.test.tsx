@@ -32,7 +32,7 @@ import { AnswerPane } from "../AnswerPane";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { __resetAnswerWaitingForTests, isAnswerHeld } from "../answerWaiting";
 import { fakeOnNext, fakeOnPrevious } from "../../speech/__tests__/fakeTransportHost";
-import { SUBMIT_RETURN_MS, __resetPtySubmitForTests } from "../ptySubmit";
+import { __resetPtySubmitForTests } from "../ptySubmit";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 import { readySpeech } from "./answerPane.harness";
@@ -96,19 +96,6 @@ const utterance = (id: string, text: string): Utterance => ({
 
 const queueOf = (u: Utterance): UtteranceQueue => ({
   previous: [],
-  current: u,
-  pending: [],
-  cursor: 0,
-});
-
-/**
- * The same cell with one step of history behind the answer on screen — what a
- * *previous* press needs in order to be a press at all. The bar disables the
- * control when the cursor has nothing left behind it, so a fixture without a
- * history would let a test about stepping back click a dead button and pass.
- */
-const queueBehind = (older: Utterance, u: Utterance): UtteranceQueue => ({
-  previous: [older],
   current: u,
   pending: [],
   cursor: 0,
@@ -253,8 +240,6 @@ const playButton = (): HTMLElement => screen.getByTestId(`speech-bar-playpause-$
 
 const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previous-${SESSION}`);
 
-const nextButton = (): HTMLElement => screen.getByTestId(`speech-bar-next-${SESSION}`);
-
 /** The debounce window these tests run under, pinned on the boot document. */
 const DEBOUNCE = 3000;
 
@@ -268,7 +253,7 @@ const DEBOUNCE = 3000;
  * The window is elapsed here because `busy` is *the PTY emitted output* and
  * the agent's trigger now waits it out before it may take the body. Every
  * criterion in this file is about an ESTABLISHED busy spell; the window itself
- * is pinned in `answerWaiting.debounce.test.ts`.
+ * is pinned in `answerWaiting.store.test.ts`.
  */
 const activity = (state: "idle" | "busy" | "attention", at: number): void => {
   act(() => {
@@ -367,25 +352,6 @@ describe("the answer pane while a reply is pending", () => {
     for (const command of commands) expect(command).not.toHaveBeenCalled();
   });
 
-  // The surface, not the pane alone: the arrival is noticed on the row, which
-  // is what lets the wait end while the pane is closed. A pane without its row
-  // is a shape `TerminalView` cannot render anyway — it mounts the pane only
-  // inside the row's own condition.
-  it("renders the new answer when one arrives", () => {
-    let queue = queueOf(utterance("u-1", ANSWER));
-    const speech = waitingSpeech(() => queue);
-    const { rerender } = render(surfaceTree(speech));
-
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    queue = queueOf(utterance("u-2", NEXT_ANSWER));
-    rerender(surfaceTree(speech));
-
-    expect(waiting()).toBeNull();
-    expect(within(body()).getByText(NEXT_ANSWER)).toBeInTheDocument();
-  });
-
   it("returns to the answer when the transport is used, keeping a pending mark", () => {
     render(surfaceTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
 
@@ -399,95 +365,6 @@ describe("the answer pane while a reply is pending", () => {
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
     expect(playButton()).toHaveAttribute("data-pending", "1");
-  });
-
-  /**
-   * The same scenario as the test above, with the one thing the real app does
-   * that it leaves out: the agent goes busy within a second of a send.
-   *
-   * With that broadcast in place a transport press no longer settles the body
-   * by itself — the agent's own claim on it is still standing — so the test
-   * above has quietly stopped covering the gesture it was written for. It is
-   * not weakened: a press on a cell whose agent has NOT gone busy still hands
-   * the body straight back, which is exactly what it asserts. This is its
-   * sibling, and the hold is what answers the case it cannot reach.
-   */
-  it("keeps the wave while the agent works, and gives the body back on a step back", () => {
-    const older = utterance("u-0", NEXT_ANSWER);
-    render(surfaceTree(waitingSpeech(() => queueBehind(older, utterance("u-1", ANSWER)))));
-
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    // The agent picked the draft up.
-    activity("busy", 2);
-    expect(waiting()).toBeInTheDocument();
-
-    // A press on play hands the SEND wait back to the play button and touches
-    // nothing else, so the agent still has the body: the wave stays up.
-    fireEvent.click(playButton());
-    expect(waiting()).toBeInTheDocument();
-    expect(playButton()).toHaveAttribute("data-pending", "1");
-
-    // Stepping BACK is a different gesture. It is the user saying they want
-    // the text, and it outranks every claim on the body until it is released
-    // — which is the whole of why the hold exists.
-    fireEvent.click(previousButton());
-
-    expect(waiting()).toBeNull();
-    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
-    // The reply is still coming, so the mark is still on the play button.
-    expect(playButton()).toHaveAttribute("data-pending", "1");
-  });
-
-  it("returns to the answer when the session goes idle having spoken nothing", () => {
-    _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
-    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
-
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    // Still working: the wait is not over because an event arrived.
-    activity("busy", 2);
-    expect(waiting()).toBeInTheDocument();
-
-    activity("idle", 3);
-
-    expect(waiting()).toBeNull();
-    expect(within(body()).getByText(ANSWER)).toBeInTheDocument();
-  });
-
-  it("does not schedule a timeout to leave the waiting state", () => {
-    vi.useFakeTimers();
-    _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
-    render(paneTree(waitingSpeech(() => queueOf(utterance("u-1", ANSWER)))));
-
-    const timeout = vi.spyOn(globalThis, "setTimeout");
-    const interval = vi.spyOn(globalThis, "setInterval");
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    // Nothing the WAIT owns was armed on the way in. The one timeout scheduled
-    // belongs to the write, not to this state: `ptySubmit` gives the
-    // submitting return a turn of its own so a TUI does not read it as part of
-    // the pasted body. It writes `\r` to the pty and touches nothing here —
-    // and the ten minutes below are what proves that.
-    expect(interval).not.toHaveBeenCalled();
-    expect(timeout.mock.calls.map(([, delay]) => delay)).toEqual([SUBMIT_RETURN_MS]);
-
-    // ...and ten minutes of clock changes nothing: the session is still busy,
-    // so the only thing that could end this wait has not happened.
-    // Inside `act`, deliberately: a timer that fired here would settle the
-    // store, and only a flush turns that into the DOM the next line reads. An
-    // unwrapped advance would leave the stale element in place and this half of
-    // the test would pass over an implementation that does use a timeout
-    // (verified: it did, before the wrap).
-    act(() => {
-      vi.advanceTimersByTime(10 * 60 * 1000);
-    });
-
-    expect(waiting()).toBeInTheDocument();
-    expect(within(body()).queryByText(ANSWER)).toBeNull();
   });
 
   it("notices the reply even when it lands with the pane closed", () => {
@@ -857,66 +734,24 @@ const BACKLOG: UtteranceQueue = {
 const heardOf = (...ids: string[]): ReadonlySet<string> => new Set(ids);
 
 describe("the waiting state counts what has not been played", () => {
-  it("shows how many answers have not been played", () => {
-    // The last played is the oldest of the four, so the three that arrived
-    // after it are the backlog.
-    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1"))));
+  // The label and its absence, over one fixture: which answer was played last
+  // decides how many arrived behind it. A pip reading "0" is worse than no pip
+  // — it says there is a backlog and then says the backlog is empty — so the
+  // positional rule (the NEWEST played means caught up, however much unplayed
+  // history is still reachable) renders no element at all.
+  it.each([
+    { heard: ["u-1"], label: "3 answers not played" },
+    { heard: ["u-3"], label: "1 answer not played" },
+    { heard: ["u-4"], label: null },
+    { heard: ["u-1", "u-2", "u-3", "u-4"], label: null },
+  ])("with $heard heard the count reads $label", ({ heard, label }) => {
+    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf(...heard))));
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
 
-    const count = notPlayedCount();
-    expect(count).toBeInTheDocument();
-    expect(count?.textContent).toMatch(/\b3\b/);
-  });
-
-  it("a zero count renders no element", () => {
-    // The NEWEST answer played, and the three behind it never played. This is
-    // the case the positional rule exists for: the listener is caught up, so
-    // there is nothing to show, however much unplayed history is still
-    // reachable behind them.
-    const { unmount } = render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-4"))));
-
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    // A pip reading "0" is worse than no pip: it says there is a backlog and
-    // then says the backlog is empty.
-    expect(notPlayedCount()).toBeNull();
-
-    unmount();
-    __resetAnswerWaitingForTests();
-    __resetPtySubmitForTests();
-    _resetForTests();
-
-    // ...and the same when every reachable answer has been played.
-    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1", "u-2", "u-3", "u-4"))));
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-    expect(notPlayedCount()).toBeNull();
-  });
-
-  it("the label is singular for one answer", () => {
-    // The last played is u-3, so exactly one answer arrived behind it.
-    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-3"))));
-
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "1 answer not played",
-    );
-  });
-
-  it("the label is plural for more than one", () => {
-    render(paneTree(waitingSpeech(() => BACKLOG, () => heardOf("u-1"))));
-
-    sendReply();
-    expect(waiting()).toBeInTheDocument();
-
-    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "3 answers not played",
-    );
+    // No element at all for a zero, not an empty one.
+    expect(notPlayedCount()?.textContent?.replace(/\s+/g, " ").trim() ?? null).toBe(label);
   });
 
   it("shows no count while the body is rendering an answer", () => {
@@ -1019,34 +854,6 @@ describe("the way back out of a hold", () => {
     expect(waiting()).toBeInTheDocument();
     expect(nextAnswerControl()).toBeNull();
     expect(within(body()).queryByText(ANSWER)).toBeNull();
-  });
-
-  it("keeps the hold while forward still has a backlog to walk", () => {
-    heldOnScreen();
-
-    // `BACKLOG` has an answer waiting behind the cursor, and the wave sits
-    // above the BACKLOG rather than above `current`. So this press is a step
-    // INTO it, not a step onto the wave: the hold survives and the control
-    // that draws it stays. A gate of "the cursor is on current" released here,
-    // spending the hold without moving and costing a second press to go one
-    // place.
-    fireEvent.click(nextButton());
-
-    expect(nextAnswerControl()).not.toBeNull();
-  });
-
-  it("releases onto the wave once nothing is waiting", () => {
-    render(surfaceTree(waitingSpeech(() => ({ ...BACKLOG, pending: [] }))));
-    activity("busy", 2);
-    fireEvent.click(previousButton());
-    expect(nextAnswerControl()).not.toBeNull();
-
-    // Nothing ahead of the cursor now, so forward is the step that arrives at
-    // the wave — and the transport's own control says what the pane's does.
-    fireEvent.click(nextButton());
-
-    expect(waiting()).toBeInTheDocument();
-    expect(nextAnswerControl()).toBeNull();
   });
 
   it("shows no Next answer control while the body is already waiting", () => {

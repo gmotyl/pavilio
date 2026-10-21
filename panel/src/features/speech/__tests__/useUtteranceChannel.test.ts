@@ -265,32 +265,6 @@ describe("useUtteranceChannel", () => {
     expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
   });
 
-  it("does not announce a response that has nothing to say", async () => {
-    const { result, rerender } = await renderChannel();
-
-    lastMessage = frame(codeOnly("cell-a", "a1"));
-    await act(async () => {
-      rerender();
-    });
-
-    // No pulse, no pip, no audio: the cell is as inert as one that never
-    // received anything, and nothing can be handed to the player either.
-    expect(result.current.stateFor("cell-a")).toBe("empty");
-    expect(result.current.utteranceFor("cell-a")).toBeNull();
-  });
-
-  it("does not announce a stored response that has nothing to say", async () => {
-    // Hydration is an arrival too — `/latest` keeps the last response per
-    // session whether or not it was speakable.
-    serveLatest([codeOnly("cell-a", "a1"), utterance("cell-b", "b1")]);
-
-    const { result } = await renderChannel();
-
-    await waitFor(() => expect(result.current.stateFor("cell-b")).toBe("ready"));
-    expect(result.current.stateFor("cell-a")).toBe("empty");
-    expect(result.current.utteranceFor("cell-a")).toBeNull();
-  });
-
   it("a response with nothing to say still casts its language vote", async () => {
     const { result, rerender } = await renderChannel();
 
@@ -302,7 +276,10 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
     expect(result.current.languageFor("cell-a")).toBe("en");
+    // No pulse, no pip, no audio: the cell is as inert as one that never
+    // received anything, and nothing can be handed to the player either.
     expect(result.current.stateFor("cell-a")).toBe("empty");
+    expect(result.current.utteranceFor("cell-a")).toBeNull();
 
     lastMessage = frame(codeOnly("cell-a", "a2"));
     await act(async () => {
