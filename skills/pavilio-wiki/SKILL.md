@@ -31,6 +31,8 @@ Every `scripts/wiki` command runs from the workspace root and prints one JSON ob
 
 ## 1. Resolve the project
 
+The knowledge harvest (§ 2, first rule) skips this section: its target is always `knowledge`.
+
 1. An explicit project argument or a `<project>:` prefix wins → `scripts/wiki project --name <p>`.
 2. Else a project set earlier in this conversation → pass it as `--name`.
 3. Else `scripts/wiki project` (cwd, then the panel cell).
@@ -42,6 +44,9 @@ is optional, and only its `## Archived Projects` rows are refused.
 ## 2. Pick the mode
 
 - `ingest knowledge [-yolo]` with no project argument before the verb → **Knowledge harvest**.
+- `<p> ingest knowledge …` (a project before the verb) → refuse: `knowledge` as the first word
+  after `ingest` is never an ordinary input. Point at `/pavilio-wiki ingest knowledge` for the
+  harvest, or `/pavilio-wiki knowledge ingest <input>…` to ingest into the knowledge project.
 - First remaining word is `ingest` → **Ingest**. Only this verb ingests: paths and URLs inside a
   question are question text.
 - `lint` → **Lint**.
@@ -120,6 +125,10 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 5. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
+   `source_writer` rewrites the whole page, so when the target already exists, first capture the
+   `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each
+   with `scripts/wiki backlink <p> <source page> <target>` (idempotent — a link the writer kept is
+   left alone). A failed writer left the old page in place; re-append anyway.
 6. **Backlog** — `scripts/wiki backlog <p> --touched <slug>,<slug>,…` — every namespaced slug
    from the receipts, comma-separated. Run it only after every source writer has returned. A
    catch-up (no inputs) drops `--touched`, so it also pays what earlier runs left owed.
@@ -221,18 +230,21 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
      | ≥4 | 9 |
      | ≥5 | 4 |
 
-     (counts illustrative). The user picks one; that batch is taken without per-item picking. For the rest the user
-     chooses: drop it, or continue into manual mode with what is left.
+     (counts illustrative). The user picks one; that batch is taken without per-item picking.
+     For the rest the user chooses: drop it, or continue into manual mode with what is left.
 5. **Page writers** — one `page_writer` per subject in knowledge-wiki mode
    (`agents/page_writer.md § Knowledge-wiki mode`), given the slug (`entities/<name>` for a tool,
    library or platform, `concepts/<name>` for a technique — reuse an existing `knowledge` page or
    alias first), the picked claims and their origins as `<project>:wiki/sources/<page>.md`.
    ≤10 in parallel, never two on one page.
-6. **Back-link** — for every picked item with a `source`:
-   `scripts/wiki backlink <project> <source> wiki/<slug>` (idempotent; adds
-   `- [[knowledge:wiki/<slug>]]` under the source page's `## Knowledge`).
-7. **Clear** — write every id the harvest saw (picked, skipped and dropped) to a JSON array file
-   and run `scripts/wiki clear-candidates --ids <file.json>`; `removed` must equal the count.
+6. **Back-link** — only after that subject's writer returned a valid receipt, for every picked
+   item of it with a `source`: `scripts/wiki backlink <project> <source> wiki/<slug>`
+   (idempotent; adds `- [[knowledge:wiki/<slug>]]` under the source page's `## Knowledge`). A
+   failed writer's items get no back-link.
+7. **Clear** — write every id the harvest saw (picked, skipped and dropped) except the items of a
+   failed page writer to a JSON array file and run `scripts/wiki clear-candidates --ids
+   <file.json>`; `removed` must equal the number of ids in that file. A failed writer's items
+   stay as candidates for the next harvest.
 8. **Index + overview** — `scripts/wiki index knowledge`, an `overview_writer` when pages changed,
    `index` again (exit 1 → stop before the commit, as in § Ingest).
 9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) listing
@@ -242,7 +254,12 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
     `knowledge: wiki harvest <n> picked`. Then `lock release`.
 
 Report: clusters picked / skipped / dropped, knowledge pages created/updated, back-links added,
-failures. A writer that fails keeps its items out of the clear list, so they come back next time.
+failures — each failed writer's subject, its items left as candidates (steps 6–7).
+
+Steps 6–7 edit other projects' `open-questions.md` and source pages while holding only the
+`knowledge` lock, not those projects' ingest locks. An ingest or query running in an origin project
+at the same time can race on those files (a lost candidate line or back-link); run the harvest
+when no other wiki session is writing.
 
 ## 6. Lint
 

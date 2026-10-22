@@ -41,7 +41,9 @@ and their roles. No status lines: PR numbers, test counts, branch names, "pendin
 checklists. Code detail is allowed here; it is cited from `repos/` pages, not concept pages.
 
 Once a harvest took one of its findings, the page ends with the back-links `scripts/wiki
-backlink` appends (never written by hand or by `source_writer`; a rewrite keeps the section):
+backlink` appends (never written by hand or by `source_writer`). `source_writer` rewrites the
+whole page and drops the section; ingest keeps it by capturing these lines before the rewrite and
+re-appending each with `scripts/wiki backlink` after it (`SKILL.md § 4. Ingest`, step 5):
 
 ```markdown
 ## Knowledge
@@ -60,8 +62,9 @@ sources: ["wiki/sources/note-2026-10-01-kickoff.md", "wiki/sources/progress-2026
 
 Body: `# <name>`, what it is, its role in this project, relationships (`[[wiki/entities/…]]`),
 decisions it is part of, each claim cited `([[wiki/sources/…]])`. In the `knowledge` project
-claims cite `([[<project>:wiki/sources/…]])` and `sources:` holds `"<project>:wiki/sources/….md"`. A `repository` entity is a short
-node that links down: `Code: [[wiki/repos/<repo>/index]]`.
+claims cite `([[<project>:wiki/sources/…]])` and `sources:` holds
+`"<project>:wiki/sources/….md"`. A `repository` entity is a short node that links down:
+`Code: [[wiki/repos/<repo>/index]]`.
 
 ## Concept page — `wiki/concepts/<name>.md`
 
@@ -163,7 +166,7 @@ newest `harvest` heading for the harvest age):
 
 ```markdown
 ## 2026-10-22 16:40 harvest (manual | -yolo ≥3)
-- picked: concepts/sse-backpressure ← pavilio [[pavilio:wiki/sources/progress-2026-10-19-tts-relay-node20]], metro
+- picked: concepts/sse-backpressure ← pavilio [[pavilio:wiki/sources/progress-2026-10-19-relay]]
 - skipped: "Node 20 fetch drops keep-alive" ← motyl
 - dropped: "Client X renews in Q3" ← alokai          # prefilter: not generic
 - pages: entities/edge-tts (created), concepts/sse-backpressure (updated)

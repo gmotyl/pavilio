@@ -34,16 +34,17 @@ Never edit one by hand; regenerate it.
   an archived change's `proposal.md` / `design.md`. Never `tasks.md`, delta specs, or today's
   progress. Records are cited in place by their project-relative path, never copied.
 - **Raw file** — anything without a stable workspace home, snapshotted verbatim under `wiki/raw/`:
-  `<slug>.md` (outside file), `article-<slug>.md`, `youtube-<id>.md`, `snippet-<YYYY-MM-DD>-<slug>.md`,
-  `context-snapshot-<YYYY-MM-DD>.md`, its per-section split
+  `<slug>.md` (outside file), `article-<slug>.md`, `youtube-<id>.md`,
+  `snippet-<YYYY-MM-DD>-<slug>.md`, `context-snapshot-<YYYY-MM-DD>.md`, its per-section split
   `context-snapshot-<YYYY-MM-DD>/<nn>-<section-slug>.md` (written by migrate; source page
   `sources/context-snapshot-<YYYY-MM-DD>-<section-slug>.md`), `repos/<owner>-<repo>/`. A raw file
   is never rewritten (clones are refreshed in place by `clone-repo`).
 - **Source page** — `wiki/sources/<kind>-<stem>.md`, one per record or raw file. `<kind>` is
   `note`, `memo`, `progress`, `adr`, `proposal`, `design`, `file`, `article`, `youtube`,
-  `snippet` or `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change id for
-  `proposal`/`design`), so raw `article-edge-tts.md` → `sources/article-edge-tts.md`, never
-  `article-article-…`. On a stem collision append the parent directory name. A changed record rewrites its existing source page.
+  `snippet` or `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change
+  id for `proposal`/`design`), so raw `article-edge-tts.md` → `sources/article-edge-tts.md`, never
+  `article-article-…`. On a stem collision append the parent directory name. A changed record
+  rewrites its existing source page.
 - **Slug** — lowercase kebab-case ASCII; people `first-last`. Frontmatter lists carry bare names
   (`concepts: [utterance]`); receipts, `mentions --touched` and page writers use the namespaced
   form `entities/<name>` / `concepts/<name>`, whose page is `wiki/<slug>.md`. Reuse an existing
@@ -77,7 +78,7 @@ next run picks them up; a page with an empty backlog is up to date.
 
 | Path | Writer | Regime |
 |---|---|---|
-| `raw/` | ingest routing, `fetch-article`, `fetch-youtube`, `clone-repo` | written once; clones refreshed |
+| `raw/` | ingest, `fetch-article`, `fetch-youtube`, `clone-repo` | written once; clones refreshed |
 | `sources/` | `source_writer` | one per record; rewritten when its hash changes |
 | `entities/`, `concepts/` | `page_writer` | incremental rewrite from the existing page + new source pages only |
 | `repos/<repo>/` | `repo_writer` | `ARCHITECTURE.md` rewritten on clone refresh; notes added |
@@ -85,11 +86,14 @@ next run picks them up; a page with an empty backlog is up to date.
 | `index.md` files | `scripts/wiki index` | generated |
 | `questions/` | query | one new page per explicit query; never edited after |
 | `notes/` | query | new, or enriched in place |
-| `open-questions.md` | query, ingest, harvest | append items; people resolve and delete them; the harvest clears the candidates it saw (`scripts/wiki clear-candidates`) |
+| `open-questions.md` | query, ingest, harvest | append items; people resolve and delete them |
 | `log.md` | query, ingest, harvest, `scripts/wiki record` | append-only |
-| `sources/` `## Knowledge` | `scripts/wiki backlink` | appended by the harvest, idempotent |
-| `knowledge/wiki/entities/`, `concepts/` | `page_writer` (knowledge-wiki mode) | harvest only |
+| `sources/` `## Knowledge` | `scripts/wiki backlink` | harvest; ingest re-adds after a rewrite |
+| `knowledge/wiki/` `entities/`, `concepts/` | `page_writer`, knowledge-wiki mode | harvest only |
 | `CONTEXT.md` | archive-plan, migrate | never this skill |
+
+The harvest also clears the candidates it handled from each `open-questions.md`
+(`scripts/wiki clear-candidates`); a failed page writer's items stay for the next harvest.
 
 People may edit any page. Writers keep `created` and human-added `aliases`.
 
