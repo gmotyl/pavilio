@@ -137,7 +137,9 @@ description: "Gaps the wiki could not answer and knowledge waiting for a home"
 - 2026-10-20 — <generic finding> (from [[wiki/sources/progress-2026-10-19-tts-relay-node20]])
 ```
 
-Append only; create the file with this skeleton when missing. People delete resolved items.
+Append only; create the file with this skeleton when missing. People delete resolved items. A
+candidate's indented sub-lines are part of it: the harvest reads them as its `details` and clears
+them with the bullet.
 
 ## log.md
 

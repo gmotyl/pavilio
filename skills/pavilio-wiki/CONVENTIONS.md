@@ -92,7 +92,7 @@ next run picks them up; a page with an empty backlog is up to date.
 | `knowledge/wiki/` `entities/`, `concepts/` | `page_writer`, knowledge-wiki mode | harvest only |
 | `CONTEXT.md` | archive-plan, migrate | never this skill |
 
-The harvest also clears the candidates it handled from each `open-questions.md`
+The harvest also clears the candidates it handled, indented sub-lines included, from each `open-questions.md`
 (`scripts/wiki clear-candidates`); a failed page writer's items stay for the next harvest.
 
 People may edit any page. Writers keep `created` and human-added `aliases`.

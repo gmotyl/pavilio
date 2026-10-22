@@ -211,9 +211,12 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
 1. **Target** — no `projects/knowledge/` → `scripts/project new knowledge --kind knowledge`
    (creates `PROJECT.md` with `kind: knowledge` and the `wiki/` skeleton). Then
    `scripts/wiki lock take knowledge --session <id>` as in § Ingest; `held: false` → stop.
-2. **Candidates** — `scripts/wiki candidates` → `items` (`id`, `project`, `text`, `date`,
-   `source`: the origin `wiki/sources/…` page or null) from every non-archived wiki except
-   `knowledge`, research projects included. None → release, report "no candidates", stop.
+2. **Candidates** — `scripts/wiki candidates` → `items` (`id`, `project`, `text`, `details`:
+   the bullet's indented sub-lines, dedented, `[]` when none, `date`, `source`: the origin
+   `wiki/sources/…` page or null) from every non-archived wiki except `knowledge`, research
+   projects included. `text` + `details` together are the finding: pass both to the prefilter
+   and the page writers (step 7 clears the sub-lines with the bullet). None → release, report
+   "no candidates", stop.
 3. **Prefilter + cluster** — cheap writers (`writerModel`, inputs inline, ≤150 items per chunk)
    drop what is not generic (business or client claims, project-specific facts), merge duplicates
    across projects into clusters, and give each cluster a subject (tool / library / platform /
@@ -237,7 +240,7 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
 5. **Page writers** — one `page_writer` per subject in knowledge-wiki mode
    (`agents/page_writer.md § Knowledge-wiki mode`), given the slug (`entities/<name>` for a tool,
    library or platform, `concepts/<name>` for a technique — reuse an existing `knowledge` page or
-   alias first), the picked claims and their origins as `<project>:wiki/sources/<page>.md`.
+   alias first), the picked claims (each `text` with its `details`) and their origins as `<project>:wiki/sources/<page>.md`.
    ≤10 in parallel, never two on one page.
 6. **Back-link** — only after that subject's writer returned a valid receipt, for every picked
    item of it with a `source`: `scripts/wiki backlink <project> <source> wiki/<slug>`

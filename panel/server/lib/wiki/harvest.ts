@@ -25,6 +25,11 @@ export type Candidate = {
   id: string;
   project: string;
   text: string;
+  /**
+   * The bullet's indented sub-lines, dedented by their common indent — part of the finding, and
+   * dropped with it by `clear-candidates`. Not part of `id`, so editing a detail keeps the id.
+   */
+  details: string[];
   date: string | null;
   /** The cited source page as a project-root path without `.md` (`wiki/sources/…`), or null. */
   source: string | null;
@@ -91,10 +96,16 @@ function parseCandidate(project: string, line: string, occurrence: number): Cand
   const cited = /\[\[(wiki\/sources\/[^\]|#]+)(?:[|#][^\]]*)?\]\]/.exec(rest);
   const source = cited ? cited[1].trim().replace(/\.md$/, "") : null;
   const text = rest.replace(/\s*\(from \[\[[^\]]*\]\]\)\s*$/, "").trim();
-  return { id: `${project}#${lineHash(line, occurrence)}`, project, text, date, source };
+  return { id: `${project}#${lineHash(line, occurrence)}`, project, text, details: [], date, source };
 }
 
 type Found = { /** Line indexes of the bullet and its indented sub-lines. */ indexes: number[]; item: Candidate };
+
+/** Strip the indent every line shares (tabs count as one column, like spaces). */
+function dedent(lines: string[]): string[] {
+  const indent = Math.min(...lines.map((l) => /^\s*/.exec(l)![0].length));
+  return lines.map((l) => l.slice(indent));
+}
 
 /** Every candidate of one project, with the lines it spans in `open-questions.md`. */
 function projectCandidates(workspaceRoot: string, project: string): { lines: string[]; found: Found[] } {
@@ -113,6 +124,7 @@ function projectCandidates(workspaceRoot: string, project: string): { lines: str
     const item = parseCandidate(project, lines[i], occurrence);
     const indexes = [i];
     while (i + 1 < range[1] && isContinuation(lines[i + 1])) indexes.push(++i);
+    item.details = dedent(indexes.slice(1).map((at) => lines[at].replace(/\r$/, "").trimEnd()));
     found.push({ indexes, item });
   }
   return { lines, found };

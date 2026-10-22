@@ -106,6 +106,26 @@ describe("harvest", () => {
     );
   });
 
+  it("candidates carry their indented details, dedented, with the id of the top line alone", () => {
+    project("alpha", [
+      "- 2026-10-20 — parent one",
+      "  - a nested detail of one",
+      "    continuation of the detail",
+      "- 2026-10-20 — parent two",
+    ]);
+    const { items } = listCandidates(root);
+    const one = items.find((i) => i.text === "parent one")!;
+    expect(one.details).toEqual(["- a nested detail of one", "  continuation of the detail"]);
+    expect(items.find((i) => i.text === "parent two")!.details).toEqual([]);
+
+    // Editing a detail keeps the id: it hashes the top-level line only.
+    write(
+      "projects/alpha/wiki/open-questions.md",
+      read("projects/alpha/wiki/open-questions.md").replace("a nested detail of one", "an edited detail"),
+    );
+    expect(listCandidates(root).items.find((i) => i.text === "parent one")!.id).toBe(one.id);
+  });
+
   it("identical candidate lines get distinct ids and clear one at a time", () => {
     project("alpha", ["- 2026-10-20 — same", "- 2026-10-20 — other", "- 2026-10-20 — same"]);
     const { items } = listCandidates(root);
