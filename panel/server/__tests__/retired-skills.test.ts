@@ -149,6 +149,53 @@ describe("retired skills", () => {
     expect(existsSync(join(repo, ".opencode/commands/pavilio-bootstrap.md"))).toBe(false);
   });
 
+  it("both setup scripts ignore a RETIRED name with a CR inside it", () => {
+    write(join(repo, "skills/RETIRED"), "private\r-skill\n");
+    write(join(repo, ".claude/commands/private-skill.md"), "mine\n");
+    write(join(repo, ".opencode/commands/private-skill.md"), "mine\n");
+    const skills = join(home, ".claude/skills");
+    mkdirSync(skills, { recursive: true });
+    symlinkSync(join(sandbox, "gone-clone/skills/private-skill"), join(skills, "private-skill"));
+
+    run("setup:claude-code");
+    run("setup:opencode");
+
+    expect(existsSync(join(repo, ".claude/commands/private-skill.md"))).toBe(true);
+    expect(existsSync(join(repo, ".opencode/commands/private-skill.md"))).toBe(true);
+    expect(isLink(join(skills, "private-skill"))).toBe(true);
+  });
+
+  it("setup:claude-code keeps a foreign retired skill link when readlink has no -f", () => {
+    // BSD readlink (macOS) rejects -f; a failed resolution must never count as "ours".
+    writeFileSync(join(stubBin, "readlink"), '#!/bin/bash\n[ "$1" = -f ] && exit 1\nexec /bin/readlink "$@"\n', {
+      mode: 0o755,
+    });
+    const other = join(sandbox, "other-clone/skills/pavilio-bootstrap");
+    write(join(other, "SKILL.md"), "---\nname: pavilio-bootstrap\n---\n# other clone\n");
+    const skills = join(home, ".claude/skills");
+    mkdirSync(skills, { recursive: true });
+    symlinkSync(other, join(skills, "pavilio-bootstrap"));
+
+    run("setup:claude-code");
+
+    expect(isLink(join(skills, "pavilio-bootstrap"))).toBe(true);
+  });
+
+  it("setup:claude-code unlinks a retired skill link into this repo's live dir without readlink -f", () => {
+    writeFileSync(join(stubBin, "readlink"), '#!/bin/bash\n[ "$1" = -f ] && exit 1\nexec /bin/readlink "$@"\n', {
+      mode: 0o755,
+    });
+    // The retired skill's dir still exists here (no SKILL.md), so the link is not dangling.
+    write(join(repo, "skills/pavilio-bootstrap/notes.md"), "leftover\n");
+    const skills = join(home, ".claude/skills");
+    mkdirSync(skills, { recursive: true });
+    symlinkSync(join(repo, "skills/pavilio-bootstrap"), join(skills, "pavilio-bootstrap"));
+
+    run("setup:claude-code");
+
+    expect(isLink(join(skills, "pavilio-bootstrap"))).toBe(false);
+  });
+
   it("setup:claude-code works from any cwd", () => {
     write(join(repo, ".claude/commands/pavilio-bootstrap.md"), "old\n");
 

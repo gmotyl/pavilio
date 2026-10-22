@@ -420,6 +420,22 @@ describe("scripts/update.sh sync commit", () => {
     expect(existsSync(join(dest, "skills", "pavilio-bootstrap"))).toBe(false);
   });
 
+  it("ignores a RETIRED name with a CR inside it instead of stripping the CR", () => {
+    initDestRepo();
+    mkdirSync(join(dest, "skills", "private-skill"), { recursive: true });
+    writeFileSync(join(dest, "skills", "private-skill", "SKILL.md"), "# mine\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "workspace skills");
+    // Only a trailing CR is a line terminator; `private\r-skill` is not the name `private-skill`.
+    writeFileSync(join(upstream, "skills", "RETIRED"), "private\r-skill\n");
+    commitUpstream("retire a malformed name");
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(existsSync(join(dest, "skills", "private-skill", "SKILL.md"))).toBe(true);
+  });
+
   it("skips the retired-skill cleanup when the workspace skills/ is a symlink", () => {
     initDestRepo();
     // skills/ points outside the workspace: rm -rf through it would delete foreign files.
