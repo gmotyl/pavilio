@@ -6,6 +6,7 @@ import { pageBacklog } from "./backlog";
 import { cloneRepo } from "./clone-repo";
 import { loadWikiConfig, readWikiConfig, type WikiConfig } from "./config";
 import { fetchArticle } from "./fetch-article";
+import { fetchYoutube, UvMissingError, type Runner } from "./fetch-youtube";
 import { buildIndex } from "./index-md";
 import { pendingRecords, recordIngested } from "./ledger";
 import { lintWiki } from "./lint";
@@ -22,7 +23,7 @@ import { resolveProject, type FetchLike } from "./project";
  * or 2 (ask the user, `{ask: true, reason}`). Diagnostics and usage go to stderr only.
  *
  * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`/`removed`,
- * `fetch-article` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
+ * `fetch-article`/`fetch-youtube` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
  * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys and
  * `backlog`'s source paths, which are project-root `wiki/…` paths ready for a page writer.
  *
@@ -48,6 +49,8 @@ const USAGE = `usage: scripts/wiki <command> [args]
   lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers}
   config                                    {sessionStartIngest, writerModel}
   fetch-article <p> <url>                   {raw, title, warning?}
+  fetch-youtube <p> <url>                   {raw, title, track}: transcript via uvx yt-dlp into
+                                            raw/youtube-<id>.md | exit 2 {ask, reason} without uv
   clone-repo <p> <url>                      {clonePath, commitSha, action}
 
 <p> is a project dir under <workspace>/projects/. Paths in receipts are wiki-relative except
@@ -65,6 +68,8 @@ export type CliDeps = {
   /** Overrides `env.PAVILIO_WORKSPACE_ROOT` and the default. */
   workspaceRoot?: string;
   fetch?: FetchLike;
+  /** Command runner for `fetch-youtube` (tests inject a fake yt-dlp). */
+  run?: Runner;
 };
 
 /** The dir above `panel/`: `panel/server/lib/wiki/cli.ts` → four levels up. */
@@ -220,6 +225,16 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       const [p, url] = only(parsed, 2, "fetch-article <p> <url>");
       const options = deps.fetch ? { fetch: deps.fetch as typeof fetch } : {};
       return ok({ ...(await fetchArticle(projectDir(workspaceRoot, p), url, options)) });
+    }
+    case "fetch-youtube": {
+      const [p, url] = only(parsed, 2, "fetch-youtube <p> <url>");
+      const dir = projectDir(workspaceRoot, p);
+      try {
+        return ok({ ...(await fetchYoutube(dir, url, deps.run ? { run: deps.run } : {})) });
+      } catch (err) {
+        if (err instanceof UvMissingError) return { code: 2, body: { ask: true, reason: err.message } };
+        throw err;
+      }
     }
     case "clone-repo": {
       const [p, url] = only(parsed, 2, "clone-repo <p> <url>");
