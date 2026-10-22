@@ -5,7 +5,7 @@ import {
   PROJECT_MARK_ICONS,
   derivedProjectColor,
   parseProjectMark,
-} from "../projectMark";
+} from "../projectIdentity";
 
 describe("unset colour derives from the project name and is stable", () => {
   it("returns a preset colour, the same one on every call", () => {

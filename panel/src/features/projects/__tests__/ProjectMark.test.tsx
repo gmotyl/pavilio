@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { preferences } from "../../../preferences/declarations";
 import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
 import { PROJECT_MARK_COMPONENTS, ProjectMark } from "../ProjectMark";
-import { PROJECT_MARK_ICONS, derivedProjectColor } from "../projectMark";
+import { PROJECT_MARK_ICONS, derivedProjectColor } from "../projectIdentity";
 
 afterEach(() => {
   cleanup();

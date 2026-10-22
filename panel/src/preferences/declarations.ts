@@ -25,7 +25,7 @@
  * would close a cycle the moment those features start reading the registry.
  */
 import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
-import { PROJECT_COLOR_HEX_RE, parseProjectMark } from "../features/projects/projectMark";
+import { PROJECT_COLOR_HEX_RE, parseProjectMark } from "../features/projects/projectIdentity";
 import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";

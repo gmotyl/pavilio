@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { derivedProjectColor } from "../../projects/projectMark";
+import { derivedProjectColor } from "../../projects/projectIdentity";
 import { readPreference, writePreference } from "../../../preferences/store";
 import { preferences } from "../../../preferences/declarations";
 import { useProjectColors } from "../useProjectColors";

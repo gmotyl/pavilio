@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 
 import { alerts } from "../alerts/store";
-import { PROJECT_COLOR_PRESETS } from "../projects/projectMark";
+import { PROJECT_COLOR_PRESETS } from "../projects/projectIdentity";
 import { useProjectColors } from "./useProjectColors";
 
 /**
  * The palette offered in the picker — the same list the derived default colour
- * is picked from, owned by `features/projects/projectMark.ts`.
+ * is picked from, owned by `features/projects/projectIdentity.ts`.
  */
 export { PROJECT_COLOR_PRESETS };
 
