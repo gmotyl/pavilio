@@ -25,9 +25,9 @@ export type ScaffoldResult =
   | { ok: true; created: string[] } // project-relative paths written
   | { ok: false; ask: true; reason: "exists" | "archived" };
 
-/** A plain dir name: no separators, no dot segments, not the archive dir itself. */
+/** A slug (lowercase letters, digits, `.`, `_`, `-`; starts alphanumeric), not the archive dir itself. */
 export function isValidProjectName(name: string): boolean {
-  return !!name && name !== "." && !name.includes("..") && !/[/\\]/.test(name) && name !== "archived" && name.trim() === name;
+  return /^[a-z0-9][a-z0-9._-]*$/.test(name) && name !== "archived";
 }
 
 function projectCard(input: ScaffoldInput): string {
@@ -146,11 +146,14 @@ function skeleton(input: ScaffoldInput): { files: [string, string][]; keptDirs: 
 /**
  * Create the skeleton of project `name` under `projectsDir` and add its registry row. Asks (writes
  * nothing) when the project already has a card or the name is taken under `archived/`. Throws on
- * an unsafe name.
+ * a name that is not a slug and on a research project without a topic.
  */
 export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const { projectsDir, name } = input;
   if (!isValidProjectName(name)) throw new Error(`invalid project name: ${JSON.stringify(name)}`);
+  if (input.kind === "research" && !input.topic?.trim()) {
+    throw new Error("a topic is required for research projects (--topic \"…\")");
+  }
   const projectDir = join(projectsDir, name);
   if (existsSync(join(projectDir, "PROJECT.md"))) return { ok: false, ask: true, reason: "exists" };
   if (existsSync(join(projectsDir, "archived", name))) return { ok: false, ask: true, reason: "archived" };

@@ -55,6 +55,24 @@ describe("scripts/project", () => {
     expect(unsafe.json.error).toMatch(/invalid project name/);
   });
 
+  it("cli new rejects a name that is not a slug", async () => {
+    for (const name of ["Acme", "my project", "-x", ".hidden", "archived", "a/b", "zażółć"]) {
+      const res = await cli(["new", name]);
+      expect(res.code, name).toBe(1);
+      expect(res.json.error, name).toMatch(/invalid project name/);
+    }
+    expect(existsSync(join(root, "projects/Acme"))).toBe(false);
+    expect((await cli(["new", "a1.b_c-d"])).code).toBe(0);
+  });
+
+  it("cli new requires a topic for research", async () => {
+    const res = await cli(["new", "lab", "--kind", "research"]);
+    expect(res.code).toBe(1);
+    expect(res.json.error).toMatch(/topic is required for research projects/);
+    expect(existsSync(join(root, "projects/lab"))).toBe(false);
+    expect((await cli(["new", "lab", "--kind", "research", "--topic", "  "])).code).toBe(1);
+  });
+
   it("cli new exits 2 with reason", async () => {
     mkdirSync(join(root, "projects/acme"), { recursive: true });
     writeFileSync(join(root, "projects/acme/PROJECT.md"), "# Acme\n");

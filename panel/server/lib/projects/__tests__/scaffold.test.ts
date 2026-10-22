@@ -111,6 +111,16 @@ describe("scaffoldProject", () => {
     expect(readFileSync(registryFile(), "utf8")).toBe(REGISTRY);
   });
 
+  it("throws on a non-slug name or a research project without a topic", () => {
+    expect(() => scaffoldProject({ projectsDir, name: "Acme Corp", kind: "project", today: "2026-10-22" })).toThrow(
+      /invalid project name/,
+    );
+    expect(() => scaffoldProject({ projectsDir, name: "lab", kind: "research", today: "2026-10-22" })).toThrow(
+      /topic is required for research projects/,
+    );
+    expect(existsSync(join(projectsDir, "lab"))).toBe(false);
+  });
+
   it("refuses a name taken in archived", () => {
     mkdirSync(join(projectsDir, "archived", "old"), { recursive: true });
     const result = scaffoldProject({ projectsDir, name: "old", kind: "project", today: "2026-10-22" });

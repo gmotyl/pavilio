@@ -20,6 +20,8 @@ const USAGE = `usage: scripts/project <command> [args]
   new <name> [--kind project|research|knowledge] [--topic "…"]
                                             {created}: project-relative paths written
                                             | exit 2 {ask, reason: exists | archived}
+                                            <name>: a slug, [a-z0-9][a-z0-9._-]*; --topic is
+                                            required for --kind research
 
 Exit: 0 ok, 1 error {error}, 2 ask the user.
 Workspace: $PAVILIO_WORKSPACE_ROOT, default the dir that contains scripts/ and panel/.
