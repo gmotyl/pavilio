@@ -127,8 +127,10 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
    `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each
-   with `scripts/wiki backlink <p> <source page> <target>` (idempotent — a link the writer kept is
-   left alone). A failed writer left the old page in place; re-append anyway.
+   with `scripts/wiki backlink <p> <source page> <target>`, where `<target>` is the link's bare
+   target `wiki/<slug>` — strip the `- `, the brackets, the `knowledge:` prefix and any `|alias`,
+   as harvest step 6 passes it (idempotent — a link the writer kept is left alone). A failed
+   writer left the old page in place; re-append anyway.
 6. **Backlog** — `scripts/wiki backlog <p> --touched <slug>,<slug>,…` — every namespaced slug
    from the receipts, comma-separated. Run it only after every source writer has returned. A
    catch-up (no inputs) drops `--touched`, so it also pays what earlier runs left owed.
