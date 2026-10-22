@@ -4,8 +4,9 @@
  * YouTube automatic captions "roll": each cue repeats the previous line and adds a new one
  * carrying word-timing tags (`<00:00:04.760><c> word</c>`), and tiny 10 ms cues repeat the
  * finished line once more. Tags are stripped and a line equal to the last emitted line is
- * dropped, so every spoken line appears once. Paragraphs open with a `[mm:ss]` marker
- * (`[h:mm:ss]` past an hour) about every `markerEverySec` seconds.
+ * dropped, so every spoken line appears once. Accepted trade-off: consecutive identical lines
+ * always collapse, so a line genuinely spoken twice in a row appears once. Paragraphs open with
+ * a `[mm:ss]` marker (`[h:mm:ss]` past an hour) about every `markerEverySec` seconds.
  */
 
 export type Cue = { start: number; lines: string[] };

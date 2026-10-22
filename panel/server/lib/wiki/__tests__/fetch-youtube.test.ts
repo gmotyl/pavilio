@@ -102,7 +102,14 @@ describe("fetch-youtube", () => {
     expect(res.json).toEqual({ raw: "raw/youtube-abc123XYZ_-.md", title: "But what is a neural network?", track: "en" });
     expect(subFlag(download(calls))).toBe("--write-subs");
     expect(subLangs(download(calls))).toBe("en");
-    expect(calls[0]).toEqual({ cmd: "uvx", args: ["--with", "curl_cffi", "yt-dlp", "--dump-json", "--", URL] });
+    expect(calls[0]).toEqual({ cmd: "uvx", args: ["--with", "curl_cffi", "yt-dlp", "--dump-json", "--no-playlist", "--", URL] });
+  });
+
+  it("ignores the playlist of a watch URL", async () => {
+    const { run, calls } = fakeRunner(info({ subtitles: { en: [{}] } }));
+    expect((await cli(run)).code).toBe(0);
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call.args).toContain("--no-playlist");
   });
 
   it("falls back to auto orig then en", async () => {
@@ -168,11 +175,18 @@ describe("fetch-youtube", () => {
   });
 
   it("no usable track exits 1 listing languages", async () => {
-    const { run, calls } = fakeRunner(info({ language: "pl", subtitles: { de: [{}] }, automatic_captions: { fr: [{}] } }));
+    const { run, calls } = fakeRunner(
+      info({
+        language: "pl",
+        subtitles: { de: [{}] },
+        automatic_captions: { "fr-orig": [{}], "en-fr": [{}], ja: [{}], "zh-Hant": [{}], fr: [{}] },
+      }),
+    );
     const res = await cli(run);
     expect(res.code).toBe(1);
-    expect(res.json.error).toMatch(/de/);
-    expect(res.json.error).toMatch(/fr/);
+    expect(res.json.error).toMatch(/manual: de;/);
+    expect(res.json.error).toMatch(/automatic: fr-orig, en-fr$/);
+    expect(res.json.error).not.toMatch(/\bja\b|zh-Hant/);
     expect(calls.some((c) => c.args.includes("--skip-download"))).toBe(false);
   });
 });

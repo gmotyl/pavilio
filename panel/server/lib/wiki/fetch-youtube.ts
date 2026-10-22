@@ -13,7 +13,8 @@ import { vttToMarkdown } from "./vtt";
  * to be installed. `--dump-json` gives the video's language and its track lists; exactly one track
  * is then downloaded: manual subtitles in the video's language, else the automatic `<lang>-orig`
  * track, else `en` (manual, then automatic). `--sub-langs` always names one exact code — a loose
- * `en.*` pattern pulls every auto-translated track and gets HTTP 429.
+ * `en.*` pattern pulls every auto-translated track and gets HTTP 429. Both calls pass
+ * `--no-playlist`, so a `watch?v=X&list=Y` URL fetches only video X.
  *
  * The runner is injectable so tests never touch the network.
  */
@@ -136,7 +137,7 @@ export async function fetchYoutube(
 
   let info: VideoInfo;
   try {
-    info = JSON.parse(await run(["--dump-json", "--", url])) as VideoInfo;
+    info = JSON.parse(await run(["--dump-json", "--no-playlist", "--", url])) as VideoInfo;
   } catch (err) {
     if (err instanceof SyntaxError) throw new Error(`yt-dlp --dump-json returned no JSON for ${url}`);
     throw err;
@@ -144,10 +145,13 @@ export async function fetchYoutube(
   const id = safeId(info, url);
   const track = pickTrack(info);
   if (!track) {
-    const list = (o: Record<string, unknown> | undefined) => Object.keys(o ?? {}).join(", ") || "none";
+    // Automatic keys are ~150 auto-translations; only `-orig` and English ones are worth naming.
+    const useful = (k: string) => k.endsWith("-orig") || k === "en" || k.startsWith("en-");
+    const list = (keys: string[]) => keys.join(", ") || "none";
     throw new Error(
       `no usable subtitle track for ${url} (language ${info.language ?? "unknown"}); ` +
-        `manual: ${list(info.subtitles)}; automatic: ${list(info.automatic_captions)}`,
+        `manual: ${list(Object.keys(info.subtitles ?? {}))}; ` +
+        `automatic: ${list(Object.keys(info.automatic_captions ?? {}).filter(useful))}`,
     );
   }
 
@@ -156,6 +160,7 @@ export async function fetchYoutube(
   try {
     await run([
       "--skip-download",
+      "--no-playlist",
       track.auto ? "--write-auto-subs" : "--write-subs",
       "--sub-format",
       "vtt",
