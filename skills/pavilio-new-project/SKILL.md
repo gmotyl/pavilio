@@ -31,15 +31,16 @@ prints one JSON object; exit 0 ok (`created` lists the paths written), 1 error, 
 1. **Look at `projects/<name>/`.**
    - **No folder** → `scripts/project new <name>` (with `--kind research --topic "…"` for
      `--research`). Report what it created; done — there are no notes to read.
-   - **Folder with notes, no `PROJECT.md`** → `scripts/project new <name>` scaffolds only the
-     missing parts. Then continue with step 2 to generate the card from the notes.
+   - **Folder with notes, no `PROJECT.md`** → `scripts/project new <name>` (with
+     `--kind research --topic "…"` for `--research`, as above) scaffolds only the missing parts.
+     Then continue with step 2 to generate the card from the notes.
    - **`PROJECT.md` exists** → the script exits 2 `exists`. Ask: **A) rebuild from notes**
      (including the legacy all-in-one split, see **Output: STATUS.md**) or **B) stop**. Write
      nothing until answered. A) → step 2 without rerunning the script; B) → done.
    - **Exit 2 `archived`** → the name is taken under `projects/archived/`. Ask whether to pick
      another name or restore the archived project by hand; write nothing until answered.
 2. **Orient on the glossary.** Read `projects/<p>/CONTEXT.md` (the glossary) so names and terms match it; with `projects/<p>/wiki/`, walk the reading ladder (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` — `overview.md` and the repository/person entity pages are the usual stops) for stable facts the notes leave implicit. No `wiki/` → `CONTEXT.md` whole. This skill never writes `CONTEXT.md` or wiki pages (the scaffold's empty `wiki/` skeleton aside).
-3. **Scan the projects/project folder** for all `*.md` notes (excluding PROJECT.md, STATUS.md, DECISIONS.md)
+3. **Scan the notes** — only the top-level `projects/<p>/*.md` files, see **Scanning Process**
 4. **Read and analyze each note** to extract:
    - People mentioned (names, roles, responsibilities)
    - Decisions made
@@ -47,7 +48,7 @@ prints one JSON object; exit 0 ok (`created` lists the paths written), 1 error, 
    - Action items
    - Key topics
 5. **Aggregate data** across all notes
-6. **Generate PROJECT.md** (resume card — stable facts only), **STATUS.md** (volatile state — from the most recent notes, within caps) and **DECISIONS.md**; they replace the scaffold's empty templates
+6. **Generate PROJECT.md** (resume card — stable facts only), **STATUS.md** (volatile state — from the most recent notes, within caps) and **DECISIONS.md**; they fill the scaffold's empty templates. PROJECT.md keeps what is already in it — see **Output: PROJECT.md**
 7. **Generate _index.json** with structured search data
 8. **Commit** `projects/<p>/` — never `.projects.local.md` (local, gitignored)
 
@@ -58,7 +59,8 @@ prints one JSON object; exit 0 ok (`created` lists the paths written), 1 error, 
 For projects/projectname folder:
 
 ```
-1. List all *.md files in projects/projectname/ (exclude PROJECT.md, STATUS.md, DECISIONS.md)
+1. List the top-level *.md files in projects/projectname/ only — never recurse into wiki/
+   (or any other subdir), and exclude CONTEXT.md, PROJECT.md, STATUS.md, DECISIONS.md
 2. Sort by date (from filename YYYY-MM-DD prefix)
 3. For each note:
    a. Read the file content
@@ -100,7 +102,13 @@ When reading existing notes, look for:
 
 ## Output: PROJECT.md (resume card)
 
-Use the **PROJECT.md Template (resume card)** from [[pavilio-note]] verbatim. Only stable facts go in: overview, repositories + working rules, environment gotchas, stack, links. Header line: `> Last updated: [today] · pavilio-new-project (from [N] notes)`.
+Use the **PROJECT.md Template (resume card)** from [[pavilio-note]] verbatim **for the body only**. Only stable facts go in: overview, repositories + working rules, environment gotchas, stack, links. Header line: `> Last updated: [today] · pavilio-new-project (from [N] notes)`.
+
+Both when filling the scaffold's card (folder with notes, no `PROJECT.md`) and when rebuilding (A), the existing `PROJECT.md` is not thrown away:
+
+- **Frontmatter verbatim** — the YAML block at the top (`kind`, and for research `topic` / `created`) stays exactly as it is, first in the file; the template has none, so never drop or regenerate it
+- **Research sections stay** — `## Research questions`, `## Scope` and any seed-link section are carried over unchanged
+- **`## See also` keeps the scaffold's links** (`STATUS.md`, `wiki/overview.md`); add new links below them
 
 - **No Team, no Focus, no Open Questions, no Key Decisions table** — those are `STATUS.md` / `DECISIONS.md`
 - Hard cap **60 lines**; anything longer belongs in the wiki (via [[pavilio-wiki]] ingest), an ADR, or a memo — `CONTEXT.md` is a one-line glossary
@@ -186,8 +194,6 @@ Created:
 Team members found: [list]
 Technologies identified: [list]
 Date range: [earliest] to [latest]
-
-Would you like me to commit these changes?
 ```
 
 ---
