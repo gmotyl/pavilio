@@ -2,6 +2,10 @@
 
 set -e
 
+# Every path below is relative to the repo root, whatever cwd the script was started from.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
 echo "🔧 Setting up Claude Code..."
 echo ""
 
@@ -22,6 +26,17 @@ fi
 
 echo "✓ Claude Code CLI found"
 echo ""
+
+# Skills renamed or removed upstream, from skills/RETIRED (one name per line, `#` comments).
+# Only a plain skill slug counts, and a name that is a live skill again is skipped, so the
+# cleanup below can only ever touch the exact artifacts generated for a retired skill.
+retired_skills() {
+    [ -f skills/RETIRED ] || return 0
+    # Strip only a trailing CR (CRLF files); a CR inside a name must not join it into another name.
+    awk '{ sub(/\r$/, "") } 1' skills/RETIRED | grep -E '^[a-z0-9][a-z0-9._-]*$' | while read -r name; do
+        [ -e "skills/$name/SKILL.md" ] || echo "$name"
+    done
+}
 
 # Create .claude directory structure
 mkdir -p .claude/commands
@@ -54,6 +69,26 @@ if [ -d "skills" ]; then
         echo "  ✓ ${name} -> ${skill_dir}"
     done
 fi
+
+# Setup only adds, so a retired skill's command and skill link would linger forever.
+for name in $(retired_skills); do
+    if [ -f ".claude/commands/${name}.md" ]; then
+        rm -f ".claude/commands/${name}.md"
+        echo "  ✗ removed retired command ${name}.md"
+    fi
+    # Only a link, and only one that is dangling or points at this repo's skills/<name>: a real
+    # directory, or a link another clone still serves the skill from, is not ours to delete.
+    # Resolved with `cd && pwd -P` (BSD readlink has no -f); a path that fails to resolve
+    # is never treated as ours.
+    link="$SKILLS_DIR/$name"
+    link_target="$(cd "$link" 2>/dev/null && pwd -P)" || link_target=""
+    own_target="$(cd "$REPO_ROOT/skills/$name" 2>/dev/null && pwd -P)" || own_target=""
+    if [ -L "$link" ] && { [ ! -e "$link" ] || \
+        { [ -n "$link_target" ] && [ "$link_target" = "$own_target" ]; }; }; then
+        rm -f "$SKILLS_DIR/$name"
+        echo "  ✗ unlinked retired skill ${name}"
+    fi
+done
 
 # Create .claude/settings.json if it doesn't exist
 if [ ! -f ".claude/settings.json" ]; then

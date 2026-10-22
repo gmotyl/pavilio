@@ -16,6 +16,17 @@ OUT_ROOT="${PAVILIO_OPENCODE_OUT:-$REPO_ROOT}"
 OC_CMD_DIR="$OUT_ROOT/.opencode/commands"
 OC_JSON="$OUT_ROOT/opencode.json"
 
+# Skills renamed or removed upstream, from skills/RETIRED (one name per line, `#` comments).
+# Only a plain skill slug counts, and a name that is a live skill again is skipped, so the
+# cleanup below can only ever touch the exact artifacts generated for a retired skill.
+retired_skills() {
+    [ -f skills/RETIRED ] || return 0
+    # Strip only a trailing CR (CRLF files); a CR inside a name must not join it into another name.
+    awk '{ sub(/\r$/, "") } 1' skills/RETIRED | grep -E '^[a-z0-9][a-z0-9._-]*$' | while read -r name; do
+        [ -e "skills/$name/SKILL.md" ] || echo "$name"
+    done
+}
+
 # 1. Generate one opencode command wrapper per skill (dynamic, no hardcoded list) —
 #    mirrors setup:claude-code. Wrappers use the absolute skill path so the command
 #    resolves regardless of the invoking cwd.
@@ -29,6 +40,20 @@ if [ -d "skills" ]; then
         echo "  ✓ ${cmd}.md"
     done
 fi
+
+# Wrappers are only ever added, and opencode.json is rebuilt from them: dropping a retired
+# skill's wrapper here also drops its command entry below.
+GLOBAL="$HOME/.config/opencode"
+for name in $(retired_skills); do
+    if [ -f "$OC_CMD_DIR/${name}.md" ]; then
+        rm -f "$OC_CMD_DIR/${name}.md"
+        echo "  ✗ removed retired ${name}.md"
+    fi
+    if [ -z "${PAVILIO_OPENCODE_OUT:-}" ] && [ -f "$GLOBAL/commands/${name}.md" ]; then
+        rm -f "$GLOBAL/commands/${name}.md"
+        echo "  ✗ removed retired ${name}.md from $GLOBAL/commands/"
+    fi
+done
 
 # 2. Register the wrappers in opencode.json's `command` block. opencode reads
 #    slash-commands from this block; regenerating it means every skill is wired
@@ -90,7 +115,6 @@ PY
 
 # 3. Sync wrappers to the global opencode config, if present, so commands also
 #    resolve when opencode is launched outside this repo.
-GLOBAL="$HOME/.config/opencode"
 if [ -z "${PAVILIO_OPENCODE_OUT:-}" ] && [ -d "$GLOBAL" ]; then
     mkdir -p "$GLOBAL/commands"
     cp "$OC_CMD_DIR"/*.md "$GLOBAL/commands/" 2>/dev/null || true

@@ -35,7 +35,7 @@ type LockHooks = {
 };
 
 /** Lines `<projectDir>/wiki/.gitignore` must carry (workspaces older than the root entry lack them). */
-const WIKI_GITIGNORE_LINES = [".ingest.lock*", "raw/repos/"]; // `*`: takeover temp and aside files too
+export const WIKI_GITIGNORE_LINES = [".ingest.lock*", "raw/repos/"]; // `*`: takeover temp and aside files too
 
 /** Append the missing wiki gitignore lines, creating the file when absent. */
 function ensureWikiGitignore(projectDir: string): void {

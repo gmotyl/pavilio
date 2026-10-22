@@ -20,11 +20,22 @@ export type ResolvedWikiLink = WikiLink & {
   exists: boolean;
 };
 
-/** Resolve a parsed link to its `.md` file under `<projectsDir>/<project>/`. */
+/**
+ * Resolve a parsed link to its `.md` file under `<projectsDir>/<project>/`. A `<project>:` link
+ * whose target is missing there is retried under `<projectsDir>/archived/<project>/`, so links
+ * survive archiving; the active project wins when both exist. Missing in both → the active path.
+ */
 export function resolveWikiLink(link: WikiLink, ctx: LinkContext): ResolvedWikiLink {
   const project = link.project ?? ctx.project;
-  const absPath = join(projectsDirOf(ctx), project, ...link.target.split("/")) + ".md";
-  return { ...link, project, absPath, exists: existsSync(absPath) };
+  const projectsDir = projectsDirOf(ctx);
+  const segments = link.target.split("/");
+  const absPath = join(projectsDir, project, ...segments) + ".md";
+  if (existsSync(absPath)) return { ...link, project, absPath, exists: true };
+  if (link.project) {
+    const archivedPath = join(projectsDir, "archived", project, ...segments) + ".md";
+    if (existsSync(archivedPath)) return { ...link, project, absPath: archivedPath, exists: true };
+  }
+  return { ...link, project, absPath, exists: false };
 }
 
 /** Project-relative page key without `.md`, e.g. `concepts/x.md` → `wiki/concepts/x`. */

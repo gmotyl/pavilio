@@ -302,6 +302,23 @@ mkdir -p "$REPO_ROOT/skills"
 rsync -a \
   --exclude='.DS_Store' \
   "$UPSTREAM_DIR/skills/" "$REPO_ROOT/skills/"
+# skills/ is synced without --delete (it holds private downstream skills), so a skill retired
+# upstream would stay forever. Remove exactly the names upstream's skills/RETIRED lists, and only
+# when upstream has no such skill again. A skills/ that resolves anywhere but the workspace's own
+# skills/ (a symlink to another tree) is skipped: rm -rf would follow it and delete foreign files.
+if [ -f "$UPSTREAM_DIR/skills/RETIRED" ] && \
+   { [ -L "$REPO_ROOT/skills" ] || \
+     [ "$(cd "$REPO_ROOT/skills" && pwd -P)" != "$(cd "$REPO_ROOT" && pwd -P)/skills" ]; }; then
+  echo "  ⚠️  skills/ is a symlink — skipping retired-skill cleanup" >&2
+elif [ -f "$UPSTREAM_DIR/skills/RETIRED" ]; then
+  # Strip only a trailing CR (CRLF files); a CR inside a name must not join it into another name.
+  awk '{ sub(/\r$/, "") } 1' "$UPSTREAM_DIR/skills/RETIRED" | grep -E '^[a-z0-9][a-z0-9._-]*$' | while read -r name; do
+    if [ ! -e "$UPSTREAM_DIR/skills/$name" ] && [ -d "$REPO_ROOT/skills/$name" ] && [ ! -L "$REPO_ROOT/skills/$name" ]; then
+      rm -rf "${REPO_ROOT:?}/skills/$name"
+      echo "  ✗ removed retired skills/$name/"
+    fi
+  done
+fi
 
 if [ -d "$UPSTREAM_DIR/commands" ]; then
   echo "Syncing commands/..."

@@ -52,6 +52,22 @@ One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity p
   its own meaning, say the other use in one sentence under a `Terminology` note, and report it
   under `collisions` — never merge the other meaning's claims into the page.
 
+## Knowledge-wiki mode
+
+When `project` is `knowledge` the knowledge harvest runs you, and these rules replace the
+matching ones above:
+
+- Inputs: `slug`, and `claims` — the picked findings, each with its origin as
+  `<project>:wiki/sources/<kind>-<stem>.md` (no `sources` from a backlog, no `glossary`).
+- Read limits: `wiki/<slug>.md` in `knowledge` if it exists, the origin source pages the claims
+  name (only to get a claim right), and `knowledge`'s `wiki/entities/index.md` and
+  `wiki/concepts/index.md`.
+- Cite every claim with its origin: `([[<project>:wiki/sources/<kind>-<stem>]])`; append each
+  origin to `sources:` as `"<project>:wiki/sources/<kind>-<stem>.md"`.
+- No ≥2-source rule: one picked claim is enough for a page. The user's pick is the promotion.
+- Write only what holds outside any one project — the tool, library, platform or technique, never
+  a client, a deal or a project's own plans. Name the project only in the citation.
+
 ## Receipt
 
 Reply with exactly one JSON object and nothing else:

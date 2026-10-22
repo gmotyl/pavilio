@@ -1,0 +1,6 @@
+# Skills renamed or removed upstream, one name per line. The setup scripts delete the commands
+# and skill links generated for these names, and scripts/update.sh deletes the workspace copy
+# of the skill dir (skills/ is synced without --delete). Exact names only; drop a name here
+# before reusing it for a new skill. A retired name's workspace skills/<name>/ is removed on
+# update even if it was modified locally — copy it under a new name first to keep it.
+pavilio-bootstrap

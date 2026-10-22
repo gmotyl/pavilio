@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { markArchivedInRegistry, markRestoredInRegistry, readActiveProjects } from "../registry";
+import { addProjectToRegistry, markArchivedInRegistry, markRestoredInRegistry, readActiveProjects } from "../registry";
 
 let root = "";
 let projectsDir = "";
@@ -79,5 +79,19 @@ describe("registry sync", () => {
     expect(readActiveProjects(projectsDir)).toEqual(["beta"]);
     rmSync(registryFile());
     expect(readActiveProjects(projectsDir)).toEqual([]);
+  });
+
+  it("addProjectToRegistry appends one row", () => {
+    markArchivedInRegistry(projectsDir, "beta");
+    expect(addProjectToRegistry(projectsDir, "gamma")).toBe(true);
+    expect(addProjectToRegistry(projectsDir, "gamma")).toBe(false);
+    const out = readFileSync(registryFile(), "utf8");
+    expect(out.match(/^\| gamma \|/gm)?.length).toBe(1);
+    expect(out).toContain("| alpha | alpha | `projects/alpha/` |\n| gamma | gamma | `projects/gamma/` |\n");
+    expect(readActiveProjects(projectsDir)).toEqual(["alpha", "gamma"]);
+    expect(out).toContain("keep me");
+    rmSync(registryFile());
+    expect(addProjectToRegistry(projectsDir, "delta")).toBe(false);
+    expect(existsSync(registryFile())).toBe(false);
   });
 });

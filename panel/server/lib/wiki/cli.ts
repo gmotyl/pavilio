@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, statSync } from "fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
@@ -6,11 +6,15 @@ import { pageBacklog } from "./backlog";
 import { cloneRepo } from "./clone-repo";
 import { loadWikiConfig, readWikiConfig, type WikiConfig } from "./config";
 import { fetchArticle } from "./fetch-article";
+import { fetchYoutube, UvMissingError, type Runner } from "./fetch-youtube";
+import { addBacklink, clearCandidates, harvestStatus, listCandidates } from "./harvest";
 import { buildIndex } from "./index-md";
 import { pendingRecords, recordIngested } from "./ledger";
 import { lintWiki } from "./lint";
 import { releaseLock, takeLock } from "./lock";
 import { countMentions } from "./mentions";
+import { projectKind } from "../projects/kind";
+import { panelLink } from "./panel-link";
 import { resolveProject, type FetchLike } from "./project";
 
 /**
@@ -20,7 +24,7 @@ import { resolveProject, type FetchLike } from "./project";
  * or 2 (ask the user, `{ask: true, reason}`). Diagnostics and usage go to stderr only.
  *
  * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`/`removed`,
- * `fetch-article` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
+ * `fetch-article`/`fetch-youtube` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
  * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys and
  * `backlog`'s source paths, which are project-root `wiki/…` paths ready for a page writer.
  *
@@ -31,7 +35,10 @@ import { resolveProject, type FetchLike } from "./project";
 
 const USAGE = `usage: scripts/wiki <command> [args]
 
-  project [--name <p>] [--cwd <dir>]        {project, via} | exit 2 {ask, reason}
+  project [--name <p>] [--cwd <dir>]        {project, via, kind} | exit 2 {ask, reason}
+                                            kind: project | research | knowledge
+  panel-link <path>                         {link}: panel route (/project/<p>/wiki?file=… or
+                                            /view/…) for a projects-relative path, no host
   pending <p> [--only <path>]               {pending: [{path, hash, status}]}
   record <p> <path> <hash>                  {ok: true}
   lock take|release <p> --session <id>      {held, takenOver[, busy]} (release adds released;
@@ -43,7 +50,18 @@ const USAGE = `usage: scripts/wiki <command> [args]
   lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers}
   config                                    {sessionStartIngest, writerModel}
   fetch-article <p> <url>                   {raw, title, warning?}
+  fetch-youtube <p> <url>                   {raw, title, track}: transcript via uvx yt-dlp into
+                                            raw/youtube-<id>.md | exit 2 {ask, reason} without uv
   clone-repo <p> <url>                      {clonePath, commitSha, action}
+  candidates                                {items: [{id, project, text, details, date, source}]}: the
+                                            ## Knowledge candidates of every non-archived wiki
+                                            except knowledge; source is wiki/sources/… or null
+  clear-candidates --ids <file.json>        {removed}: drop exactly those candidate lines
+                                            (file holds a JSON array of ids)
+  backlink <p> <source page> <target>       {added}: - [[knowledge:<target>]] under the page's
+                                            ## Knowledge (created at the end when absent)
+  harvest-status                            {lastRun, daysAgo, waiting}: newest harvest entry in
+                                            knowledge/wiki/log.md (null = never), candidates waiting
 
 <p> is a project dir under <workspace>/projects/. Paths in receipts are wiki-relative except
 pending/record paths (project-relative). Exit: 0 ok, 1 error {error}, 2 ask the user.
@@ -60,6 +78,10 @@ export type CliDeps = {
   /** Overrides `env.PAVILIO_WORKSPACE_ROOT` and the default. */
   workspaceRoot?: string;
   fetch?: FetchLike;
+  /** Command runner for `fetch-youtube` (tests inject a fake yt-dlp). */
+  run?: Runner;
+  /** Clock for `harvest-status` (tests pin "today"). */
+  now?: () => Date;
 };
 
 /** The dir above `panel/`: `panel/server/lib/wiki/cli.ts` → four levels up. */
@@ -130,6 +152,21 @@ function touchedSlugs(raw: string | undefined, deps: CliDeps): string[] | undefi
   return touched;
 }
 
+/** The `--ids` file: a JSON array of candidate ids (or `{ids: [...]}`). */
+function readIds(path: string): string[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    throw new Error(`cannot read ids file ${path}: ${(err as Error).message}`);
+  }
+  const ids = Array.isArray(data) ? data : (data as { ids?: unknown } | null)?.ids;
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
+    throw new Error("ids file must hold a JSON array of candidate ids");
+  }
+  return ids;
+}
+
 type Outcome = { code: 0 | 1 | 2; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Outcome => ({ code: 0, body });
 
@@ -155,8 +192,15 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
         env: deps.env,
         fetch: deps.fetch ?? (globalThis.fetch as FetchLike),
       });
-      if (result.ok) return ok({ project: result.project, via: result.via });
+      if (result.ok) {
+        const kind = projectKind(join(workspaceRoot, "projects"), result.project);
+        return ok({ project: result.project, via: result.via, kind });
+      }
       return { code: 2, body: { ask: true, reason: result.reason } };
+    }
+    case "panel-link": {
+      const [path] = only(parsed, 1, "panel-link <projects-relative path>");
+      return ok({ link: panelLink(path) });
     }
     case "pending": {
       const [p] = only(parsed, 1, "pending <p> [--only <path>]", ["only"]);
@@ -209,9 +253,38 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       const options = deps.fetch ? { fetch: deps.fetch as typeof fetch } : {};
       return ok({ ...(await fetchArticle(projectDir(workspaceRoot, p), url, options)) });
     }
+    case "fetch-youtube": {
+      const [p, url] = only(parsed, 2, "fetch-youtube <p> <url>");
+      const dir = projectDir(workspaceRoot, p);
+      try {
+        return ok({ ...(await fetchYoutube(dir, url, deps.run ? { run: deps.run } : {})) });
+      } catch (err) {
+        if (err instanceof UvMissingError) return { code: 2, body: { ask: true, reason: err.message } };
+        throw err;
+      }
+    }
     case "clone-repo": {
       const [p, url] = only(parsed, 2, "clone-repo <p> <url>");
       return ok({ ...(await cloneRepo(projectDir(workspaceRoot, p), url)) });
+    }
+    case "candidates": {
+      only(parsed, 0, "no arguments");
+      return ok({ ...listCandidates(workspaceRoot) });
+    }
+    case "clear-candidates": {
+      only(parsed, 0, "clear-candidates --ids <file.json>", ["ids"]);
+      const file = flag("ids");
+      if (!file) throw new CliError("clear-candidates needs --ids <file.json>");
+      return ok({ ...clearCandidates(workspaceRoot, readIds(resolve(deps.cwd, file))) });
+    }
+    case "backlink": {
+      const [p, page, target] = only(parsed, 3, "backlink <p> <source page> <knowledge target>");
+      projectDir(workspaceRoot, p);
+      return ok({ ...addBacklink(workspaceRoot, p, page, target) });
+    }
+    case "harvest-status": {
+      only(parsed, 0, "no arguments");
+      return ok({ ...harvestStatus(workspaceRoot, (deps.now ?? (() => new Date()))()) });
     }
     default:
       throw new UnknownCommand(command);

@@ -154,6 +154,61 @@ describe("wiki cli", () => {
     }
   });
 
+  it("cli panel-link prints the link", async () => {
+    expect(await cli(["panel-link", "demo/wiki/sources/a.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/project/demo/wiki?file=demo%2Fwiki%2Fsources%2Fa.md" },
+    });
+    expect(await cli(["panel-link", "demo/notes/2026-10-01_1000_kickoff.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/demo/notes/2026-10-01_1000_kickoff.md" },
+    });
+    const missing = await cli(["panel-link"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toMatch(/panel-link/);
+  });
+
+  it("cli project reports the project kind", async () => {
+    expect(await cli(["project", "--name", "demo"])).toMatchObject({
+      code: 0,
+      json: { project: "demo", via: "arg", kind: "project" },
+    });
+    write("PROJECT.md", "---\nkind: research\n---\n# Demo\n");
+    expect(await cli(["project", "--name", "demo"])).toEqual({
+      code: 0,
+      json: { project: "demo", via: "arg", kind: "research" },
+      stderr: "",
+    });
+  });
+
+  it("cli dispatches the harvest commands", async () => {
+    write("wiki/open-questions.md", "## Gaps\n- g\n\n## Knowledge candidates\n- 2026-10-20 — one (from [[wiki/sources/a]])\n- 2026-10-20 — two\n");
+    const listed = await cli(["candidates"]);
+    expect(listed.code).toBe(0);
+    expect(listed.json.items).toHaveLength(2);
+    expect(listed.json.items[0]).toMatchObject({ project: "demo", text: "one", date: "2026-10-20", source: "wiki/sources/a" });
+
+    const idsFile = join(root, "ids.json");
+    writeFileSync(idsFile, JSON.stringify([listed.json.items[1].id]));
+    expect(await cli(["clear-candidates", "--ids", "ids.json"])).toMatchObject({ code: 0, json: { removed: 1 } });
+    expect(readFileSync(join(project, "wiki/open-questions.md"), "utf8")).toBe(
+      "## Gaps\n- g\n\n## Knowledge candidates\n- 2026-10-20 — one (from [[wiki/sources/a]])\n",
+    );
+    expect((await cli(["clear-candidates"])).code).toBe(1);
+
+    expect(await cli(["backlink", "demo", "wiki/sources/a.md", "wiki/concepts/vitest"])).toMatchObject({
+      code: 0,
+      json: { added: true },
+    });
+    expect(await cli(["backlink", "demo", "wiki/sources/a.md", "wiki/concepts/vitest"])).toMatchObject({
+      json: { added: false },
+    });
+    expect((await cli(["backlink", "demo", "../escape.md", "wiki/concepts/vitest"])).code).toBe(1);
+
+    const status = await cli(["harvest-status"], { now: () => new Date(2026, 9, 22) });
+    expect(status).toMatchObject({ code: 0, json: { lastRun: null, daysAgo: null, waiting: 1 } });
+  });
+
   it("fails on an unknown command", async () => {
     const res = await cli(["frobnicate"]);
     expect(res.code).toBe(1);
