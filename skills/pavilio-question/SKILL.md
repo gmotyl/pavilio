@@ -181,6 +181,6 @@ If `_index.json` or `PROJECT.md` doesn't exist for a project:
 1. Fall back to searching `.md` files directly in the projects/project folder
 2. Look for patterns: dates in filenames, common sections in notes
 3. Inform user: "Note: [project] doesn't have a structured index yet. Searching raw notes..."
-4. Suggest running `/pavilio-bootstrap [project]` to generate the index from existing notes
+4. Suggest running `/pavilio-new-project [project]` to generate the index from existing notes
 
 ---

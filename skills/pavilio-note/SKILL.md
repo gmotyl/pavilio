@@ -289,7 +289,7 @@ Project knowledge is split by **volatility**, because `PROJECT.md` is read in fu
 
 | File | Holds | Changes | Written by |
 |---|---|---|---|
-| `PROJECT.md` | the **resume card** — what the project *is* and how to *work* on it: overview, repos + working rules, environment gotchas, stack, links | rarely | bootstrap; pavilio-note only when a stable fact changed; humans |
+| `PROJECT.md` | the **resume card** — what the project *is* and how to *work* on it: overview, repos + working rules, environment gotchas, stack, links | rarely | pavilio-new-project; pavilio-note only when a stable fact changed; humans |
 | `STATUS.md` | the **volatile state** — current focus, open questions, recent decisions, active team | every meeting | pavilio-note (**replace**, never append) |
 | `DECISIONS.md` | full decision history, append-only | when something is decided | pavilio-note (append) |
 
@@ -312,7 +312,7 @@ Project knowledge is split by **volatility**, because `PROJECT.md` is read in fu
 ```markdown
 # [Project Name]
 
-> Last updated: [YYYY-MM-DD] · [bootstrap | pavilio-note | manual]
+> Last updated: [YYYY-MM-DD] · [pavilio-new-project | pavilio-note | manual]
 
 ## Overview
 

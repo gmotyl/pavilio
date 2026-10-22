@@ -36,7 +36,7 @@ At the beginning of each session:
 - `/pavilio-memo` - Quick note capture
 - `/pavilio-note` - Save session notes (project-aware! checks AGENTS.md first)
 - `/pavilio-question` - Query project knowledge
-- `/pavilio-bootstrap` - Initialize PROJECT.md structure
+- `/pavilio-new-project` - Create a project or build PROJECT.md from its notes
 
 **Project-Aware Note Creation:**
 - `/pavilio-note my-app` - Creates note in my-app project directory (from AGENTS.md)
@@ -54,7 +54,7 @@ At the beginning of each session:
 - `/model` - Select your Claude model (Opus, Sonnet, Haiku, etc.)
 - Choose based on your needs and access level
 
-**Local skills** live under [`skills/`](skills/), each in its own folder with a `SKILL.md`. The self-contained **pavilio-** family covers the workflow: `pavilio-session-start` / `pavilio-session-end` (session bracket), `pavilio-grill` (design), `pavilio-writing-plans` (plan), plus `pavilio-handoff` / `pavilio-compact` / `pavilio-resume`, `pavilio-manager`, `pavilio-audit`, `pavilio-qa-agent`, `pavilio-create-skill`, and the notes tools `pavilio-memo` / `pavilio-memo-explain` / `pavilio-note` / `pavilio-note-batch` / `pavilio-question` / `pavilio-bootstrap`. Other project skills: `pavilio-mermaid-chart`.
+**Local skills** live under [`skills/`](skills/), each in its own folder with a `SKILL.md`. The self-contained **pavilio-** family covers the workflow: `pavilio-session-start` / `pavilio-session-end` (session bracket), `pavilio-grill` (design), `pavilio-writing-plans` (plan), plus `pavilio-handoff` / `pavilio-compact` / `pavilio-resume`, `pavilio-manager`, `pavilio-audit`, `pavilio-qa-agent`, `pavilio-create-skill`, and the notes tools `pavilio-memo` / `pavilio-memo-explain` / `pavilio-note` / `pavilio-note-batch` / `pavilio-question` / `pavilio-new-project`. Other project skills: `pavilio-mermaid-chart`.
 
 **Session Tracking:** Active - write "session end" to finalize
 

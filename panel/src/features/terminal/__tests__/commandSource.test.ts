@@ -25,7 +25,7 @@ const REAL: SkillEntry[] = [
   skill("pavilio-note", "Process a meeting transcript into structured project notes"),
   skill("pavilio-archive-plan", "Archive a shipped change OpenSpec-style"),
   skill("pavilio-audit", "Deep, evidence-based repository audit"),
-  skill("pavilio-bootstrap", "Generate PROJECT.md, STATUS.md and _index.json"),
+  skill("pavilio-new-project", "Create a project or build PROJECT.md from its notes"),
   skill("pavilio-code-review", "Two-axis review of the diff between HEAD and a fixed point"),
   skill("pavilio-compact", "Package the session's remaining work into a handoff file"),
   skill("pavilio-create-skill", "Scaffold a new workspace skill"),
