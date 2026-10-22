@@ -21,7 +21,7 @@ OC_JSON="$OUT_ROOT/opencode.json"
 # cleanup below can only ever touch the exact artifacts generated for a retired skill.
 retired_skills() {
     [ -f skills/RETIRED ] || return 0
-    grep -E '^[a-z0-9][a-z0-9._-]*$' skills/RETIRED | while read -r name; do
+    tr -d '\r' <skills/RETIRED | grep -E '^[a-z0-9][a-z0-9._-]*$' | while read -r name; do
         [ -e "skills/$name/SKILL.md" ] || echo "$name"
     done
 }

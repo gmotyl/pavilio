@@ -2,6 +2,10 @@
 
 set -e
 
+# Every path below is relative to the repo root, whatever cwd the script was started from.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
 echo "🔧 Setting up Claude Code..."
 echo ""
 
@@ -28,7 +32,7 @@ echo ""
 # cleanup below can only ever touch the exact artifacts generated for a retired skill.
 retired_skills() {
     [ -f skills/RETIRED ] || return 0
-    grep -E '^[a-z0-9][a-z0-9._-]*$' skills/RETIRED | while read -r name; do
+    tr -d '\r' <skills/RETIRED | grep -E '^[a-z0-9][a-z0-9._-]*$' | while read -r name; do
         [ -e "skills/$name/SKILL.md" ] || echo "$name"
     done
 }
@@ -71,8 +75,11 @@ for name in $(retired_skills); do
         rm -f ".claude/commands/${name}.md"
         echo "  ✗ removed retired command ${name}.md"
     fi
-    # Only a link: a real directory there is not ours to delete.
-    if [ -L "$SKILLS_DIR/$name" ]; then
+    # Only a link, and only one that is dangling or points at this repo's skills/<name>: a real
+    # directory, or a link another clone still serves the skill from, is not ours to delete.
+    link="$SKILLS_DIR/$name"
+    if [ -L "$link" ] && { [ ! -e "$link" ] || \
+        [ "$(readlink -f "$link")" = "$(readlink -f "$REPO_ROOT/skills/$name")" ]; }; then
         rm -f "$SKILLS_DIR/$name"
         echo "  ✗ unlinked retired skill ${name}"
     fi

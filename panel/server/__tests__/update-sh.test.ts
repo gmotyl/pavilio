@@ -405,6 +405,21 @@ describe("scripts/update.sh sync commit", () => {
     expect(destStatus()).toBe("");
   });
 
+  it("removes a retired skill even when upstream's RETIRED has CRLF line endings", () => {
+    initDestRepo();
+    mkdirSync(join(dest, "skills", "pavilio-bootstrap"), { recursive: true });
+    writeFileSync(join(dest, "skills", "pavilio-bootstrap", "SKILL.md"), "# old\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "workspace skills");
+    writeFileSync(join(upstream, "skills", "RETIRED"), "# retired\r\npavilio-bootstrap\r\n");
+    commitUpstream("retire pavilio-bootstrap (crlf)");
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(existsSync(join(dest, "skills", "pavilio-bootstrap"))).toBe(false);
+  });
+
   it("skips the retired-skill cleanup when the workspace skills/ is a symlink", () => {
     initDestRepo();
     // skills/ points outside the workspace: rm -rf through it would delete foreign files.

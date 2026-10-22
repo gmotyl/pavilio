@@ -53,7 +53,7 @@ const USAGE = `usage: scripts/wiki <command> [args]
   fetch-youtube <p> <url>                   {raw, title, track}: transcript via uvx yt-dlp into
                                             raw/youtube-<id>.md | exit 2 {ask, reason} without uv
   clone-repo <p> <url>                      {clonePath, commitSha, action}
-  candidates                                {items: [{id, project, text, date, source}]}: the
+  candidates                                {items: [{id, project, text, details, date, source}]}: the
                                             ## Knowledge candidates of every non-archived wiki
                                             except knowledge; source is wiki/sources/… or null
   clear-candidates --ids <file.json>        {removed}: drop exactly those candidate lines

@@ -37,9 +37,9 @@ function write(abs: string, text: string) {
   writeFileSync(abs, text);
 }
 
-function run(script: string) {
+function run(script: string, cwd = repo) {
   const res = spawnSync("bash", [join(repo, "scripts", script)], {
-    cwd: repo,
+    cwd,
     encoding: "utf8",
     env: { HOME: home, PATH: `${stubBin}:/usr/local/bin:/usr/bin:/bin` },
   });
@@ -113,6 +113,50 @@ describe("retired skills", () => {
     expect(cfg.permission).toEqual({ x: 1 });
     expect(existsSync(join(home, ".config/opencode/commands/pavilio-bootstrap.md"))).toBe(false);
     expect(existsSync(join(home, ".config/opencode/commands/global-own.md"))).toBe(true);
+  });
+
+  it("setup:claude-code keeps a retired skill link that another clone owns", () => {
+    const other = join(sandbox, "other-clone/skills/pavilio-bootstrap");
+    write(join(other, "SKILL.md"), "---\nname: pavilio-bootstrap\n---\n# other clone\n");
+    const skills = join(home, ".claude/skills");
+    mkdirSync(skills, { recursive: true });
+    symlinkSync(other, join(skills, "pavilio-bootstrap"));
+
+    run("setup:claude-code");
+
+    expect(isLink(join(skills, "pavilio-bootstrap"))).toBe(true);
+  });
+
+  it("setup:claude-code still unlinks a dangling retired skill link from elsewhere", () => {
+    const skills = join(home, ".claude/skills");
+    mkdirSync(skills, { recursive: true });
+    symlinkSync(join(sandbox, "gone-clone/skills/pavilio-bootstrap"), join(skills, "pavilio-bootstrap"));
+
+    run("setup:claude-code");
+
+    expect(isLink(join(skills, "pavilio-bootstrap"))).toBe(false);
+  });
+
+  it("both setup scripts honour a RETIRED file with CRLF line endings", () => {
+    write(join(repo, "skills/RETIRED"), "# retired\r\npavilio-bootstrap\r\n");
+    write(join(repo, ".claude/commands/pavilio-bootstrap.md"), "old\n");
+    write(join(repo, ".opencode/commands/pavilio-bootstrap.md"), "old\n");
+
+    run("setup:claude-code");
+    run("setup:opencode");
+
+    expect(existsSync(join(repo, ".claude/commands/pavilio-bootstrap.md"))).toBe(false);
+    expect(existsSync(join(repo, ".opencode/commands/pavilio-bootstrap.md"))).toBe(false);
+  });
+
+  it("setup:claude-code works from any cwd", () => {
+    write(join(repo, ".claude/commands/pavilio-bootstrap.md"), "old\n");
+
+    run("setup:claude-code", sandbox);
+
+    expect(existsSync(join(repo, ".claude/commands/alive.md"))).toBe(true);
+    expect(existsSync(join(repo, ".claude/commands/pavilio-bootstrap.md"))).toBe(false);
+    expect(existsSync(join(sandbox, ".claude"))).toBe(false);
   });
 
   it("a retired name that is a live skill again is left alone", () => {

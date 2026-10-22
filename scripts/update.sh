@@ -311,7 +311,7 @@ if [ -f "$UPSTREAM_DIR/skills/RETIRED" ] && \
      [ "$(cd "$REPO_ROOT/skills" && pwd -P)" != "$(cd "$REPO_ROOT" && pwd -P)/skills" ]; }; then
   echo "  ⚠️  skills/ is a symlink — skipping retired-skill cleanup" >&2
 elif [ -f "$UPSTREAM_DIR/skills/RETIRED" ]; then
-  grep -E '^[a-z0-9][a-z0-9._-]*$' "$UPSTREAM_DIR/skills/RETIRED" | while read -r name; do
+  tr -d '\r' <"$UPSTREAM_DIR/skills/RETIRED" | grep -E '^[a-z0-9][a-z0-9._-]*$' | while read -r name; do
     if [ ! -e "$UPSTREAM_DIR/skills/$name" ] && [ -d "$REPO_ROOT/skills/$name" ] && [ ! -L "$REPO_ROOT/skills/$name" ]; then
       rm -rf "${REPO_ROOT:?}/skills/$name"
       echo "  ✗ removed retired skills/$name/"
