@@ -112,6 +112,14 @@ router.get("/read/*path", (req, res) => {
     if (!absolutePath.startsWith(projectsDir)) {
       return res.status(403).json({ error: "Path traversal blocked" });
     }
+    // Fallback: a `<project>/…` path whose project was archived lives under `archived/<project>/…`
+    if (!existsSync(absolutePath) && !relativePath.startsWith("archived/")) {
+      const archivedDir = resolve(projectsDir, "archived");
+      const archived = resolve(archivedDir, relativePath);
+      if (isPathUnder(archived, archivedDir) && existsSync(archived)) {
+        absolutePath = archived;
+      }
+    }
     // Fallback: if not found in projectsDir, try repo root
     if (!existsSync(absolutePath)) {
       const repoRoot = resolve(projectsDir, "..");

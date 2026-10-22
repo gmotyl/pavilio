@@ -82,6 +82,20 @@ describe("lintWiki", () => {
     ]);
   });
 
+  it("lint accepts a link into an archived project", () => {
+    write("projects/archived/metro/wiki/sources/x.md", page("source", "X\n"));
+    write("projects/knowledge/wiki/concepts/k.md", page("concept", "From [[metro:wiki/sources/x]].\n"));
+    expect(lintWiki(root, "knowledge").broken).toEqual([]);
+  });
+
+  it("lint reports a link missing in both places", () => {
+    write("projects/archived/metro/wiki/sources/x.md", page("source", "X\n"));
+    write("projects/knowledge/wiki/concepts/k.md", page("concept", "From [[metro:wiki/sources/gone]].\n"));
+    expect(lintWiki(root, "knowledge").broken).toEqual([
+      { page: "wiki/concepts/k.md", target: "metro:wiki/sources/gone" },
+    ]);
+  });
+
   it("reports orphans", () => {
     write(`${W}/sources/cited.md`, page("source", "A record.\n"));
     write(`${W}/sources/bare.md`, page("source", "Cited wiki-relative.\n"));

@@ -73,6 +73,28 @@ describe("resolveWikiLink", () => {
     // A path escaping the project is not a link at all.
     expect(parseWikiLink("../metro/wiki/entities/y")).toBeNull();
   });
+
+  it("resolveWikiLink falls back to archived project", () => {
+    write("projects/archived/oldie/wiki/sources/x.md", "# X\n");
+    expect(resolve("oldie:wiki/sources/x")).toMatchObject({
+      project: "oldie",
+      absPath: join(root, "projects/archived/oldie/wiki/sources/x.md"),
+      exists: true,
+    });
+    // Missing in both places: the active path is reported, not existing.
+    expect(resolve("oldie:wiki/sources/nope")).toMatchObject({
+      absPath: join(root, "projects/oldie/wiki/sources/nope.md"),
+      exists: false,
+    });
+  });
+
+  it("resolveWikiLink prefers the active project", () => {
+    write("projects/archived/metro/wiki/entities/y.md", "# Archived Y\n");
+    expect(resolve("metro:wiki/entities/y")).toMatchObject({
+      absPath: join(root, "projects/metro/wiki/entities/y.md"),
+      exists: true,
+    });
+  });
 });
 
 describe("extractWikiLinks", () => {
