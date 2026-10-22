@@ -51,8 +51,9 @@ JSON object; exit 0 ok, 1 error, 2 ask the user.
    Present the candidates numbered: `<n>. <title> — <why relevant> — article|video`. The user
    picks by number; only the picked ones and the seeds are fetched. With `-yolo`, pick at most 10
    (seeds are always kept and do not count) and list them before step 5.
-5. **Fetch + ingest** — `/pavilio-wiki <p> ingest <url>…` with every seed and pick. Fetching
-   into `wiki/raw/`, page writing and the `wiki/` commit are that run's; never fetch outside it.
+5. **Fetch + ingest** — `/pavilio-wiki <p> ingest <url>…` with every seed and pick. That ingest
+   fetches via `scripts/wiki fetch-article` / `fetch-youtube` into `wiki/raw/`; page writing and
+   the `wiki/` commit are that run's too; never fetch outside it.
    Report every source the ingest dropped, with its reason.
 6. **Answer** — each research question as a query: `/pavilio-wiki <p>: "<question>"`. It leaves
    the question page, cites every page as a panel link (`scripts/wiki panel-link <path>`) and
