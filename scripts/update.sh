@@ -302,6 +302,17 @@ mkdir -p "$REPO_ROOT/skills"
 rsync -a \
   --exclude='.DS_Store' \
   "$UPSTREAM_DIR/skills/" "$REPO_ROOT/skills/"
+# skills/ is synced without --delete (it holds private downstream skills), so a skill retired
+# upstream would stay forever. Remove exactly the names upstream's skills/RETIRED lists, and only
+# when upstream has no such skill again.
+if [ -f "$UPSTREAM_DIR/skills/RETIRED" ]; then
+  grep -E '^[a-z0-9][a-z0-9._-]*$' "$UPSTREAM_DIR/skills/RETIRED" | while read -r name; do
+    if [ ! -e "$UPSTREAM_DIR/skills/$name" ] && [ -d "$REPO_ROOT/skills/$name" ] && [ ! -L "$REPO_ROOT/skills/$name" ]; then
+      rm -rf "${REPO_ROOT:?}/skills/$name"
+      echo "  ✗ removed retired skills/$name/"
+    fi
+  done
+fi
 
 if [ -d "$UPSTREAM_DIR/commands" ]; then
   echo "Syncing commands/..."

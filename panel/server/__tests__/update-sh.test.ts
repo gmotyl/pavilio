@@ -386,6 +386,25 @@ describe("scripts/update.sh panel build", () => {
 });
 
 describe("scripts/update.sh sync commit", () => {
+  it("removes the workspace copy of a skill upstream retired, and only that one", () => {
+    initDestRepo();
+    mkdirSync(join(dest, "skills", "pavilio-bootstrap"), { recursive: true });
+    writeFileSync(join(dest, "skills", "pavilio-bootstrap", "SKILL.md"), "# old\n");
+    mkdirSync(join(dest, "skills", "my-private"), { recursive: true });
+    writeFileSync(join(dest, "skills", "my-private", "SKILL.md"), "# mine\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "workspace skills");
+    writeFileSync(join(upstream, "skills", "RETIRED"), "# retired\npavilio-bootstrap\n../my-private\n");
+    commitUpstream("retire pavilio-bootstrap");
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(existsSync(join(dest, "skills", "pavilio-bootstrap"))).toBe(false);
+    expect(existsSync(join(dest, "skills", "my-private", "SKILL.md"))).toBe(true);
+    expect(destStatus()).toBe("");
+  });
+
   it("commits the synced files so the workspace is left clean", () => {
     initDestRepo();
 
