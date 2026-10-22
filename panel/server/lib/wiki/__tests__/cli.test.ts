@@ -154,6 +154,33 @@ describe("wiki cli", () => {
     }
   });
 
+  it("cli panel-link prints the link", async () => {
+    expect(await cli(["panel-link", "demo/wiki/sources/a.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/project/demo/wiki?file=demo%2Fwiki%2Fsources%2Fa.md" },
+    });
+    expect(await cli(["panel-link", "demo/notes/2026-10-01_1000_kickoff.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/demo/notes/2026-10-01_1000_kickoff.md" },
+    });
+    const missing = await cli(["panel-link"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toMatch(/panel-link/);
+  });
+
+  it("cli project reports the project kind", async () => {
+    expect(await cli(["project", "--name", "demo"])).toMatchObject({
+      code: 0,
+      json: { project: "demo", via: "arg", kind: "project" },
+    });
+    write("PROJECT.md", "---\nkind: research\n---\n# Demo\n");
+    expect(await cli(["project", "--name", "demo"])).toEqual({
+      code: 0,
+      json: { project: "demo", via: "arg", kind: "research" },
+      stderr: "",
+    });
+  });
+
   it("fails on an unknown command", async () => {
     const res = await cli(["frobnicate"]);
     expect(res.code).toBe(1);

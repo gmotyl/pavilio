@@ -11,6 +11,8 @@ import { pendingRecords, recordIngested } from "./ledger";
 import { lintWiki } from "./lint";
 import { releaseLock, takeLock } from "./lock";
 import { countMentions } from "./mentions";
+import { projectKind } from "../projects/kind";
+import { panelLink } from "./panel-link";
 import { resolveProject, type FetchLike } from "./project";
 
 /**
@@ -31,7 +33,10 @@ import { resolveProject, type FetchLike } from "./project";
 
 const USAGE = `usage: scripts/wiki <command> [args]
 
-  project [--name <p>] [--cwd <dir>]        {project, via} | exit 2 {ask, reason}
+  project [--name <p>] [--cwd <dir>]        {project, via, kind} | exit 2 {ask, reason}
+                                            kind: project | research | knowledge
+  panel-link <path>                         {link}: panel route (/project/<p>/wiki?file=… or
+                                            /view/…) for a projects-relative path, no host
   pending <p> [--only <path>]               {pending: [{path, hash, status}]}
   record <p> <path> <hash>                  {ok: true}
   lock take|release <p> --session <id>      {held, takenOver[, busy]} (release adds released;
@@ -155,8 +160,15 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
         env: deps.env,
         fetch: deps.fetch ?? (globalThis.fetch as FetchLike),
       });
-      if (result.ok) return ok({ project: result.project, via: result.via });
+      if (result.ok) {
+        const kind = projectKind(join(workspaceRoot, "projects"), result.project);
+        return ok({ project: result.project, via: result.via, kind });
+      }
       return { code: 2, body: { ask: true, reason: result.reason } };
+    }
+    case "panel-link": {
+      const [path] = only(parsed, 1, "panel-link <projects-relative path>");
+      return ok({ link: panelLink(path) });
     }
     case "pending": {
       const [p] = only(parsed, 1, "pending <p> [--only <path>]", ["only"]);

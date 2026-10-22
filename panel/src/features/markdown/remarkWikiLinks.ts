@@ -3,7 +3,7 @@
  * `<project>:` prefix, optional `|label`. Parsing is the server's pure module, shared as is.
  */
 import { parseWikiLink, type WikiLink } from "../../../server/lib/wiki/wikilinks";
-import { encodePathSegments } from "./viewRoute";
+import { panelLink } from "../../../server/lib/wiki/panel-link";
 
 /** Attribute the plugin puts on every wikilink anchor: the target's projectsDir-relative path. */
 export const WIKILINK_ATTR = "data-wikilink";
@@ -33,24 +33,10 @@ type MdNode = {
 };
 
 /**
- * The viewer route for a projectsDir-relative path, each segment percent-encoded so `#`, `?` and
- * spaces stay part of the path. Route consumers decode it back (`viewRoute.ts`).
+ * Where a wikilink target opens: a wiki page in its project's wiki tab (`?file=`), any other file
+ * in the bare viewer. Shared with `scripts/wiki panel-link`, so agent links match rendered ones.
  */
-const viewerHref = (path: string) => `/view/${encodePathSegments(path)}`;
-
-/** `<project>/wiki/…`: a wiki page, which opens in its project's wiki tab. */
-const WIKI_PAGE = /^([^/]+)\/wiki\//;
-
-/**
- * Where a wikilink target opens: a wiki page in its project's wiki tab (`?file=`), so the wiki
- * tree stays beside it; any other file in the bare viewer.
- */
-function linkHref(path: string): string {
-  const project = WIKI_PAGE.exec(path)?.[1];
-  return project
-    ? `/project/${encodeURIComponent(project)}/wiki?file=${encodeURIComponent(path)}`
-    : viewerHref(path);
-}
+const linkHref = panelLink;
 
 const LINK = /\[\[([^[\]\n]+)\]\]/g;
 
