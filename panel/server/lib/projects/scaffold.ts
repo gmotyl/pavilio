@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 
 import { addProjectToRegistry } from "../registry";
+import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
 import { renderIndexes } from "../wiki/index-md";
 import { WIKI_GITIGNORE_LINES } from "../wiki/lock";
 import type { ProjectKind } from "./kind";
@@ -144,6 +145,23 @@ function skeleton(input: ScaffoldInput): { files: [string, string][]; keptDirs: 
 }
 
 /**
+ * Refuse (throw, before anything is written) when the project dir, a dir the skeleton writes
+ * through, or a skeleton file is a symlink or resolves outside `projectsDir` — `mkdirSync` and
+ * `writeFileSync` would follow it and scaffold outside the workspace.
+ */
+function assertWritable(projectsDir: string, name: string, files: [string, string][], keptDirs: string[]): void {
+  const dirs = new Set(["", ...keptDirs, ...files.map(([rel]) => dirname(rel))]);
+  for (const dir of dirs) {
+    assertContainedDir(projectsDir, [name, ...dir.split("/").filter((s) => s && s !== ".")]);
+  }
+  for (const [rel] of files) {
+    if (isDanglingLink(join(projectsDir, name, rel)) && !existsSync(join(projectsDir, name, rel))) {
+      throw new Error(`refusing a symlinked ${name}/${rel}`);
+    }
+  }
+}
+
+/**
  * Create the skeleton of project `name` under `projectsDir` and add its registry row. Asks (writes
  * nothing) when the project already has a card or the name is taken under `archived/`. Throws on
  * a name that is not a slug and on a research project without a topic.
@@ -159,6 +177,7 @@ export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   if (existsSync(join(projectsDir, "archived", name))) return { ok: false, ask: true, reason: "archived" };
 
   const { files, keptDirs } = skeleton(input);
+  assertWritable(projectsDir, name, files, keptDirs);
   const created: string[] = [];
   // Dirs first: whether a dir pre-existed decides its `.gitkeep`, before files land in it.
   for (const dir of keptDirs) {

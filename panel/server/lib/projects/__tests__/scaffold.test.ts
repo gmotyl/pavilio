@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 
@@ -157,5 +157,33 @@ describe("scaffoldProject", () => {
     expect(result.ok).toBe(true);
     expect(existsSync(join(projectsDir, "acme/PROJECT.md"))).toBe(true);
     expect(existsSync(registryFile())).toBe(false);
+  });
+
+  it("refuses a symlinked project dir pointing outside projects", () => {
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, join(projectsDir, "acme"));
+    expect(() => scaffoldProject({ projectsDir, name: "acme", kind: "project", today: "2026-10-22" })).toThrow(/symlink/);
+    expect(readdirSync(outside)).toEqual([]);
+    expect(readFileSync(registryFile(), "utf8")).toBe(REGISTRY);
+  });
+
+  it("refuses a symlinked wiki dir inside an existing cardless folder", () => {
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    write("legacy/notes.md", "n");
+    symlinkSync(outside, join(projectsDir, "legacy/wiki"));
+    expect(() => scaffoldProject({ projectsDir, name: "legacy", kind: "project", today: "2026-10-22" })).toThrow(/symlink/);
+    expect(readdirSync(outside)).toEqual([]);
+    expect(existsSync(join(projectsDir, "legacy/PROJECT.md"))).toBe(false);
+  });
+
+  it("refuses a dangling symlinked skeleton file", () => {
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    write("legacy/notes.md", "n");
+    symlinkSync(join(outside, "status.md"), join(projectsDir, "legacy/STATUS.md"));
+    expect(() => scaffoldProject({ projectsDir, name: "legacy", kind: "project", today: "2026-10-22" })).toThrow(/symlink/);
+    expect(readdirSync(outside)).toEqual([]);
   });
 });
