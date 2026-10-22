@@ -18,7 +18,10 @@ const CANDIDATES_HEADING = "## Knowledge candidates";
 const KNOWLEDGE_HEADING = "## Knowledge";
 
 export type Candidate = {
-  /** `<project>#<line hash>` — stable while the line is unchanged. */
+  /**
+   * `<project>#<line hash>` — stable while the line is unchanged. A repeated identical line hashes
+   * its occurrence index too, so every candidate has its own id.
+   */
   id: string;
   project: string;
   text: string;
@@ -60,7 +63,9 @@ const openQuestionsPath = (workspaceRoot: string, project: string) =>
 
 /** A heading of level 1 or 2 ends a `##` section. */
 const isSectionEnd = (line: string) => /^#{1,2}\s/.test(line);
-const isItem = (line: string) => /^\s*[-*]\s/.test(line);
+/** Only a top-level bullet is a candidate; indented lines belong to the bullet above them. */
+const isItem = (line: string) => /^[-*]\s/.test(line);
+const isContinuation = (line: string) => /^\s+\S/.test(line);
 
 /** `[start, end)` line range of the body under `heading`, or null when the heading is absent. */
 function sectionRange(lines: string[], heading: string): [number, number] | null {
@@ -71,12 +76,14 @@ function sectionRange(lines: string[], heading: string): [number, number] | null
   return [at + 1, end];
 }
 
-function lineHash(line: string): string {
-  return createHash("sha256").update(line.replace(/\r$/, "")).digest("hex").slice(0, 12);
+/** The first occurrence of a line hashes the line alone; the n-th repeat adds `#n`. */
+function lineHash(line: string, occurrence: number): string {
+  const input = line.replace(/\r$/, "") + (occurrence > 0 ? `\n#${occurrence}` : "");
+  return createHash("sha256").update(input).digest("hex").slice(0, 12);
 }
 
 /** `- 2026-10-20 — <finding> (from [[wiki/sources/…]])`; date and source are optional. */
-function parseCandidate(project: string, line: string): Candidate {
+function parseCandidate(project: string, line: string, occurrence: number): Candidate {
   let rest = line.replace(/\r$/, "").replace(/^\s*[-*]\s+/, "");
   const dated = /^(\d{4}-\d{2}-\d{2})\s*(?:[—–:-]\s*)?/.exec(rest);
   const date = dated ? dated[1] : null;
@@ -84,19 +91,29 @@ function parseCandidate(project: string, line: string): Candidate {
   const cited = /\[\[(wiki\/sources\/[^\]|#]+)(?:[|#][^\]]*)?\]\]/.exec(rest);
   const source = cited ? cited[1].trim().replace(/\.md$/, "") : null;
   const text = rest.replace(/\s*\(from \[\[[^\]]*\]\]\)\s*$/, "").trim();
-  return { id: `${project}#${lineHash(line)}`, project, text, date, source };
+  return { id: `${project}#${lineHash(line, occurrence)}`, project, text, date, source };
 }
 
-/** Every candidate line of one project, with its line index in `open-questions.md`. */
-function projectCandidates(workspaceRoot: string, project: string): { lines: string[]; found: { index: number; item: Candidate }[] } {
+type Found = { /** Line indexes of the bullet and its indented sub-lines. */ indexes: number[]; item: Candidate };
+
+/** Every candidate of one project, with the lines it spans in `open-questions.md`. */
+function projectCandidates(workspaceRoot: string, project: string): { lines: string[]; found: Found[] } {
   const path = openQuestionsPath(workspaceRoot, project);
   if (!existsSync(path)) return { lines: [], found: [] };
   const lines = readFileSync(path, "utf8").split("\n");
   const range = sectionRange(lines, CANDIDATES_HEADING);
   if (!range) return { lines, found: [] };
-  const found: { index: number; item: Candidate }[] = [];
+  const found: Found[] = [];
+  const seen = new Map<string, number>();
   for (let i = range[0]; i < range[1]; i++) {
-    if (isItem(lines[i])) found.push({ index: i, item: parseCandidate(project, lines[i]) });
+    if (!isItem(lines[i])) continue;
+    const key = lines[i].replace(/\r$/, "");
+    const occurrence = seen.get(key) ?? 0;
+    seen.set(key, occurrence + 1);
+    const item = parseCandidate(project, lines[i], occurrence);
+    const indexes = [i];
+    while (i + 1 < range[1] && isContinuation(lines[i + 1])) indexes.push(++i);
+    found.push({ indexes, item });
   }
   return { lines, found };
 }
@@ -109,7 +126,10 @@ export function listCandidates(workspaceRoot: string): { items: Candidate[] } {
   return { items };
 }
 
-/** `scripts/wiki clear-candidates`: drop exactly the lines with these ids; nothing else changes. */
+/**
+ * `scripts/wiki clear-candidates`: drop exactly the candidates with these ids, each with its
+ * indented sub-lines; nothing else changes.
+ */
 export function clearCandidates(workspaceRoot: string, ids: string[]): { removed: number } {
   const wanted = new Set(ids);
   const projects = new Set(ids.map((id) => id.slice(0, id.lastIndexOf("#"))));
@@ -118,13 +138,14 @@ export function clearCandidates(workspaceRoot: string, ids: string[]): { removed
   for (const project of projects) {
     if (!known.has(project)) continue;
     const { lines, found } = projectCandidates(workspaceRoot, project);
-    const drop = new Set(found.filter((f) => wanted.has(f.item.id)).map((f) => f.index));
-    if (drop.size === 0) continue;
+    const hits = found.filter((f) => wanted.has(f.item.id));
+    if (hits.length === 0) continue;
+    const drop = new Set(hits.flatMap((f) => f.indexes));
     writeFileSync(
       openQuestionsPath(workspaceRoot, project),
       lines.filter((_, i) => !drop.has(i)).join("\n"),
     );
-    removed += drop.size;
+    removed += hits.length;
   }
   return { removed };
 }
@@ -208,5 +229,6 @@ export function harvestStatus(workspaceRoot: string, today: Date): HarvestStatus
   }
   if (lastRun === null) return { lastRun: null, daysAgo: null, waiting };
   const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  return { lastRun, daysAgo: daysBetween(lastRun, todayStr), waiting };
+  // A log dated ahead of the local clock reads as "today", never as negative days.
+  return { lastRun, daysAgo: Math.max(0, daysBetween(lastRun, todayStr)), waiting };
 }

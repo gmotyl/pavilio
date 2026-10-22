@@ -84,6 +84,40 @@ describe("harvest", () => {
     expect(listCandidates(root).items.map((i) => i.text).sort()).toEqual(["four", "one"]);
   });
 
+  it("candidates are top-level bullets and clear-candidates drops their sub-lines", () => {
+    project("alpha", [
+      "- 2026-10-20 — parent one",
+      "  - a nested detail of one",
+      "    continuation of the detail",
+      "- 2026-10-20 — parent two",
+      "  * nested under two",
+    ]);
+    const before = read("projects/alpha/wiki/open-questions.md");
+    const { items } = listCandidates(root);
+    expect(items.map((i) => i.text)).toEqual(["parent one", "parent two"]);
+
+    const one = items.find((i) => i.text === "parent one")!;
+    expect(clearCandidates(root, [one.id])).toEqual({ removed: 1 });
+    expect(read("projects/alpha/wiki/open-questions.md")).toBe(
+      before.replace(
+        "- 2026-10-20 — parent one\n  - a nested detail of one\n    continuation of the detail\n",
+        "",
+      ),
+    );
+  });
+
+  it("identical candidate lines get distinct ids and clear one at a time", () => {
+    project("alpha", ["- 2026-10-20 — same", "- 2026-10-20 — other", "- 2026-10-20 — same"]);
+    const { items } = listCandidates(root);
+    const same = items.filter((i) => i.text === "same");
+    expect(same).toHaveLength(2);
+    expect(same[0].id).not.toBe(same[1].id);
+
+    expect(clearCandidates(root, [same[1].id])).toEqual({ removed: 1 });
+    expect(listCandidates(root).items.map((i) => i.text)).toEqual(["same", "other"]);
+    expect(listCandidates(root).items[0].id).toBe(same[0].id);
+  });
+
   it("backlink is idempotent", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
     write("projects/alpha/wiki/sources/a.md", "---\ntype: source\n---\nbody\n\n## Knowledge\n- [[knowledge:wiki/concepts/x]]\n");
@@ -123,5 +157,11 @@ describe("harvest", () => {
       "# Log\n\n## [2026-10-01] harvest\n- picked: a\n\n## [2026-10-12] harvest\n- picked: b\n\n## 2026-10-15 09:00 ingest (explicit)\n",
     );
     expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-12", daysAgo: 10, waiting: 3 });
+  });
+
+  it("harvest-status clamps a future harvest to zero days", () => {
+    write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
+    write("projects/knowledge/wiki/log.md", "# Log\n\n## [2026-10-25] harvest\n- picked: a\n");
+    expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-25", daysAgo: 0, waiting: 0 });
   });
 });
