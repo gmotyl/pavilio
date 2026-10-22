@@ -88,39 +88,14 @@ describe("detectLanIp", () => {
     expect(detectLanIp(stub, noWslHost, notWsl)).toBe("10.0.0.5");
   });
 
-  it("skips internal (loopback) addresses", () => {
-    const stub = makeStub({
-      lo0: [addr("127.0.0.1", { internal: true })],
-    });
-    expect(detectLanIp(stub, noWslHost, notWsl)).toBeNull();
-  });
-
-  it("skips link-local 169.254/16", () => {
-    const stub = makeStub({
-      en0: [addr("169.254.10.20")],
-    });
-    expect(detectLanIp(stub, noWslHost, notWsl)).toBeNull();
-  });
-
-  it("skips Tailscale CGNAT range 100.64.0.0/10", () => {
-    const stub = makeStub({
-      tailscale0: [addr("100.100.10.5")],
-    });
-    expect(detectLanIp(stub, noWslHost, notWsl)).toBeNull();
-  });
-
-  it("skips IPv6 addresses", () => {
-    const stub = makeStub({
-      en0: [addr("fe80::1", { family: "IPv6" })],
-    });
-    expect(detectLanIp(stub, noWslHost, notWsl)).toBeNull();
-  });
-
-  it("keeps only RFC1918 ranges — public IPs are ignored", () => {
-    const stub = makeStub({
-      en0: [addr("203.0.113.5")],
-    });
-    expect(detectLanIp(stub, noWslHost, notWsl)).toBeNull();
+  it.each<[string, Record<string, ReturnType<typeof addr>[]>]>([
+    ["internal (loopback) addresses", { lo0: [addr("127.0.0.1", { internal: true })] }],
+    ["link-local 169.254/16", { en0: [addr("169.254.10.20")] }],
+    ["Tailscale CGNAT range 100.64.0.0/10", { tailscale0: [addr("100.100.10.5")] }],
+    ["IPv6 addresses", { en0: [addr("fe80::1", { family: "IPv6" })] }],
+    ["public IPs (keeps only RFC1918 ranges)", { en0: [addr("203.0.113.5")] }],
+  ])("skips %s", (_label, ifaces) => {
+    expect(detectLanIp(makeStub(ifaces), noWslHost, notWsl)).toBeNull();
   });
 
   it("returns null when no interfaces are present", () => {

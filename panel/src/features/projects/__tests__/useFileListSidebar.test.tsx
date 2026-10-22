@@ -1,37 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { useFileListSidebar } from "../useFileListSidebar";
 import { preferences } from "../../../preferences/declarations";
-
-/** Controllable matchMedia stub — jsdom has none. */
-function installMatchMedia(mobile: boolean) {
-  const listeners = new Set<(e: MediaQueryListEvent) => void>();
-  let matches = mobile;
-  const mql = {
-    get matches() {
-      return matches;
-    },
-    media: MOBILE_QUERY,
-    addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
-    removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-  };
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => mql,
-  });
-  return {
-    setMobile(next: boolean) {
-      matches = next;
-      act(() => {
-        listeners.forEach((cb) => cb({ matches: next } as MediaQueryListEvent));
-      });
-    },
-  };
-}
+import { installMatchMedia } from "../../../test-utils";
 
 function Probe() {
   const { collapsed, isMobile, peeking, toggle, collapseTransient, startPeek, endPeek } =
@@ -73,14 +44,14 @@ const stored = () => doc()[KEY] ?? null;
 
 describe("useFileListSidebar", () => {
   it("defaults to expanded on desktop", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     render(<Probe />);
     expect(collapsed()).toBe("false");
     expect(screen.getByTestId("mobile").textContent).toBe("false");
   });
 
   it("persists the desktop toggle", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     render(<Probe />);
     fireEvent.click(screen.getByTestId("toggle"));
     expect(collapsed()).toBe("true");
@@ -88,14 +59,14 @@ describe("useFileListSidebar", () => {
   });
 
   it("reads the stored value on mount", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     seed(true);
     render(<Probe />);
     expect(collapsed()).toBe("true");
   });
 
   it("ignores collapseTransient on desktop", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     render(<Probe />);
     fireEvent.click(screen.getByTestId("select"));
     expect(collapsed()).toBe("false");
@@ -103,14 +74,14 @@ describe("useFileListSidebar", () => {
   });
 
   it("starts collapsed on mobile even when storage says expanded", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     seed(false);
     render(<Probe />);
     expect(collapsed()).toBe("true");
   });
 
   it("toggling on mobile never writes storage", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     seed(false);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("toggle"));
@@ -119,7 +90,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("collapseTransient re-collapses on mobile without writing storage", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     seed(false);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("toggle"));
@@ -130,7 +101,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("returning to desktop restores the stored preference", () => {
-    const mm = installMatchMedia(true);
+    const mm = installMatchMedia({ mobile: true });
     seed(false);
     render(<Probe />);
     expect(collapsed()).toBe("true");
@@ -139,7 +110,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("startPeek expands a stored-collapsed sidebar without writing storage", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     seed(true);
     render(<Probe />);
     expect(collapsed()).toBe("true");
@@ -150,7 +121,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("endPeek re-collapses the peek without writing storage", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     seed(true);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("start-peek"));
@@ -162,7 +133,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("toggle pins the sidebar open and clears an active peek", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     seed(true);
     render(<Probe />);
     fireEvent.click(screen.getByTestId("start-peek"));
@@ -175,7 +146,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("while pinned open, peeking does not toggle the stored pref", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     // stored expanded (pinned open)
     render(<Probe />);
     expect(collapsed()).toBe("false");
@@ -186,7 +157,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("startPeek is a no-op when the sidebar is pinned open", () => {
-    installMatchMedia(false);
+    installMatchMedia();
     // stored expanded (pinned open) on desktop
     seed(false);
     render(<Probe />);
@@ -197,7 +168,7 @@ describe("useFileListSidebar", () => {
   });
 
   it("startPeek and endPeek are no-ops on mobile", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     render(<Probe />);
     expect(collapsed()).toBe("true");
     fireEvent.click(screen.getByTestId("start-peek"));

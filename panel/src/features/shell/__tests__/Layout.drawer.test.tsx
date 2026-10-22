@@ -186,8 +186,14 @@ describe("Layout sidebar toggles vs a docked drawer", () => {
 
   it("offsets from the collapsed base when the sidebar is collapsed", () => {
     setup(true, "right", { width: 400, rightExpanded: false });
-    expect(screen.getByTestId("sidebar-toggle-right")).toHaveStyle({
+    const toggle = screen.getByTestId("sidebar-toggle-right");
+    expect(toggle).toHaveStyle({
       right: `${TOGGLE_BASE_COLLAPSED + 400}px`,
     });
+    // `.sidebar-toggle` is transparent until `visible`: without it a collapsed
+    // sidebar has no way back. And no inline transition shadows the 150ms
+    // `transition: all` that fades it in and carries it across the collapse.
+    expect(toggle).toHaveClass("visible");
+    expect(toggle.style.transition).toBe("");
   });
 });

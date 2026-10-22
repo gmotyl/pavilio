@@ -16,42 +16,26 @@ describe("vscodeUrlFor", () => {
     expect(url).toBe("vscode://vscode-remote/wsl+Ubuntu/root/git/prv/projects/notes/foo.md");
   });
 
-  it("falls back to plain file:// when there is no WSL distro", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ wslDistro: null })));
+  it.each<[label: string, stub: () => { fetch: ReturnType<typeof vi.fn>; json?: ReturnType<typeof vi.fn> }]>([
+    ["there is no WSL distro", () => ({ fetch: vi.fn().mockResolvedValue(okJson({ wslDistro: null })) })],
+    ["the /api/system request fails", () => ({ fetch: vi.fn().mockRejectedValue(new Error("network down")) })],
+    [
+      "the response is non-OK, without parsing it",
+      () => {
+        const json = vi.fn();
+        return { fetch: vi.fn().mockResolvedValue({ ok: false, status: 500, json }), json };
+      },
+    ],
+    ["the payload has no usable wslDistro", () => ({ fetch: vi.fn().mockResolvedValue(okJson({ wslDistro: 42 })) })],
+  ])("falls back to plain file:// when %s", async (_label, stub) => {
+    const { fetch, json } = stub();
+    vi.stubGlobal("fetch", fetch);
     const { vscodeUrlFor } = await import("../vscode");
 
     const url = await vscodeUrlFor("/Users/greg/git/prv/projects/notes/foo.md");
 
     expect(url).toBe("vscode://file//Users/greg/git/prv/projects/notes/foo.md");
-  });
-
-  it("falls back to plain file:// when the /api/system request fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
-    const { vscodeUrlFor } = await import("../vscode");
-
-    const url = await vscodeUrlFor("/root/git/prv/projects/notes/foo.md");
-
-    expect(url).toBe("vscode://file//root/git/prv/projects/notes/foo.md");
-  });
-
-  it("falls back to plain file:// on a non-OK response instead of parsing it", async () => {
-    const json = vi.fn();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, json }));
-    const { vscodeUrlFor } = await import("../vscode");
-
-    const url = await vscodeUrlFor("/root/git/prv/projects/notes/foo.md");
-
-    expect(url).toBe("vscode://file//root/git/prv/projects/notes/foo.md");
-    expect(json).not.toHaveBeenCalled();
-  });
-
-  it("falls back to plain file:// when the payload has no usable wslDistro", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ wslDistro: 42 })));
-    const { vscodeUrlFor } = await import("../vscode");
-
-    const url = await vscodeUrlFor("/root/git/prv/projects/notes/foo.md");
-
-    expect(url).toBe("vscode://file//root/git/prv/projects/notes/foo.md");
+    if (json) expect(json).not.toHaveBeenCalled();
   });
 
   it("gives up on a hung /api/system via an abort signal", async () => {

@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import ProjectSettingsCard from "../ProjectSettingsCard";
-import { ProjectColorPicker } from "../../terminal/ProjectColorPicker";
 import { installProjectColors, rgb } from "../../terminal/__tests__/projectColors.harness";
 
 vi.mock("../../speech/ProjectVoiceSelect", () => ({ ProjectVoiceSelect: () => null }));
@@ -143,14 +142,5 @@ describe("ProjectSettingsCard appearance", () => {
     render(<ProjectSettingsCard project="alpha" />);
     unfold();
     expect(screen.getByTestId("project-color-preset-alpha-coral").getAttribute("title")).toMatch(/used by beta/);
-  });
-
-  it("terminal grid popover picker is unchanged", () => {
-    render(<ProjectColorPicker project="alpha" testId="trigger" />);
-    fireEvent.click(screen.getByTestId("trigger"));
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("project-color-preset-alpha-blue"));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "Set colour for alpha" })).toBeTruthy();
   });
 });

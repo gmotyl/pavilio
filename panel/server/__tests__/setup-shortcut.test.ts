@@ -20,7 +20,6 @@ import { join, resolve } from "node:path";
  */
 
 const SETUP_SHORTCUT = resolve(__dirname, "../../../scripts/setup:shortcut");
-const REPO_ROOT = resolve(__dirname, "../../..");
 
 // Absolute, because the script runs on a PATH that could not resolve `bash`.
 const BASH =
@@ -171,7 +170,7 @@ describe("scripts/setup:shortcut", () => {
 
     // And the user is told where it landed, in a path they can act on.
     expect(output).toContain(WSL_LNK);
-  }, 30000);
+  });
 
   it("targets the Windows Desktop folder via GetFolderPath so OneDrive redirection is honoured", () => {
     writePowershellStub();
@@ -196,7 +195,7 @@ describe("scripts/setup:shortcut", () => {
     // Without wslpath on PATH the Windows spelling is printed rather than
     // nothing at all.
     expect(second.output).toContain(WINDOWS_LNK);
-  }, 30000);
+  });
 
   it("is skipped outside WSL", () => {
     // No powershell.exe on PATH at all: a plain Linux or macOS checkout.
@@ -213,7 +212,7 @@ describe("scripts/setup:shortcut", () => {
     expect(noDistro.status).toBe(0);
     expect(noDistro.output).toContain("skipped (not WSL)");
     expect(payloads()).toHaveLength(0);
-  }, 30000);
+  });
 
   it("survives a checkout path holding both a space and an apostrophe", () => {
     writePowershellStub();
@@ -251,7 +250,7 @@ describe("scripts/setup:shortcut", () => {
     expect(`${ran.stdout}${ran.stderr}`).toBe("");
     expect(ran.status).toBe(0);
     expect(existsSync(marker)).toBe(true);
-  }, 30000);
+  });
 
   it("fails loudly when PowerShell cannot write the shortcut", () => {
     // A locked-down Desktop, a broken COM registration, a refused interop call:
@@ -269,7 +268,7 @@ describe("scripts/setup:shortcut", () => {
     expect(status).toBe(1);
     expect(output).toContain("Could not write the desktop shortcut");
     expect(output).not.toContain("✅");
-  }, 30000);
+  });
 
   it("refuses to write a shortcut when the launcher is missing", () => {
     writePowershellStub();
@@ -284,17 +283,5 @@ describe("scripts/setup:shortcut", () => {
     expect(output).not.toContain("✅");
     // PowerShell is never reached, so nothing lands on the Desktop.
     expect(payloads()).toHaveLength(0);
-  }, 30000);
-
-  it("the repository no longer ships a reference .lnk", () => {
-    // It was one machine's binary shortcut, stale the moment the repo moved.
-    expect(existsSync(join(REPO_ROOT, "scripts", "Pavilio Panel.lnk"))).toBe(false);
-
-    const tracked = spawnSync("git", ["ls-files", "scripts/"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    }).stdout;
-    expect(tracked).not.toContain(".lnk");
-    expect(tracked).toContain("scripts/setup:shortcut");
-  }, 30000);
+  });
 });

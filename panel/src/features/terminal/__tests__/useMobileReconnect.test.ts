@@ -165,27 +165,6 @@ describe("useMobileReconnect", () => {
     expect(reportAutoBlankReopen).not.toHaveBeenCalled();
   });
 
-  // The row must name the reason a reader would recognise. With a closed
-  // socket the blank viewport is incidental: the return is what reopened it,
-  // and attributing it to `auto-blank` would hide the trigger under review.
-  it("reports auto-return rather than auto-blank when the viewport is blank", () => {
-    const { ws } = fakeWs(3); // CLOSED
-    const reopen = vi.fn();
-    renderHook(() =>
-      useMobileReconnect({
-        ws,
-        getDims: () => ({ cols: 100, rows: 30 }),
-        reopen,
-        isViewportBlank: () => true,
-        hasExited: () => false,
-      }),
-    );
-    becomeVisible();
-    expect(reportAutoReturnReopen).toHaveBeenCalledTimes(1);
-    expect(reportAutoReturnReopen).toHaveBeenCalledWith(ws);
-    expect(reportAutoBlankReopen).not.toHaveBeenCalled();
-  });
-
   // Both the return path and the blank gate can see the same closed socket;
   // only one of them may act on it, or the session is rebuilt twice.
   it("reopens only once when the viewport is blank and the socket is closed", () => {
@@ -315,75 +294,52 @@ describe("useMobileReconnect", () => {
     expect(reopen).not.toHaveBeenCalled();
   });
 
-  // Both blank-gated paths reopen without anyone clicking anything. Unreported,
-  // they are invisible in the log — the very gap that makes today's nine
-  // manual-only lines unable to answer whether automation would have helped.
-  // A CONNECTING socket is the case the blank gate still owns: the return path
-  // takes only the sockets that are CLOSED or absent.
-  it("reports the blank-gated refocus reopen to the log", () => {
-    const { ws } = fakeWs(0); // CONNECTING
+  // Every automatic reopen reports itself to the log, named by the reason a
+  // reader would recognise, with the socket it holds and BEFORE the reopen, so
+  // the metric describes the state that prompted it rather than the fresh socket.
+  //
+  // - auto-return: with a closed socket the blank viewport is incidental — the
+  //   return is what reopened it, and attributing it to `auto-blank` would hide
+  //   the trigger under review.
+  // - auto-blank: both blank-gated paths reopen without anyone clicking anything.
+  //   Unreported, they are invisible in the log — the very gap that makes
+  //   today's nine manual-only lines unable to answer whether automation would
+  //   have helped. A CONNECTING socket is the case the blank gate still owns: the
+  //   return path takes only the sockets that are CLOSED or absent.
+  // - nothing: content on screen, so the nudge path and the silent watchdog
+  //   path reopen nothing and may report nothing.
+  it.each<[label: string, readyState: number, blank: boolean, via: "return" | "watchdog" | "both", reported: "return" | "blank" | null]>([
+    ["auto-return, not auto-blank, for a CLOSED socket on a blank viewport", 3, true, "return", "return"],
+    ["the blank-gated refocus reopen of a CONNECTING socket", 0, true, "return", "blank"],
+    ["the watchdog's blank-gated reopen", 1, true, "watchdog", "blank"],
+    ["nothing on the paths that do not reopen", 1, false, "both", null],
+  ])("reports %s", (_label, readyState, blank, via, reported) => {
+    const { ws } = fakeWs(readyState);
     const reopen = vi.fn();
     renderHook(() =>
       useMobileReconnect({
         ws,
         getDims: () => ({ cols: 100, rows: 30 }),
         reopen,
-        isViewportBlank: () => true,
+        isViewportBlank: () => blank,
         hasExited: () => false,
       }),
     );
-    becomeVisible();
+    if (via !== "watchdog") becomeVisible();
+    if (via !== "return") {
+      act(() => {
+        vi.advanceTimersByTime(26_000);
+      });
+    }
+
+    const expected = reported === "return" ? reportAutoReturnReopen : reported === "blank" ? reportAutoBlankReopen : null;
+    for (const reporter of [reportAutoReturnReopen, reportAutoBlankReopen]) {
+      if (reporter !== expected) expect(reporter).not.toHaveBeenCalled();
+    }
+    if (!expected) return;
     expect(reopen).toHaveBeenCalledTimes(1);
-    expect(reportAutoBlankReopen).toHaveBeenCalledTimes(1);
-    // Reported with the socket it holds, and BEFORE the reopen, so the metric
-    // describes the state that prompted it rather than the fresh socket.
-    expect(reportAutoBlankReopen).toHaveBeenCalledWith(ws);
-    expect(reportAutoBlankReopen.mock.invocationCallOrder[0]).toBeLessThan(
-      reopen.mock.invocationCallOrder[0],
-    );
-  });
-
-  it("reports the watchdog's blank-gated reopen to the log", () => {
-    const { ws } = fakeWs(1);
-    const reopen = vi.fn();
-    renderHook(() =>
-      useMobileReconnect({
-        ws,
-        getDims: () => ({ cols: 100, rows: 30 }),
-        reopen,
-        isViewportBlank: () => true,
-        hasExited: () => false,
-      }),
-    );
-    act(() => {
-      vi.advanceTimersByTime(26_000);
-    });
-    expect(reopen).toHaveBeenCalled();
-    expect(reportAutoBlankReopen).toHaveBeenCalledWith(ws);
-    // Same ordering contract as the refocus path: reported first, so the
-    // metric describes the stale socket rather than its replacement.
-    expect(reportAutoBlankReopen.mock.invocationCallOrder[0]).toBeLessThan(
-      reopen.mock.invocationCallOrder[0],
-    );
-  });
-
-  it("reports nothing on the paths that do not reopen", () => {
-    const { ws } = fakeWs(1);
-    renderHook(() =>
-      useMobileReconnect({
-        ws,
-        getDims: () => ({ cols: 100, rows: 30 }),
-        reopen: vi.fn(),
-        // Content on screen: the nudge path and the silent watchdog path.
-        isViewportBlank: () => false,
-        hasExited: () => false,
-      }),
-    );
-    becomeVisible();
-    act(() => {
-      vi.advanceTimersByTime(26_000);
-    });
-    expect(reportAutoBlankReopen).not.toHaveBeenCalled();
-    expect(reportAutoReturnReopen).not.toHaveBeenCalled();
+    expect(expected).toHaveBeenCalledTimes(1);
+    expect(expected).toHaveBeenCalledWith(ws);
+    expect(expected.mock.invocationCallOrder[0]).toBeLessThan(reopen.mock.invocationCallOrder[0]);
   });
 });

@@ -1,29 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
 import { execSync } from "child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { configMock, makeApp } from "../../test-kit";
 import { synthesizeAddDiff } from "../git";
 
 let repoDir = "";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: repoDir }),
-}));
+vi.mock("../../config", () => configMock(() => repoDir));
 vi.mock("../../watcher", () => ({ broadcast: vi.fn() }));
 vi.mock("../../lib/syncRepo", () => ({ syncRepo: vi.fn() }));
 vi.mock("../../lib/hostname", () => ({ machineHostname: () => "test-host" }));
 
 import gitRouter from "../git";
-
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/git", gitRouter);
-  return app;
-}
 
 function sh(cmd: string) {
   execSync(cmd, { cwd: repoDir, stdio: "pipe" });
@@ -42,7 +33,7 @@ describe("GET /api/git/status", () => {
     writeFileSync(join(repoDir, "newdir", "a.txt"), "a");
     writeFileSync(join(repoDir, "newdir", "b.txt"), "b");
 
-    const res = await request(makeApp()).get(
+    const res = await request(makeApp(gitRouter, "/api/git")).get(
       `/api/git/status?repo=${encodeURIComponent(repoDir)}`,
     );
     expect(res.status).toBe(200);

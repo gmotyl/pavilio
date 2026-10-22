@@ -42,11 +42,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
 import { prepare } from "../../speech/prepare";
 import { getStoredAutoOpenAnswer, setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
+import { StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in. `send` is the only part that matters here:
@@ -111,16 +113,12 @@ vi.mock("../terminalInstances", () => {
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
 // mermaid pulls in a browser-only rendering stack the pane never needs here.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 // The synthesis cache the bar peeks into: everything is cold.
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so they pick them up.
@@ -137,8 +135,6 @@ const utterance: Utterance = { id: "u-1", sessionId: SESSION, text: ANSWER, at: 
 
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
  *  stable between notifications — a fresh value per call is a render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 
 /**
@@ -151,36 +147,23 @@ const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
  */
 type Host = GridSpeech & { arrive: () => void };
 
-function makeSpeech(): Host {
+function arrivingSpeech(): Host {
   let queue: UtteranceQueue = emptyUtteranceQueue;
   let spoken = false;
   const units = prepare(ANSWER).units;
 
   return {
+    ...makeSpeech({
+      // One direction only, exactly as the real host: a cell never returns to
+      // `empty` once it has an answer, so the pills never come back.
+      stateFor: () => (spoken ? "ready" : "empty"),
+      queueFor: () => queue,
+      unitsFor: () => (spoken ? units : NO_UNITS),
+    }),
     arrive: () => {
       queue = { ...emptyUtteranceQueue, current: utterance };
       spoken = true;
     },
-    // One direction only, exactly as the real host: a cell never returns to
-    // `empty` once it has an answer, so the pills never come back.
-    stateFor: () => (spoken ? "ready" : "empty"),
-    queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => (spoken ? units : NO_UNITS),
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
   };
 }
 
@@ -190,12 +173,6 @@ const cell = (speech: GridSpeech, speechBarVisible = true) => (
     <TerminalView sessionId={SESSION} speech={speech} speechBarVisible={speechBarVisible} />
   </MemoryRouter>
 );
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const pane = (): HTMLElement | null => screen.queryByTestId(`answer-pane-${SESSION}`);
 const wave = (): HTMLElement | null => screen.queryByTestId(`answer-pane-waiting-${SESSION}`);
@@ -208,7 +185,7 @@ const launcher = (): HTMLElement => screen.getByRole("button", { name: "claude" 
  */
 async function settleSubmit(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await vi.advanceTimersByTimeAsync(80);
   });
 }
 
@@ -222,6 +199,9 @@ function activity(state: "idle" | "busy" | "attention"): void {
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   at = 0;
   term.writes.length = 0;
   term.accept = true;
@@ -235,6 +215,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   _resetForTests();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
@@ -244,7 +225,7 @@ afterEach(() => {
 
 describe("a launcher press opens the answer pane", () => {
   it("a launcher press opens the pane and leaves no opened-for-wait mark", async () => {
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
     // The cell has never spoken, so the pane is closed. The eye is on the row
     // — it has been since the strip stopped being conditional — but nothing
     // has pressed it, which is what makes the press below the opener.
@@ -269,7 +250,7 @@ describe("a launcher press opens the answer pane", () => {
 
   it("a refused launcher press opens nothing", async () => {
     term.accept = false;
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
 
     fireEvent.click(launcher());
     await settleSubmit();
@@ -285,7 +266,7 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   it("a hidden speech bar suppresses the open", async () => {
-    const speech = makeSpeech();
+    const speech = arrivingSpeech();
     const view = render(cell(speech, false));
 
     // With the row hidden there is no pill to press at all — the bar's
@@ -313,7 +294,7 @@ describe("a launcher press opens the answer pane", () => {
     // cell starts fresh.
     setStoredAutoOpenAnswer(false);
     forgetAnswerPane(SESSION);
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
 
     fireEvent.click(launcher());
     await settleSubmit();
@@ -329,7 +310,7 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   it("the wait ending on idle does not close a press-opened pane", async () => {
-    render(cell(makeSpeech()));
+    render(cell(arrivingSpeech()));
 
     fireEvent.click(launcher());
     await settleSubmit();
@@ -352,7 +333,7 @@ describe("a launcher press opens the answer pane", () => {
   });
 
   it("an answer arriving leaves the pane open on the answer", async () => {
-    const speech = makeSpeech();
+    const speech = arrivingSpeech();
     const view = render(cell(speech));
 
     fireEvent.click(launcher());
@@ -394,7 +375,7 @@ describe("a launcher press opens the answer pane", () => {
     // starts fresh.
     setStoredAutoOpenAnswer(false);
     forgetAnswerPane(SESSION);
-    const speech = makeSpeech();
+    const speech = arrivingSpeech();
     const view = render(cell(speech));
 
     fireEvent.click(launcher());

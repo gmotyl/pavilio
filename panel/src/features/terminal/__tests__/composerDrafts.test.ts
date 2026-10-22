@@ -6,7 +6,7 @@
  * The other three criteria are written in terms of the PANE ("the pane is
  * closed and reopened", "a new utterance arrives", "the draft is sent"), and a
  * draft that survived a `Map` but not an unmount would satisfy every one of
- * them here while failing the user: those live in `AnswerComposer.test.tsx`,
+ * them here while failing the user: those live in `AnswerComposer.send.test.tsx` ("send"),
  * against a composer that is actually mounted, typed into and sent from.
  *
  * Nothing in this file resets the module itself. The store is a tab-scoped

@@ -14,9 +14,9 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import type { GridSpeech, SpeechMode, SpeechUnit } from "../../speech/types";
-import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import type { GridSpeech, SpeechMode } from "../../speech/types";
 
 vi.mock("../terminalInstances", () => ({
   acquireTerminal: () => {
@@ -43,35 +43,12 @@ const { SpeechControlBar } = await import("../SpeechControlBar");
 
 const SESSION = "cell-a";
 
-/** Shared, because a `useSyncExternalStore` snapshot must be referentially
- *  stable between notifications — a fresh value per call is a render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-
-function makeSpeech(mode: SpeechMode): GridSpeech {
-  return {
-    stateFor: () => "empty",
-    queueFor: () => emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
+function speechInMode(mode: SpeechMode): GridSpeech {
+  return makeSpeech({
     // Only this cell carries the mode under test; any other id reads `off`, so
     // a bar asking about the wrong session draws the wrong glyph.
     speechModeOf: (sessionId) => (sessionId === SESSION ? mode : "off"),
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 function renderBar(speech: GridSpeech) {
@@ -98,7 +75,7 @@ describe("SpeechControlBar — the speech mode control", () => {
       autoplay: "lucide-volume-2",
     };
     for (const mode of MODES) {
-      const { unmount } = renderBar(makeSpeech(mode));
+      const { unmount } = renderBar(speechInMode(mode));
       const button = control();
       expect(button).toHaveAttribute("data-speech-mode", mode);
       // A three-state cycle is not a switch: no `aria-checked` to half-tell it.
@@ -119,7 +96,7 @@ describe("SpeechControlBar — the speech mode control", () => {
 
   it("clicking the first control cycles the cell's mode", () => {
     for (const mode of MODES) {
-      const speech = makeSpeech(mode);
+      const speech = speechInMode(mode);
       const { unmount } = renderBar(speech);
       fireEvent.click(control());
       expect(speech.cycleSpeechMode).toHaveBeenCalledTimes(1);
@@ -135,7 +112,7 @@ describe("SpeechControlBar — the speech mode control", () => {
       autoplay: "Autoplay — click to turn off",
     };
     for (const mode of MODES) {
-      const { unmount } = renderBar(makeSpeech(mode));
+      const { unmount } = renderBar(speechInMode(mode));
       expect(control()).toHaveAttribute("aria-label", labels[mode]);
       expect(control()).toHaveAttribute("title", labels[mode]);
       expect(control()).toHaveAccessibleName(labels[mode]);

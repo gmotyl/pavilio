@@ -39,14 +39,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import AlertHost from "../../alerts/AlertHost";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
-import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
-import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import type { CellSpeechState, GridSpeech } from "../../speech/types";
 import { AnswerPane } from "../AnswerPane";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
@@ -54,70 +53,22 @@ import { getDraft, __resetComposerDraftsForTests } from "../composerDrafts";
 import { SUBMIT_RETURN_MS, __resetPtySubmitForTests, submitToPty } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 // The pane's rail peeks into the synthesis cache; nothing here is warm and
 // nothing subscribes, exactly as in the other composer suites.
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // No answer is put under the cursor in this file, so the markdown renderer is
 // never mounted — but the mock keeps mermaid's browser-only stack from being a
 // reason the suite cannot run.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
-
-/** Referentially stable — a fresh array per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 const SESSION = "cell-a";
 const PROJECT = "alpha";
 
-function makeSpeech(state: CellSpeechState = "ready"): GridSpeech {
-  return {
-    stateFor: () => state,
-    queueFor: () => emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
+function speechIn(state: CellSpeechState = "ready"): GridSpeech {
+  return makeSpeech({ stateFor: () => state });
 }
 
 function session(id: string, project: string): SessionMeta {
@@ -157,7 +108,7 @@ function renderPane(send: (data: string) => boolean) {
     <MemoryRouter>
       <AnswerPane
         sessionId={SESSION}
-        speech={makeSpeech()}
+        speech={speechIn()}
         onClose={() => {}}
         send={send}
       />
@@ -183,7 +134,7 @@ beforeEach(async () => {
   __resetComposerDraftsForTests();
   __resetAlertsForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
-  installMatchMedia(false);
+  installMatchMedia();
   await seedSessions([session(SESSION, PROJECT)]);
 });
 
@@ -440,7 +391,7 @@ describe("a launcher pill on a dead socket", () => {
    * with `AlertHost` beside it, because what the pills promise is that the
    * refusal is ANNOUNCED. Asserting the store alone would have rested that
    * claim on the host's own suite rather than on this path, which is the same
-   * reason `AnswerComposer.paste.test.tsx` mounts it for its failed upload.
+   * reason `AnswerComposer.picker.test.tsx` ("paste") mounts it for its failed upload.
    */
   function renderBar(send: (data: string) => boolean) {
     return render(
@@ -449,7 +400,7 @@ describe("a launcher pill on a dead socket", () => {
           sessionId={SESSION}
           // The pills are the row's contents only before a cell has spoken;
           // once there is an utterance the transport takes the row.
-          speech={makeSpeech("empty")}
+          speech={speechIn("empty")}
           answerOpen={false}
           onToggleAnswer={() => {}}
           send={send}

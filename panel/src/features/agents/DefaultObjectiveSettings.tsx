@@ -3,6 +3,7 @@ import { useState } from "react";
 import { preferences } from "../../preferences/declarations";
 import { clearPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
+import { useSyncedDraft } from "./useSyncedDraft";
 
 /**
  * The workspace's task-run objective: the template every project resolves
@@ -15,21 +16,12 @@ import { usePreference } from "../../preferences/usePreference";
  */
 export function DefaultObjectiveSettings() {
   const [template, setTemplate] = usePreference(preferences.taskPromptDefault);
-  const [draft, setDraft] = useState(template);
-  // The stored value the draft was last filled from, and whether the field has
-  // focus: together they say whether an edit is in progress.
-  const [base, setBase] = useState(template);
   const [focused, setFocused] = useState(false);
-
   // The stored value can change under the field — another tab's write, or the
   // clear below — so the draft follows it, UNLESS the user is mid-edit (focused
   // and changed from what it was filled from). That edit is kept, and saving
-  // it on blur is the user's last word; a clean draft catches up on blur.
-  // Adjusted during render rather than in an effect, so stale text never paints.
-  if (template !== base && !(focused && draft !== base)) {
-    setBase(template);
-    setDraft(template);
-  }
+  // it on blur is the user's last word; a clean draft catches up at once.
+  const [draft, setDraft] = useSyncedDraft(template, template, { hold: focused });
 
   const commit = () => {
     if (draft === template) return;

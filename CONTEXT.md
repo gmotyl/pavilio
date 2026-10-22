@@ -33,12 +33,12 @@ The Vite + React + Express app at `panel/` that the workspace runs locally. Sing
 _Avoid_: UI, dashboard, app
 
 **Section**:
-A conventional subfolder of a project — `notes/`, `progress/`, `plans/`, `memo/`, `qa/`. The panel renders each section as its own list with section-specific UI rules (e.g. `qa/` shows `run.md` folder names; `plans/` overlays the active-plans banner).
+A conventional subfolder of a project — `notes/`, `progress/`, `plans/`, `memo/`, `qa/`. The panel renders each section as its own list with section-specific UI rules (e.g. `qa/` shows `run.md` folder names; `plans/` lists OpenSpec changes as active or archived).
 _Avoid_: subfolder (use when speaking generically), category, tab
 
 **Active plan**:
-A plan file path listed in `projects/<name>/plans/CURRENT.md`. Multiple lines = multiple in-progress plans. The panel surfaces these prominently on the project view so agents resume in the right place.
-_Avoid_: open plan, current plan (file is `CURRENT.md`, but the concept is "active")
+An un-archived OpenSpec change directory — `openspec/changes/<change-id>/` (outside `changes/archive/`) in the project's plans store. Several can be in progress at once. The panel lists them as active on the project's Plans tab so agents resume in the right place; there is no pointer file (the old `plans/CURRENT.md` is gone).
+_Avoid_: open plan, current plan
 
 **Overview script**:
 A configured button on a project's Overview tab that runs a workspace shell script (`scripts/*.sh`) against the current project. Defined as one entry in the workspace `scripts/scripts.json`. Scoped to one **Project** at a time.
@@ -78,7 +78,7 @@ _Avoid_: replay (lowercase, ambiguous with WS message replay), restore, snapshot
 - A **Project** owns its **Notes world** subtree and references zero or more **Linked repositories**
 - A **Linked repository** is **Repo world** — read-only to the panel's filesystem mutations
 - A **Project** is composed of **Sections**; each section is one **Notes world** subfolder
-- An **Active plan** is a **Notes world** file path advertised through `plans/CURRENT.md`
+- An **Active plan** is a **Notes world** change directory under `openspec/changes/` that has not been moved to `changes/archive/`
 - The **Scripts config** defines a list of **Overview scripts**; the **Panel** renders one button per entry on every **Project**'s Overview tab.
 - The **Workspace** also contains the **Toolbox** — workspace-level tooling directories that the **Panel** edits with the same mutation policy as **Notes world**, but that `pnpm pull` may merge from upstream pavilio.
 - A **Project**'s **Time bucket** for a given day contains zero or more **Manual entries** (chargeable) and zero or more **Busy blocks** (reference only). Exports include manual entries only.

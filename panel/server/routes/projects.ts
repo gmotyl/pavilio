@@ -1,7 +1,6 @@
 import { Router } from "express";
 import {
   readFileSync,
-  writeFileSync,
   existsSync,
   readdirSync,
   statSync,
@@ -708,52 +707,6 @@ router.get("/:name/wiki", (req, res) => {
 router.get("/", (_req, res) => {
   const projects = discoverProjects();
   res.json(projects);
-});
-
-router.post("/:name/plans/current/:planFile", (req, res) => {
-  const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
-  // Only a project-local plan file (by basename) may be marked active.
-  const filename = basename(decodeURIComponent(req.params.planFile));
-  if (!/\.md$/i.test(filename)) return res.status(400).json({ error: "Not a .md plan file" });
-  const planAbs = join(projectDir, "plans", filename);
-  if (!existsSync(planAbs) || !statSync(planAbs).isFile()) {
-    return res.status(404).json({ error: "Plan file not found" });
-  }
-
-  const currentMdPath = join(projectDir, "plans", "CURRENT.md");
-  const existing = existsSync(currentMdPath)
-    ? readFileSync(currentMdPath, "utf-8").split("\n").map((l) => l.trim()).filter(Boolean)
-    : [];
-  if (existing.some((l) => l.endsWith(filename))) {
-    return res.json({ ok: true }); // already active — idempotent
-  }
-  const line = `projects/${req.params.name}/plans/${filename}`;
-  const header = existing.length === 0 ? "# CURRENT plan\n\n" : "";
-  writeFileSync(currentMdPath, header + [...existing, line].join("\n") + "\n");
-  res.json({ ok: true });
-});
-
-router.delete("/:name/plans/current/:planFile", (req, res) => {
-  const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
-  const currentMdPath = join(projectDir, "plans", "CURRENT.md");
-  if (!existsSync(currentMdPath)) return res.status(404).json({ error: "CURRENT.md not found" });
-
-  const planFile = decodeURIComponent(req.params.planFile);
-  const lines = readFileSync(currentMdPath, "utf-8").split("\n");
-  const filtered = lines.filter((l) => {
-    const trimmed = l.trim();
-    return trimmed !== "" && !trimmed.endsWith(planFile);
-  });
-  writeFileSync(currentMdPath, filtered.join("\n") + "\n");
-  res.json({ ok: true });
 });
 
 export default router;

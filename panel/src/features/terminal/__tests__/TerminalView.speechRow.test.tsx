@@ -26,7 +26,8 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 import { prepare } from "../../speech/prepare";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import {
@@ -37,6 +38,7 @@ import {
 import { forgetAnswerPane } from "../answerPaneState";
 import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in. `fit()` refreshes AND sends a resize frame,
@@ -46,10 +48,9 @@ import type { SessionMeta } from "../useTerminalSessions";
 const term = vi.hoisted(() => {
   const fit = vi.fn();
   const sent: string[] = [];
-  const observed: Element[] = [];
   /** Every byte written to the PTY through `inst.send` — the launcher path. */
   const writes: string[] = [];
-  return { fit, sent, observed, writes };
+  return { fit, sent, writes };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -113,14 +114,10 @@ vi.mock("../useTerminalConnection", () => ({ useTerminalConnection: () => "conne
 vi.mock("../TerminalActivityLed", () => ({
   TerminalActivityLed: () => <span data-testid="activity-led" />,
 }));
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so they pick them up.
@@ -128,41 +125,21 @@ const { TerminalView } = await import("../TerminalView");
 const { TerminalLayoutGrid } = await import("../TerminalLayoutGrid");
 
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
 const MARKDOWN = "The cell finally says something.";
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
 /** A speech host reporting one fixed reading of the cell. */
-function makeSpeech(
+function speechIn(
   state: CellSpeechState,
   queue: UtteranceQueue = emptyUtteranceQueue,
   units: readonly SpeechUnit[] = NO_UNITS,
 ): GridSpeech {
-  return {
+  return makeSpeech({
     stateFor: () => state,
     queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 /** The same host once the cell's first answer has landed. */
@@ -172,7 +149,7 @@ function spokenSpeech(): GridSpeech {
     utterance,
     speaking: false,
   });
-  return makeSpeech("ready", queue, prepare(MARKDOWN).units);
+  return speechIn("ready", queue, prepare(MARKDOWN).units);
 }
 
 const sessions: SessionMeta[] = [
@@ -193,9 +170,9 @@ const grid = (speech: GridSpeech) => (
 );
 
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
-async function settle(): Promise<void> {
+async function settleMount(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -219,38 +196,23 @@ function columnShape(container: Element): string[] {
 }
 
 beforeAll(() => {
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
-class StubResizeObserver {
-  observe(element: Element): void {
-    term.observed.push(element);
-  }
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settleMount helper steps it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   forgetAnswerPane("cell-a");
   term.fit.mockClear();
   term.sent.length = 0;
-  term.observed.length = 0;
+  StubResizeObserver.observed.length = 0;
   term.writes.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("the speech row", () => {
@@ -267,8 +229,8 @@ describe("the speech row", () => {
   // asserts on the bytes the terminal instance received.
   // -------------------------------------------------------------------------
   it("hands the row the cell's own PTY write", async () => {
-    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
-    await settle();
+    render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
+    await settleMount();
 
     // A silent cell shows the launchers; the first is the `claude` default.
     const pill = screen.getByTestId("speech-bar-launch-cell-a-0");
@@ -288,17 +250,17 @@ describe("the speech row", () => {
     // Nothing in the queue, nothing to play, no interaction — and the row is
     // there anyway. That is what "reserved from mount" means: the height is
     // spent before the cell has anything to say, so an arrival cannot claim it.
-    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
-    await settle();
+    render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
+    await settleMount();
 
     expect(bar()).toBeInTheDocument();
   });
 
   it("places the row before the terminal container, not over it", async () => {
-    render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
-    await settle();
+    render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
+    await settleMount();
 
-    const container = term.observed[0];
+    const container = StubResizeObserver.observed[0];
     expect(container).toBeDefined();
     // A sibling, still — never a child of the observed box.
     expect(container.contains(bar())).toBe(false);
@@ -327,17 +289,17 @@ describe("the speech row", () => {
     // to open is a deliberate act, like the hide toggle below; what must cost
     // nothing is the arrival ITSELF.
     setStoredAutoOpenAnswer(false);
-    const view = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
-    await settle();
+    const view = render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
+    await settleMount();
 
-    const container = term.observed[0];
+    const container = StubResizeObserver.observed[0];
     const shapeBefore = columnShape(container);
     const fitsBefore = term.fit.mock.calls.length;
     const resizesBefore = resizeFrames().length;
 
     // The cell's first answer lands.
     view.rerender(<TerminalView sessionId="cell-a" speech={spokenSpeech()} />);
-    await settle();
+    await settleMount();
 
     // The transport is live — the arrival was seen.
     expect(screen.getByTestId("speech-bar-playpause-cell-a")).toHaveAttribute(
@@ -347,7 +309,7 @@ describe("the speech row", () => {
     // jsdom lays nothing out, so the height is asserted as what determines it:
     // the same container node, in the same column, with the same siblings in
     // the same order. Nothing entered or left the flow.
-    expect(term.observed[0]).toBe(container);
+    expect(StubResizeObserver.observed[0]).toBe(container);
     expect(columnShape(container)).toEqual(shapeBefore);
     // And nothing refit it, so no SIGWINCH reached the PTY mid-answer.
     expect(term.fit.mock.calls.length).toBe(fitsBefore);
@@ -367,8 +329,8 @@ describe("the speech row", () => {
     // Seeding `lastBarVisible` with the CURRENT value of `speechBarVisible` is
     // what prevents it — seed it with anything else and the counts below go to
     // four. So the number is the point, not an incidental total.
-    const shown = render(<TerminalView sessionId="cell-a" speech={makeSpeech("empty")} />);
-    await settle();
+    const shown = render(<TerminalView sessionId="cell-a" speech={speechIn("empty")} />);
+    await settleMount();
 
     expect(bar()).toBeInTheDocument();
     expect(term.fit).toHaveBeenCalledTimes(3);
@@ -381,9 +343,9 @@ describe("the speech row", () => {
     term.fit.mockClear();
     term.sent.length = 0;
     render(
-      <TerminalView sessionId="cell-b" speech={makeSpeech("empty")} speechBarVisible={false} />,
+      <TerminalView sessionId="cell-b" speech={speechIn("empty")} speechBarVisible={false} />,
     );
-    await settle();
+    await settleMount();
 
     expect(screen.queryByTestId("speech-bar-cell-b")).not.toBeInTheDocument();
     expect(term.fit).toHaveBeenCalledTimes(3);
@@ -391,9 +353,9 @@ describe("the speech row", () => {
   });
 
   it("refits once when the row is hidden", async () => {
-    const speech = makeSpeech("empty");
+    const speech = speechIn("empty");
     const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
-    await settle();
+    await settleMount();
 
     term.fit.mockClear();
     term.sent.length = 0;
@@ -402,7 +364,7 @@ describe("the speech row", () => {
     // genuinely grows, so a fit and a resize frame are the correct response —
     // exactly once, not per render.
     view.rerender(<TerminalView sessionId="cell-a" speech={speech} speechBarVisible={false} />);
-    await settle();
+    await settleMount();
 
     expect(screen.queryByTestId("speech-bar-cell-a")).not.toBeInTheDocument();
     expect(term.fit).toHaveBeenCalledTimes(1);
@@ -427,41 +389,41 @@ describe("the speech row", () => {
 
   it("an arriving answer opens the pane when the stored preference is on", async () => {
     setStoredAutoOpenAnswer(true);
-    const view = render(cell(makeSpeech("empty")));
-    await settle();
+    const view = render(cell(speechIn("empty")));
+    await settleMount();
     expect(answerPane()).toBeNull();
 
     view.rerender(cell(spokenSpeech()));
-    await settle();
+    await settleMount();
     expect(answerPane()).not.toBeNull();
   });
 
   it("a preference cleared after the cell exists stops the next arrival opening it", async () => {
     // The cell and its pane entry exist while the preference is still on…
     setStoredAutoOpenAnswer(true);
-    const view = render(cell(makeSpeech("empty")));
-    await settle();
+    const view = render(cell(speechIn("empty")));
+    await settleMount();
 
     // …then Settings clears it, and only afterwards does the answer land.
     setStoredAutoOpenAnswer(false);
     view.rerender(cell(spokenSpeech()));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
   });
 
   it("a hidden speech bar still outranks the preference", async () => {
     setStoredAutoOpenAnswer(true);
-    const view = render(cell(makeSpeech("empty"), false));
-    await settle();
+    const view = render(cell(speechIn("empty"), false));
+    await settleMount();
 
     const spoken = spokenSpeech();
     view.rerender(cell(spoken, false));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
 
     // Nor is the arrival held back for the bar's return.
     view.rerender(cell(spoken));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
   });
 
@@ -470,11 +432,11 @@ describe("the speech row", () => {
     const spoken = spokenSpeech();
     // The queue already holds the utterance on the very first render.
     const view = render(cell(spoken));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
 
     view.rerender(cell(spoken));
-    await settle();
+    await settleMount();
     expect(answerPane()).toBeNull();
   });
 
@@ -482,14 +444,14 @@ describe("the speech row", () => {
     // The derivation lives in the cell, so this mounts the cell rather than the
     // view: `speechBarVisible` used to read the session's speech state, which
     // made the row's EXISTENCE conditional on having spoken. It no longer does.
-    const silent = render(grid(makeSpeech("empty")));
-    await settle();
+    const silent = render(grid(speechIn("empty")));
+    await settleMount();
     expect(bar()).toBeInTheDocument();
     silent.unmount();
 
     forgetAnswerPane("cell-a");
     render(grid(spokenSpeech()));
-    await settle();
+    await settleMount();
     expect(bar()).toBeInTheDocument();
   });
 });

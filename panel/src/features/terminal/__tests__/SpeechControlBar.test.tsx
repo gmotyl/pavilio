@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { READY_PULSE_MS } from "../../speech/useReadyPulseWindow";
@@ -29,6 +30,7 @@ import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../../speech/voices";
 import { CellSpeakButton } from "../CellSpeakButton";
 import { refreshSessions } from "../sessionStore";
 import { SpeechControlBar } from "../SpeechControlBar";
+import { StubResizeObserver } from "../../../test-utils";
 
 /**
  * A terminal instance stand-in whose `fit()` does exactly what the real one
@@ -38,8 +40,7 @@ import { SpeechControlBar } from "../SpeechControlBar";
 const term = vi.hoisted(() => {
   const fit = vi.fn();
   const sent: string[] = [];
-  const observed: Element[] = [];
-  return { fit, sent, observed };
+  return { fit, sent };
 });
 
 vi.mock("../terminalInstances", () => {
@@ -151,7 +152,7 @@ function cacheChanged(): void {
 }
 
 /** One unit's synthesis landing, announced. */
-function settle(text: string): void {
+function landSynthesis(text: string): void {
   warming.delete(text);
   warm.add(text);
   cacheChanged();
@@ -168,14 +169,6 @@ const noop = (): void => {};
 const noSend = (): boolean => true;
 
 const resizeFrames = (): string[] => term.sent.filter((frame) => frame.includes('"resize"'));
-
-class StubResizeObserver {
-  observe(element: Element): void {
-    term.observed.push(element);
-  }
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const units = (...chars: number[]): SpeechUnit[] =>
   chars.map((count) => {
@@ -210,37 +203,21 @@ interface SpeechOverrides {
  *  render loop, which is exactly what this caught the first time. */
 const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
+function speechWith(over: SpeechOverrides = {}): GridSpeech {
   const durations = over.durations ?? NO_DURATIONS;
   const progress = over.progress ?? null;
   const units_ = over.units ?? [];
 
-  return {
+  return makeSpeech({
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units_,
     // Nothing here moves, so the store never notifies: the snapshots below are
     // read once and stay put.
-    subscribeProgress: () => () => {},
     progressFor: () => progress,
     unitDurationsFor: () => durations,
     speechModeOf: (id: string) => (id === over.autoplaySessionId ? "autoplay" : "off"),
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 /** The rendered width of a segment, as a number of percent. */
@@ -265,7 +242,7 @@ function boxFor(element: HTMLElement, left: number, width: number): void {
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
 async function settleTerminal(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -298,19 +275,26 @@ function declarationsOf(selector: string): Record<string, string> {
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // settleTerminal steps it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   warm.clear();
   warming.clear();
   voiced.clear();
   cacheListeners.clear();
   term.fit.mockClear();
   term.sent.length = 0;
-  term.observed.length = 0;
+  StubResizeObserver.observed.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("SpeechControlBar", () => {
   it("renders in every cell without interaction", async () => {
-    const speech = makeSpeech();
+    const speech = speechWith();
 
     render(
       <>
@@ -326,7 +310,7 @@ describe("SpeechControlBar", () => {
   });
 
   it("toggling the row refits deliberately once per toggle, from outside the observed box", async () => {
-    const speech = makeSpeech();
+    const speech = speechWith();
     const view = render(<TerminalView sessionId="cell-a" speech={speech} />);
     await settleTerminal();
 
@@ -358,7 +342,7 @@ describe("SpeechControlBar", () => {
 
     // What has NOT changed: the row is a sibling of the observed container, so
     // no fit is ever provoked from inside the box the observer measures.
-    const observedContainer = term.observed[0];
+    const observedContainer = StubResizeObserver.observed[0];
     expect(observedContainer).toBeDefined();
     expect(observedContainer.contains(screen.getByTestId("speech-bar-cell-a"))).toBe(false);
   });
@@ -388,7 +372,7 @@ describe("SpeechControlBar", () => {
   // `getComputedStyle` in jsdom reports the user-agent value and would pass
   // over a stylesheet that says nothing at all.
   it("drops the row's hairline while the answer pane is open, and keeps it while it is closed", () => {
-    const speech = makeSpeech();
+    const speech = speechWith();
     const view = render(
       <SpeechControlBar
         sessionId="cell-a"
@@ -438,7 +422,7 @@ describe("SpeechControlBar", () => {
   });
 
   it("renders one segment per unit before anything is synthesized", () => {
-    const speech = makeSpeech({
+    const speech = speechWith({
       state: "ready",
       queue: queueWith({ current: utterance("u-1") }),
       // Nothing synthesized, nothing playing, no duration known anywhere.
@@ -462,7 +446,7 @@ describe("SpeechControlBar", () => {
   });
 
   it("a segment's width follows its real duration once known", () => {
-    const speech = makeSpeech({
+    const speech = speechWith({
       state: "speaking",
       queue: queueWith({ current: utterance("u-1") }),
       // Equal character counts, so a chars-only bar would draw 50/50.
@@ -487,7 +471,7 @@ describe("SpeechControlBar", () => {
     // exists: "clicking this segment starts with no wait".
     warm.add(all[1].text);
 
-    const speech = makeSpeech({
+    const speech = speechWith({
       state: "ready",
       queue: queueWith({ current: utterance("u-1") }),
       units: all,
@@ -513,7 +497,7 @@ describe("SpeechControlBar", () => {
     // must report the stronger fact, which is that it was spoken.
     warm.add(all[0].text);
 
-    const speech = makeSpeech({
+    const speech = speechWith({
       state: "heard",
       queue: queueWith({ current: utterance("u-1") }),
       units: all,
@@ -539,7 +523,7 @@ describe("SpeechControlBar", () => {
    */
   describe("warming", () => {
     const barFor = (all: SpeechUnit[], over: SpeechOverrides = {}): GridSpeech =>
-      makeSpeech({
+      speechWith({
         state: "ready",
         queue: queueWith({ current: utterance("u-1") }),
         units: all,
@@ -631,7 +615,7 @@ describe("SpeechControlBar", () => {
       // publishes nothing in either state — and `cascadeWarm` keeps warming
       // through a pause, because a pause does not clear `run.active` — so the
       // cache's own notification is the only thing that can move this segment.
-      act(() => settle(all[0].text));
+      act(() => landSynthesis(all[0].text));
 
       expect(segmentAt("cell-a", 0)).toBe("ready");
     });
@@ -649,10 +633,10 @@ describe("SpeechControlBar", () => {
       expect(row()).toEqual(["warming", "warming", "warming", "cold"]);
 
       // One landing is one step of the ladder, not the whole staircase.
-      act(() => settle(all[0].text));
+      act(() => landSynthesis(all[0].text));
       expect(row()).toEqual(["ready", "warming", "warming", "cold"]);
 
-      act(() => settle(all[1].text));
+      act(() => landSynthesis(all[1].text));
       expect(row()).toEqual(["ready", "ready", "warming", "cold"]);
     });
 
@@ -703,7 +687,7 @@ describe("SpeechControlBar", () => {
     it("a cell with no utterance is still empty and still inert while warming", () => {
       // Nothing to warm, nothing to draw: a cache notification for some other
       // cell must not conjure a scrubber here.
-      const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
+      const speech = speechWith({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
       render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
       act(() => cacheChanged());
@@ -744,7 +728,7 @@ describe("SpeechControlBar", () => {
    */
   describe("the scrubber is a pointer affordance, not a row of buttons", () => {
     const barWithUnits = () =>
-      makeSpeech({
+      speechWith({
         state: "ready",
         queue: queueWith({ current: utterance("u-1") }),
         units: units(200, 200, 200),
@@ -779,7 +763,7 @@ describe("SpeechControlBar", () => {
       // The trade-off's other half: dropping the role is only honest because
       // the function has a keyboard route. These are real buttons with names,
       // and `useSpeechKeys` binds Ctrl+Shift+←/→ to the same two handlers.
-      const speech = makeSpeech({
+      const speech = speechWith({
         state: "ready",
         queue: queueWith({ previous: [utterance("u-0")], current: utterance("u-1") }),
         units: units(200, 200, 200),
@@ -811,7 +795,7 @@ describe("SpeechControlBar", () => {
             answerOpen={answerOpen}
             onToggleAnswer={onToggleAnswer}
             send={noSend}
-            speech={makeSpeech({
+            speech={speechWith({
               state: "speaking",
               queue: queueWith({ current: utterance("u-1") }),
               units: units(200, 200, 200, 200, 200),
@@ -882,7 +866,7 @@ describe("SpeechControlBar", () => {
               // `ready`, not the default `empty`: the row carries the
               // launchers before a cell has spoken, and the eye is part of
               // the transport that replaces them.
-              speech={makeSpeech({
+              speech={speechWith({
                 state: "ready",
                 queue: queueWith({ current: utterance("u-1") }),
                 units: units(200, 200, 200),
@@ -928,7 +912,7 @@ describe("SpeechControlBar", () => {
 
     /** `id` is what the window is anchored to: a new one is a new answer. */
     const barFor = (state: CellSpeechState, id = "u-1"): GridSpeech =>
-      makeSpeech({
+      speechWith({
         state,
         queue: queueWith({ current: utterance(id) }),
         units: units(200, 240),
@@ -1056,7 +1040,7 @@ describe("SpeechControlBar", () => {
   });
 
   it("clicking a segment jumps to that unit", () => {
-    const speech = makeSpeech({
+    const speech = speechWith({
       state: "ready",
       queue: queueWith({ current: utterance("u-1") }),
       units: units(200, 200, 200),
@@ -1069,7 +1053,7 @@ describe("SpeechControlBar", () => {
   });
 
   it("dragging the playing segment seeks within the unit", () => {
-    const speech = makeSpeech({
+    const speech = speechWith({
       state: "speaking",
       queue: queueWith({ current: utterance("u-1") }),
       units: units(200, 200),
@@ -1109,7 +1093,7 @@ describe("SpeechControlBar", () => {
     // absent. `SpeechControlBar.alwaysTransport.test.tsx` carries the whole
     // contract, the pills' half included; what stays here is that an empty
     // cell's rail is present and inert.
-    const speech = makeSpeech({ state: "empty", queue: emptyUtteranceQueue, units: [] });
+    const speech = speechWith({ state: "empty", queue: emptyUtteranceQueue, units: [] });
 
     render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={speech} />);
 
@@ -1147,7 +1131,7 @@ describe("SpeechControlBar", () => {
     const history = (): Utterance[] => [utterance("u-3"), utterance("u-2"), utterance("u-1")];
 
     const barAt = (cursor: number, pending: Utterance[] = []) =>
-      makeSpeech({
+      speechWith({
         state: "ready",
         queue: queueWith({ previous: history(), current: utterance("u-4"), pending, cursor }),
         units: units(200, 200),
@@ -1195,7 +1179,7 @@ describe("SpeechControlBar", () => {
           answerOpen={false}
           onToggleAnswer={noop}
           send={noSend}
-          speech={makeSpeech({ state: "ready", queue: queueWith({ current: utterance("u-1") }), units: units(200, 200) })}
+          speech={speechWith({ state: "ready", queue: queueWith({ current: utterance("u-1") }), units: units(200, 200) })}
         />,
       );
       expect(screen.getByTestId("speech-bar-previous-cell-a")).toBeDisabled();

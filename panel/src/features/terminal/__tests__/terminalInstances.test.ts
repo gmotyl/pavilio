@@ -724,22 +724,16 @@ describe("activation reconnect and disconnected fan-out", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reconnectSession defaults to the manual trigger", async () => {
+  it.each<[label: string, trigger: "manual-all" | undefined, logged: string]>([
+    ["defaults to the manual trigger", undefined, "manual"],
+    ["records the trigger it is given", "manual-all", "manual-all"],
+  ])("reconnectSession %s", async (_label, trigger, logged) => {
     const mod = await import("../terminalInstances");
     mod.acquireTerminal("a");
 
-    mod.reconnectSession("a");
+    mod.reconnectSession("a", trigger);
 
-    expect(loggedMetrics().map((m) => m.trigger)).toEqual(["manual"]);
-  });
-
-  it("reconnectSession records the trigger it is given", async () => {
-    const mod = await import("../terminalInstances");
-    mod.acquireTerminal("a");
-
-    mod.reconnectSession("a", "manual-all");
-
-    expect(loggedMetrics().map((m) => m.trigger)).toEqual(["manual-all"]);
+    expect(loggedMetrics().map((m) => m.trigger)).toEqual([logged]);
   });
 
   it("reconnectOnActivate reopens a disconnected session and logs auto-activate", async () => {
@@ -760,37 +754,36 @@ describe("activation reconnect and disconnected fan-out", () => {
     ]);
   });
 
-  it("reconnectOnActivate is a no-op for a connected session", async () => {
+  it.each<[label: string, setup: (mod: typeof import("../terminalInstances")) => string, sockets: number]>([
+    [
+      "a connected session",
+      (mod) => {
+        mod.acquireTerminal("a");
+        return "a";
+      },
+      1,
+    ],
+    [
+      // The terminal already prints [Process exited]; reopening would replay it.
+      "an exited session",
+      (mod) => {
+        mod.acquireTerminal("a");
+        createdSockets[0].onmessage?.({
+          data: JSON.stringify({ type: "exit", code: 0 }),
+        } as MessageEvent);
+        killSocket(createdSockets[0]);
+        return "a";
+      },
+      1,
+    ],
+    ["a session with no instance", () => "never-acquired", 0],
+  ])("reconnectOnActivate is a no-op for %s", async (_label, setup, sockets) => {
     const mod = await import("../terminalInstances");
-    mod.acquireTerminal("a");
+    const id = setup(mod);
 
-    mod.reconnectOnActivate("a");
+    mod.reconnectOnActivate(id);
 
-    expect(createdSockets).toHaveLength(1);
-    expect(loggedMetrics()).toEqual([]);
-  });
-
-  it("reconnectOnActivate is a no-op for an exited session", async () => {
-    // The terminal already prints [Process exited]; reopening would replay it.
-    const mod = await import("../terminalInstances");
-    mod.acquireTerminal("a");
-    createdSockets[0].onmessage?.({
-      data: JSON.stringify({ type: "exit", code: 0 }),
-    } as MessageEvent);
-    killSocket(createdSockets[0]);
-
-    mod.reconnectOnActivate("a");
-
-    expect(createdSockets).toHaveLength(1);
-    expect(loggedMetrics()).toEqual([]);
-  });
-
-  it("reconnectOnActivate is a no-op for a session with no instance", async () => {
-    const mod = await import("../terminalInstances");
-
-    mod.reconnectOnActivate("never-acquired");
-
-    expect(createdSockets).toHaveLength(0);
+    expect(createdSockets).toHaveLength(sockets);
     expect(loggedMetrics()).toEqual([]);
   });
 

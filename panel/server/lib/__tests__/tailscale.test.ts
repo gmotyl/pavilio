@@ -172,25 +172,19 @@ describe("detectTailscale daemon_down", () => {
     existsMock.mockImplementation((p) => String(p).includes("Applications"));
   });
 
-  it("flags a stopped daemon with the daemon_down hint", async () => {
-    mockExecOnce("", "", new Error("failed to connect to local tailscaled; is tailscaled running?"));
-    const res = await detectTailscale(3010);
-    expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
-  });
-
-  it("flags a stopped daemon reported only on stderr", async () => {
-    // Mixed case on purpose: the match must be case-insensitive, and the CLI
-    // puts this wording on stderr while the error itself is only "exit 1".
-    mockExecOnce("", "Failed to connect to local Tailscaled", new Error("exit 1"));
-    const res = await detectTailscale(3010);
-    expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
-  });
-
-  it("flags a stopped daemon from the is-tailscaled-running phrasing alone", async () => {
-    // The CLI does not always print both connect-failure phrasings together,
-    // so this alternative has to be pinned on its own: no "failed to connect
-    // to local tailscaled" anywhere in the text.
-    mockExecOnce("", "cannot reach the backend; is tailscaled running?", new Error("exit 1"));
+  // Rows: the CLI's two connect-failure phrasings, on the error or on stderr.
+  // - stderr-only, mixed case on purpose: the match must be case-insensitive,
+  //   and the CLI puts this wording on stderr while the error itself is only
+  //   "exit 1".
+  // - is-tailscaled-running alone: the CLI does not always print both
+  //   connect-failure phrasings together, so this alternative has to be pinned
+  //   on its own: no "failed to connect to local tailscaled" anywhere in the text.
+  it.each<[string, string, string]>([
+    ["the error message", "", "failed to connect to local tailscaled; is tailscaled running?"],
+    ["stderr only (case-insensitive)", "Failed to connect to local Tailscaled", "exit 1"],
+    ["the is-tailscaled-running phrasing alone", "cannot reach the backend; is tailscaled running?", "exit 1"],
+  ])("flags a stopped daemon from %s with the daemon_down hint", async (_label, stderr, msg) => {
+    mockExecOnce("", stderr, new Error(msg));
     const res = await detectTailscale(3010);
     expect(res).toMatchObject({ state: "error", hint: "daemon_down" });
   });
@@ -214,28 +208,27 @@ describe("detectTailscale daemon_down", () => {
     expect(error).toContain("permission denied on /var/run/tailscale/tailscaled.sock");
   });
 
-  it("logs the underlying daemon failure", async () => {
+  // `enableServe` logs every failure; a status failure that is not
+  // `daemon_down` used to leave no server-side trace at all, which is the
+  // one case where the CLI's own words are the only diagnostic there is.
+  it.each<[string, string, string, { msg: string; stderr: string }]>([
+    [
+      "the underlying daemon failure",
+      "failed to connect to local tailscaled",
+      "exit 1",
+      { msg: "exit 1", stderr: "failed to connect to local tailscaled" },
+    ],
+    [
+      "an unrelated status failure too",
+      "some unrelated stderr",
+      "boom",
+      { msg: "boom", stderr: "some unrelated stderr" },
+    ],
+  ])("logs %s", async (_label, stderr, msg, logged) => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockExecOnce("", "failed to connect to local tailscaled", new Error("exit 1"));
+    mockExecOnce("", stderr, new Error(msg));
     await detectTailscale(3010);
-    expect(errorLog).toHaveBeenCalledWith("[tailscale] status failed", {
-      msg: "exit 1",
-      stderr: "failed to connect to local tailscaled",
-    });
-    errorLog.mockRestore();
-  });
-
-  it("logs an unrelated status failure too", async () => {
-    // `enableServe` logs every failure; a status failure that is not
-    // `daemon_down` used to leave no server-side trace at all, which is the
-    // one case where the CLI's own words are the only diagnostic there is.
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockExecOnce("", "some unrelated stderr", new Error("boom"));
-    await detectTailscale(3010);
-    expect(errorLog).toHaveBeenCalledWith("[tailscale] status failed", {
-      msg: "boom",
-      stderr: "some unrelated stderr",
-    });
+    expect(errorLog).toHaveBeenCalledWith("[tailscale] status failed", logged);
     errorLog.mockRestore();
   });
 

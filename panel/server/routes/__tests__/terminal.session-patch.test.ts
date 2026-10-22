@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
+import { configMock, makeApp } from "../../test-kit";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/unused" }),
-}));
+vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
   listSessions: vi.fn(() => []),
@@ -15,18 +13,11 @@ vi.mock("../../lib/terminal-manager", () => ({
 import terminalRouter from "../terminal";
 import { updateSession } from "../../lib/terminal-manager";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/terminal", terminalRouter);
-  return app;
-}
-
 beforeEach(() => vi.mocked(updateSession).mockClear());
 
 describe("PATCH /api/terminal/sessions/:id", () => {
   it("does not persist a colour sent in the body", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .patch("/api/terminal/sessions/s1")
       .send({ name: "renamed", color: "#f0c674" });
 
@@ -38,7 +29,7 @@ describe("PATCH /api/terminal/sessions/:id", () => {
   });
 
   it("still renames when only a name is sent", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .patch("/api/terminal/sessions/s1")
       .send({ name: "renamed" });
 

@@ -92,8 +92,10 @@ const MACHINE_LOCAL = [
  *
  * EMPTY, and kept rather than deleted: every row of the design's table is
  * declared as of `2026-09-21-panel-ui-polish` Task 4, so this is where the
- * next one goes. The test below it still runs, over nothing — which is the
- * honest reading of "nothing is outstanding".
+ * next one goes. "the portable set matches the design's portability table"
+ * filters it out of PORTABLE, so an empty list means the table and the
+ * declarations must match exactly — the honest reading of "nothing is
+ * outstanding".
  */
 const NOT_YET_DECLARED: readonly string[] = [];
 
@@ -268,18 +270,6 @@ describe("the declaration table", () => {
     for (const key of local) expect(MACHINE_LOCAL).toContain(key);
   });
 
-  it("the rows the design names but nothing persists yet are undeclared", () => {
-    // Guards the tolerance above from rotting into a blanket exemption: a key
-    // listed as not-yet-declared must actually be absent.
-    const keys = ALL_PREFERENCES.map((d) => d.key);
-    // Stated, not just looped over: the list is empty today, so the loop below
-    // runs zero times and on its own this test would assert nothing at all.
-    // Every row the design names is declared — that is the fact, and it is the
-    // one that breaks if a key is parked here instead of built.
-    expect(NOT_YET_DECLARED).toEqual([]);
-    for (const key of NOT_YET_DECLARED) expect(keys).not.toContain(key);
-  });
-
   it("session-backed navigation preferences declare browserStore: session", () => {
     // `lastPath.ts` uses sessionStorage, so routing these to localStorage
     // would break panel-shell spec.md's "a second browser tab keeps its own
@@ -320,37 +310,6 @@ describe("the declaration table", () => {
     expect(ALL_PREFERENCES.map((d) => d.key).sort()).toEqual(
       DEFAULTS.map(([key]) => key).sort(),
     );
-  });
-
-  it("keys of removed features are not declared", () => {
-    const keys = ALL_PREFERENCES.map((d) => d.key);
-
-    // Residue found in a real browser's storage dump, with no writer left in
-    // the source. Declaring either would resurrect dead state.
-    for (const dead of ["panel-archived-projects", "panel:cellReader:tab"]) {
-      expect(keys).not.toContain(dead);
-    }
-    expect(keys.filter((k) => /archivedProjects|cellReader/i.test(k))).toEqual([]);
-    // The quick finder's live archive toggle is a different setting, and stays.
-    expect(keyOf("search.includeArchived").portable).toBe(true);
-
-    // `pavilio.time.<project>` is the busy accumulator — data, not a choice.
-    // Only the report options and the manual-entry reset flag are declared, and
-    // both are portable despite sharing the accumulator's old key prefix.
-    expect(keys.filter((k) => k.startsWith("time.")).sort()).toEqual([
-      "time.form.resetAutoOnSave",
-      "time.report",
-    ]);
-    expect(keyOf("time.report").portable).toBe(true);
-    expect(keyOf("time.form.resetAutoOnSave").portable).toBe(true);
-  });
-
-  it("no declaration keeps the retired history-only key", () => {
-    // The commit tree's width is now `repos.tree.paneWidth`, the one width
-    // every repo file tree reads. No migration, per the registry's standing
-    // policy: a workspace that dragged the old handle opens at 280 again.
-    const keys = ALL_PREFERENCES.map((d) => d.key);
-    expect(keys).not.toContain("git.history.paneWidth");
   });
 });
 

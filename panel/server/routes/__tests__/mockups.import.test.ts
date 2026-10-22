@@ -1,23 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
-import {
-  mkdtempSync,
-  rmSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  readdirSync,
-  existsSync,
-  symlinkSync,
-} from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, symlinkSync } from "fs";
 import { join } from "path";
+import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
+const projects = withProjectsDir("pavilio-mockup-import-test-");
 
-vi.mock("../../config", () => ({ getConfig: () => ({ projectsDir }) }));
+vi.mock("../../config", () => configMock(() => projects.dir()));
 const { rebuildIndex } = vi.hoisted(() => ({ rebuildIndex: vi.fn() }));
 vi.mock("../../lib/file-index", () => ({
   getFileIndex: () => [],
@@ -29,15 +18,8 @@ import mockupsRouter from "../mockups";
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 3, 250, 251]);
 const HTML = Buffer.from("<!doctype html><html><body>hi</body></html>");
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/projects", mockupsRouter);
-  return app;
-}
-
 function mockupsDir(project = "p") {
-  return join(projectsDir, project, "mockups");
+  return join(projects.dir(), project, "mockups");
 }
 
 function listMockups(project = "p"): string[] {
@@ -50,19 +32,16 @@ describe("POST /api/projects/:project/mockups/import", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 9, 7, 12, 0, 0));
     rebuildIndex.mockClear();
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-mockup-import-test-"));
-    projectsDir = join(tmpRoot, "projects");
-    mkdirSync(join(projectsDir, "p"), { recursive: true });
-    writeFileSync(join(projectsDir, "p", "PROJECT.md"), "# p");
+    mkdirSync(join(projects.dir(), "p"), { recursive: true });
+    writeFileSync(join(projects.dir(), "p", "PROJECT.md"), "# p");
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it("imports a png byte-for-byte under a dated slug", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "Frame 12.png")
       .field("slugs", "frame-12");
@@ -77,7 +56,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("normalises the slug", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "x.png")
       .field("slugs", "../Account Details / Mobile!!");
@@ -89,7 +68,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
     mkdirSync(mockupsDir(), { recursive: true });
     writeFileSync(join(mockupsDir(), "2026-10-07-frame-12.png"), "original");
     writeFileSync(join(mockupsDir(), "2026-10-07-frame-12-2.png"), "second");
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "a.png")
       .attach("files", PNG, "b.png")
@@ -104,7 +83,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("rejects a disguised file but imports the rest", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", HTML, "fake.png")
       .attach("files", Buffer.from("%PDF-1.7"), "doc.pdf")
@@ -125,7 +104,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   it("rejects files over 20 MB", async () => {
     const big = Buffer.alloc(20 * 1024 * 1024 + 1);
     PNG.copy(big);
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", big, "big.png")
       .attach("files", PNG, "small.png")
@@ -139,44 +118,44 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("refuses traversal and unknown projects", async () => {
-    const traversal = await request(makeApp())
+    const traversal = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/..%2Fp/mockups/import")
       .attach("files", PNG, "a.png")
       .field("slugs", "a");
     expect(traversal.status).toBe(400);
 
-    const slash = await request(makeApp())
+    const slash = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p%2F..%2Fq/mockups/import")
       .attach("files", PNG, "a.png")
       .field("slugs", "a");
     expect(slash.status).toBe(400);
 
     // A directory without PROJECT.md is not a project
-    mkdirSync(join(projectsDir, "ghost"), { recursive: true });
-    const unknown = await request(makeApp())
+    mkdirSync(join(projects.dir(), "ghost"), { recursive: true });
+    const unknown = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/ghost/mockups/import")
       .attach("files", PNG, "a.png")
       .field("slugs", "a");
     expect(unknown.status).toBe(404);
 
-    expect(existsSync(join(tmpRoot, "mockups"))).toBe(false);
-    expect(existsSync(join(projectsDir, "mockups"))).toBe(false);
+    expect(existsSync(join(projects.root(), "mockups"))).toBe(false);
+    expect(existsSync(join(projects.dir(), "mockups"))).toBe(false);
     expect(listMockups("ghost")).toEqual([]);
     expect(listMockups()).toEqual([]);
     expect(rebuildIndex).not.toHaveBeenCalled();
   });
 
   it("refuses a mockups dir that is a symlink out of the project", async () => {
-    const outside = join(tmpRoot, "outside");
+    const outside = join(projects.root(), "outside");
     mkdirSync(outside);
     symlinkSync(outside, mockupsDir());
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "a.png")
       .field("slugs", "a");
     expect(res.status).toBe(200);
     expect(res.body.files[0]).toMatchObject({ ok: false, name: "a.png" });
-    expect(res.body.files[0].error).not.toContain(tmpRoot);
+    expect(res.body.files[0].error).not.toContain(projects.root());
     expect(readdirSync(outside)).toEqual([]);
     expect(rebuildIndex).not.toHaveBeenCalled();
   });
@@ -184,14 +163,14 @@ describe("POST /api/projects/:project/mockups/import", () => {
   it("does not leak the server path when the mockups dir cannot be created", async () => {
     // A regular file where the folder should be makes mkdir/write fail
     writeFileSync(mockupsDir(), "not a dir");
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "a.png")
       .field("slugs", "a");
     expect(res.status).toBe(200);
     expect(res.body.files[0]).toMatchObject({ ok: false, name: "a.png" });
     expect(res.body.files[0].error).toBeTruthy();
-    expect(res.body.files[0].error).not.toContain(tmpRoot);
+    expect(res.body.files[0].error).not.toContain(projects.root());
     expect(res.body.files[0].error).not.toMatch(/\//);
   });
 
@@ -202,7 +181,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
       // 00:30 in Warsaw on Oct 7 is 22:30 UTC on Oct 6
       vi.setSystemTime(new Date(2026, 9, 7, 0, 30, 0));
       expect(new Date().toISOString().slice(0, 10)).toBe("2026-10-06");
-      const res = await request(makeApp())
+      const res = await request(makeApp(mockupsRouter, "/api/projects"))
         .post("/api/projects/p/mockups/import")
         .attach("files", PNG, "a.png")
         .field("slugs", "a");
@@ -214,7 +193,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("normalises a slug with diacritics", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "x.png")
       .field("slugs", "Zażółć gęślą");
@@ -222,7 +201,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("refuses more text fields than files can use", async () => {
-    let req = request(makeApp()).post("/api/projects/p/mockups/import").attach("files", PNG, "a.png");
+    let req = request(makeApp(mockupsRouter, "/api/projects")).post("/api/projects/p/mockups/import").attach("files", PNG, "a.png");
     for (let i = 0; i < 51; i++) req = req.field("slugs", `s${i}`);
     const res = await req;
     expect(res.status).toBe(400);
@@ -230,7 +209,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("refuses an oversized text field", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "a.png")
       .field("slugs", "x".repeat(2048));
@@ -239,7 +218,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("still takes one slug per file at the file limit", async () => {
-    let req = request(makeApp()).post("/api/projects/p/mockups/import");
+    let req = request(makeApp(mockupsRouter, "/api/projects")).post("/api/projects/p/mockups/import");
     for (let i = 0; i < 50; i++) req = req.attach("files", PNG, `f${i}.png`).field("slugs", `s${i}`);
     const res = await req;
     expect(res.body.error).toBeUndefined();
@@ -249,7 +228,7 @@ describe("POST /api/projects/:project/mockups/import", () => {
   });
 
   it("rebuilds the index once per batch", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/import")
       .attach("files", PNG, "a.png")
       .attach("files", HTML, "b.html")
@@ -264,14 +243,8 @@ describe("POST /api/projects/:project/mockups/import", () => {
 
 describe("POST /api/projects/:project/mockups/inspect", () => {
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-mockup-inspect-test-"));
-    projectsDir = join(tmpRoot, "projects");
-    mkdirSync(join(projectsDir, "p"), { recursive: true });
-    writeFileSync(join(projectsDir, "p", "PROJECT.md"), "# p");
-  });
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    mkdirSync(join(projects.dir(), "p"), { recursive: true });
+    writeFileSync(join(projects.dir(), "p", "PROJECT.md"), "# p");
   });
 
   it("counts external resources in html and svg", async () => {
@@ -280,7 +253,7 @@ describe("POST /api/projects/:project/mockups/inspect", () => {
        <img src="https://a.example.com/1.png"><img src="https://a.example.com/2.png"><img src="x.png">`,
     );
     const svg = Buffer.from('<svg><image href="//cdn.example.com/a.png"/></svg>');
-    const res = await request(makeApp())
+    const res = await request(makeApp(mockupsRouter, "/api/projects"))
       .post("/api/projects/p/mockups/inspect")
       .attach("files", html, "page.html")
       .attach("files", svg, "icon.svg")
@@ -300,15 +273,12 @@ describe("POST /api/projects/:project/mockups/inspect", () => {
 describe("GET /api/projects/:project/mockups/today", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-mockup-today-test-"));
-    projectsDir = join(tmpRoot, "projects");
-    mkdirSync(join(projectsDir, "p"), { recursive: true });
-    writeFileSync(join(projectsDir, "p", "PROJECT.md"), "# p");
+    mkdirSync(join(projects.dir(), "p"), { recursive: true });
+    writeFileSync(join(projects.dir(), "p", "PROJECT.md"), "# p");
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it("answers with the server's local date, the one imports are prefixed with", async () => {
@@ -316,7 +286,7 @@ describe("GET /api/projects/:project/mockups/today", () => {
     process.env.TZ = "Europe/Warsaw";
     try {
       vi.setSystemTime(new Date(2026, 9, 7, 0, 30, 0));
-      const res = await request(makeApp()).get("/api/projects/p/mockups/today");
+      const res = await request(makeApp(mockupsRouter, "/api/projects")).get("/api/projects/p/mockups/today");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ date: "2026-10-07" });
     } finally {
@@ -326,7 +296,7 @@ describe("GET /api/projects/:project/mockups/today", () => {
   });
 
   it("404s an unknown project", async () => {
-    const res = await request(makeApp()).get("/api/projects/nope/mockups/today");
+    const res = await request(makeApp(mockupsRouter, "/api/projects")).get("/api/projects/nope/mockups/today");
     expect(res.status).toBe(404);
   });
 });

@@ -23,13 +23,13 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import type { CellSpeechState, GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
 import { SpeechControlBar } from "../SpeechControlBar";
 import {
   __resetAnswerWaitingForTests,
-  beginWaiting,
   getAnswerWaiting,
   watchSessionActivity,
   isAnswerHeld,
@@ -62,10 +62,6 @@ vi.mock("../../speech/synth", () => ({
 
 const SESSION = "cell-a";
 
-/** Referentially stable — a fresh value per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-
 const answer = (id: string): Utterance => ({
   id,
   sessionId: SESSION,
@@ -86,24 +82,10 @@ interface Cell {
   queue: UtteranceQueue;
 }
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(cell: Cell): GridSpeech {
-  return {
+function cellSpeech(cell: Cell): GridSpeech {
+  return makeSpeech({
     stateFor: () => cell.state,
     queueFor: () => cell.queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
     // A spy alone is no longer a faithful host: the hold moved into
     // `onPrevious`/`onNext` so that the chord and the media keys take it too.
     // See `fakeTransportHost.ts`.
@@ -111,11 +93,7 @@ function makeSpeech(cell: Cell): GridSpeech {
     onNext: vi.fn((sessionId: string) =>
       fakeOnNext(sessionId, isAnswerHeld(sessionId), cell.queue.cursor, cell.queue.pending.length),
     ),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
+  });
 }
 
 /** A live socket: the write landed. `send` reports delivery now, and a stub
@@ -140,7 +118,7 @@ const DEBOUNCE = 3000;
  * the debounce window it opens. `busy` is *the PTY emitted output*, so the
  * agent's trigger waits that window out before it may take the body; every
  * criterion in this file is about an ESTABLISHED busy spell, and the window
- * itself is pinned in `answerWaiting.debounce.test.ts`.
+ * itself is pinned in `answerWaiting.store.test.ts`.
  *
  * Both halves run inside `act`: the store publishes on the channel's own
  * listener AND on the timer's, and only a flush turns either into the DOM the
@@ -161,7 +139,6 @@ const activity = (state: "idle" | "busy" | "attention", at: number): void => {
 const bodyHandedOver = (): boolean => getAnswerWaiting(SESSION).waiting;
 
 const previousButton = (): HTMLElement => screen.getByTestId(`speech-bar-previous-${SESSION}`);
-const nextButton = (): HTMLElement => screen.getByTestId(`speech-bar-next-${SESSION}`);
 
 /** Every command on the host, so a claim about "nothing else" covers them all. */
 const commandsOf = (host: GridSpeech): [string, Mock][] =>
@@ -197,55 +174,28 @@ afterEach(() => {
 });
 
 describe("the bar tells the waiting store whether the voice is reading", () => {
-  it("defers the handover while the voice is speaking", () => {
-    render(barTree(makeSpeech({ state: "speaking", queue: WITH_HISTORY })));
-
-    activity("busy", 2);
-
-    // The agent went to work mid-sentence. Taking the text away here pulls it
+  // The bar's read of `stateFor`, pushed as `noteSpeaking`. The deferral
+  // itself is the store's (`answerWaiting.store` "waits for the voice to finish
+  // before handing the body over"); this is the bar's predicate over the states.
+  it.each([
+    // The agent went to work mid-sentence: taking the text away here pulls it
     // out from under a sentence the listener is halfway through hearing.
-    expect(bodyHandedOver()).toBe(false);
-  });
-
-  it("counts a stalled run as reading", () => {
-    render(barTree(makeSpeech({ state: "stalled", queue: WITH_HISTORY })));
-
-    activity("busy", 2);
-
-    // A run blocked on synthesis is still a run the listener is inside: more
-    // of the same answer is coming, and the pause is still theirs to press.
-    expect(bodyHandedOver()).toBe(false);
-  });
-
-  it("does not count a paused run as reading", () => {
-    render(barTree(makeSpeech({ state: "paused", queue: WITH_HISTORY })));
+    { state: "speaking", handedOver: false },
+    // A run blocked on synthesis is still a run the listener is inside.
+    { state: "stalled", handedOver: false },
+    // A held run is not mid-sentence: nothing for the handover to wait on.
+    { state: "paused", handedOver: true },
+  ] as const)("a $state voice leaves the body handed over: $handedOver", ({ state, handedOver }) => {
+    render(barTree(cellSpeech({ state, queue: WITH_HISTORY })));
 
     activity("busy", 2);
 
-    // A held run is not mid-sentence. There is no sentence to finish, so
-    // there is nothing for the handover to be patient about.
-    expect(bodyHandedOver()).toBe(true);
-  });
-
-  it("hands the body over when the playback the deferral waited on ends", () => {
-    const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
-    const { rerender } = render(barTree(speech));
-
-    activity("busy", 2);
-    expect(bodyHandedOver()).toBe(false);
-
-    // The last unit played out. The agent is still working, so the body is
-    // now its.
-    cell.state = "heard";
-    rerender(barTree(speech));
-
-    expect(bodyHandedOver()).toBe(true);
+    expect(bodyHandedOver()).toBe(handedOver);
   });
 
   it("keeps a deferral alive across speaking \u2192 stalled", () => {
     const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     activity("busy", 2);
@@ -268,7 +218,7 @@ describe("the bar tells the waiting store whether the voice is reading", () => {
   });
 
   it("pushes false when the bar unmounts while the voice is reading", () => {
-    const { unmount } = render(barTree(makeSpeech({ state: "speaking", queue: WITH_HISTORY })));
+    const { unmount } = render(barTree(cellSpeech({ state: "speaking", queue: WITH_HISTORY })));
 
     activity("busy", 2);
     expect(bodyHandedOver()).toBe(false);
@@ -290,7 +240,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
     // `current?.id` this arrival is invisible — in the one situation a hold
     // exists for.
     const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     fireEvent.click(previousButton());
@@ -311,7 +261,7 @@ describe("the bar tells the waiting store when an answer lands", () => {
 
   it("does not snap when the arrival released no hold", () => {
     const cell: Cell = { state: "ready", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
+    const speech = cellSpeech(cell);
     const { rerender } = render(barTree(speech));
 
     cell.queue = queueWith({ previous: [answer("u-1")], current: answer("u-2") });
@@ -321,134 +271,5 @@ describe("the bar tells the waiting store when an answer lands", () => {
     // put the cursor back to. A snap here would be a cursor move nobody asked
     // for, on every answer the panel ever receives.
     expect(speech.onNewestAnswer).not.toHaveBeenCalled();
-  });
-
-  it("keeps the hold across a render that brought no answer with it", () => {
-    // The bar re-renders for reasons that have nothing to do with the queue —
-    // the playhead, the synthesis cache, the row beside it. A push made on
-    // every render must still be an ARRIVAL only when the newest answer
-    // actually changed, or the first repaint after a step back would drop the
-    // hold the user had just made.
-    const cell: Cell = { state: "ready", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
-    const { rerender } = render(barTree(speech));
-
-    activity("busy", 2);
-    fireEvent.click(previousButton());
-    expect(bodyHandedOver()).toBe(false);
-
-    rerender(barTree(speech));
-
-    expect(bodyHandedOver()).toBe(false);
-    expect(speech.onNewestAnswer).not.toHaveBeenCalled();
-  });
-
-  it("a reply landing in one commit on a still-busy agent does not bring the wave back", () => {
-    // The reply moves the cursor AND the newest answer in the same render, so
-    // both of the bar's effects push in one commit: `noteUtterance` (the end
-    // of the send) and `noteNewestAnswer` (the arrival). In the order the bar
-    // declares them the send ends first and the arrival then cancels the
-    // window that re-opened, so this passes even without `endSend` asking
-    // `answered`. What it guards is a REORDERING of those effects: arrival
-    // first, the end of the send must not re-open a window on the spell's
-    // tail. The shape that needs `answered` in the declared order is the
-    // next test's.
-    const cell: Cell = { state: "ready", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
-    const { rerender } = render(barTree(speech));
-
-    activity("busy", 2);
-    expect(bodyHandedOver()).toBe(true);
-    act(() => {
-      beginWaiting(SESSION, "u-1");
-    });
-
-    cell.queue = queueWith({ previous: [answer("u-0"), answer("u-1")], current: answer("u-2") });
-    rerender(barTree(speech));
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
-
-    // The PTY is still busy: no transition, so nothing may re-arm the wave.
-    act(() => {
-      vi.advanceTimersByTime(10 * DEBOUNCE);
-    });
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
-  });
-
-  it("a reply the cursor reaches a commit after it arrived does not bring the wave back", () => {
-    // The voice is still reading the previous answer when the reply lands, so
-    // the reducer appends it to `pending` and leaves the cursor where it was:
-    // the arrival is pushed in one commit, and the send stays open because the
-    // id under the cursor is still the one it was sent on. Only when the
-    // reading ends does the cursor move onto the reply — a LATER commit, with
-    // the arrival's cancel long since spent — and it is then `endSend` alone
-    // that must not re-open a window on the spell's tail.
-    const cell: Cell = { state: "speaking", queue: WITH_HISTORY };
-    const speech = makeSpeech(cell);
-    const { rerender } = render(barTree(speech));
-
-    activity("busy", 2);
-    act(() => {
-      beginWaiting(SESSION, "u-1");
-    });
-
-    cell.queue = queueWith({ ...WITH_HISTORY, pending: [answer("u-2")] });
-    rerender(barTree(speech));
-    // The arrival ended the spell, but not the send: the reply is not on the
-    // body yet, so the wait keeps it.
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: true });
-
-    cell.state = "ready";
-    cell.queue = queueWith({ previous: [answer("u-0"), answer("u-1")], current: answer("u-2") });
-    rerender(barTree(speech));
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
-
-    // The PTY is still busy: no transition, so nothing may re-arm the wave.
-    act(() => {
-      vi.advanceTimersByTime(10 * DEBOUNCE);
-    });
-    expect(getAnswerWaiting(SESSION)).toEqual({ waiting: false, pending: false });
-  });
-});
-
-describe("the transport holds the answer and lets it go", () => {
-  it("holds on previous and releases on the step back onto the wave", () => {
-    const cell: Cell = {
-      state: "ready",
-      // A step behind the cursor for previous, and NOTHING waiting: the wave
-      // sits directly above the cursor, so one forward press reaches it.
-      queue: queueWith(WITH_HISTORY),
-    };
-    render(barTree(makeSpeech(cell)));
-
-    activity("busy", 2);
-    expect(bodyHandedOver()).toBe(true);
-
-    // Stepping back is the user saying *I want the text*, and it outranks the
-    // agent's claim on the body for as long as it stands.
-    fireEvent.click(previousButton());
-    expect(bodyHandedOver()).toBe(false);
-
-    // Stepping forward is the user done with it. The agent is still working,
-    // so the body goes straight back to the wave.
-    fireEvent.click(nextButton());
-    expect(bodyHandedOver()).toBe(true);
-  });
-
-  it("keeps the hold while a backlog is still ahead of the cursor", () => {
-    const cell: Cell = {
-      state: "ready",
-      queue: queueWith({ ...WITH_HISTORY, pending: [answer("u-2")] }),
-    };
-    render(barTree(makeSpeech(cell)));
-
-    activity("busy", 2);
-    fireEvent.click(previousButton());
-    expect(bodyHandedOver()).toBe(false);
-
-    // With an answer waiting, the newest thing the cell holds is that answer —
-    // which is what the row's unread mark counts — so the wave is above the
-    // BACKLOG and this press steps into it rather than onto the wave.
-    fireEvent.click(nextButton());
-    expect(bodyHandedOver()).toBe(false);
   });
 });

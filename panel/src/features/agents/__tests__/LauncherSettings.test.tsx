@@ -739,96 +739,35 @@ describe("LauncherSettings", () => {
     expect(nameFields().map((f) => f.value)).toEqual(["claude", "codex", "opencode"]);
   });
 
-  describe("a write from elsewhere", () => {
-    /**
-     * Any change of the stored list resets every row's drafts, the row being
-     * typed into included — even when the write left that row's own launcher
-     * alone. Rows are keyed by position, so an edit kept across a change could
-     * land on another launcher; it is dropped instead.
-     */
-    it("an outside change resets a row being edited", async () => {
-      const user = userEvent.setup();
-      const a = { name: "alpha", command: "alpha" };
-      const b = { name: "beta", command: "beta" };
-      writePreference(preferences.terminalLaunchers, [a, b]);
-      render(<LauncherSettings />);
+  /**
+   * The rows' drafts come from `useSyncedDraft` (its own suite holds the
+   * matrix). Here: a write from another tab refills every row, the one being
+   * typed into included, and a blur afterwards writes nothing. Rows are keyed
+   * by position, so `alpha`'s edit must not land on `beta2`, which now sits
+   * where `alpha` was.
+   */
+  it("a write from another tab refills the rows and drops an edit in progress", async () => {
+    const user = userEvent.setup();
+    const a = { name: "alpha", command: "alpha" };
+    const b = { name: "beta", command: "beta" };
+    const c = { name: "gamma", command: "gamma" };
+    writePreference(preferences.terminalLaunchers, [a, b, c]);
+    render(<LauncherSettings />);
 
-      await user.click(commandFields()[0]);
-      await user.type(commandFields()[0], " --verbose");
-      act(() =>
-        writePreference(preferences.terminalLaunchers, [a, { name: "beta2", command: "beta" }]),
-      );
+    await user.click(commandFields()[0]);
+    await user.type(commandFields()[0], " X");
+    act(() =>
+      writePreference(preferences.terminalLaunchers, [{ name: "beta2", command: "beta" }, c]),
+    );
 
-      expect(commandFields()[0]).toHaveValue("alpha");
-      expect(commandFields()[0]).toHaveFocus();
-      expect(nameFields().map((f) => f.value)).toEqual(["alpha", "beta2"]);
-    });
+    expect(nameFields().map((f) => f.value)).toEqual(["beta2", "gamma"]);
+    expect(commandFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
+    expect(commandFields()[0]).toHaveFocus();
+    await user.click(document.body);
+    expect(stored()).toEqual([{ name: "beta2", command: "beta" }, c]);
+  });
 
-    it("a blur after an outside change writes nothing", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.terminalLaunchers, [
-        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
-      ]);
-      render(<LauncherSettings />);
-
-      await user.click(commandFields()[0]);
-      await user.type(commandFields()[0], " --verbose");
-      act(() =>
-        writePreference(preferences.terminalLaunchers, [
-          { name: "claude", command: "claude", runLoop: "/goal again {prompt}" },
-        ]),
-      );
-      expect(commandFields()[0]).toHaveValue("claude");
-      await user.click(document.body);
-
-      expect(stored()).toEqual([
-        { name: "claude", command: "claude", runLoop: "/goal again {prompt}" },
-      ]);
-    });
-
-    it("an edit to a row removed elsewhere is dropped and writes nothing", async () => {
-      const user = userEvent.setup();
-      const a = { name: "alpha", command: "alpha" };
-      const b = { name: "beta", command: "beta" };
-      const c = { name: "gamma", command: "gamma" };
-      writePreference(preferences.terminalLaunchers, [a, b, c]);
-      render(<LauncherSettings />);
-
-      await user.click(commandFields()[1]);
-      await user.type(commandFields()[1], " --edited");
-      act(() => writePreference(preferences.terminalLaunchers, [a, c]));
-
-      expect(commandFields().map((f) => f.value)).toEqual(["alpha", "gamma"]);
-      await user.click(document.body);
-      expect(stored()).toEqual([a, c]);
-    });
-
-    /**
-     * The probe: `alpha` is being edited while one write elsewhere removes it
-     * AND renames `beta`. `beta2` then sits where `alpha` was; the row must not
-     * take it as `alpha` edited in place, or the blur writes alpha's edit over
-     * beta's command.
-     */
-    it("an edit to a row removed elsewhere is not carried onto a renamed neighbour", async () => {
-      const user = userEvent.setup();
-      const a = { name: "alpha", command: "alpha" };
-      const b = { name: "beta", command: "beta" };
-      const c = { name: "gamma", command: "gamma" };
-      writePreference(preferences.terminalLaunchers, [a, b, c]);
-      render(<LauncherSettings />);
-
-      await user.click(commandFields()[0]);
-      await user.type(commandFields()[0], " X");
-      act(() =>
-        writePreference(preferences.terminalLaunchers, [{ name: "beta2", command: "beta" }, c]),
-      );
-
-      expect(nameFields().map((f) => f.value)).toEqual(["beta2", "gamma"]);
-      expect(commandFields().map((f) => f.value)).toEqual(["beta", "gamma"]);
-      await user.click(document.body);
-      expect(stored()).toEqual([{ name: "beta2", command: "beta" }, c]);
-    });
-
+  describe("write guards", () => {
     /**
      * The write guards. A write elsewhere that lands after the row last
      * rendered — the store notified, React not yet re-rendered — leaves the
@@ -917,41 +856,6 @@ describe("LauncherSettings", () => {
       expect(stored()).toEqual([
         { name: "alpha", command: "alpha --one" },
         { name: "beta", command: "beta --two" },
-      ]);
-    });
-
-    it("an unfocused row follows it", () => {
-      writePreference(preferences.terminalLaunchers, [
-        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
-      ]);
-      render(<LauncherSettings />);
-
-      act(() =>
-        writePreference(preferences.terminalLaunchers, [
-          { name: "claude", command: "claude -c", runLoop: "/goal again {prompt}" },
-        ]),
-      );
-      expect(commandFields()[0]).toHaveValue("claude -c");
-      expect(runLoopFields()[0]).toHaveValue("/goal again {prompt}");
-    });
-
-    it("a focused row with no edit follows it", async () => {
-      const user = userEvent.setup();
-      writePreference(preferences.terminalLaunchers, [
-        { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
-      ]);
-      render(<LauncherSettings />);
-
-      await user.click(commandFields()[0]);
-      act(() =>
-        writePreference(preferences.terminalLaunchers, [
-          { name: "claude", command: "claude -c", runLoop: "/goal {prompt}" },
-        ]),
-      );
-      expect(commandFields()[0]).toHaveValue("claude -c");
-      await user.tab();
-      expect(stored()).toEqual([
-        { name: "claude", command: "claude -c", runLoop: "/goal {prompt}" },
       ]);
     });
   });

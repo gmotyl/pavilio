@@ -72,6 +72,11 @@ describe("the mockups detail pane", () => {
     });
 
     expect(await screen.findByTestId("mockup-viewer-frame")).toBeTruthy();
+    // The read's content reaches the frame's toolbar: what it then copies is
+    // `MockupFrame.image.test.tsx`'s.
+    await waitFor(() =>
+      expect(screen.getByTestId("mockup-viewer-copy-content")).not.toBeDisabled(),
+    );
   });
 
   it("opens an archived project's mockup from a copied link", async () => {
@@ -129,55 +134,6 @@ describe("the mockups detail pane", () => {
   });
 });
 
-describe("copying a mockup's content", () => {
-  beforeEach(() => {
-    sessionStorage.clear();
-    Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("copies an svg mockup's source, read as text", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
-    renderMockups(["pavilio/mockups/icon.svg"], { file: "pavilio/mockups/icon.svg" });
-
-    const button = await screen.findByTestId("mockup-viewer-copy-content");
-    await waitFor(() => expect(button).not.toBeDisabled());
-    fireEvent.click(button);
-    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-    expect(writeText).toHaveBeenLastCalledWith("# stub");
-    const reads = vi
-      .mocked(fetch)
-      .mock.calls.map(([input]) => String(input))
-      .filter((url) => url.startsWith("/api/files/read/pavilio/mockups/"));
-    expect(reads.length).toBeGreaterThan(0);
-    for (const url of reads) expect(url).not.toContain("meta=1");
-    // Capped: a huge existing svg is not read in full just for Copy content
-    for (const url of reads) expect(url).toContain("maxBytes=");
-  });
-
-  it("copies an html mockup's source", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
-    renderMockups(["pavilio/mockups/boot.html"], { file: "pavilio/mockups/boot.html" });
-
-    const button = await screen.findByTestId("mockup-viewer-copy-content");
-    await waitFor(() => expect(button).not.toBeDisabled());
-    fireEvent.click(button);
-    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("# stub"));
-  });
-
-  it("keeps copy content off for a raster mockup", async () => {
-    renderMockups(["pavilio/mockups/hero.png"], { file: "pavilio/mockups/hero.png" });
-
-    expect(await screen.findByTestId("mockup-viewer-image")).toBeTruthy();
-    expect(screen.getByTestId("mockup-viewer-copy-content")).toBeDisabled();
-  });
-});
-
 describe("the mockups empty state", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -208,13 +164,6 @@ describe("the mockups empty state", () => {
 
     await screen.findByTestId("mockups-empty-state");
     expect(screen.queryByText("No files in this section.")).toBeNull();
-  });
-
-  it("leaves the notes section's empty message unchanged", async () => {
-    renderMockups([], { section: "notes" });
-
-    expect(await screen.findByText("No files in this section.")).toBeTruthy();
-    expect(screen.queryByTestId("mockups-empty-state")).toBeNull();
   });
 });
 
@@ -298,6 +247,8 @@ describe("the mockup fill chain", () => {
     renderMockups([], { section: "notes" });
 
     await screen.findByText("No files in this section.");
+    // The mockups how-to is that section's own empty state, not every section's.
+    expect(screen.queryByTestId("mockups-empty-state")).toBeNull();
     expect(classesOf(outer())).not.toContain("md:h-full");
     for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
   });

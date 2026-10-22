@@ -1,17 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
+import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync, chmodSync } from "fs";
 import { join } from "path";
+import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
-let workspaceRoot = "";
+const projects = withProjectsDir("pavilio-scripts-test-");
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir }),
-}));
+vi.mock("../../config", () => configMock(() => projects.dir()));
 vi.mock("../../lib/discovery", async () => {
   const actual = await vi.importActual<typeof import("../../lib/discovery")>("../../lib/discovery");
   return { ...actual, discoverProjects: () => [] };
@@ -19,48 +14,30 @@ vi.mock("../../lib/discovery", async () => {
 
 import scriptsRouter, { loadScriptsConfig } from "../scripts";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api", scriptsRouter);
-  return app;
-}
-
 function seedScriptsJson(content: string | object) {
   const text = typeof content === "string" ? content : JSON.stringify(content);
-  mkdirSync(join(workspaceRoot, "scripts"), { recursive: true });
-  writeFileSync(join(workspaceRoot, "scripts", "scripts.json"), text);
+  mkdirSync(join(projects.root(), "scripts"), { recursive: true });
+  writeFileSync(join(projects.root(), "scripts", "scripts.json"), text);
 }
 
 function seedScript(name: string, body: string) {
-  const path = join(workspaceRoot, "scripts", name);
-  mkdirSync(join(workspaceRoot, "scripts"), { recursive: true });
+  const path = join(projects.root(), "scripts", name);
+  mkdirSync(join(projects.root(), "scripts"), { recursive: true });
   writeFileSync(path, body);
   chmodSync(path, 0o755);
   return path;
 }
 
-beforeEach(() => {
-  tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-scripts-test-"));
-  workspaceRoot = tmpRoot;
-  projectsDir = join(tmpRoot, "projects");
-  mkdirSync(projectsDir, { recursive: true });
-});
-
-afterEach(() => {
-  rmSync(tmpRoot, { recursive: true, force: true });
-});
-
 describe("loadScriptsConfig", () => {
   it("returns { scripts: [] } when scripts.json is missing", () => {
-    const cfg = loadScriptsConfig(workspaceRoot);
+    const cfg = loadScriptsConfig(projects.root());
     expect(cfg).toEqual({ scripts: [] });
   });
 
   it("returns { scripts: [] } and logs a warn when scripts.json has invalid JSON", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     seedScriptsJson("{ not valid json");
-    const cfg = loadScriptsConfig(workspaceRoot);
+    const cfg = loadScriptsConfig(projects.root());
     expect(cfg).toEqual({ scripts: [] });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -80,7 +57,7 @@ describe("loadScriptsConfig", () => {
         },
       ],
     });
-    const cfg = loadScriptsConfig(workspaceRoot);
+    const cfg = loadScriptsConfig(projects.root());
     expect(cfg.scripts).toHaveLength(1);
     expect(cfg.scripts[0]).toMatchObject({
       id: "x",
@@ -101,14 +78,14 @@ describe("GET /api/scripts", () => {
         { id: "a", label: "A", description: "d", script: "scripts/a.sh" },
       ],
     });
-    const res = await request(makeApp()).get("/api/scripts");
+    const res = await request(makeApp(scriptsRouter)).get("/api/scripts");
     expect(res.status).toBe(200);
     expect(res.body.scripts).toHaveLength(1);
     expect(res.body.scripts[0].id).toBe("a");
   });
 
   it("returns empty array when scripts.json is missing", async () => {
-    const res = await request(makeApp()).get("/api/scripts");
+    const res = await request(makeApp(scriptsRouter)).get("/api/scripts");
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ scripts: [] });
   });
@@ -127,7 +104,7 @@ describe("GET /api/scripts", () => {
         },
       ],
     });
-    const res = await request(makeApp()).get("/api/scripts");
+    const res = await request(makeApp(scriptsRouter)).get("/api/scripts");
     expect(res.body.scripts[0].timeoutSec).toBe(30);
     expect(res.body.scripts[0].icon).toBe("Play");
     expect(res.body.scripts[0].outputMatch).toBe("R: (.+)");
@@ -135,8 +112,8 @@ describe("GET /api/scripts", () => {
 });
 
 function seedProject(name: string) {
-  mkdirSync(join(projectsDir, name), { recursive: true });
-  writeFileSync(join(projectsDir, name, "PROJECT.md"), "# " + name);
+  mkdirSync(join(projects.dir(), name), { recursive: true });
+  writeFileSync(join(projects.dir(), name, "PROJECT.md"), "# " + name);
 }
 
 describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
@@ -145,7 +122,7 @@ describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
       scripts: [{ id: "x", label: "X", description: "d", script: "scripts/x.sh" }],
     });
     seedScript("x.sh", "#!/bin/bash\necho ok\n");
-    const res = await request(makeApp())
+    const res = await request(makeApp(scriptsRouter))
       .post("/api/projects/no-such/scripts/x/run");
     expect(res.status).toBe(404);
     expect(res.body.error).toMatch(/project/i);
@@ -157,7 +134,7 @@ describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
       scripts: [{ id: "x", label: "X", description: "d", script: "scripts/x.sh" }],
     });
     seedScript("x.sh", "#!/bin/bash\necho ok\n");
-    const res = await request(makeApp())
+    const res = await request(makeApp(scriptsRouter))
       .post("/api/projects/alpha/scripts/no-such/run");
     expect(res.status).toBe(404);
     expect(res.body.error).toMatch(/script/i);
@@ -170,7 +147,7 @@ describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
         { id: "x", label: "X", description: "d", script: "../etc/passwd.sh" },
       ],
     });
-    const res = await request(makeApp())
+    const res = await request(makeApp(scriptsRouter))
       .post("/api/projects/alpha/scripts/x/run");
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/scripts/i);
@@ -184,7 +161,7 @@ describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
       ],
     });
     seedScript("x.py", "print('hi')");
-    const res = await request(makeApp())
+    const res = await request(makeApp(scriptsRouter))
       .post("/api/projects/alpha/scripts/x/run");
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/\.sh/);
@@ -197,7 +174,7 @@ describe("POST /api/projects/:name/scripts/:id/run — validation", () => {
         { id: "x", label: "X", description: "d", script: "scripts/missing.sh" },
       ],
     });
-    const res = await request(makeApp())
+    const res = await request(makeApp(scriptsRouter))
       .post("/api/projects/alpha/scripts/x/run");
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/not found|missing|exist/i);
@@ -219,7 +196,7 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
         },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/ok/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/ok/run");
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.output).toContain("hello world");
@@ -236,7 +213,7 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
         { id: "bad", label: "Bad", description: "d", script: "scripts/bad.sh" },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/bad/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/bad/run");
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
     expect(res.body.output).toContain("something broke");
@@ -256,11 +233,11 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
         },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/slow/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/slow/run");
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
     expect(res.body.output).toMatch(/timed out/i);
-  }, 10_000);
+  });
 
   it("passes the project name as argv to bash", async () => {
     seedProject("alpha");
@@ -270,7 +247,7 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
         { id: "argv", label: "Argv", description: "d", script: "scripts/argv.sh" },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/argv/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/argv/run");
     expect(res.body.output).toContain("argv1=alpha");
   });
 
@@ -289,7 +266,7 @@ describe("POST /api/projects/:name/scripts/:id/run — execution", () => {
         },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/ok/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/ok/run");
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(warn).toHaveBeenCalled();
@@ -306,7 +283,7 @@ describe("resolveScriptArgs / POST args schema", () => {
         { id: "x", label: "X", description: "d", script: "scripts/argv.sh" },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
     expect(res.body.ok).toBe(true);
     expect(res.body.output).toContain("argv: alpha");
   });
@@ -320,7 +297,7 @@ describe("resolveScriptArgs / POST args schema", () => {
           args: ["before", "{project}", "after"] },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
     expect(res.body.output).toContain("args=before alpha after");
   });
 
@@ -333,18 +310,18 @@ describe("resolveScriptArgs / POST args schema", () => {
           args: ["{exportsDir}"] },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
-    expect(res.body.output).toContain("out=" + join(projectsDir, "alpha", "exports"));
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
+    expect(res.body.output).toContain("out=" + join(projects.dir(), "alpha", "exports"));
     expect(res.body.output).toContain("dir exists");
   });
 
   it("substitutes {repo} with the first expanded repo path from repos.json", async () => {
     seedProject("alpha");
     // Seed repos.json pointing at a known path under tmpRoot
-    mkdirSync(join(tmpRoot, "fake-repo"), { recursive: true });
+    mkdirSync(join(projects.root(), "fake-repo"), { recursive: true });
     writeFileSync(
-      join(projectsDir, "alpha", "repos.json"),
-      JSON.stringify([{ name: "fake", path: join(tmpRoot, "fake-repo") }]),
+      join(projects.dir(), "alpha", "repos.json"),
+      JSON.stringify([{ name: "fake", path: join(projects.root(), "fake-repo") }]),
     );
     seedScript("show.sh", "#!/bin/bash\necho \"repo=$1\"\n");
     seedScriptsJson({
@@ -353,8 +330,8 @@ describe("resolveScriptArgs / POST args schema", () => {
           args: ["{repo}"] },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
-    expect(res.body.output).toContain("repo=" + join(tmpRoot, "fake-repo"));
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
+    expect(res.body.output).toContain("repo=" + join(projects.root(), "fake-repo"));
   });
 
   it("returns 400 when {repo} is used but repos.json is missing", async () => {
@@ -366,14 +343,14 @@ describe("resolveScriptArgs / POST args schema", () => {
           args: ["{repo}"] },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/repos\.json/);
   });
 
   it("returns 400 when {repo} is used but repos.json is empty", async () => {
     seedProject("alpha");
-    writeFileSync(join(projectsDir, "alpha", "repos.json"), "[]");
+    writeFileSync(join(projects.dir(), "alpha", "repos.json"), "[]");
     seedScript("show.sh", "#!/bin/bash\necho ok\n");
     seedScriptsJson({
       scripts: [
@@ -381,14 +358,14 @@ describe("resolveScriptArgs / POST args schema", () => {
           args: ["{repo}"] },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/empty/i);
   });
 
   it("returns 400 with a clear message when repos.json has malformed JSON", async () => {
     seedProject("alpha");
-    writeFileSync(join(projectsDir, "alpha", "repos.json"), "{ not valid json");
+    writeFileSync(join(projects.dir(), "alpha", "repos.json"), "{ not valid json");
     seedScript("show.sh", "#!/bin/bash\necho ok\n");
     seedScriptsJson({
       scripts: [
@@ -396,7 +373,7 @@ describe("resolveScriptArgs / POST args schema", () => {
           args: ["{repo}"] },
       ],
     });
-    const res = await request(makeApp()).post("/api/projects/alpha/scripts/x/run");
+    const res = await request(makeApp(scriptsRouter)).post("/api/projects/alpha/scripts/x/run");
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/malformed repos\.json/i);
   });

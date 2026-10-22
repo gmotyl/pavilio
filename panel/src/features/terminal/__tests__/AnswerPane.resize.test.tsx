@@ -22,11 +22,10 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
 import { cssPx, cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
-import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
+import type { Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";
 import { ANSWER_COMPOSER_BOUNDS } from "../AnswerComposer";
 import {
@@ -38,6 +37,8 @@ import {
 } from "../AnswerPane";
 import { __resetSessionStoreForTests, refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
+import { readySpeech } from "./answerPane.harness";
 
 // The activity channel opens a WebSocket at import time and re-arms a 2s
 // reconnect timer whenever that socket closes. A socket that never closes
@@ -89,16 +90,10 @@ vi.mock("../../../preferences/store", async (importOriginal) => {
 
 // The synthesis cache the rail peeks into. Nothing is warm and nothing
 // subscribes: no test here draws a segment.
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // mermaid's rendering stack is browser-only and no answer here holds a fence.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 const SESSION = "cell-a";
 /** A second cell of the SAME project — the two that share a height. */
@@ -108,11 +103,6 @@ const PROJECT = "alpha";
 
 /** The height of the terminal area the pane is rendered into. */
 const AREA = 600;
-
-/** Referentially stable — a fresh array per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 
 const ANSWER: Utterance = {
   id: "u1",
@@ -127,49 +117,6 @@ const QUEUE: UtteranceQueue = {
   pending: [],
   cursor: 0,
 };
-
-function makeSpeech(): GridSpeech {
-  return {
-    stateFor: () => "ready",
-    queueFor: () => QUEUE,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-/** Controllable matchMedia stub — jsdom has none. */
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: query === MOBILE_QUERY ? mobile : false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
 
 function session(id: string, project: string): SessionMeta {
   return {
@@ -240,7 +187,7 @@ function renderPaneFor(sessionId = SESSION, areaHeight = AREA): RenderedPane {
     <MemoryRouter>
       <AnswerPane
         sessionId={sessionId}
-        speech={makeSpeech()}
+        speech={readySpeech({ queueFor: () => QUEUE })}
         onClose={() => {}}
         send={() => true}
       />
@@ -276,7 +223,7 @@ beforeEach(async () => {
   Element.prototype.releasePointerCapture = vi.fn();
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
     StubResizeObserver;
-  installMatchMedia(false);
+  installMatchMedia();
   // Both cells belong to one project, because that is the scope both heights
   // are now kept per: without a list the pane cannot name its project.
   await seedSessions([session(SESSION, PROJECT), session(SIBLING, PROJECT)]);
@@ -334,7 +281,7 @@ describe("the answer pane's bottom edge", () => {
   });
 
   it("drops the handle on a narrow viewport", () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     // Stored, so that the absence below is the viewport's doing and not an
     // empty preference's.
     writePreference(preferences.answerPaneHeight, 240, PROJECT);

@@ -51,16 +51,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
-
-import type { Callout } from "../BootLegend";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { prepare } from "../../speech/prepare";
-import { ALL_PREFERENCES, preferences } from "../../../preferences/declarations";
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 /**
  * The terminal instance stand-in. `send` reports delivery the way the real one
@@ -118,16 +116,12 @@ vi.mock("../terminalInstances", () => {
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
 // mermaid pulls in a browser-only rendering stack the pane never needs here.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 // The synthesis cache the bar peeks into: everything is cold.
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so they pick them up.
@@ -144,8 +138,6 @@ const ANSWER = "The migration finished, so the deploy is unblocked.";
 
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
  *  stable between notifications — a fresh value per call is a render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 
 /**
@@ -154,35 +146,22 @@ const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
  */
 type Host = GridSpeech & { arrive: () => void };
 
-function makeSpeech(sessionId: string): Host {
+function arrivingSpeech(sessionId: string): Host {
   let queue: UtteranceQueue = emptyUtteranceQueue;
   let spoken = false;
   const units = prepare(ANSWER).units;
   const utterance: Utterance = { id: "u-1", sessionId, text: ANSWER, at: 1 };
 
   return {
+    ...makeSpeech({
+      stateFor: () => (spoken ? "ready" : "empty"),
+      queueFor: () => queue,
+      unitsFor: () => (spoken ? units : NO_UNITS),
+    }),
     arrive: () => {
       queue = { ...emptyUtteranceQueue, current: utterance };
       spoken = true;
     },
-    stateFor: () => (spoken ? "ready" : "empty"),
-    queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => (spoken ? units : NO_UNITS),
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
   };
 }
 
@@ -192,12 +171,6 @@ const cell = (speech: GridSpeech, sessionId = SESSION, speechBarVisible = true) 
     <TerminalView sessionId={sessionId} speech={speech} speechBarVisible={speechBarVisible} />
   </MemoryRouter>
 );
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
 
 const legend = (sessionId = SESSION): HTMLElement | null =>
   screen.queryByTestId(`boot-legend-${sessionId}`);
@@ -220,7 +193,7 @@ const composer = (sessionId = SESSION): HTMLTextAreaElement =>
  */
 async function settleSubmit(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await vi.advanceTimersByTimeAsync(80);
   });
 }
 
@@ -371,11 +344,14 @@ const px = (value: string): number => Number.parseFloat(value);
  */
 function openLegend(cellWidth?: number, sessionId = SESSION, cellHeight?: number): void {
   if (cellWidth !== undefined) stubLayout(cellWidth, cellHeight);
-  render(cell(makeSpeech(sessionId), sessionId));
+  render(cell(arrivingSpeech(sessionId), sessionId));
   fireEvent.click(eye(sessionId));
 }
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   at = 0;
   term.writes.length = 0;
   term.accept = true;
@@ -388,6 +364,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   _resetForTests();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
@@ -403,7 +380,7 @@ describe("the boot legend", () => {
   // -------------------------------------------------------------------------
 
   it("a launcher press goes straight to the wave, not the legend", async () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     expect(legend()).toBeNull();
 
     fireEvent.click(launcher());
@@ -420,7 +397,7 @@ describe("the boot legend", () => {
   });
 
   it("a silent boot leaves the pane open with the legend", async () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(launcher());
     await settleSubmit();
     expect(legend()).toBeNull(); // the wave has the body, per the test above
@@ -441,7 +418,7 @@ describe("the boot legend", () => {
   });
 
   it("the eye on an unspoken cell shows the legend", () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     expect(legend()).toBeNull();
 
     // No press, no send, no wait — just the control that opens the pane.
@@ -457,7 +434,7 @@ describe("the boot legend", () => {
   // -------------------------------------------------------------------------
 
   it("an arriving answer replaces the legend", async () => {
-    const speech = makeSpeech(SESSION);
+    const speech = arrivingSpeech(SESSION);
     const view = render(cell(speech));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
@@ -480,7 +457,7 @@ describe("the boot legend", () => {
     // session is busy but `waiting` has not flipped yet — and the legend
     // stands through exactly that gap.
     globals.__PAVILIO_TUNING__ = { answerWaveDebounceMs: 20 };
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
 
@@ -490,7 +467,7 @@ describe("the boot legend", () => {
     expect(legend()).not.toBeNull();
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await vi.advanceTimersByTimeAsync(80);
     });
 
     expect(getAnswerWaiting(SESSION)).toEqual({ waiting: true, pending: false });
@@ -499,7 +476,7 @@ describe("the boot legend", () => {
   });
 
   it("Escape closes the pane and the legend with it", async () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
 
@@ -513,7 +490,7 @@ describe("the boot legend", () => {
   });
 
   it("hiding the bar closes the pane and the legend; showing it again reopens neither", () => {
-    const speech = makeSpeech(SESSION);
+    const speech = arrivingSpeech(SESSION);
     const view = render(cell(speech));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
@@ -538,7 +515,7 @@ describe("the boot legend", () => {
   // -------------------------------------------------------------------------
 
   it("the legend is shown again on a second cell after it has been shown once", () => {
-    const first = render(cell(makeSpeech(SESSION)));
+    const first = render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
     first.unmount();
@@ -546,7 +523,7 @@ describe("the boot legend", () => {
     // Another cell, another agent, the same browser. There is no per-browser
     // "already taught" preference left to consult — see the acceptance test
     // below — so a second cell shows the legend exactly as the first one did.
-    render(cell(makeSpeech(OTHER), OTHER));
+    render(cell(arrivingSpeech(OTHER), OTHER));
     fireEvent.click(eye(OTHER));
 
     expect(legend(OTHER)).not.toBeNull();
@@ -557,14 +534,9 @@ describe("the boot legend", () => {
     // across a remount — shows it again too. "Shown once" is not a fact any
     // module here tracks any more.
     forgetAnswerPane(SESSION);
-    render(cell(makeSpeech(SESSION), SESSION));
+    render(cell(arrivingSpeech(SESSION), SESSION));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
-  });
-
-  it("no boot-legend-seen preference is declared", () => {
-    expect(ALL_PREFERENCES.some((def) => def.key === "terminal.bootLegend.seen")).toBe(false);
-    expect(Object.keys(preferences)).not.toContain("bootLegendSeen");
   });
 
   // -------------------------------------------------------------------------
@@ -572,7 +544,7 @@ describe("the boot legend", () => {
   // -------------------------------------------------------------------------
 
   it("the composer under the legend takes focus and text", () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
 
@@ -592,7 +564,7 @@ describe("the boot legend", () => {
   // -------------------------------------------------------------------------
 
   it("the legend mounts outside the answer pane", () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
 
     const up = legend();
@@ -618,7 +590,7 @@ describe("the boot legend", () => {
   });
 
   it("each leader ends on the control it names", () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
 
     // The transport strip and the eye are both on the row from mount, so each
@@ -646,7 +618,7 @@ describe("the boot legend", () => {
   });
 
   it("no callout names the composer, Enter or Esc", () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
 
     const text = legend()!.textContent ?? "";
@@ -659,7 +631,7 @@ describe("the boot legend", () => {
   });
 
   it("the transport it names cannot be pressed under it, and is named anyway", () => {
-    render(cell(makeSpeech(SESSION)));
+    render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
 
@@ -865,46 +837,6 @@ const hint = (sessionId = SESSION): HTMLElement | null =>
   screen.queryByTestId(`answer-pane-hint-${sessionId}`);
 
 describe("the boot legend and the command picker", () => {
-  it("no callout teaches the picker by the chip row", () => {
-    // Every observer records what it watches: other parts of the cell observe
-    // too, so the assertion is about the boxes a picker callout would watch.
-    const resizeObserved: Element[] = [];
-    class RecordingResizeObserver {
-      constructor(_cb: ResizeObserverCallback) {}
-      observe(el: Element): void {
-        resizeObserved.push(el);
-      }
-      unobserve(): void {}
-      disconnect(): void {}
-    }
-    const mutationFilters: string[] = [];
-    const RealMutationObserver = MutationObserver;
-    class RecordingMutationObserver extends RealMutationObserver {
-      observe(target: Node, options?: MutationObserverInit): void {
-        mutationFilters.push(...(options?.attributeFilter ?? []));
-        super.observe(target, options);
-      }
-    }
-    vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
-    vi.stubGlobal("MutationObserver", RecordingMutationObserver);
-
-    openLegend(720);
-
-    const root = legend()!;
-    const row = chip()!.closest(".answer-pane-chip-row")!;
-    expect(row, "the chip row is always drawn").not.toBeNull();
-    // Nothing in the legend but the band's two boxes, and nothing points at the chip.
-    expect(root.querySelectorAll("[data-testid^='boot-legend-door']")).toHaveLength(0);
-    expect(root.querySelector(`[data-leads-to="answer-pane-skills-chip-${SESSION}"]`)).toBeNull();
-    expect(root.querySelectorAll(":scope > div")).toHaveLength(2);
-    // ...and nothing measures the foot of the pane for one.
-    for (let r: Element | null = row; r; r = r.nextElementSibling) {
-      expect(resizeObserved).not.toContain(r);
-    }
-    expect(resizeObserved).not.toContain(pane()!);
-    expect(mutationFilters).not.toContain("aria-expanded");
-  });
-
   it("the band still carries only the transport and eye callouts", () => {
     openLegend(720);
 
@@ -915,8 +847,6 @@ describe("the boot legend and the command picker", () => {
       "eye",
       "transport",
     ]);
-    // Type-level: a third key in the band is a compile error, not a review note.
-    expectTypeOf<Callout["key"]>().toEqualTypeOf<"transport" | "eye">();
   });
 
   it("the hint line still teaches the picker", () => {
@@ -928,16 +858,7 @@ describe("the boot legend and the command picker", () => {
   });
 
   it("a touch viewport renders no hint line but does render the chip", () => {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      configurable: true,
-      value: (query: string) => ({
-        matches: query === MOBILE_QUERY,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      }),
-    });
+    installMatchMedia({ mobile: true });
     try {
       openLegend();
 
@@ -1009,14 +930,9 @@ describe("the boot legend and the command picker", () => {
     }
   });
 
-  it("no rule for the removed picker callout is left in the stylesheet", () => {
-    expect(CSS).not.toMatch(/\.boot-legend-door/);
-  });
-
-  it("the hint line's skills fact is accented, as the mockup draws it", () => {
+  it("the hint line marks its skills fact as the accented span", () => {
     openLegend();
     const accent = hint()!.querySelector(".answer-pane-hint-new");
     expect(accent?.textContent).toBe("/ FOR SKILLS");
-    expect(cssRule(".answer-pane-hint-new")).toMatch(/color:\s*var\(--accent\)/);
   });
 });

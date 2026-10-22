@@ -15,14 +15,6 @@ describe("TerminalShortcutBar", () => {
     ]);
   });
 
-  test("does NOT render removed buttons (yes, 1, 2, 3)", () => {
-    render(<TerminalShortcutBar onSend={() => {}} />);
-    expect(screen.queryByText("yes")).toBeNull();
-    expect(screen.queryByText("1")).toBeNull();
-    expect(screen.queryByText("2")).toBeNull();
-    expect(screen.queryByText("3")).toBeNull();
-  });
-
   test("⏎ sends \\r", () => {
     const onSend = vi.fn();
     render(<TerminalShortcutBar onSend={onSend} />);

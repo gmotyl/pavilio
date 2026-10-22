@@ -254,7 +254,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(output).not.toContain("Pavilio panel ready");
     expect(existsSync(netshMarker)).toBe(false);
     expectNoToolchainWasRun(status, output);
-  }, 30000);
+  });
 
   it("starts the panel through scripts/panel once the pinned toolchain resolves", () => {
     writePinnedToolchain();
@@ -272,7 +272,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(existsSync(netshMarker)).toBe(false);
     // On PATH is all they were ever for: the launcher must not run them itself.
     expectNoToolchainWasRun(status, output);
-  }, 30000);
+  });
 
   it("launcher starts the panel with corepack pnpm when pnpm is absent", () => {
     // A node that still bundles corepack, and no pnpm anywhere. npm is there
@@ -291,7 +291,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expectNoToolchainWasRun(status, output);
     // Nothing in the launcher spells npm any more, not even in a comment.
     expect(readFileSync(LAUNCHER, "utf8")).not.toMatch(/\bnpm\b/);
-  }, 30000);
+  });
 
   it("launcher stops with a pnpm install hint when neither pnpm nor corepack exists", () => {
     writePinnedToolchain(["node", "npm"]);
@@ -310,7 +310,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(output).not.toContain("Pavilio panel ready");
     expect(existsSync(netshMarker)).toBe(false);
     expectNoToolchainWasRun(status, output);
-  }, 30000);
+  });
 
   it("skips the WSL block outside WSL and still prints the local link", () => {
     writePinnedToolchain();
@@ -337,7 +337,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(output).toContain("./scripts/panel stop");
     expect(output).not.toMatch(/Stop with:\s*npm/);
     expectNoToolchainWasRun(status, output);
-  }, 30000);
+  });
 
   it("stops with a clear message when scripts/panel cannot start the panel", () => {
     writePinnedToolchain();
@@ -375,7 +375,7 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(output).not.toContain("===== Pavilio panel ready =====");
     expect(existsSync(netshMarker)).toBe(false);
     expectNoToolchainWasRun(status, output);
-  }, 30000);
+  });
 
   it("still runs PANEL_POST_LAUNCH_CMD last", () => {
     writePinnedToolchain();
@@ -394,5 +394,5 @@ describe("scripts/start-panel-windows.sh toolchain handoff", () => {
     expect(order()).toEqual(["panel start", "post-launch"]);
     expect(existsSync(netshMarker)).toBe(false);
     expectNoToolchainWasRun(status, output);
-  }, 30000);
+  });
 });

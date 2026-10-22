@@ -2,47 +2,30 @@ import { describe, it, expect } from "vitest";
 import { detectLang, escapeHtml, injectHighlight } from "../DiffView";
 
 describe("detectLang", () => {
-  it("returns typescript for .ts files", () => {
-    expect(detectLang("src/app.ts")).toBe("typescript");
+  it.each<[label: string, filename: string | undefined, lang: string | undefined]>([
+    [".ts files", "src/app.ts", "typescript"],
+    [".tsx files", "components/Button.tsx", "typescript"],
+    ["Dockerfile", "Dockerfile", "dockerfile"],
+    ["unknown extensions", "file.xyz", undefined],
+    ["no filename", undefined, undefined],
+    ["nested paths", "a/b/c/styles.css", "css"],
+    ["filenames case-insensitively", "path/DOCKERFILE", "dockerfile"],
+  ])("detects %s", (_label, filename, lang) => {
+    expect(detectLang(filename)).toBe(lang);
   });
 
-  it("returns typescript for .tsx files", () => {
-    expect(detectLang("components/Button.tsx")).toBe("typescript");
-  });
-
-  it("returns dockerfile for Dockerfile", () => {
-    expect(detectLang("Dockerfile")).toBe("dockerfile");
-  });
-
-  it("returns undefined for unknown extensions", () => {
-    expect(detectLang("file.xyz")).toBeUndefined();
-  });
-
-  it("returns undefined when no filename given", () => {
+  it("returns undefined when called with no argument", () => {
     expect(detectLang()).toBeUndefined();
-    expect(detectLang(undefined)).toBeUndefined();
-  });
-
-  it("handles nested paths", () => {
-    expect(detectLang("a/b/c/styles.css")).toBe("css");
-  });
-
-  it("is case-insensitive for filenames", () => {
-    expect(detectLang("path/DOCKERFILE")).toBe("dockerfile");
   });
 });
 
 describe("escapeHtml", () => {
-  it("escapes ampersand, less-than, greater-than", () => {
-    expect(escapeHtml("a < b > c & d")).toBe("a &lt; b &gt; c &amp; d");
-  });
-
-  it("returns empty string for empty input", () => {
-    expect(escapeHtml("")).toBe("");
-  });
-
-  it("leaves safe text unchanged", () => {
-    expect(escapeHtml("hello world")).toBe("hello world");
+  it.each([
+    ["escapes ampersand, less-than, greater-than", "a < b > c & d", "a &lt; b &gt; c &amp; d"],
+    ["returns empty string for empty input", "", ""],
+    ["leaves safe text unchanged", "hello world", "hello world"],
+  ])("%s", (_label, input, expected) => {
+    expect(escapeHtml(input)).toBe(expected);
   });
 });
 

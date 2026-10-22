@@ -114,7 +114,7 @@ describe("scripts/setup:codex", () => {
       expect(readlinkSync(join(codexSkills, name))).toBe(join(repo, "skills", name));
     }
     expect(second.output).toContain("0 installed");
-  }, 30000);
+  });
 
   it("leaves foreign links alone unless --force", () => {
     // A link planted by another checkout of the same repo.
@@ -153,7 +153,7 @@ describe("scripts/setup:codex", () => {
     expect(statSync(foreign).isDirectory()).toBe(true);
     expect(readFileSync(join(foreign, "SKILL.md"), "utf8")).toContain("pavilio-note");
     expect(forced.output).toContain("0 conflicting");
-  }, 30000);
+  });
 
   it("replaces a real directory only with --force, and keeps its contents out of the repo", () => {
     mkdirSync(codexSkills, { recursive: true });
@@ -183,7 +183,7 @@ describe("scripts/setup:codex", () => {
       "pavilio-note",
     );
     expect(existsSync(join(planted, "notes.md"))).toBe(false);
-  }, 30000);
+  });
 
   it("says so and exits non-zero when CODEX_HOME/skills cannot be created", () => {
     mkdirSync(codexHome, { recursive: true });
@@ -201,7 +201,7 @@ describe("scripts/setup:codex", () => {
     expect(output).toContain(codexSkills);
     // And the file is still a file: nothing was silently clobbered.
     expect(statSync(codexSkills).isFile()).toBe(true);
-  }, 30000);
+  });
 
   it("says so and exits non-zero when a link cannot be written", () => {
     mkdirSync(codexSkills, { recursive: true });
@@ -224,7 +224,7 @@ describe("scripts/setup:codex", () => {
     expect(output).not.toMatch(/\d+ installed/);
     expect(output).toContain("Could not link");
     expect(existsSync(join(codexSkills, "pavilio-note"))).toBe(false);
-  }, 30000);
+  });
 
   it("skips when codex is not installed", () => {
     // CODEX_HOME never created: a machine without codex.
@@ -241,7 +241,7 @@ describe("scripts/setup:codex", () => {
     expect(res.status).toBe(0);
     expect(`${res.stdout}${res.stderr}`).toContain("skipped (codex not installed)");
     expect(existsSync(join(home, ".codex"))).toBe(false);
-  }, 30000);
+  });
 
   it("prunes links that pointed into this repo for skills that no longer exist", () => {
     mkdirSync(codexSkills, { recursive: true });
@@ -263,5 +263,5 @@ describe("scripts/setup:codex", () => {
     // Untouched, still dangling.
     expect(lstatSync(theirs).isSymbolicLink()).toBe(true);
     expect(readlinkSync(theirs)).toBe(join(sandbox, "elsewhere", "skills", "their-gone"));
-  }, 30000);
+  });
 });

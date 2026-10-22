@@ -50,10 +50,9 @@
  */
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
-import type { CellSpeechState, GridSpeech, SpeechUnit } from "../../speech/types";
-import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import type { CellSpeechState, GridSpeech } from "../../speech/types";
 import type { MediaSessionTransportTarget } from "../../speech/useMediaSessionTransport";
 import { useMediaSessionTransport } from "../../speech/useMediaSessionTransport";
 import { useSpeechKeys } from "../../speech/useSpeechKeys";
@@ -67,6 +66,7 @@ import {
   getActivityState,
   type ActivityState,
 } from "../useTerminalActivityChannel";
+import { installMatchMedia } from "../../../test-utils";
 
 const sendDismiss = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
 const reconnectOnActivate = vi.hoisted(() => vi.fn<(sessionId: string) => void>());
@@ -83,7 +83,7 @@ const reconnectOnActivate = vi.hoisted(() => vi.fn<(sessionId: string) => void>(
 // for, and asked for THIS session. What the real one REFUSES to do — a
 // healthy socket, an exited session, a second ask mid-handshake — is a
 // property of the pool, invisible through a spy, and is pinned against the
-// real pool in `AnswerComposer.focusReconnect.test.tsx`.
+// real pool in `AnswerComposer.send.test.tsx` ("focus repair").
 vi.mock("../terminalInstances", () => ({
   sendDismiss: (sessionId: string) => sendDismiss(sessionId),
   reconnectOnActivate: (sessionId: string) => reconnectOnActivate(sessionId),
@@ -100,46 +100,8 @@ vi.mock("../../speech/synth", () => ({
   subscribeSpeechCache: () => () => {},
 }));
 
-/** Referentially stable — a fresh collection per call is a `useSyncExternalStore` loop. */
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(state: CellSpeechState): GridSpeech {
-  return {
-    stateFor: () => state,
-    queueFor: () => emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
-}
-
-/** jsdom has no `matchMedia`, and the composer's grip asks it for the viewport. */
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
+function speechIn(state: CellSpeechState): GridSpeech {
+  return makeSpeech({ stateFor: () => state });
 }
 
 /** What the activity channel would have been told by the server. */
@@ -156,7 +118,7 @@ function renderBar(sessionId: string, state: CellSpeechState = "ready") {
   return render(
     <SpeechControlBar
       sessionId={sessionId}
-      speech={makeSpeech(state)}
+      speech={speechIn(state)}
       answerOpen={false}
       onToggleAnswer={() => {}}
       send={() => true}
@@ -190,7 +152,7 @@ const field = (sessionId: string): HTMLElement =>
 function resetArrivalHarness(): void {
   _resetForTests();
   __resetAnswerWaitingForTests();
-  installMatchMedia(false);
+  installMatchMedia();
   reconnectOnActivate.mockReset();
   sendDismiss.mockReset();
   // The server's half of the round trip — see the note on this file.
@@ -289,7 +251,7 @@ describe("attention clears when the user actually arrives", () => {
    * the composer asks again, unconditionally, and `reconnectOnActivate` drops
    * the ask because the handshake it started is still in flight. So the count
    * below is 2 rather than 1 — the second ask costs nothing, and that it costs
-   * nothing is `AnswerComposer.focusReconnect.test.tsx`'s claim, made against
+   * nothing is `AnswerComposer.send.test.tsx` ("focus repair")'s claim, made against
    * the real pool where the sockets it did or did not open can be counted.
    * Were this file to stub that refusal in, it would be asserting its own mock.
    */
@@ -324,7 +286,7 @@ describe("attention clears when the user actually arrives", () => {
       rerender(
         <SpeechControlBar
           sessionId="cell-a"
-          speech={makeSpeech(state)}
+          speech={speechIn(state)}
           answerOpen={false}
           onToggleAnswer={() => {}}
           send={() => true}
@@ -613,7 +575,7 @@ describe("arrival closes the session's notification", () => {
 
   const notification = (tag: string): FakeNotification => ({ tag, close: vi.fn() });
 
-  async function settle(): Promise<void> {
+  async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 5; i += 1) await Promise.resolve();
   }
 
@@ -632,7 +594,7 @@ describe("arrival closes the session's notification", () => {
 
     // Through a real door, not the helper: every door gets this for free.
     fireEvent.click(play("cell-a"));
-    await settle();
+    await flushMicrotasks();
 
     expect(sendDismiss).toHaveBeenCalledWith("cell-a");
     expect(getNotifications).toHaveBeenCalledWith({ tag: "cell-a" });
@@ -649,7 +611,7 @@ describe("arrival closes the session's notification", () => {
 
     dismissAttentionOnArrival("cell-busy");
     dismissAttentionOnArrival("cell-idle");
-    await settle();
+    await flushMicrotasks();
 
     expect(sendDismiss).not.toHaveBeenCalled();
     expect(getRegistration).not.toHaveBeenCalled();
@@ -666,7 +628,7 @@ describe("arrival closes the session's notification", () => {
     setActivity("cell-a", "attention");
 
     expect(() => dismissAttentionOnArrival("cell-a")).not.toThrow();
-    await settle();
+    await flushMicrotasks();
 
     expect(sendDismiss).toHaveBeenCalledWith("cell-a");
   });

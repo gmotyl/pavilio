@@ -877,51 +877,63 @@ command = "npx"
   });
   // --- what the file already held ------------------------------------------
 
-  it("preserves the codex config file permissions", () => {
-    makeRoots([".codex"]);
-    writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
-    // A real ~/.codex/config.toml is 0600: it carries MCP server definitions
-    // with plaintext tokens in them. A write that lands on a fresh inode would
-    // hand those to every account on the machine.
-    chmodSync(codexConfigPath, 0o600);
+  // One rule over both writers, existing file or not. A real
+  // ~/.codex/config.toml is 0600: it carries MCP server definitions with
+  // plaintext tokens in them, and a write that lands on a fresh inode would
+  // hand those to every account on the machine. 0600 is not the default for
+  // the claude settings file, but a user who tightened it has to stay
+  // tightened — the writer is the same temp-file-plus-rename dance. With
+  // nothing to inherit the installer picks the conservative mode: these files
+  // grow credentials over time and only their owner ever reads them. Uninstall
+  // rewrites the same file and must not loosen it either.
+  it.each([
+    {
+      file: "an existing codex config",
+      path: () => codexConfigPath,
+      seed: () => {
+        makeRoots([".codex"]);
+        writeFileSync(codexConfigPath, CODEX_SEED_CONFIG);
+        chmodSync(codexConfigPath, 0o600);
+      },
+      installed: () => readCodexConfig().includes(CODEX_BLOCK),
+    },
+    {
+      file: "an existing claude settings file",
+      path: () => settingsPath,
+      seed: () => {
+        writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2));
+        chmodSync(settingsPath, 0o600);
+      },
+      installed: () => speechCommands(readSettings()).length === 1,
+    },
+    {
+      file: "an absent codex config",
+      path: () => codexConfigPath,
+      seed: () => {
+        makeRoots([".codex"]);
+        expect(existsSync(codexConfigPath)).toBe(false);
+      },
+      installed: () => readCodexConfig().includes(CODEX_BLOCK),
+    },
+    {
+      file: "an absent claude settings file",
+      path: () => settingsPath,
+      seed: () => {
+        expect(existsSync(settingsPath)).toBe(false);
+      },
+      installed: () => speechCommands(readSettings()).length === 1,
+    },
+  ])("$file stays readable only by its owner across install and uninstall", ({ path, seed, installed }) => {
+    seed();
 
     expect(run().status).toBe(0);
 
-    // Guard against a vacuous pass: it did rewrite the file.
-    expect(readCodexConfig()).toContain(CODEX_BLOCK);
-    expect(statSync(codexConfigPath).mode & 0o777).toBe(0o600);
+    // Guard against a vacuous pass: it did write the file.
+    expect(installed()).toBe(true);
+    expect(statSync(path()).mode & 0o777).toBe(0o600);
 
-    // Uninstall rewrites the same file and must not loosen it either.
     expect(run("--uninstall").status).toBe(0);
-    expect(statSync(codexConfigPath).mode & 0o777).toBe(0o600);
-  });
-
-  it("preserves the claude settings file permissions", () => {
-    writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2));
-    // 0600 is not the default for this file, but a user who tightened it has
-    // to stay tightened — the writer is the same temp-file-plus-rename dance.
-    chmodSync(settingsPath, 0o600);
-
-    expect(run().status).toBe(0);
-
-    expect(speechCommands(readSettings())).toHaveLength(1);
-    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
-
-    expect(run("--uninstall").status).toBe(0);
-    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
-  });
-
-  it("creates absent config files readable only by their owner", () => {
-    makeRoots([".codex"]);
-    expect(existsSync(settingsPath)).toBe(false);
-    expect(existsSync(codexConfigPath)).toBe(false);
-
-    expect(run().status).toBe(0);
-
-    // Nothing to inherit, so the installer picks the conservative mode: these
-    // files grow credentials over time and only their owner ever reads them.
-    expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
-    expect(statSync(codexConfigPath).mode & 0o777).toBe(0o600);
+    expect(statSync(path()).mode & 0o777).toBe(0o600);
   });
 
   it("refuses to write when a stray begin marker sits above the block", () => {
@@ -1026,18 +1038,6 @@ command = "npx"
       realpathSync(OPENCODE_PLUGIN_PATH),
     );
     expect(reportLines(result.stdout).opencode).not.toMatch(/skipped/i);
-  });
-
-  it("creates the plugins directory when absent", () => {
-    makeRoots([".config", "opencode"]);
-    // Guard against a vacuous pass: the directory must really be missing.
-    expect(existsSync(opencodePluginsDir)).toBe(false);
-
-    const result = run();
-
-    expect(result.status).toBe(0);
-    expect(statSync(opencodePluginsDir).isDirectory()).toBe(true);
-    expect(lstatSync(opencodeLinkPath).isSymbolicLink()).toBe(true);
   });
 
   it("creates the plugins directory with the opencode root's own permissions", () => {

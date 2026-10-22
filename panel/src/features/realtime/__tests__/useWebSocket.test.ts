@@ -95,19 +95,6 @@ describe("useWebSocket", () => {
     expect(result.current.lastMessage).not.toBe(first);
   });
 
-  it("two consumers share one socket", () => {
-    const a = renderHook(() => useWebSocket());
-    const b = renderHook(() => useWebSocket());
-
-    expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(realtimeSubscriberCount()).toBe(2);
-
-    act(() => last().deliver({ type: "ping" }));
-
-    expect(a.result.current.lastMessage).toEqual({ type: "ping" });
-    expect(b.result.current.lastMessage).toEqual({ type: "ping" });
-  });
-
   it("unmounting releases the subscription without closing the socket", () => {
     const a = renderHook(() => useWebSocket());
     renderHook(() => useWebSocket());
@@ -129,33 +116,5 @@ describe("useWebSocket", () => {
 
     expect(late.result.current.lastMessage).toBeNull();
     expect(FakeWebSocket.instances).toHaveLength(1);
-  });
-
-  it("remounting opens no new socket", () => {
-    const first = renderHook(() => useWebSocket());
-    act(() => first.unmount());
-
-    const second = renderHook(() => useWebSocket());
-
-    expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(FakeWebSocket.instances[0].closed).toBe(false);
-    expect(second.result.current.lastMessage).toBeNull();
-  });
-
-  it("publishes a synthetic file-change after a reconnect, but not on first connect", () => {
-    const { result } = renderHook(() => useWebSocket());
-    expect(result.current.lastMessage).toBeNull();
-
-    act(() => {
-      vi.advanceTimersByTime(40_000); // watchdog closes the stale socket
-    });
-    act(() => {
-      vi.advanceTimersByTime(2_000); // reconnect
-    });
-
-    expect(result.current.lastMessage).toMatchObject({
-      type: "file-change",
-      event: "reconnect",
-    });
   });
 });

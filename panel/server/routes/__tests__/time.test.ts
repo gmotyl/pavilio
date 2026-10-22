@@ -18,10 +18,6 @@ beforeEach(() => {
 });
 
 describe("POST /api/time/append", () => {
-  it("rejects missing project", async () => {
-    const r = await request(app).post("/api/time/append").send({ entry: { type: "manual" } });
-    expect(r.status).toBe(400);
-  });
   it("appends a manual entry and returns the stored row", async () => {
     const r = await request(app)
       .post("/api/time/append")
@@ -29,12 +25,6 @@ describe("POST /api/time/append", () => {
     expect(r.status).toBe(200);
     expect(r.body.entry.id).toMatch(/^[0-9a-z]+$/i);
     expect(r.body.entry.minutes).toBe(90);
-  });
-  it("rejects unknown entry types", async () => {
-    const r = await request(app)
-      .post("/api/time/append")
-      .send({ project: "metro", entry: { type: "evil" } });
-    expect(r.status).toBe(400);
   });
 });
 
@@ -96,11 +86,6 @@ describe("GET /api/time/range", () => {
       { date: "2026-05-25", minutes: 30, note: "in-high" },
     ]);
   });
-
-  it("400s on missing params", async () => {
-    const r = await request(app).get("/api/time/range?project=metro");
-    expect(r.status).toBe(400);
-  });
 });
 
 describe("PATCH /api/time/entry/:id", () => {
@@ -145,41 +130,16 @@ describe("PATCH /api/time/entry/:id", () => {
     expect(r.status).toBe(404);
   });
 
-  it("400 when minutes is negative", async () => {
+  it.each<[string, Record<string, unknown>]>([
+    ["minutes is negative", { minutes: -5 }],
+    ["minutes is non-integer", { minutes: 1.5 }],
+    ["date is malformed", { date: "not-a-date" }],
+  ])("400 when %s", async (_label, patch) => {
     const post = await request(app).post("/api/time/append").send({
       project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90 },
     });
     const id = post.body.entry.id;
-    const r = await request(app).patch(`/api/time/entry/${id}`).send({
-      project: "metro", patch: { minutes: -5 },
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("400 when minutes is non-integer", async () => {
-    const post = await request(app).post("/api/time/append").send({
-      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90 },
-    });
-    const id = post.body.entry.id;
-    const r = await request(app).patch(`/api/time/entry/${id}`).send({
-      project: "metro", patch: { minutes: 1.5 },
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("400 when date is malformed", async () => {
-    const post = await request(app).post("/api/time/append").send({
-      project: "metro", entry: { type: "manual", date: "2026-05-25", minutes: 90 },
-    });
-    const id = post.body.entry.id;
-    const r = await request(app).patch(`/api/time/entry/${id}`).send({
-      project: "metro", patch: { date: "not-a-date" },
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("400 when project is missing", async () => {
-    const r = await request(app).patch("/api/time/entry/any").send({ patch: {} });
+    const r = await request(app).patch(`/api/time/entry/${id}`).send({ project: "metro", patch });
     expect(r.status).toBe(400);
   });
 });
@@ -203,113 +163,62 @@ describe("DELETE /api/time/entry/:id", () => {
     const r = await request(app).delete("/api/time/entry/missing?project=metro");
     expect(r.status).toBe(404);
   });
-
-  it("400 when project is missing", async () => {
-    const r = await request(app).delete("/api/time/entry/any");
-    expect(r.status).toBe(400);
-  });
 });
+
+type Method = "get" | "post" | "patch" | "delete";
+// One row per rejected request: [label, method, url, json body].
+type BadRequest = [string, Method, string, object?];
+
+function send(method: Method, url: string, body?: object) {
+  const req = request(app)[method](url);
+  return body === undefined ? req : req.send(body);
+}
+
+const manual = { type: "manual", date: "2026-05-25" };
+const busy = {
+  type: "busy_block",
+  date: "2026-05-21",
+  start: "2026-05-21T09:00:00Z",
+  end: "2026-05-21T10:00:00Z",
+};
 
 describe("path traversal", () => {
-  it("POST with project '../etc' returns 400", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "../etc",
-      entry: { type: "manual", date: "2026-05-25", minutes: 10 },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("POST with project 'metro/sub' returns 400", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "metro/sub",
-      entry: { type: "manual", date: "2026-05-25", minutes: 10 },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("POST with empty project returns 400", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "",
-      entry: { type: "manual", date: "2026-05-25", minutes: 10 },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("GET /today with project '..' returns 400", async () => {
-    const r = await request(app).get("/api/time/today?project=..");
-    expect(r.status).toBe(400);
-  });
-  it("GET /range with backslash in project returns 400", async () => {
-    const r = await request(app).get(
-      "/api/time/range?project=metro%5Cbad&from=2026-05-01&to=2026-05-31",
-    );
-    expect(r.status).toBe(400);
-  });
-  it("PATCH with project '..' returns 400", async () => {
-    const r = await request(app).patch("/api/time/entry/any").send({
-      project: "..",
-      patch: { minutes: 60 },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("DELETE with project '../foo' returns 400", async () => {
-    const r = await request(app).delete(
-      "/api/time/entry/any?project=" + encodeURIComponent("../foo"),
-    );
+  it.each<BadRequest>([
+    ["POST with project '../etc'", "post", "/api/time/append", { project: "../etc", entry: { ...manual, minutes: 10 } }],
+    ["POST with project 'metro/sub'", "post", "/api/time/append", { project: "metro/sub", entry: { ...manual, minutes: 10 } }],
+    ["POST with empty project", "post", "/api/time/append", { project: "", entry: { ...manual, minutes: 10 } }],
+    ["GET /today with project '..'", "get", "/api/time/today?project=.."],
+    ["GET /range with backslash in project", "get", "/api/time/range?project=metro%5Cbad&from=2026-05-01&to=2026-05-31"],
+    ["PATCH with project '..'", "patch", "/api/time/entry/any", { project: "..", patch: { minutes: 60 } }],
+    ["DELETE with project '../foo'", "delete", "/api/time/entry/any?project=" + encodeURIComponent("../foo")],
+  ])("%s returns 400", async (_label, method, url, body) => {
+    const r = await send(method, url, body);
     expect(r.status).toBe(400);
   });
 });
 
-describe("POST /api/time/append minutes validation", () => {
-  it("rejects manual entry with negative minutes", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "metro",
-      entry: { type: "manual", date: "2026-05-25", minutes: -5 },
-    });
+describe("request validation", () => {
+  it.each<BadRequest>([
+    ["POST /append rejects missing project", "post", "/api/time/append", { entry: { type: "manual" } }],
+    ["POST /append rejects unknown entry types", "post", "/api/time/append", { project: "metro", entry: { type: "evil" } }],
+    ["POST /append rejects manual entry with negative minutes", "post", "/api/time/append", { project: "metro", entry: { ...manual, minutes: -5 } }],
+    ["POST /append rejects manual entry with string minutes", "post", "/api/time/append", { project: "metro", entry: { ...manual, minutes: "90" } }],
+    ["POST /append rejects manual entry with NaN minutes", "post", "/api/time/append", { project: "metro", entry: { ...manual, minutes: NaN } }],
+    ["POST /append rejects manual entry without minutes", "post", "/api/time/append", { project: "metro", entry: manual }],
+    ["POST /append rejects busy_block with minutes >= 24h", "post", "/api/time/append", { project: "metro", entry: { ...busy, minutes: 24 * 60 } }],
+    ["GET /range 400s on missing params", "get", "/api/time/range?project=metro"],
+    ["PATCH 400 when project is missing", "patch", "/api/time/entry/any", { patch: {} }],
+    ["DELETE 400 when project is missing", "delete", "/api/time/entry/any"],
+  ])("%s", async (_label, method, url, body) => {
+    const r = await send(method, url, body);
     expect(r.status).toBe(400);
   });
-  it("rejects manual entry with string minutes", async () => {
+
+  it("POST /append accepts busy_block with valid minutes", async () => {
     const r = await request(app).post("/api/time/append").send({
       project: "metro",
-      entry: { type: "manual", date: "2026-05-25", minutes: "90" },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("rejects manual entry with NaN minutes", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "metro",
-      entry: { type: "manual", date: "2026-05-25", minutes: NaN },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("rejects manual entry without minutes", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "metro",
-      entry: { type: "manual", date: "2026-05-25" },
-    });
-    expect(r.status).toBe(400);
-  });
-  it("accepts busy_block with valid minutes", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "metro",
-      entry: {
-        type: "busy_block",
-        date: "2026-05-21",
-        start: "2026-05-21T09:00:00Z",
-        end: "2026-05-21T10:00:00Z",
-        minutes: 60,
-      },
+      entry: { ...busy, minutes: 60 },
     });
     expect(r.status).toBe(200);
-  });
-  it("rejects busy_block with minutes >= 24h", async () => {
-    const r = await request(app).post("/api/time/append").send({
-      project: "metro",
-      entry: {
-        type: "busy_block",
-        date: "2026-05-21",
-        start: "2026-05-21T09:00:00Z",
-        end: "2026-05-21T10:00:00Z",
-        minutes: 24 * 60,
-      },
-    });
-    expect(r.status).toBe(400);
   });
 });

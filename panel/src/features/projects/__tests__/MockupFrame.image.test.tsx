@@ -187,7 +187,7 @@ describe("MockupFrame copy link", () => {
 
 describe("mockup image detection", () => {
   it("matches the image extensions case-insensitively", () => {
-    for (const p of ["a.svg", "a.png", "a.jpg", "a.jpeg", "a.webp", "A.PNG", "b.JpEg"])
+    for (const p of ["a.svg", "a.png", "a.jpg", "a.jpeg", "a.webp", "A.PNG", "A.SVG", "b.JpEg"])
       expect(isMockupImage(p)).toBe(true);
     for (const p of ["a.html", "a.md", "a.gif", "png", "a.png.md"])
       expect(isMockupImage(p)).toBe(false);
@@ -197,6 +197,7 @@ describe("mockup image detection", () => {
     expect(isRasterImage("a.PNG")).toBe(true);
     expect(isRasterImage("a.webp")).toBe(true);
     expect(isRasterImage("a.svg")).toBe(false);
+    expect(isRasterImage("A.SVG")).toBe(false);
     expect(isRasterImage("a.html")).toBe(false);
   });
 });

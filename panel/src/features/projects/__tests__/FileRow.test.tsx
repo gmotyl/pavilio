@@ -26,35 +26,6 @@ describe("FileRow", () => {
     expect(screen.getByText("Jul 14")).toBeTruthy();
   });
 
-  it("marks the current entry", () => {
-    render(
-      <FileRow
-        testId="row"
-        label="a.md"
-        isCurrent
-        onSelect={() => {}}
-      />,
-    );
-    expect(screen.getByTestId("row-current-badge")).toBeTruthy();
-  });
-
-  it("omits the badge when not current", () => {
-    render(<FileRow testId="row" label="a.md" onSelect={() => {}} />);
-    expect(screen.queryByTestId("row-current-badge")).toBeNull();
-  });
-
-  it("renders the star slot when given", () => {
-    render(
-      <FileRow
-        testId="row"
-        label="a.md"
-        star={<button data-testid="row-star">star</button>}
-        onSelect={() => {}}
-      />,
-    );
-    expect(screen.getByTestId("row-star")).toBeTruthy();
-  });
-
   it("spreads drag props onto the row button", () => {
     render(
       <FileRow

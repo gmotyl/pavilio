@@ -3,59 +3,35 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { buildReadUrl } from "../MarkdownViewer";
 import MarkdownViewer from "../MarkdownViewer";
+import { jsonResponse, stubFetch } from "../../../test-utils";
 
 // ---------- unit tests for the pure helper ----------
 
 describe("buildReadUrl", () => {
-  it("returns a plain read URL for normal paths", () => {
-    expect(buildReadUrl("pavilio/notes/foo.md")).toBe(
-      "/api/files/read/pavilio/notes/foo.md",
-    );
-  });
-
-  it("percent-encodes each path segment", () => {
-    expect(buildReadUrl("p/notes/a b#c?.md")).toBe("/api/files/read/p/notes/a%20b%23c%3F.md");
-    expect(buildReadUrl("_root/skills/a b/SKILL.md")).toBe("/api/files/read/a%20b/SKILL.md?root=skills");
-  });
-
-  it("maps _root/<rootId>/<rest> to ?root= query param", () => {
-    expect(buildReadUrl("_root/skills/memo/SKILL.md")).toBe(
-      "/api/files/read/memo/SKILL.md?root=skills",
-    );
-  });
-
-  it("URL-encodes the rootId", () => {
-    expect(buildReadUrl("_root/my root/file.md")).toBe(
-      "/api/files/read/file.md?root=my%20root",
-    );
-  });
-
-  it("handles _root with only rootId and no rest path", () => {
+  it.each([
+    ["a plain read URL for normal paths", "pavilio/notes/foo.md", "/api/files/read/pavilio/notes/foo.md"],
+    ["percent-encodes each path segment", "p/notes/a b#c?.md", "/api/files/read/p/notes/a%20b%23c%3F.md"],
+    ["percent-encodes each segment of a _root path", "_root/skills/a b/SKILL.md", "/api/files/read/a%20b/SKILL.md?root=skills"],
+    ["maps _root/<rootId>/<rest> to ?root= query param", "_root/skills/memo/SKILL.md", "/api/files/read/memo/SKILL.md?root=skills"],
+    ["URL-encodes the rootId", "_root/my root/file.md", "/api/files/read/file.md?root=my%20root"],
     // Edge case: _root/<id> with nothing after — rest is ""
-    const url = buildReadUrl("_root/skills");
-    expect(url).toBe("/api/files/read/?root=skills");
+    ["handles _root with only rootId and no rest path", "_root/skills", "/api/files/read/?root=skills"],
+  ])("%s", (_label, path, url) => {
+    expect(buildReadUrl(path)).toBe(url);
   });
 });
 
-// ---------- integration: viewer fetches the right URL ----------
-
-function stubFetch(captured: string[]) {
-  return vi.fn(async (url: string | URL) => {
-    const u = typeof url === "string" ? url : url.toString();
-    captured.push(u);
-    return new Response(
-      JSON.stringify({ content: "# Hello", absolutePath: "/fake/path.md" }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  });
-}
+// ---------- wiring: the viewer reads through buildReadUrl (its table is above) ----------
 
 describe("MarkdownViewer cross-root fetch", () => {
   let fetchedUrls: string[];
 
   beforeEach(() => {
     fetchedUrls = [];
-    vi.stubGlobal("fetch", stubFetch(fetchedUrls));
+    stubFetch({}, (url: string) => {
+      fetchedUrls.push(url);
+      return jsonResponse({ content: "# Hello", absolutePath: "/fake/path.md" });
+    });
     // Stub WebSocket so the component doesn't throw
     vi.stubGlobal(
       "WebSocket",
@@ -86,20 +62,6 @@ describe("MarkdownViewer cross-root fetch", () => {
       expect(fetchedUrls).toContain(
         "/api/files/read/memo/SKILL.md?root=skills",
       ),
-    );
-  });
-
-  it("calls plain /api/files/read/<path> for a non-_root path", async () => {
-    render(
-      <MemoryRouter initialEntries={["/view/pavilio/notes/foo.md"]}>
-        <Routes>
-          <Route path="/view/*" element={<MarkdownViewer />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    await waitFor(() =>
-      expect(fetchedUrls).toContain("/api/files/read/pavilio/notes/foo.md"),
     );
   });
 });

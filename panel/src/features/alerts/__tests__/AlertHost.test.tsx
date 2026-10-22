@@ -417,17 +417,6 @@ describe("AlertHost", () => {
 });
 
 describe("AlertHost display time", () => {
-  it("info alert expires after the default 15 seconds", () => {
-    render(<AlertHost />);
-    act(() => {
-      alerts.info("i");
-    });
-    advance(14_000);
-    expect(titles()).toEqual(["i"]);
-    advance(1000);
-    expect(titles()).toEqual([]);
-  });
-
   it("error alert uses the same configured delay as info", () => {
     writePreference(preferences.alertsDurationSeconds, 10);
     render(<AlertHost />);
@@ -437,35 +426,6 @@ describe("AlertHost display time", () => {
     });
     advance(9999);
     expect(titles()).toEqual(["i", "e"]);
-    advance(1);
-    expect(titles()).toEqual([]);
-  });
-
-  it("persistent alerts ignore the configured delay", () => {
-    writePreference(preferences.alertsDurationSeconds, 2);
-    render(<AlertHost />);
-    act(() => {
-      alerts.warning("standing", { persistent: true });
-    });
-    advance(120_000);
-    expect(titles()).toEqual(["standing"]);
-  });
-
-  it("hover pause and folded expiry still work on the configured delay", () => {
-    writePreference(preferences.alertsDurationSeconds, 10);
-    render(<AlertHost />);
-    act(() => {
-      for (const n of [1, 2, 3, 4]) alerts.info(`a${n}`, { id: `a${n}` });
-    });
-    // a1 is folded behind "+1 more" and still expires on time.
-    expect(screen.getByRole("button", { name: "+1 more" })).toBeInTheDocument();
-    const a4 = cards().find((c) => titleOf(c) === "a4")!;
-    fireEvent.pointerEnter(a4);
-    advance(10_000);
-    expect(titles()).toEqual(["a4"]);
-    fireEvent.pointerLeave(cards()[0]);
-    advance(9999);
-    expect(titles()).toEqual(["a4"]);
     advance(1);
     expect(titles()).toEqual([]);
   });

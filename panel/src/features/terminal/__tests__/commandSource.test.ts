@@ -45,129 +45,82 @@ const REAL: SkillEntry[] = [
 ];
 
 describe("filterSkills", () => {
-  it("an empty query returns every skill alphabetically", () => {
-    expect(names(filterSkills(ALL, ""))).toEqual([
-      "agent-browser",
-      "pavilio-memo",
-      "pavilio-note",
-      "tempo",
-    ]);
-  });
-
-  it("a whitespace-only query is treated as empty", () => {
-    expect(names(filterSkills(ALL, "   "))).toEqual(names(filterSkills(ALL, "")));
-  });
-
-  it("surrounding whitespace in the query is ignored", () => {
-    expect(names(filterSkills(ALL, "  memo "))).toEqual(["pavilio-memo"]);
-  });
-
-  it("matches on a fragment of the name", () => {
-    expect(names(filterSkills(ALL, "avilio-n"))).toEqual(["pavilio-note"]);
-  });
-
-  it("matches on the description alone", () => {
-    expect(names(filterSkills(ALL, "transcript"))).toEqual(["pavilio-note"]);
-  });
-
-  it("matching is case-insensitive", () => {
-    expect(names(filterSkills(ALL, "TEMPO"))).toEqual(["tempo"]);
-    expect(names(filterSkills(ALL, "browser AUTOMATION"))).toEqual(["agent-browser"]);
-  });
-
-  it("no match returns an empty list", () => {
-    expect(filterSkills(ALL, "zzz-nothing")).toEqual([]);
-  });
-
-  it("ranks a whole-segment match first and shorter names above longer", () => {
-    const list = [
-      skill("pavilio-note-batch", "Batch-process unprocessed meetings"),
-      skill("pavilio-memo", "Capture a quick thought for a project"),
-      skill("pavilio-note", "Process a meeting transcript"),
-    ];
-    expect(names(filterSkills(list, "note"))).toEqual(["pavilio-note", "pavilio-note-batch"]);
-    expect(names(filterSkills(REAL, "compact"))[0]).toBe("pavilio-compact");
-  });
-
-  it("matches characters in order across segments", () => {
-    const result = names(filterSkills(REAL, "pvnote"));
-    expect(result[0]).toBe("pavilio-note");
-    expect(result).toContain("pavilio-note-batch");
+  it.each<[label: string, list: SkillEntry[], query: string, expected: string[]]>([
+    ["an empty query returns every skill alphabetically", ALL, "", ["agent-browser", "pavilio-memo", "pavilio-note", "tempo"]],
+    ["a whitespace-only query is treated as empty", ALL, "   ", ["agent-browser", "pavilio-memo", "pavilio-note", "tempo"]],
+    ["surrounding whitespace in the query is ignored", ALL, "  memo ", ["pavilio-memo"]],
+    ["matches on a fragment of the name", ALL, "avilio-n", ["pavilio-note"]],
+    ["matches on the description alone", ALL, "transcript", ["pavilio-note"]],
+    ["matching is case-insensitive (name)", ALL, "TEMPO", ["tempo"]],
+    ["matching is case-insensitive (description)", ALL, "browser AUTOMATION", ["agent-browser"]],
+    ["no match returns an empty list", ALL, "zzz-nothing", []],
     // Out of order is no match: "e" before "n" is not a subsequence of "note".
-    expect(names(filterSkills([skill("pavilio-note")], "pveton"))).toEqual([]);
+    ["characters out of order do not match", [skill("pavilio-note")], "pveton", []],
+    // Neither description contains the term: only the name can match.
+    ["matches the name alone case-insensitively", [skill("Zebra-Tool", "does things"), skill("other", "unrelated")], "zebra", ["Zebra-Tool"]],
+    ["matches the name alone case-insensitively, mixed case", [skill("Zebra-Tool", "does things"), skill("other", "unrelated")], "ZEBRA-t", ["Zebra-Tool"]],
+    [
+      "ranks a whole-segment match first and shorter names above longer",
+      [
+        skill("pavilio-note-batch", "Batch-process unprocessed meetings"),
+        skill("pavilio-memo", "Capture a quick thought for a project"),
+        skill("pavilio-note", "Process a meeting transcript"),
+      ],
+      "note",
+      ["pavilio-note", "pavilio-note-batch"],
+    ],
+    // Greedy leftmost would take session's "s" and start's "t" apart (5), the
+    // same as safety-review's, and the alphabetical tie-break would put safety
+    // first. The best alignment is start's own "st" run (7).
+    [
+      "scores the best alignment, not the leftmost one",
+      [skill("pavilio-safety-review", "Review a change for safety"), skill("pavilio-session-start", "Starts or resumes a project session")],
+      "st",
+      ["pavilio-session-start", "pavilio-safety-review"],
+    ],
+    ["breaks an equal score and length alphabetically", [skill("pavilio-note-sync"), skill("pavilio-note-push")], "note", ["pavilio-note-push", "pavilio-note-sync"]],
+    [
+      "description-only matches sit below every name match",
+      [skill("pavilio-note", "Process a meeting transcript into notes"), skill("whisper-transcript", "Speech to text")],
+      "transcript",
+      ["whisper-transcript", "pavilio-note"],
+    ],
+    // Plain `<` compare: "-" (0x2d) sorts before ":" (0x3a) and letters.
+    ["orders by code unit, independent of locale", [skill("a:b"), skill("ab"), skill("a-b")], "", ["a-b", "a:b", "ab"]],
+  ])("%s", (_label, list, query, expected) => {
+    expect(names(filterSkills(list, query))).toEqual(expected);
   });
 
-  it("segment starts outrank scattered letters", () => {
+  // Ranking against the realistic list (shared `pavilio-` prefix, repeated segments).
+  it.each<[label: string, query: string, top: string[], alsoMatches: string[]]>([
+    ["a whole-segment match ranks first", "compact", ["pavilio-compact"], []],
+    ["characters match in order across segments", "pvnote", ["pavilio-note"], ["pavilio-note-batch"]],
     // Only "g" opens a segment; "r" continues the run and "l" follows it.
     // memo-grill matches the same way, so the shorter name wins.
-    expect(names(filterSkills(REAL, "grl"))[0]).toBe("pavilio-grill");
-    // "m" and "g" both open segments in memo-grill, but "g" is buried
-    // mid-word in manager: segment starts beat the shorter name.
-    expect(names(filterSkills(REAL, "mg")).slice(0, 2)).toEqual([
-      "pavilio-memo-grill",
-      "pavilio-manager",
-    ]);
+    ["segment starts outrank scattered letters, shorter name breaks the tie", "grl", ["pavilio-grill"], []],
+    // "m" and "g" both open segments in memo-grill, but "g" is buried mid-word
+    // in manager: segment starts beat the shorter name.
+    ["segment starts outrank a shorter name", "mg", ["pavilio-memo-grill", "pavilio-manager"], []],
+  ])("ranks the real skill list: %s", (_label, query, top, alsoMatches) => {
+    const result = names(filterSkills(REAL, query));
+    expect(result.slice(0, top.length)).toEqual(top);
+    for (const name of alsoMatches) expect(result).toContain(name);
   });
 
-  it("scores the best alignment, not the leftmost one", () => {
-    // Greedy leftmost would take session's "s" and start's "t" apart (5), the
-    // same as safety-review's, and the alphabetical tie-break would put
-    // safety first. The best alignment is start's own "st" run (7).
-    const list = [
-      skill("pavilio-safety-review", "Review a change for safety"),
-      skill("pavilio-session-start", "Starts or resumes a project session"),
-    ];
-    expect(names(filterSkills(list, "st"))).toEqual([
-      "pavilio-session-start",
-      "pavilio-safety-review",
-    ]);
-  });
-
-  it("breaks an equal score and length alphabetically", () => {
-    const list = [skill("pavilio-note-sync"), skill("pavilio-note-push")];
-    expect(names(filterSkills(list, "note"))).toEqual(["pavilio-note-push", "pavilio-note-sync"]);
-  });
-
-  it("description-only matches sit below every name match", () => {
-    const list = [
-      skill("pavilio-note", "Process a meeting transcript into notes"),
-      skill("whisper-transcript", "Speech to text"),
-    ];
-    expect(names(filterSkills(list, "transcript"))).toEqual([
-      "whisper-transcript",
-      "pavilio-note",
-    ]);
-  });
-
-  it("empty query is the full alphabetical list", () => {
+  it("an empty query sorts a copy and never mutates the input", () => {
     const input = [...REAL];
     const result = filterSkills(input, "");
     expect(names(result)).toEqual(names(REAL).slice().sort());
     expect(result).toHaveLength(REAL.length);
     expect(names(input)).toEqual(names(REAL));
     expect(result).not.toBe(input);
-  });
 
-  it("orders by code unit, independent of locale", () => {
-    // Plain `<` compare: "-" (0x2d) sorts before ":" (0x3a) and letters.
-    const list = [skill("a:b"), skill("ab"), skill("a-b")];
-    expect(names(filterSkills(list, ""))).toEqual(["a-b", "a:b", "ab"]);
-  });
-
-  it("does not mutate the input array", () => {
     // A fresh, out-of-order array: an in-place sort would visibly reorder it.
-    const input = [skill("zulu"), skill("alpha"), skill("mike")];
-    const result = filterSkills(input, "");
-    expect(names(input)).toEqual(["zulu", "alpha", "mike"]);
-    expect(names(result)).toEqual(["alpha", "mike", "zulu"]);
-    expect(result).not.toBe(input);
-  });
-
-  it("matches the name alone case-insensitively", () => {
-    // Neither description contains the term: only the name can match.
-    const list = [skill("Zebra-Tool", "does things"), skill("other", "unrelated")];
-    expect(names(filterSkills(list, "zebra"))).toEqual(["Zebra-Tool"]);
-    expect(names(filterSkills(list, "ZEBRA-t"))).toEqual(["Zebra-Tool"]);
+    const small = [skill("zulu"), skill("alpha"), skill("mike")];
+    const sorted = filterSkills(small, "");
+    expect(names(small)).toEqual(["zulu", "alpha", "mike"]);
+    expect(names(sorted)).toEqual(["alpha", "mike", "zulu"]);
+    expect(sorted).not.toBe(small);
   });
 });
 

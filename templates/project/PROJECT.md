@@ -32,7 +32,7 @@ See [DECISIONS.md](./DECISIONS.md) for full history.
 
 - [Active workstream 1 — brief status]
 
-Active plans: see [plans/CURRENT.md](./plans/CURRENT.md)
+Active plans: un-archived dirs under plans/openspec/changes/
 
 ## Open Questions / Blockers
 

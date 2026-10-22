@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, fireEvent, within, cleanup } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
-import { renderWithRouter, mockFetchResponses } from "../../../test-utils";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { installMatchMedia, mockFetchResponses, renderWithRouter } from "../../../test-utils";
 
 vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
@@ -163,19 +162,6 @@ function renderTab(search = "") {
 
 const fileParam = (path: string) => `?file=${encodeURIComponent(path)}`;
 
-function stubMatchMedia(mobile: boolean) {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => ({
-      matches: mobile,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
-}
-
 const row = (path: string) => screen.queryByTestId(`wiki-page-${path}`);
 const groupHeader = (id: string) => screen.getByTestId(`wiki-tab-source-${id}`);
 const sub = (id: string) => screen.getByTestId(`wiki-sub-${id}`);
@@ -183,7 +169,7 @@ const sub = (id: string) => screen.getByTestId(`wiki-sub-${id}`);
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
-  stubMatchMedia(false);
+  installMatchMedia();
   mockApi();
 });
 
@@ -403,7 +389,7 @@ describe("WikiTab", () => {
   });
 
   it("stacks list above page at 390px", async () => {
-    stubMatchMedia(true);
+    installMatchMedia({ mobile: true });
     renderTab(fileParam(FILE));
     await screen.findByTestId("wiki-title");
 

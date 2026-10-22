@@ -1,1 +1,11 @@
-pnpm lint && pnpm knip && pnpm test
+pnpm lint && pnpm knip && pnpm test || exit 1
+
+# The slow project (process-driving suites, see panel/vitest.config.ts) runs only
+# when the push touches what those suites execute: shell scripts, the root
+# scripts/ launchers, the speech hooks, git sync, panel-ctl — or the test config
+# itself. server/__tests__/test-projects.contract.test.ts keeps this pattern in
+# step with the slow project's allowlist. With no origin/main to diff against
+# (a fresh clone) it runs the slow project rather than skip it.
+SLOW='(\.sh$|^scripts/|^panel/scripts/|^panel/hooks/|^panel/server/lib/(__tests__/)?syncRepo|panel-ctl|^panel/server/__tests__/(setup|update|pm|launcher)|^panel/vitest\.config\.ts$|^panel/test-setup\.node\.ts$)'
+base=$(git merge-base origin/main HEAD 2>/dev/null) || { pnpm test:slow; exit $?; }
+if git diff --name-only "$base" HEAD | grep -qE "$SLOW"; then pnpm test:slow; fi

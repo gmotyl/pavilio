@@ -15,6 +15,7 @@ import { __resetProjectColorsForTests } from "../useProjectColors";
 import type { ConnectionState } from "../terminalInstances";
 import type { TerminalHandle } from "../TerminalView";
 import { INERT_SPEECH } from "./speech.harness";
+import { installMatchMedia, stubFetch } from "../../../test-utils";
 
 /**
  * Task 4's subject: the wide surfaces label a session by `sessionLabel`, while
@@ -139,32 +140,13 @@ function renamed(): SessionMeta {
 }
 
 /** The fetches every surface here can make, answered from one stub. */
-function stubFetch(sessions: SessionMeta[]): void {
+function stubSessionsFetch(sessions: SessionMeta[]): void {
   __resetProjectColorsForTests();
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.startsWith("/api/terminal/sessions"))
-      return { ok: true, status: 200, json: async () => sessions } as Response;
-    return { ok: true, status: 200, json: async () => ({}) } as Response;
-  }) as typeof fetch);
+  stubFetch({ "/api/terminal/sessions": sessions }, {});
 }
 
 beforeAll(() => {
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent: () => false,
-        onchange: null,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
 beforeEach(() => {
@@ -173,11 +155,12 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   sidebarSessions.list = [];
-  stubFetch([auto()]);
+  stubSessionsFetch([auto()]);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 // ---------------------------------------------------------------- renderers
@@ -275,7 +258,7 @@ function renderSidebar(sessions: SessionMeta[]) {
 }
 
 async function renderQuickFinder(sessions: SessionMeta[]) {
-  stubFetch(sessions);
+  stubSessionsFetch(sessions);
   render(
     <MemoryRouter initialEntries={["/project/pavilio"]}>
       <TerminalDrawerProvider>

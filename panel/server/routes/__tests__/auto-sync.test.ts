@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import express from "express";
 import request from "supertest";
+import { makeApp } from "../../test-kit";
 
 vi.mock("../../lib/syncRepo", () => ({
   syncRepo: vi.fn(async () => ({ state: "synced", lastSync: "2026-06-08T00:00:00Z", detail: "", summary: "↑1 ↓0" })),
@@ -33,13 +33,6 @@ import * as state from "../../lib/autoSyncState";
 import * as sched from "../../lib/autoSyncScheduler";
 import autoSyncRouter from "../auto-sync";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/auto-sync", autoSyncRouter);
-  return app;
-}
-
 describe("auto-sync routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,19 +41,19 @@ describe("auto-sync routes", () => {
 
   it("falls back to a 15-minute interval when autoSync is not configured", async () => {
     mocks.autoSync = undefined;
-    const res = await request(makeApp()).get("/api/auto-sync/status");
+    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).get("/api/auto-sync/status");
     expect(res.status).toBe(200);
     expect(res.body.intervalMinutes).toBe(15);
   });
 
   it("GET /status returns enabled + status + interval", async () => {
-    const res = await request(makeApp()).get("/api/auto-sync/status");
+    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).get("/api/auto-sync/status");
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ enabled: true, state: "idle", stale: false, intervalMinutes: 15 });
   });
 
   it("POST /enable persists, starts scheduler, triggers a sync", async () => {
-    const res = await request(makeApp()).post("/api/auto-sync/enable");
+    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).post("/api/auto-sync/enable");
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ enabled: true, stale: false });
     expect(state.setEnabled).toHaveBeenCalledWith(true);
@@ -76,7 +69,7 @@ describe("auto-sync routes", () => {
   });
 
   it("POST /disable persists + stops scheduler", async () => {
-    const res = await request(makeApp()).post("/api/auto-sync/disable");
+    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).post("/api/auto-sync/disable");
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ enabled: false, stale: false });
     expect(state.setEnabled).toHaveBeenCalledWith(false);
@@ -84,7 +77,7 @@ describe("auto-sync routes", () => {
   });
 
   it("POST /now runs syncRepo once", async () => {
-    const res = await request(makeApp()).post("/api/auto-sync/now");
+    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).post("/api/auto-sync/now");
     expect(res.status).toBe(200);
     expect(syncRepo).toHaveBeenCalled();
     expect(res.body).toMatchObject({ state: "synced", stale: false });

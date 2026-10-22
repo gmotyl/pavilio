@@ -1,10 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import express from "express";
 import request from "supertest";
+import { configMock, makeApp } from "../../test-kit";
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/unused" }),
-}));
+vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
   listSessions: vi.fn(() => []),
@@ -20,16 +18,9 @@ vi.mock("../../lib/os-users", () => ({
 
 import terminalRouter from "../terminal";
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/terminal", terminalRouter);
-  return app;
-}
-
 describe("GET /api/terminal/os-users", () => {
   it("returns usernames only, not homeDir or shell", async () => {
-    const res = await request(makeApp()).get("/api/terminal/os-users");
+    const res = await request(makeApp(terminalRouter, "/api/terminal")).get("/api/terminal/os-users");
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([{ username: "greg" }, { username: "greg-ip" }]);

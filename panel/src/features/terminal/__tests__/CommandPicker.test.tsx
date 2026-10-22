@@ -7,7 +7,7 @@
  * matches, or does nothing while the list loads. A literal `/command` is sent
  * with Escape, then Enter.
  *
- * Asserted through `AnswerPane`, like `AnswerComposer.test.tsx`, because two of
+ * Asserted through `AnswerPane`, like `AnswerComposer.send.test.tsx` ("send"), because two of
  * the criteria are about keys the PANE owns — Escape closes the pane from its
  * root, Enter sends from the field — and the picker's whole job is to take
  * them first and give them back. A harness that rendered the picker alone
@@ -18,10 +18,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
-import type { GridSpeech, SpeechUnit } from "../../speech/types";
-import { emptyUtteranceQueue } from "../../speech/utteranceQueue";
+import type { GridSpeech } from "../../speech/types";
 import { AnswerPane } from "../AnswerPane";
 import { CommandPicker, type CommandPickerHandle } from "../CommandPicker";
 import { __resetAnswerWaitingForTests } from "../answerWaiting";
@@ -29,61 +28,14 @@ import type { SkillEntry } from "../commandSource";
 import { __resetPtySubmitForTests } from "../ptySubmit";
 import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
+import { installMatchMedia, jsonResponse, StubResizeObserver, stubFetch } from "../../../test-utils";
 
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
-const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(): GridSpeech {
-  return {
-    stateFor: () => "ready",
-    queueFor: () => emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
-    unitsFor: () => NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  } satisfies GridSpeech;
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
-function installMatchMedia(mobile: boolean): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: mobile && query === MOBILE_QUERY,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
+function readySpeech(): GridSpeech {
+  return makeSpeech({ stateFor: () => "ready" });
 }
 
 /** Served out of order on purpose: the picker must impose its own order. */
@@ -139,19 +91,13 @@ const NOTE_BATCH: SkillEntry = {
 let served: SkillEntry[] | null = SKILLS;
 
 /** One fetch for both endpoints this tree reaches: the session list and the skills. */
-function stubFetch(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((url: string) => {
-      const isSkills = String(url).includes("/api/skills");
-      if (isSkills && served === null) return new Promise<Response>(() => {});
-      const body = isSkills ? served : [session("cell-a")];
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(body),
-      }) as unknown as Promise<Response>;
-    }),
+function stubSkillsFetch() {
+  stubFetch(
+    {
+      "/api/skills": () =>
+        served === null ? new Promise<Response>(() => {}) : jsonResponse(served),
+    },
+    [session("cell-a")],
   );
 }
 
@@ -161,7 +107,7 @@ const onClose = vi.fn();
 function renderPane() {
   return render(
     <MemoryRouter>
-      <AnswerPane sessionId="cell-a" speech={makeSpeech()} onClose={onClose} send={send} />
+      <AnswerPane sessionId="cell-a" speech={readySpeech()} onClose={onClose} send={send} />
     </MemoryRouter>,
   );
 }
@@ -191,8 +137,8 @@ beforeEach(async () => {
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
-  installMatchMedia(false);
-  stubFetch();
+  installMatchMedia();
+  stubSkillsFetch();
   await refreshSessions();
 });
 
@@ -616,7 +562,7 @@ describe("CommandPicker", () => {
   });
 
   it("the picker opens on a touch viewport", async () => {
-    installMatchMedia(true);
+    installMatchMedia({ mobile: true });
     const user = userEvent.setup();
     renderPane();
 

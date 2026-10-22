@@ -83,15 +83,9 @@ vi.mock("../../../preferences/store", async (importOriginal) => {
  * above it. Only the host is stubbed — an inert one, since this suite's subject
  * is the project link, not speech.
  */
-vi.mock("../../speech/useSpeechHost", async () => {
-  const { INERT_SPEECH_HOST } = await import(
-    "../../terminal/__tests__/speech.harness"
-  );
-  return {
-    useSpeechHost: () => INERT_SPEECH_HOST,
-    default: () => INERT_SPEECH_HOST,
-  };
-});
+vi.mock("../../speech/useSpeechHost", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useSpeechHost()),
+);
 
 import LeftSidebar from "../LeftSidebar";
 import { TerminalSpeechHost } from "../../terminal/TerminalSpeechHost";
@@ -100,87 +94,44 @@ import { readLastPath, writeLastPath } from "../lastPath";
 import { writeTerminalFocus } from "../../terminal/useTerminalSessions";
 import { useLastPath } from "../useLastPath";
 import { preferences } from "../../../preferences/declarations";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { installMatchMedia } from "../../../test-utils";
 
-vi.mock("../../projects/useProjects", () => ({
-  useProjects: () => [{ name: projectName.current, repos: [] }],
-}));
-vi.mock("../../projects/useArchivedProjects", () => ({
-  useArchivedProjects: () => ({ archive: [], archivedNames: new Set() }),
-}));
-vi.mock("../../projects/useFavorites", () => ({
-  useFavorites: () => ({
-    isFavorite: () => false,
-    toggleFavorite: () => {},
-    favorites: [],
-  }),
-}));
-vi.mock("../../terminal/useAllTerminalSessions", () => ({
+vi.mock("../../projects/useProjects", () =>
+  import("./leftSidebar.harness").then((m) =>
+    m.mockShellDeps.useProjects(() => [{ name: projectName.current, repos: [] }]),
+  ),
+);
+vi.mock("../../terminal/useAllTerminalSessions", () =>
   // The session belongs to whichever project the box currently holds. Pinning
   // it to the literal "vector" would leave the encoding tests rendering a
   // project with no session rows at all — a row that is absent looks exactly
   // like a row that failed to highlight, which is the one thing those tests
   // must be able to tell apart.
-  useAllTerminalSessions: () => ({
-    sessions: [{ ...SESSION, project: projectName.current }],
-    refresh: () => {},
-  }),
-}));
-vi.mock("../../mobile-access/useMobileAccessStatus", () => ({
-  useMobileAccessStatus: () => ({ enabled: false }),
-}));
-vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
-  useAutoSyncStatus: () => ({ status: null }),
-}));
-vi.mock("../../git/useGitStatus", () => ({
-  useGitStatus: () => ({ files: [], refetch: () => {} }),
-}));
+  import("./leftSidebar.harness").then((m) =>
+    m.mockShellDeps.useAllTerminalSessions(() => [
+      { ...SESSION, project: projectName.current },
+    ]),
+  ),
+);
+vi.mock("../../projects/useArchivedProjects", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useArchivedProjects()),
+);
+vi.mock("../../projects/useFavorites", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useFavorites()),
+);
+vi.mock("../../mobile-access/useMobileAccessStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useMobileAccessStatus()),
+);
+vi.mock("../../auto-sync/useAutoSyncStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useAutoSyncStatus()),
+);
+vi.mock("../../git/useGitStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useGitStatus()),
+);
 
 /** The writes the Last-open-view bookmark received, by the key the store uses. */
 const bookmarkWrites = () =>
   writes.filter((w) => w.key === preferences.lastPath.key);
-
-/**
- * A controllable `matchMedia`, the shape the drawer and resizable-row suites
- * use. jsdom's own answers a fixed viewport and dispatches no `change`, so a
- * destination that is supposed to follow a rotation could not be driven
- * through it.
- */
-function installMatchMedia(mobile: boolean) {
-  const listeners = new Set<(e: MediaQueryListEvent) => void>();
-  let matches = mobile;
-  const mql = {
-    get matches() {
-      return matches;
-    },
-    media: MOBILE_QUERY,
-    addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.add(cb),
-    removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-    // The deprecated pair, feeding the same listener set. `useIsMobile` reaches
-    // only for the modern one today, but a stub that omits these answers
-    // `undefined` to a caller that uses the legacy form — a silent no-op rather
-    // than a failure, which is exactly the shape of bug a stub should not be
-    // able to hide.
-    addListener: (cb: (e: MediaQueryListEvent) => void) => listeners.add(cb),
-    removeListener: (cb: (e: MediaQueryListEvent) => void) =>
-      listeners.delete(cb),
-  };
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: () => mql,
-  });
-  return {
-    setMobile(next: boolean) {
-      matches = next;
-      act(() => {
-        listeners.forEach((cb) => cb({ matches: next } as MediaQueryListEvent));
-      });
-    },
-  };
-}
 
 /** Whatever this environment had before a test installed the stub. */
 const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
@@ -306,7 +257,7 @@ describe("LeftSidebar project link", () => {
    */
   describe("on a phone", () => {
     it("sends a phone tap to the project's terminal tab", () => {
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       renderShell();
 
       expect(projectLink()).toHaveAttribute("href", "/project/vector/iterm");
@@ -320,7 +271,7 @@ describe("LeftSidebar project link", () => {
 
     it("overrides a bookmarked view on a phone", () => {
       writeLastPath("vector", "/project/vector/memo");
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       renderShell();
 
       expect(projectLink()).toHaveAttribute("href", "/project/vector/iterm");
@@ -334,7 +285,7 @@ describe("LeftSidebar project link", () => {
 
     it("leaves the desktop destination alone", () => {
       writeLastPath("vector", "/project/vector/memo");
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell();
 
       expect(projectLink()).toHaveAttribute("href", "/project/vector");
@@ -353,7 +304,7 @@ describe("LeftSidebar project link", () => {
       // MUST write the bare route as the new bookmark. Without this the silence
       // that would follow a suppressed write is indistinguishable from a spy
       // that is never reached at all.
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell();
       act(() => {
         fireEvent.click(projectLink());
@@ -372,7 +323,7 @@ describe("LeftSidebar project link", () => {
 
       // Now the phone. The tap lands on the terminal, and moving on from there
       // records that view like any other.
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       renderShell();
       act(() => {
         fireEvent.click(projectLink());
@@ -390,7 +341,7 @@ describe("LeftSidebar project link", () => {
       // …which is what makes the bare project route still restore it: the
       // override changed one navigation, not what the bookmark means.
       cleanup();
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell("/project/vector");
       expect(screen.getByTestId("landed")).toHaveTextContent(
         "/project/vector/memo",
@@ -405,7 +356,7 @@ describe("LeftSidebar project link", () => {
      */
     it("sends a phone tap on a session row to the terminal too", () => {
       writeLastPath("vector", "/project/vector/memo");
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       renderShell();
       expandProject();
 
@@ -419,7 +370,7 @@ describe("LeftSidebar project link", () => {
 
     it("leaves a session row's desktop destination alone", () => {
       writeLastPath("vector", "/project/vector/memo");
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell();
       expandProject();
 
@@ -442,7 +393,7 @@ describe("LeftSidebar project link", () => {
      */
     it("follows a rotation under a mounted tree", () => {
       writeLastPath("vector", "/project/vector/memo");
-      const media = installMatchMedia(false);
+      const media = installMatchMedia();
       renderShell();
       expandProject();
       expect(projectLink()).toHaveAttribute("href", "/project/vector");
@@ -494,7 +445,7 @@ describe("LeftSidebar project link", () => {
     const oddLink = () => screen.getByRole("link", { name: "my proj#1" });
 
     it("encodes the project name into the phone's terminal destination", () => {
-      installMatchMedia(true);
+      installMatchMedia({ mobile: true });
       renderShell();
 
       expect(oddLink()).toHaveAttribute(
@@ -515,7 +466,7 @@ describe("LeftSidebar project link", () => {
 
     it("resolves the bookmark from the encoded bare route on a desktop", () => {
       writeLastPath("my proj#1", "/project/my%20proj%231/memo");
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell();
 
       expect(oddLink()).toHaveAttribute("href", "/project/my%20proj%231");
@@ -541,19 +492,19 @@ describe("LeftSidebar project link", () => {
    */
   describe("the active-row highlight", () => {
     it("highlights the row the user is standing on (plain name, bare route)", () => {
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell("/project/vector");
       expect(rowBackground("vector")).toBe(HIGHLIGHTED);
     });
 
     it("highlights the row from a deeper route under the project (plain name)", () => {
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell("/project/vector/memo");
       expect(rowBackground("vector")).toBe(HIGHLIGHTED);
     });
 
     it("leaves the row plain while the user is somewhere else entirely", () => {
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell("/");
       expect(rowBackground("vector")).toBe(PLAIN);
     });
@@ -565,7 +516,7 @@ describe("LeftSidebar project link", () => {
      * `startsWith` on the name, say — lights this row up too.
      */
     it("leaves a row plain when its name is only a prefix of the open project", () => {
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell("/project/vector-2");
       expect(rowBackground("vector")).toBe(PLAIN);
     });
@@ -579,13 +530,13 @@ describe("LeftSidebar project link", () => {
       });
 
       it("highlights the row the user is standing on (space in the name, desktop)", () => {
-        installMatchMedia(false);
+        installMatchMedia();
         renderShell("/project/my%20proj%231");
         expect(rowBackground("my proj#1")).toBe(HIGHLIGHTED);
       });
 
       it("highlights the row from a deeper route under an encoded name", () => {
-        installMatchMedia(false);
+        installMatchMedia();
         renderShell("/project/my%20proj%231/memo");
         expect(rowBackground("my proj#1")).toBe(HIGHLIGHTED);
       });
@@ -602,7 +553,7 @@ describe("LeftSidebar project link", () => {
        */
       it("highlights the focused session row under an encoded name", () => {
         writeTerminalFocus("my proj#1", SESSION.id);
-        installMatchMedia(false);
+        installMatchMedia();
         renderShell("/project/my%20proj%231/iterm");
         act(() => {
           fireEvent.click(
@@ -622,7 +573,7 @@ describe("LeftSidebar project link", () => {
      */
     it("highlights the focused session row under a plain name", () => {
       writeTerminalFocus("vector", SESSION.id);
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell("/project/vector/iterm");
       act(() => {
         fireEvent.click(screen.getByTestId("sidebar-project-expand-vector"));
@@ -647,7 +598,7 @@ describe("LeftSidebar project link", () => {
     });
 
     it("lands on the new terminal for a plain name", async () => {
-      installMatchMedia(false);
+      installMatchMedia();
       renderShell();
       act(() => {
         fireEvent.click(
@@ -670,7 +621,7 @@ describe("LeftSidebar project link", () => {
       });
 
       it("encodes the name into the created terminal's destination", async () => {
-        installMatchMedia(false);
+        installMatchMedia();
         renderShell();
         act(() => {
           fireEvent.click(

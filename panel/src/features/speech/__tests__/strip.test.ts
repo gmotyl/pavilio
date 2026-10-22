@@ -1,943 +1,277 @@
 import { describe, expect, it } from "vitest";
 import { MAX_SPOKEN_CODE_CHARS, SENTINEL_ONLY_RE, stripToSpeakableText } from "../strip";
 
+type Row = [label: string, markdown: string, spoken: string];
+
+const lines = (...l: string[]) => l.join("\n");
+const AT_CAP = "a".repeat(MAX_SPOKEN_CODE_CHARS);
+
 describe("stripToSpeakableText", () => {
-  it("removes fenced code blocks without merging the surrounding paragraphs", () => {
-    const markdown = [
-      "The grid keeps its own ordering.",
-      "",
-      "```ts",
-      "const order = useTerminalOrdering();",
-      "```",
-      "",
-      "That ordering is what the header reads.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).not.toContain("useTerminalOrdering");
-    // The block must leave a paragraph boundary behind — exactly one, not three
-    // blank lines — so whatever splits paragraphs downstream still sees the
-    // prose either side of the sentinel as its own paragraph.
-    expect(spoken).toBe(
-      "The grid keeps its own ordering.\n\n\u27E6code\u27E7\n\nThat ordering is what the header reads.",
-    );
-    expect(spoken.split(/\n{2,}/)).toEqual([
-      "The grid keeps its own ordering.",
-      "\u27E6code\u27E7",
-      "That ordering is what the header reads.",
-    ]);
+  // Removed blocks are named where they stood (⟦code⟧/⟦table⟧/⟦html⟧) and leave
+  // exactly one paragraph boundary behind — a silent removal is indistinguishable
+  // from an answer that never mentioned the code at all, and whatever splits
+  // paragraphs downstream must still see the prose either side as its own
+  // paragraph (the unit builder's "unit 0 is the first heading" reading).
+  it.each<Row>([
+    [
+      "fenced code between blank lines",
+      lines("The grid keeps its own ordering.", "", "```ts", "const order = useTerminalOrdering();", "```", "", "That ordering is what the header reads."),
+      "The grid keeps its own ordering.\n\n⟦code⟧\n\nThat ordering is what the header reads.",
+    ],
+    [
+      "markdown table between blank lines",
+      lines("Here is the cell state.", "", "| cell | state |", "| --- | ----- |", "| one  | armed |", "", "Only one cell is ever armed."),
+      "Here is the cell state.\n\n⟦table⟧\n\nOnly one cell is ever armed.",
+    ],
+    // With the block welded onto the prose, the inserted boundary is the ONLY
+    // thing keeping the paragraphs apart — and the sentinel must not weld them.
+    [
+      "fence with no blank lines around it",
+      lines("## Heading", "```ts", "const x = 1;", "```", "Body text."),
+      "## Heading\n\n⟦code⟧\n\nBody text.",
+    ],
+    [
+      "table with no blank lines around it",
+      lines("Here is the cell state.", "| cell | state |", "| --- | ----- |", "| one  | armed |", "Only one cell is ever armed."),
+      "Here is the cell state.\n\n⟦table⟧\n\nOnly one cell is ever armed.",
+    ],
+    // Exactly the empty string, not a lone sentinel: a placeholder names an
+    // omission *inside* an answer, and a cell with nothing else to say stays quiet.
+    ["a response that is only code", lines("```ts", "const x = 1;", "```"), ""],
+    ["an empty response", "", ""],
+    [
+      "an unclosed fence swallows to the end of the response",
+      lines("The patch is below.", "", "```diff", "-const a = 1;", "+const a = 2;", "  and the response was truncated here"),
+      "The patch is below.\n\n⟦code⟧",
+    ],
+    // A blank line INSIDE the unclosed run pins "runs to the end": a fence loop
+    // that stopped at the first blank line would read the truncated tail aloud.
+    [
+      "an unclosed fence with a blank line inside is named once and leaks no code",
+      lines("The patch is below.", "", "```diff", "-const a = 1;", "+const a = 2;", "", "  and the response was truncated here"),
+      "The patch is below.\n\n⟦code⟧",
+    ],
+    ["a tilde-fenced block", lines("Intro.", "", "~~~", "const x = 1;", "~~~", "", "Outro."), "Intro.\n\n⟦code⟧\n\nOutro."],
+    [
+      "a code block in different prose",
+      lines("The fix is one line.", "", "```ts", "const order = useTerminalOrdering();", "```", "", "It ships with the next build."),
+      "The fix is one line.\n\n⟦code⟧\n\nIt ships with the next build.",
+    ],
+    [
+      "an HTML <details> block and everything inside it",
+      lines("The diff is folded away.", "", "<details>", "<summary>Show the diff</summary>", "", "the hidden prose nobody asked to hear", "", "</details>", "", "It changes two files."),
+      "The diff is folded away.\n\n⟦html⟧\n\nIt changes two files.",
+    ],
+    ["a one-line HTML element", lines("Before.", '<div align="center">middle</div>', "After."), "Before.\n\n⟦html⟧\n\nAfter."],
+    ["a bare HTML table", lines("Before.", "<table>", "  <tr><td>one</td></tr>", "</table>", "After."), "Before.\n\n⟦html⟧\n\nAfter."],
+    [
+      "adjacent removals of the same kind collapse into one",
+      lines("Three attempts, none of them worth hearing.", "", "```ts", "const a = 1;", "```", "", "```ts", "const b = 2;", "```", "```ts", "const c = 3;", "```", "", "The third one worked."),
+      "Three attempts, none of them worth hearing.\n\n⟦code⟧\n\nThe third one worked.",
+    ],
+    [
+      "adjacent removals of different kinds stay apart",
+      lines("Both of these are unreadable aloud.", "", "```ts", "const a = 1;", "```", "", "| cell | state |", "| --- | ----- |", "", "<details>", "<summary>and one more</summary>", "</details>", "", "That is the whole answer."),
+      lines("Both of these are unreadable aloud.", "", "⟦code⟧", "", "⟦table⟧", "", "⟦html⟧", "", "That is the whole answer."),
+    ],
+    // Collapsing is for removals with NOTHING spoken between them.
+    [
+      "two removals of the same kind with prose between them stay two",
+      lines("```ts", "const a = 1;", "```", "A sentence between them.", "```ts", "const b = 2;", "```"),
+      "⟦code⟧\n\nA sentence between them.\n\n⟦code⟧",
+    ],
+    // Block removal runs first, so an address inside a fence or table never
+    // exists to be named a second time.
+    [
+      "an address inside a removed block emits no link sentinel",
+      lines("The fetch is one line.", "", "```ts", 'await fetch("https://pavil.io/api/units");', "```", "", "| endpoint | https://pavil.io/api/units |", "| --- | --- |", "", "Nothing else changed."),
+      "The fetch is one line.\n\n⟦code⟧\n\n⟦table⟧\n\nNothing else changed.",
+    ],
+    // The ordering itself: a destination is any run without parens, so a
+    // `</details>` inside one would go with the link if addresses ran first,
+    // and the block would leak everything it was meant to contain.
+    ["block removal runs before the address rule", lines("<details>", "See [x](y</details>z) here.", "Then prose."), "⟦html⟧\n\nThen prose."],
+  ])("names a removed block: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 
-  it("removes markdown tables", () => {
-    const markdown = [
-      "Here is the cell state.",
-      "",
-      "| cell | state |",
-      "| --- | ----- |",
-      "| one  | armed |",
-      "",
-      "Only one cell is ever armed.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).not.toContain("|");
-    expect(spoken).not.toContain("armed |");
-    expect(spoken).toBe(
-      "Here is the cell state.\n\n\u27E6table\u27E7\n\nOnly one cell is ever armed.",
-    );
+  // Task 1 repairs — a stray tag must never swallow the answer.
+  it.each<Row>([
+    // `<br>` can never carry a closing tag; the search for `</br>` fell through
+    // to the fallback, which took the rest of the response with it.
+    ["a void tag is a block of exactly one line", "Before.\n<br>\nAfter, which is real prose that is now gone.", "Before.\n\n⟦html⟧\n\nAfter, which is real prose that is now gone."],
+    // Sloppy but real: a model closes a void element it never had to close;
+    // pairing the two deletes a whole sentence.
+    [
+      "a void tag never pairs with a stray closing tag further down",
+      lines("Before.", '<img src="diagram.png">', "The diagram shows two cells.", "</img>", "After."),
+      lines("Before.", "", "⟦html⟧", "", "The diagram shows two cells.", "", "⟦html⟧", "", "After."),
+    ],
+    [
+      "an unbalanced tag is bounded to its own line",
+      lines("First para.", "", "Prose line one.", "<p> matters here.", "Prose line three."),
+      "First para.\n\nProse line one.\n\n⟦html⟧\n\nProse line three.",
+    ],
+    // The old fallback ran to the next blank line and ate every prose line between.
+    ["an unbalanced tag stays one line even with a blank line ahead", "<p> stray tag.\nStill prose.\n\nNext paragraph.", "⟦html⟧\n\nStill prose.\n\nNext paragraph."],
+    [
+      "a closing tag standing alone opens nothing and pairs with nothing",
+      lines("Before.", "</div>", "Real prose in the middle.", "</div>", "After."),
+      lines("Before.", "", "⟦html⟧", "", "Real prose in the middle.", "", "⟦html⟧", "", "After."),
+    ],
+    [
+      "a self-closing tag is finished on its own line",
+      lines("Before.", '<div class="spacer" />', "Real prose in the middle.", "</div>", "After."),
+      lines("Before.", "", "⟦html⟧", "", "Real prose in the middle.", "", "⟦html⟧", "", "After."),
+    ],
+    // `<em>` and `<span>` are not block-level: these are sentences.
+    ["a line starting with inline <em> is left alone", "<em>this</em> matters.", "<em>this</em> matters."],
+    ["a line starting with inline <span> is left alone", "<span>and so</span> does this.", "<span>and so</span> does this."],
+  ])("bounds stray HTML: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 
-  // The two tests above surround their block with blank lines, so the boundary
-  // the removal leaves behind is indistinguishable from the blank lines that
-  // were already there. These two remove that cover: with the block welded
-  // directly onto the prose, the inserted boundary is the ONLY thing keeping the
-  // paragraphs apart, which is what the unit builder's "unit 0 is the first
-  // heading" reading depends on.
-  it("leaves a paragraph boundary where a fence had no blank lines around it", () => {
-    const markdown = ["## Heading", "```ts", "const x = 1;", "```", "Body text."].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toBe("## Heading\n\n\u27E6code\u27E7\n\nBody text.");
-    // Without the inserted boundary this is one welded paragraph, not three.
-    expect(spoken.split(/\n{2,}/)).toEqual(["## Heading", "\u27E6code\u27E7", "Body text."]);
-  });
-
-  it("leaves a paragraph boundary where a table had no blank lines around it", () => {
-    const markdown = [
-      "Here is the cell state.",
-      "| cell | state |",
-      "| --- | ----- |",
-      "| one  | armed |",
-      "Only one cell is ever armed.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toBe(
-      "Here is the cell state.\n\n\u27E6table\u27E7\n\nOnly one cell is ever armed.",
-    );
-    expect(spoken.split(/\n{2,}/)).toEqual([
-      "Here is the cell state.",
-      "\u27E6table\u27E7",
-      "Only one cell is ever armed.",
-    ]);
-  });
-
-  it("keeps short inline code", () => {
-    expect(stripToSpeakableText("Call `prepare` before speaking.")).toBe(
-      "Call prepare before speaking.",
-    );
-
-    const atThreshold = "a".repeat(MAX_SPOKEN_CODE_CHARS);
-    expect(stripToSpeakableText(`Call \`${atThreshold}\` first.`)).toBe(
-      `Call ${atThreshold} first.`,
-    );
-
-    // Past the threshold the span is named rather than spoken — it used to be
-    // dropped, which left the sentence describing a call to nothing at all.
-    // The cap applies to expressions only: the span needs a space in it, or it
-    // is one name and is read however long it runs.
-    const pastThreshold = `${"a".repeat(MAX_SPOKEN_CODE_CHARS)} + 1`;
-    expect(stripToSpeakableText(`Call \`${pastThreshold}\` first.`)).toBe("Call ⟦expr⟧ first.");
-
-    // A single token past the cap is a name, not an expression, and is spoken.
-    const longName = "a".repeat(MAX_SPOKEN_CODE_CHARS + 1);
-    expect(stripToSpeakableText(`Call \`${longName}\` first.`)).toBe(`Call ${longName} first.`);
-  });
-
-  it("elides a long file path with a line range", () => {
-    expect(
-      stripToSpeakableText(
-        "See panel/src/features/terminal/TerminalLayoutGrid.tsx:453-478 for the grid.",
-      ),
-    ).toBe("See TerminalLayoutGrid.tsx for the grid.");
-
-    // Same path, written as inline code.
-    expect(
-      stripToSpeakableText(
-        "See `panel/src/features/terminal/TerminalLayoutGrid.tsx:453-478` for the grid.",
-      ),
-    ).toBe("See TerminalLayoutGrid.tsx for the grid.");
-
-    // A bare filename with a line range is elided to the filename alone.
-    expect(stripToSpeakableText("Read useTerminalOrdering.ts:66-75 again.")).toBe(
-      "Read useTerminalOrdering.ts again.",
-    );
-
-    // A path short enough to follow by ear survives verbatim.
-    expect(stripToSpeakableText("See `src/strip.ts` for the filter.")).toBe(
-      "See src/strip.ts for the filter.",
-    );
-  });
-
-  it("terminates an unterminated list item", () => {
-    const markdown = [
-      "- the header shows the armed cell",
-      "- replay is idempotent.",
-      "1) arming is exclusive",
-    ].join("\n");
-
-    // Items are paragraphs now, so the join is a paragraph boundary — see the
-    // list tests below for why.
-    expect(stripToSpeakableText(markdown)).toBe(
-      ["the header shows the armed cell.", "replay is idempotent.", "arming is exclusive."].join(
-        "\n\n",
-      ),
-    );
-  });
-
-  it("a tight list becomes one paragraph per item", () => {
-    // A tight list used to be ONE paragraph downstream, so a unit cut out of it
-    // carried the whole list as its source and the answer pane could not tell
-    // which items that unit actually speaks. Each item is its own paragraph
-    // now; the packer merges neighbours back together on the spoken side, so
-    // the source of a unit is exactly the items it speaks.
-    const markdown = ["- first item", "- second item", "* third item", "1. fourth item"].join("\n");
-
-    expect(stripToSpeakableText(markdown)).toBe(
-      "first item.\n\nsecond item.\n\nthird item.\n\nfourth item.",
-    );
-    expect(stripToSpeakableText(markdown).split(/\n{2,}/)).toHaveLength(4);
-  });
-
-  it("a list item directly under a prose line starts a new paragraph", () => {
-    // Markdown lets a list interrupt a paragraph with no blank line before it;
-    // the rendered `li` is still a block of its own, so the spoken side has to
-    // agree and give the item its own paragraph too.
-    const markdown = ["The cells are:", "- armed", "- idle", "And that is all."].join("\n");
-
-    expect(stripToSpeakableText(markdown)).toBe(
-      "The cells are:\n\narmed.\n\nidle.\nAnd that is all.",
-    );
-  });
-
-  it("prose without lists strips exactly as before", () => {
-    // The control: with no list marker in sight the paragraph rule must not
-    // fire, and the output is byte for byte what the filter produced before
-    // list items became paragraphs — inline reductions included.
-    const markdown = [
-      "First paragraph with `prepare` inside.",
-      "",
-      "Second paragraph, see [the plan](https://pavil.io/plan).",
-      "Continued on a second line.",
-      "",
-      "```ts",
-      "const x = 1;",
-      "```",
-      "",
-      "Closing line.",
-    ].join("\n");
-
-    expect(stripToSpeakableText(markdown)).toBe(
-      [
-        "First paragraph with prepare inside.",
-        "",
-        "Second paragraph, see the plan.",
-        "Continued on a second line.",
-        "",
-        "\u27E6code\u27E7",
-        "",
-        "Closing line.",
-      ].join("\n"),
-    );
+  // List items are paragraphs: a tight list used to be ONE paragraph, so a unit
+  // cut out of it carried the whole list as its source and the answer pane could
+  // not tell which items that unit speaks.
+  it.each<Row>([
+    [
+      "an unterminated item gets a terminator",
+      lines("- the header shows the armed cell", "- replay is idempotent.", "1) arming is exclusive"),
+      ["the header shows the armed cell.", "replay is idempotent.", "arming is exclusive."].join("\n\n"),
+    ],
+    ["a tight list becomes one paragraph per item", lines("- first item", "- second item", "* third item", "1. fourth item"), "first item.\n\nsecond item.\n\nthird item.\n\nfourth item."],
+    // A list may interrupt a paragraph with no blank line; the rendered `li` is still its own block.
+    ["an item directly under a prose line starts a new paragraph", lines("The cells are:", "- armed", "- idle", "And that is all."), "The cells are:\n\narmed.\n\nidle.\nAnd that is all."],
+    // The control: no list marker, so the output is byte for byte what it was
+    // before list items became paragraphs — inline reductions included.
+    [
+      "prose without lists keeps its paragraphs, drops inline markup and collapses code to a sentinel",
+      lines("First paragraph with `prepare` inside.", "", "Second paragraph, see [the plan](https://pavil.io/plan).", "Continued on a second line.", "", "```ts", "const x = 1;", "```", "", "Closing line."),
+      lines("First paragraph with prepare inside.", "", "Second paragraph, see the plan.", "Continued on a second line.", "", "⟦code⟧", "", "Closing line."),
+    ],
+    // The list marker used to defeat the sentinel-only check: `⟦image⟧.` slipped
+    // through and woke the cell up to say "obrazek" about a response with no words.
+    ["a response that is only a bulleted image says nothing", "- ![the grid, annotated](https://pavil.io/img/grid.png)", ""],
+    ["a sentinel beside prose in an item still gets its terminator", "- The layout is ![the grid](https://pavil.io/img/grid.png)", "The layout is ⟦image⟧."],
+    // Heading and leading `**TLDR:**` markers are structure the unit builder reads.
+    ["heading and emphasis markers are left for the unit builder", lines("## What changed", "", "**TLDR:** the header now speaks."), "## What changed\n\n**TLDR:** the header now speaks."],
+  ])("lists and structure: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 
   it("a bulleted image stays a sentinel-only paragraph", () => {
-    // Becoming a paragraph must not cost the item its sentinel-only shape: the
-    // unit builder recognises such a paragraph with `SENTINEL_ONLY_RE` and
-    // treats it as an omission rather than prose, and a terminator or a stray
-    // marker on it would defeat that check.
-    const markdown = ["Intro line.", "- ![the grid](https://pavil.io/img/grid.png)", "- second"].join(
-      "\n",
-    );
+    // The unit builder recognises such a paragraph with `SENTINEL_ONLY_RE` and
+    // treats it as an omission; a terminator or stray marker would defeat that.
+    const markdown = lines("Intro line.", "- ![the grid](https://pavil.io/img/grid.png)", "- second");
 
     const paragraphs = stripToSpeakableText(markdown).split(/\n{2,}/);
 
-    expect(paragraphs).toEqual(["Intro line.", "\u27E6image\u27E7", "second."]);
+    expect(paragraphs).toEqual(["Intro line.", "⟦image⟧", "second."]);
     expect(SENTINEL_ONLY_RE.test(paragraphs[1])).toBe(true);
   });
 
-  it("returns empty for a response that is only code", () => {
-    const markdown = ["```ts", "const x = 1;", "```"].join("\n");
-
-    // Exactly the empty string — not whitespace, and not a lone sentinel
-    // either: a placeholder names an omission *inside* an answer, and there is
-    // no answer here to place it in. A cell with nothing else to say stays
-    // quiet rather than waking up to announce "code block".
-    expect(stripToSpeakableText(markdown)).toBe("");
-    expect(stripToSpeakableText("")).toBe("");
-  });
-
-  it("swallows an unclosed fence to the end of the response", () => {
-    const markdown = [
-      "The patch is below.",
-      "",
-      "```diff",
-      "-const a = 1;",
-      "+const a = 2;",
-      "  and the response was truncated here",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toBe("The patch is below.\n\n\u27E6code\u27E7");
-    expect(spoken).not.toContain("const a");
-    expect(spoken).not.toContain("truncated");
-  });
-
-  it("removes a tilde-fenced block", () => {
-    const markdown = ["Intro.", "", "~~~", "const x = 1;", "~~~", "", "Outro."].join("\n");
-
-    expect(stripToSpeakableText(markdown)).toBe("Intro.\n\n\u27E6code\u27E7\n\nOutro.");
-  });
-
-  it("leaves heading and emphasis markers for the unit builder", () => {
-    const markdown = ["## What changed", "", "**TLDR:** the header now speaks."].join("\n");
-
-    // Structure downstream depends on (first heading, leading `**TLDR:**`), so
-    // those markers are deliberately not stripped here.
-    expect(stripToSpeakableText(markdown)).toBe(
-      "## What changed\n\n**TLDR:** the header now speaks.",
-    );
-  });
-
-  // ------------------------------------------------------------------
-  // Task 1 — removed blocks are named.
-  // ------------------------------------------------------------------
-
-  it("names a removed code block where it stood", () => {
-    const markdown = [
-      "The fix is one line.",
-      "",
-      "```ts",
-      "const order = useTerminalOrdering();",
-      "```",
-      "",
-      "It ships with the next build.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    // The listener hears that something was skipped, and what kind of thing it
-    // was — a silent removal is indistinguishable from an answer that never
-    // mentioned the code at all.
-    expect(spoken).not.toContain("useTerminalOrdering");
-    expect(spoken).toBe("The fix is one line.\n\n\u27E6code\u27E7\n\nIt ships with the next build.");
-  });
-
-  it("names a removed table where it stood", () => {
-    const markdown = [
-      "Here is the cell state.",
-      "",
-      "| cell | state |",
-      "| --- | ----- |",
-      "| one  | armed |",
-      "",
-      "Only one cell is ever armed.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).not.toContain("|");
-    expect(spoken).toBe(
-      "Here is the cell state.\n\n\u27E6table\u27E7\n\nOnly one cell is ever armed.",
-    );
-  });
-
-  it("names a removed HTML block where it stood", () => {
-    const markdown = [
-      "The diff is folded away.",
-      "",
-      "<details>",
-      "<summary>Show the diff</summary>",
-      "",
-      "the hidden prose nobody asked to hear",
-      "",
-      "</details>",
-      "",
-      "It changes two files.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).not.toContain("<");
-    expect(spoken).not.toContain("hidden prose");
-    expect(spoken).toBe(
-      "The diff is folded away.\n\n\u27E6html\u27E7\n\nIt changes two files.",
-    );
-
-    // A one-line element and a bare HTML table are the same kind of thing.
-    expect(stripToSpeakableText(['Before.', '<div align="center">middle</div>', "After."].join("\n"))).toBe(
-      "Before.\n\n\u27E6html\u27E7\n\nAfter.",
-    );
-    expect(
-      stripToSpeakableText(
-        ["Before.", "<table>", "  <tr><td>one</td></tr>", "</table>", "After."].join("\n"),
-      ),
-    ).toBe("Before.\n\n\u27E6html\u27E7\n\nAfter.");
-  });
-
-  it("collapses adjacent removals of the same kind into one", () => {
-    const markdown = [
-      "Three attempts, none of them worth hearing.",
-      "",
-      "```ts",
-      "const a = 1;",
-      "```",
-      "",
-      "```ts",
-      "const b = 2;",
-      "```",
-      "```ts",
-      "const c = 3;",
-      "```",
-      "",
-      "The third one worked.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken.match(/\u27E6code\u27E7/g)).toHaveLength(1);
-    expect(spoken).toBe(
-      "Three attempts, none of them worth hearing.\n\n\u27E6code\u27E7\n\nThe third one worked.",
-    );
-  });
-
-  it("keeps adjacent removals of different kinds apart", () => {
-    const markdown = [
-      "Both of these are unreadable aloud.",
-      "",
-      "```ts",
-      "const a = 1;",
-      "```",
-      "",
-      "| cell | state |",
-      "| --- | ----- |",
-      "",
-      "<details>",
-      "<summary>and one more</summary>",
-      "</details>",
-      "",
-      "That is the whole answer.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toBe(
-      [
-        "Both of these are unreadable aloud.",
-        "",
-        "\u27E6code\u27E7",
-        "",
-        "\u27E6table\u27E7",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "That is the whole answer.",
-      ].join("\n"),
-    );
-  });
-
-  it("names an unclosed fence once and leaks no code", () => {
-    const markdown = [
-      "The patch is below.",
-      "",
-      "```diff",
-      "-const a = 1;",
-      "+const a = 2;",
-      // A blank line INSIDE the unclosed run is what pins "runs to the end":
-      // without it, a fence loop that stopped at the first blank line would
-      // pass this test and then read the truncated tail aloud.
-      "",
-      "  and the response was truncated here",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toBe("The patch is below.\n\n\u27E6code\u27E7");
-    expect(spoken.match(/\u27E6code\u27E7/g)).toHaveLength(1);
-    expect(spoken).not.toContain("const a");
-    expect(spoken).not.toContain("truncated");
-  });
-
-  it("still separates the paragraphs around a removed block", () => {
-    // The block is welded onto the prose with no blank lines of its own, so the
-    // boundary the removal inserts is the ONLY thing keeping the paragraphs
-    // apart — and the sentinel must not weld them back together.
-    const markdown = ["## Heading", "```ts", "const x = 1;", "```", "Body text."].join("\n");
-
-    expect(stripToSpeakableText(markdown).split(/\n{2,}/)).toEqual([
-      "## Heading",
-      "\u27E6code\u27E7",
-      "Body text.",
-    ]);
-  });
-  // ------------------------------------------------------------------
-  // Task 1 repairs — a stray tag must never swallow the answer.
-  // ------------------------------------------------------------------
-
-  it("treats a void tag as a block of exactly one line", () => {
-    // `<br>` can never carry a closing tag, so the search for `</br>` finds
-    // nothing and the block fell through to the fallback — which took the rest
-    // of the response with it, deleting real prose the answer did write.
-    const spoken = stripToSpeakableText(
-      "Before.\n<br>\nAfter, which is real prose that is now gone.",
-    );
-
-    expect(spoken).toContain("After, which is real prose that is now gone.");
-    expect(spoken).toBe(
-      "Before.\n\n\u27E6html\u27E7\n\nAfter, which is real prose that is now gone.",
-    );
-  });
-
-  it("never pairs a void tag with a stray closing tag further down", () => {
-    const markdown = [
-      "Before.",
-      '<img src="diagram.png">',
-      "The diagram shows two cells.",
-      // Sloppy but real: a model closes a void element it never had to close.
-      "</img>",
-      "After.",
-    ].join("\n");
-
-    // A void element holds no content, so nothing between it and a bogus
-    // `</img>` belongs to it — pairing the two deletes a whole sentence.
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toContain("The diagram shows two cells.");
-    expect(spoken).toBe(
-      [
-        "Before.",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "The diagram shows two cells.",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "After.",
-      ].join("\n"),
-    );
-  });
-
-  it("bounds an unbalanced tag to its own line, never to the rest of the response", () => {
-    const markdown = [
-      "First para.",
-      "",
-      "Prose line one.",
-      "<p> matters here.",
-      "Prose line three.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    expect(spoken).toContain("Prose line three.");
-    expect(spoken).toBe(
-      "First para.\n\nProse line one.\n\n\u27E6html\u27E7\n\nProse line three.",
-    );
-
-    // And the bound is the opening line even when a blank line IS ahead: the
-    // old fallback ran to it and ate every prose line in between.
-    expect(stripToSpeakableText("<p> stray tag.\nStill prose.\n\nNext paragraph.")).toBe(
-      "\u27E6html\u27E7\n\nStill prose.\n\nNext paragraph.",
-    );
-  });
-
-  it("treats a closing tag standing alone as a block of one line", () => {
-    const markdown = [
-      "Before.",
-      "</div>",
-      "Real prose in the middle.",
-      "</div>",
-      "After.",
-    ].join("\n");
-
-    // A `</div>` opens nothing, so it can never pair with the next one —
-    // pairing them would delete the sentence standing between them.
-    expect(stripToSpeakableText(markdown)).toBe(
-      [
-        "Before.",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "Real prose in the middle.",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "After.",
-      ].join("\n"),
-    );
-  });
-
-  it("treats a self-closing tag as a block of one line", () => {
-    const markdown = [
-      "Before.",
-      '<div class="spacer" />',
-      "Real prose in the middle.",
-      "</div>",
-      "After.",
-    ].join("\n");
-
-    // Same argument as the closing tag: a self-closed element is finished on
-    // its own line, so the `</div>` below it belongs to something else.
-    expect(stripToSpeakableText(markdown)).toBe(
-      [
-        "Before.",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "Real prose in the middle.",
-        "",
-        "\u27E6html\u27E7",
-        "",
-        "After.",
-      ].join("\n"),
-    );
-  });
-
-  it("leaves a line that merely starts with an inline tag alone", () => {
-    // The block rule is anchored to the start of a line, and inline markup does
-    // start one. `<em>` and `<span>` are not block-level, so these are
-    // sentences — treating them as blocks would eat the prose after the tag.
-    expect(stripToSpeakableText("<em>this</em> matters.")).toBe("<em>this</em> matters.");
-    expect(stripToSpeakableText("<span>and so</span> does this.")).toBe(
-      "<span>and so</span> does this.",
-    );
-  });
-
-  it("keeps two removals of the same kind apart when prose stands between them", () => {
-    const markdown = [
-      "```ts",
-      "const a = 1;",
-      "```",
-      "A sentence between them.",
-      "```ts",
-      "const b = 2;",
-      "```",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    // Collapsing is for removals with NOTHING spoken between them. A sentence
-    // in between is something the listener hears, so the second block is a
-    // second omission and needs its own name.
-    expect(spoken.match(/\u27E6code\u27E7/g)).toHaveLength(2);
-    expect(spoken).toBe("\u27E6code\u27E7\n\nA sentence between them.\n\n\u27E6code\u27E7");
-  });
-
-  // ------------------------------------------------------------------
-  // Task 2 — links, images and bare addresses.
-  // ------------------------------------------------------------------
-
-  it("speaks a link's text and drops its address", () => {
-    const spoken = stripToSpeakableText(
-      "See [the ordering hook](https://pavil.io/docs/ordering) for the rule.",
-    );
-
-    // The text is the only part of a link a listener can use; the address is
-    // unspeakable and gets no placeholder either, because the sentence already
-    // reads as a whole sentence without it.
-    expect(spoken).toBe("See the ordering hook for the rule.");
-    expect(spoken).not.toContain("pavil.io");
-    expect(spoken).not.toContain("⟦link⟧");
-
-    // The markers the unit builder needs survive inside link text.
-    expect(stripToSpeakableText("Read [**the ordering hook**](https://pavil.io/d) now.")).toBe(
-      "Read **the ordering hook** now.",
-    );
-  });
-
-  it("names an image instead of reading its alt and address", () => {
-    const spoken = stripToSpeakableText(
-      "The layout is below. ![the grid, annotated](https://pavil.io/img/grid.png) It has three columns.",
-    );
-
-    // Alt text is written for a reader who cannot see the image, not for a
-    // listener who cannot see it either — read aloud it is a description of a
-    // picture nobody is looking at, so the whole construct goes.
-    expect(spoken).toBe("The layout is below. ⟦image⟧ It has three columns.");
-    expect(spoken).not.toContain("annotated");
-
-    // A response that is nothing but an image has nothing to say, exactly as a
-    // response that is nothing but code has nothing to say.
-    expect(stripToSpeakableText("![the grid, annotated](https://pavil.io/img/grid.png)")).toBe("");
-  });
-
-  it("says nothing for a response that is only a bulleted image", () => {
-    // The list marker used to defeat the sentinel-only check: `listItemToSentence`
-    // appends the terminator *after* the check has already been designed around
-    // a bare sentinel, so `⟦image⟧.` slipped through and woke the cell up to say
-    // "obrazek" about a response with no words in it.
-    expect(stripToSpeakableText("- ![the grid, annotated](https://pavil.io/img/grid.png)")).toBe(
-      "",
-    );
-
-    // A sentinel that stands beside actual prose in a list item still gets its
-    // terminator, because there the item is a sentence.
-    expect(stripToSpeakableText("- The layout is ![the grid](https://pavil.io/img/grid.png)")).toBe(
-      "The layout is ⟦image⟧.",
-    );
-  });
-
-  it("names a bare address", () => {
+  // Task 2 — links, images and bare addresses. A link's text is the only part a
+  // listener can use; the address gets no placeholder because the sentence still
+  // reads whole without it. Anything with no readable text left is named.
+  it.each<Row>([
+    ["a link speaks its text and drops its address", "See [the ordering hook](https://pavil.io/docs/ordering) for the rule.", "See the ordering hook for the rule."],
+    ["unit-builder markers survive inside link text", "Read [**the ordering hook**](https://pavil.io/d) now.", "Read **the ordering hook** now."],
+    // Alt text read aloud describes a picture nobody is looking at.
+    ["an image is named, not read", "The layout is below. ![the grid, annotated](https://pavil.io/img/grid.png) It has three columns.", "The layout is below. ⟦image⟧ It has three columns."],
+    ["a response that is only an image says nothing", "![the grid, annotated](https://pavil.io/img/grid.png)", ""],
     // The trailing full stop is the sentence's, not the address's.
-    expect(stripToSpeakableText("The spec lives at https://pavil.io/specs/speech.")).toBe(
-      "The spec lives at ⟦link⟧.",
-    );
-
-    // An address in backticks is an address, not an expression: addresses are
-    // reduced before inline code is unwrapped, so the span names a link rather
-    // than being dropped for length.
-    expect(stripToSpeakableText("Fetch it from `https://pavil.io/specs/speech.md` first.")).toBe(
-      "Fetch it from ⟦link⟧ first.",
-    );
+    ["a bare address is named", "The spec lives at https://pavil.io/specs/speech.", "The spec lives at ⟦link⟧."],
+    // Addresses are reduced before inline code is unwrapped.
+    ["an address in backticks is a link, not an expression", "Fetch it from `https://pavil.io/specs/speech.md` first.", "Fetch it from ⟦link⟧ first."],
+    // Otherwise "See [](url) now." became "See now."
+    ["a link with no readable text is named", "See [](https://pavil.io/docs/ordering) now.", "See ⟦link⟧ now."],
+    // Pins the one level of nesting `LINK_TEXT` allows.
+    ["link text with brackets of its own", "See [see [this] note](https://pavil.io/docs/ordering) now.", "See see [this] note now."],
+    // Pins the one level of nesting `LINK_DESTINATION` allows.
+    ["a destination with parens of its own", "See [the ordering hook](https://pavil.io/docs/a(b)c) now.", "See the ordering hook now."],
+    ["a link whose text is itself an address is named", "See [https://pavil.io/specs/speech](https://pavil.io/specs/speech).", "See ⟦link⟧."],
+    // A definition line is pure link plumbing.
+    [
+      "a reference-style link keeps its text and drops the definition",
+      lines("The ordering is described in [the ordering hook][ordering].", "", '[ordering]: https://pavil.io/docs/ordering "The ordering hook"'),
+      "The ordering is described in the ordering hook.",
+    ],
+    ["a definition with an address destination is dropped", "[ordering]: https://pavil.io/docs/ordering", ""],
+    ["a definition with an angle-bracketed destination is dropped", "[ordering]: <https://pavil.io/docs/ordering>", ""],
+    ["a definition with a title is dropped", "[grid]: img/grid.png 'The grid'", ""],
+  ])("links: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 
-  it("names a link with no readable text at all", () => {
-    // The named exception for `[text](url)` is bought by the text: the sentence
-    // still reads as a sentence without the address. With the text empty there
-    // is nothing readable attached, which is exactly the bare-URL case — so it
-    // is named rather than deleted, or "See [](url) now." became "See now."
-    expect(stripToSpeakableText("See [](https://pavil.io/docs/ordering) now.")).toBe(
-      "See ⟦link⟧ now.",
-    );
+  // Indexing is not linking: rewriting `arr[0](x)` as `arr0` swaps one token for
+  // a plausible-sounding other. And `[label]: text` is how log lines and
+  // footnotes are written — matching on shape alone deleted the whole line with
+  // no sentinel, the one removal in this module that leaves no trace.
+  it.each<[label: string, text: string]>([
+    ["an index call in code", "Call `arr[0](x)` now."],
+    ["chained indexing", "Read x[i][j] carefully."],
+    ["a bracket-paren pair in prose", "See note[1](x) there."],
+    ["a code span quoting link syntax", "Write `[text](url)` to make a link."],
+    ["a [WARN]: log line", "[WARN]: connection refused, retrying"],
+    ["a [TODO]: label", "[TODO]: rewrite this paragraph tomorrow"],
+    ["a [1]: footnote", "[1]: Kowalski, 2026, page 14"],
+  ])("leaves brackets that are not links alone: %s", (_label, text) => {
+    expect(stripToSpeakableText(text)).toBe(text.replace(/`/g, ""));
   });
 
-  it("keeps a link's text when the text has brackets of its own", () => {
-    // Pins the one level of nesting `LINK_TEXT` allows. Flatten it and the link
-    // stops matching altogether: the brackets are spoken and the destination
-    // falls through to the bare-address rule as a stray `⟦link⟧`.
-    expect(
-      stripToSpeakableText("See [see [this] note](https://pavil.io/docs/ordering) now."),
-    ).toBe("See see [this] note now.");
+  // Paths are spoken as their last meaningful segment, separators inside it as spaces.
+  it.each<Row>([
+    // The live bug: the last segment of a path ending in `/` is the empty string,
+    // so the token was spoken as nothing — "the plan lives in now".
+    ["live bug: path ending in a separator, in backticks", "The plan lives in `openspec/changes/speech-flow-and-diction/` now.", "The plan lives in speech flow and diction now."],
+    ["live bug: path ending in a separator, unwrapped", "The plan lives in openspec/changes/speech-flow-and-diction/ now.", "The plan lives in speech flow and diction now."],
+    ["live bug: several trailing separators are still one path", "Look under `panel/src/features/speech//` for it.", "Look under speech for it."],
+    // The original bug in its commonest position: `PATH_RE`'s final segment ate
+    // the sentence's full stop, so the last segment was "." and `tidySpacing`
+    // glued it back on, deleting the path.
+    ["original bug: a path ending the sentence keeps the full stop", "The plan lives in openspec/changes/speech-flow-and-diction/. Next.", "The plan lives in speech flow and diction. Next."],
+    ["original bug: two paths, the second sentence-final", "Move openspec/changes/aaa-bbb-ccc-ddd/ to openspec/changes/eee-fff-ggg-hhh/.", "Move aaa bbb ccc ddd to eee fff ggg hhh."],
+    ["original bug: the backticked form cannot drift from the bare one", "The plan lives in `openspec/changes/speech-flow-and-diction/`. Next.", "The plan lives in speech flow and diction. Next."],
+    // A segment made only of separators speaks as empty: the spoken segment is
+    // the last with anything left after separators become spaces.
+    ["a last segment of only a hyphen", "Look in panel/src/features/speech/- for it.", "Look in speech for it."],
+    ["a last segment of only underscores", "Look in panel/src/features/speech/__ for it.", "Look in speech for it."],
+    ["hyphens inside a segment are word spacing", "Open panel/src/features/speech/use-speech-player.ts now.", "Open use speech player.ts now."],
+    ["underscores inside a segment, a run is one space", "Open panel/docs/heading__line_re.md now.", "Open heading line re.md now."],
+    ["a long path with a line range is elided", "See panel/src/features/terminal/TerminalLayoutGrid.tsx:453-478 for the grid.", "See TerminalLayoutGrid.tsx for the grid."],
+    ["the same path as inline code", "See `panel/src/features/terminal/TerminalLayoutGrid.tsx:453-478` for the grid.", "See TerminalLayoutGrid.tsx for the grid."],
+    ["a bare filename with a line range", "Read useTerminalOrdering.ts:66-75 again.", "Read useTerminalOrdering.ts again."],
+    // Order is load-bearing: or `12-30` is spoken as "twelve thirty".
+    ["the line reference drops before the segment is spaced", "See panel/src/use-speech-player.ts:12-30 for the swap.", "See use speech player.ts for the swap."],
+    ["a short path is followable by ear and kept verbatim", "See `src/strip.ts` for the filter.", "See src/strip.ts for the filter."],
+    // A path is not an expression, however long the span.
+    ["a long backticked path keeps its segment, not ⟦expr⟧", "See `panel/src/features/speech/use-speech-player.ts` for the swap.", "See use speech player.ts for the swap."],
+    // The guard: spacing separators across prose would split a Polish hyphenated word.
+    ["a hyphenated word beside a path is left alone", "Zdjęcie czarno-białe leży w openspec/changes/speech-flow-and-diction/ do jutra.", "Zdjęcie czarno-białe leży w speech flow and diction do jutra."],
+    ["hyphenated words with no path are untouched", "Ten e-mail jest czarno-biały i dobrze znany.", "Ten e-mail jest czarno-biały i dobrze znany."],
+  ])("paths: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 
-  it("drops a destination that has parens of its own", () => {
-    // Pins the one level of nesting `LINK_DESTINATION` allows. Flatten it and
-    // the closing paren is found too early, the link never matches, and half
-    // the construct is left standing around a `⟦link⟧`.
-    expect(
-      stripToSpeakableText("See [the ordering hook](https://pavil.io/docs/a(b)c) now."),
-    ).toBe("See the ordering hook now.");
-  });
-
-  it("leaves a bracketed expression that is not a link alone", () => {
-    // Indexing is not linking. Rewriting `arr[0](x)` as `arr0` swaps one token
-    // for a different, plausible-sounding token — worse than reading the
-    // original aloud, because the listener cannot tell it happened.
-    expect(stripToSpeakableText("Call `arr[0](x)` now.")).toBe("Call arr[0](x) now.");
-    expect(stripToSpeakableText("Read x[i][j] carefully.")).toBe("Read x[i][j] carefully.");
-    expect(stripToSpeakableText("See note[1](x) there.")).toBe("See note[1](x) there.");
-
-    // And a span that quotes the link syntax itself — the answer an agent gives
-    // when asked how to write one. Nothing about its left-hand side marks it
-    // out, so only skipping code spans keeps it whole.
-    expect(stripToSpeakableText("Write `[text](url)` to make a link.")).toBe(
-      "Write [text](url) to make a link.",
-    );
-  });
-
-  it("names a link whose text is itself an address", () => {
-    // Keeping the text here would defeat the point of dropping the address.
-    expect(
-      stripToSpeakableText("See [https://pavil.io/specs/speech](https://pavil.io/specs/speech)."),
-    ).toBe("See ⟦link⟧.");
-  });
-
-  it("keeps the text of a reference-style link and drops the definition", () => {
-    const markdown = [
-      "The ordering is described in [the ordering hook][ordering].",
-      "",
-      '[ordering]: https://pavil.io/docs/ordering "The ordering hook"',
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    // A definition line is pure link plumbing — it has no prose in it at all.
-    expect(spoken).toBe("The ordering is described in the ordering hook.");
-    expect(spoken).not.toContain("pavil.io");
-    expect(spoken).not.toContain("ordering]");
-  });
-
-  it("keeps a bracketed label that is not a reference definition", () => {
-    // `[label]: text` is also how log lines and footnotes are written, and agent
-    // answers are full of both. Matching on the shape alone deleted the whole
-    // line with no sentinel — the one removal in this module that leaves no
-    // trace, applied to prose.
-    expect(stripToSpeakableText("[WARN]: connection refused, retrying")).toBe(
-      "[WARN]: connection refused, retrying",
-    );
-    expect(stripToSpeakableText("[TODO]: rewrite this paragraph tomorrow")).toBe(
-      "[TODO]: rewrite this paragraph tomorrow",
-    );
-    expect(stripToSpeakableText("[1]: Kowalski, 2026, page 14")).toBe(
-      "[1]: Kowalski, 2026, page 14",
-    );
-
-    // A destination that really is an address still makes the line plumbing,
-    // with or without a title, and plumbing is dropped.
-    expect(stripToSpeakableText("[ordering]: https://pavil.io/docs/ordering")).toBe("");
-    expect(stripToSpeakableText("[ordering]: <https://pavil.io/docs/ordering>")).toBe("");
-    expect(stripToSpeakableText("[grid]: img/grid.png 'The grid'")).toBe("");
-  });
-
-  it("emits no link sentinel for an address inside a removed block", () => {
-    const markdown = [
-      "The fetch is one line.",
-      "",
-      "```ts",
-      'await fetch("https://pavil.io/api/units");',
-      "```",
-      "",
-      "| endpoint | https://pavil.io/api/units |",
-      "| --- | --- |",
-      "",
-      "Nothing else changed.",
-    ].join("\n");
-
-    const spoken = stripToSpeakableText(markdown);
-
-    // Block removal runs first, so by the time addresses are looked for the
-    // fence and the table are already sentinels — the address never exists to
-    // be named a second time.
-    expect(spoken).toBe(
-      "The fetch is one line.\n\n⟦code⟧\n\n⟦table⟧\n\nNothing else changed.",
-    );
-    expect(spoken).not.toContain("⟦link⟧");
-
-    // And the ordering itself, which the assertions above cannot see: an
-    // address rule reaching into a block's markup can destroy the block's own
-    // boundary. A destination is any run without parens, so a `</details>`
-    // inside one goes with the link — harmless *after* block removal, and if it
-    // ran before, the block never finds its closing tag, falls back to its
-    // opening line, and everything it was meant to contain leaks into the
-    // spoken text.
-    expect(
-      stripToSpeakableText(["<details>", "See [x](y</details>z) here.", "Then prose."].join("\n")),
-    ).toBe("⟦html⟧\n\nThen prose.");
-  });
-
-  it("speaks the last segment of a path that ends in a separator", () => {
-    // The live bug: the last segment of a path ending in `/` is the empty
-    // string, so the token was spoken as nothing at all — the sentence lost
-    // its subject and the listener heard "the plan lives in now".
-    expect(
-      stripToSpeakableText("The plan lives in `openspec/changes/speech-flow-and-diction/` now."),
-    ).toBe("The plan lives in speech flow and diction now.");
-
-    // Same path unwrapped: the trailing separator belongs to the token, so it
-    // does not survive as a stray slash beside the segment either.
-    expect(
-      stripToSpeakableText("The plan lives in openspec/changes/speech-flow-and-diction/ now."),
-    ).toBe("The plan lives in speech flow and diction now.");
-
-    // Several trailing separators are still one path, not several empty ones.
-    expect(stripToSpeakableText("Look under `panel/src/features/speech//` for it.")).toBe(
-      "Look under speech for it.",
-    );
-  });
-
-  it("keeps the sentence's full stop when a path ends the sentence", () => {
-    // The original bug in its commonest position. `PATH_RE`'s final segment used
-    // to eat the sentence's own full stop, so the last segment was "." — and
-    // `tidySpacing` then glued that back onto the preceding word, deleting the
-    // path and leaving a sentence that had lost its subject.
-    expect(
-      stripToSpeakableText("The plan lives in openspec/changes/speech-flow-and-diction/. Next."),
-    ).toBe("The plan lives in speech flow and diction. Next.");
-
-    // Two of them in one sentence, the second sentence-final.
-    expect(
-      stripToSpeakableText(
-        "Move openspec/changes/aaa-bbb-ccc-ddd/ to openspec/changes/eee-fff-ggg-hhh/.",
-      ),
-    ).toBe("Move aaa bbb ccc ddd to eee fff ggg hhh.");
-
-    // In backticks the full stop was never inside the token, so this form
-    // already worked — it is here so the two cannot drift apart again.
-    expect(
-      stripToSpeakableText("The plan lives in `openspec/changes/speech-flow-and-diction/`. Next."),
-    ).toBe("The plan lives in speech flow and diction. Next.");
-  });
-
-  it("never speaks a path as nothing, whatever its last segment is", () => {
-    // A segment made only of separators is spoken as the empty string, so
-    // "everything after the last slash" and "the last non-empty segment" both
-    // still delete the token. The segment that gets spoken is the last one with
-    // anything left in it *after* the separators become spaces.
-    expect(stripToSpeakableText("Look in panel/src/features/speech/- for it.")).toBe(
-      "Look in speech for it.",
-    );
-    expect(stripToSpeakableText("Look in panel/src/features/speech/__ for it.")).toBe(
-      "Look in speech for it.",
-    );
-  });
-
-  it("speaks separators inside a path segment as spaces", () => {
-    // Inside a segment a separator is word spacing, not punctuation: the voice
-    // reads "use-speech-player" as one unpronounceable run otherwise.
-    expect(stripToSpeakableText("Open panel/src/features/speech/use-speech-player.ts now.")).toBe(
-      "Open use speech player.ts now.",
-    );
-
-    // Underscores read the same way, and a run of them is one space.
-    expect(stripToSpeakableText("Open panel/docs/heading__line_re.md now.")).toBe(
-      "Open heading line re.md now.",
-    );
-  });
-
-  it("still drops a line reference from a path", () => {
-    expect(
-      stripToSpeakableText(
-        "See panel/src/features/terminal/TerminalLayoutGrid.tsx:453-478 for the grid.",
-      ),
-    ).toBe("See TerminalLayoutGrid.tsx for the grid.");
-
-    // Order is load-bearing: the reference is dropped before the segment is
-    // spaced out, or the hyphen in `12-30` would be spoken as "twelve thirty".
-    expect(stripToSpeakableText("See panel/src/use-speech-player.ts:12-30 for the swap.")).toBe(
-      "See use speech player.ts for the swap.",
-    );
-  });
-
-  it("speaks a long single-token name as written", () => {
-    // The cap is there to catch expressions, not names. A change-id is one
-    // unbroken token: a listener follows it fine at any length, and naming it
-    // "expression" tells them something false about what they missed.
-    expect(
-      stripToSpeakableText(
-        "Active: `terminal-tab-reachability`, `terminal-resize-discipline`, " +
-          "`2026-04-19-launch-distribution`.",
-      ),
-    ).toBe(
-      "Active: terminal-tab-reachability, terminal-resize-discipline, " +
-        "2026-04-19-launch-distribution.",
-    );
-
-    // Underscores and dots join a token the same way a hyphen does.
-    expect(stripToSpeakableText("See `SPEECH_STREAM_STALL_TIMEOUT_MS` for the wait.")).toBe(
-      "See SPEECH_STREAM_STALL_TIMEOUT_MS for the wait.",
-    );
-
-    // A space is what makes a span an expression rather than a name, and that
-    // is still named once it runs past the cap.
-    expect(stripToSpeakableText("Call `const x = await synth(a, b, c, d)` first.")).toBe(
-      "Call ⟦expr⟧ first.",
-    );
-  });
-
-  it("names an over-long expression instead of dropping it", () => {
-    // An expression too long to follow by ear is still something the answer
-    // said; dropping it silently rewrote the sentence into a lie.
-    expect(stripToSpeakableText('Call `units.map((u) => u.text).join(" ")` before speaking.')).toBe(
-      "Call ⟦expr⟧ before speaking.",
-    );
-
-    // A path is not an expression: it has its own rule and keeps its segment,
-    // however long the span is.
-    expect(
-      stripToSpeakableText("See `panel/src/features/speech/use-speech-player.ts` for the swap."),
-    ).toBe("See use speech player.ts for the swap.");
-
-    // And an answer that is *only* an expression still has nothing to say, for
-    // the same reason an answer that is only code has nothing to say.
-    expect(stripToSpeakableText('`units.map((u) => u.text).join(" ")`')).toBe("");
-  });
-
-  it("still unwraps short inline code", () => {
-    expect(stripToSpeakableText("Call `prepare` before speaking.")).toBe(
-      "Call prepare before speaking.",
-    );
-
-    // Exactly at the cap is still speakable — the expression sentinel starts
-    // one character later.
-    const atThreshold = "a".repeat(MAX_SPOKEN_CODE_CHARS);
-    expect(stripToSpeakableText(`Call \`${atThreshold}\` first.`)).toBe(
-      `Call ${atThreshold} first.`,
-    );
-
-    // A short path is followable by ear, so it is neither elided nor spaced.
-    expect(stripToSpeakableText("See `src/strip.ts` for the filter.")).toBe(
-      "See src/strip.ts for the filter.",
-    );
-  });
-
-  it("leaves an ordinary hyphenated word alone", () => {
-    // The guard on the rule above. Spacing separators across prose would split
-    // a Polish hyphenated word into two, so the rule is scoped to the inside of
-    // a recognised path token and nothing else — here both are in one sentence.
-    expect(
-      stripToSpeakableText(
-        "Zdjęcie czarno-białe leży w openspec/changes/speech-flow-and-diction/ do jutra.",
-      ),
-    ).toBe("Zdjęcie czarno-białe leży w speech flow and diction do jutra.");
-
-    // With no path in sight the sentence is untouched, hyphens and all.
-    expect(stripToSpeakableText("Ten e-mail jest czarno-biały i dobrze znany.")).toBe(
-      "Ten e-mail jest czarno-biały i dobrze znany.",
-    );
+  // Inline code is unwrapped; past the cap an *expression* (a span with a space
+  // in it) is named ⟦expr⟧ — it used to be dropped, which rewrote the sentence
+  // into a lie. A single token is a name and is spoken at any length.
+  it.each<Row>([
+    ["short inline code is unwrapped", "Call `prepare` before speaking.", "Call prepare before speaking."],
+    ["inline code exactly at the cap is spoken", `Call \`${AT_CAP}\` first.`, `Call ${AT_CAP} first.`],
+    ["an expression past the cap is named", `Call \`${AT_CAP} + 1\` first.`, "Call ⟦expr⟧ first."],
+    ["a single token past the cap is a name and is spoken", `Call \`${AT_CAP}a\` first.`, `Call ${AT_CAP}a first.`],
+    [
+      "long change-ids are names, not expressions",
+      "Active: `terminal-tab-reachability`, `terminal-resize-discipline`, `2026-04-19-launch-distribution`.",
+      "Active: terminal-tab-reachability, terminal-resize-discipline, 2026-04-19-launch-distribution.",
+    ],
+    ["underscores join a token like a hyphen", "See `SPEECH_STREAM_STALL_TIMEOUT_MS` for the wait.", "See SPEECH_STREAM_STALL_TIMEOUT_MS for the wait."],
+    ["a long spaced span is an expression", "Call `const x = await synth(a, b, c, d)` first.", "Call ⟦expr⟧ first."],
+    ["an over-long call chain is named, not dropped", 'Call `units.map((u) => u.text).join(" ")` before speaking.', "Call ⟦expr⟧ before speaking."],
+    ["a response that is only an expression says nothing", '`units.map((u) => u.text).join(" ")`', ""],
+  ])("inline code: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 });

@@ -14,13 +14,15 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 import { prepare } from "../../speech/prepare";
 import type { GridSpeech, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, utteranceQueueReducer } from "../../speech/utteranceQueue";
 import type { SessionMeta } from "../useTerminalSessions";
 import { forgetAnswerPane } from "../answerPaneState";
 import { setStoredAutoOpenAnswer } from "../../speech/autoOpenAnswer";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 vi.mock("../terminalInstances", () => {
   const holders = new Map<string, HTMLDivElement>();
@@ -70,78 +72,34 @@ vi.mock("../TerminalActivityLed", () => ({
   TerminalActivityLed: () => <span data-testid="activity-led" />,
 }));
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so it picks them up.
 const { TerminalLayoutGrid } = await import("../TerminalLayoutGrid");
 
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-}
-
 beforeAll(() => {
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: () => {},
-        removeListener: () => {},
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
 const MARKDOWN = "# Deploy plan\n\nThe first paragraph explains why the deploy waits.\n";
 const utterance: Utterance = { id: "u-1", sessionId: "cell-a", text: MARKDOWN, at: 1 };
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(): GridSpeech {
+function answeredSpeech(): GridSpeech {
   const queue = utteranceQueueReducer(emptyUtteranceQueue, {
     type: "arrived",
     utterance,
     speaking: false,
   });
   const units = prepare(MARKDOWN).units;
-  return {
+  return makeSpeech({
     stateFor: () => "ready",
     queueFor: () => queue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 const sessions: SessionMeta[] = [
@@ -163,9 +121,9 @@ const grid = (speech: GridSpeech, maximized: boolean) => (
 );
 
 /** Lets the mount effect's rAF and its 300ms settle timer run. */
-async function settle(): Promise<void> {
+async function settleMount(): Promise<void> {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
   });
 }
 
@@ -173,18 +131,25 @@ const eye = (): HTMLElement => screen.getByTestId("speech-bar-eye-cell-a");
 const pane = (): HTMLElement | null => screen.queryByTestId("answer-pane-cell-a");
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settleMount helper steps it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   forgetAnswerPane("cell-a");
   forgetAnswerPane("cell-b");
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("TerminalLayoutGrid — the answer pane across a layout change", () => {
   it("MAX and back leaves the pane open", async () => {
     // Off, so the pane below is open only because the eye opened it.
     setStoredAutoOpenAnswer(false);
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(grid(speech, false));
-    await settle();
+    await settleMount();
     expect(screen.getByTestId("terminal-grid")).toBeInTheDocument();
 
     fireEvent.click(eye());
@@ -192,29 +157,29 @@ describe("TerminalLayoutGrid — the answer pane across a layout change", () => 
 
     // Maximize: the grid body is replaced by the fullscreen stack.
     view.rerender(grid(speech, true));
-    await settle();
+    await settleMount();
     expect(screen.queryByTestId("terminal-grid")).toBeNull();
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
 
     // And back.
     view.rerender(grid(speech, false));
-    await settle();
+    await settleMount();
     expect(screen.getByTestId("terminal-grid")).toBeInTheDocument();
     expect(pane()).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
   });
 
   it("a pane closed before MAX stays closed after it", async () => {
-    const speech = makeSpeech();
+    const speech = answeredSpeech();
     const view = render(grid(speech, false));
-    await settle();
+    await settleMount();
     fireEvent.click(eye());
     fireEvent.click(eye());
     expect(pane()).toBeNull();
 
     view.rerender(grid(speech, true));
-    await settle();
+    await settleMount();
     expect(pane()).toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "false");
   });

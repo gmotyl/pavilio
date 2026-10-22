@@ -181,5 +181,5 @@ describe("wiki cli", () => {
     } finally {
       rmSync(elsewhere, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 });

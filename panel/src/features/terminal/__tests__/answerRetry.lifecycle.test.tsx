@@ -2,7 +2,7 @@
  * Who SPENDS the retry ticket, and who must not.
  *
  * `answerRetry.test.ts` proves the store's own arithmetic and
- * `AnswerComposer.retryEnter.test.tsx` proves the composer opens, shows and
+ * `AnswerComposer.reconnect.test.tsx` ("retry") proves the composer opens, shows and
  * consumes a ticket. Neither of them can see the fact this file exists for:
  * the three call sites that end a ticket are in three different modules, they
  * are reached from three different lifetimes, and each one is wrong in a way
@@ -54,20 +54,16 @@ vi.hoisted(() => {
     send(): void {}
   }
   (globalThis as unknown as { WebSocket: unknown }).WebSocket = QuietSocket;
-  // The pane measures its own rail, and jsdom has no observer to measure it
-  // with. Assigned rather than stubbed because the pane's effect can run on a
-  // teardown flush, after a per-test stub would already have been lifted.
-  class StubResizeObserver {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  }
-  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = StubResizeObserver;
   // The reconnect log is fire-and-forget over `fetch`, and jsdom has no server
   // behind its relative URL.
   (globalThis as unknown as { fetch: unknown }).fetch = () =>
     Promise.resolve({ ok: true } as unknown as Response);
 });
+
+// The pane measures its own rail, and jsdom has no observer to measure it
+// with. Assigned rather than stubbed because the pane's effect can run on a
+// teardown flush, after a per-test stub would already have been lifted.
+(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = StubResizeObserver;
 
 // `terminalInstances` is a SUBJECT here, not a stub — the destroy criterion is
 // about what that function does — so xterm has to be survivable instead. jsdom
@@ -104,16 +100,10 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 // The synthesis cache the rail and the scrubber peek into. Nothing is warm and
 // nothing subscribes: no test here draws a segment.
-vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
-}));
+vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // mermaid's rendering stack is browser-only and no answer here holds a fence.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 import type { GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import type { UtteranceQueue } from "../../speech/utteranceQueue";
@@ -137,6 +127,7 @@ import {
   destroyTerminal,
 } from "../terminalInstances";
 import { _applyEventForTests, _resetForTests } from "../useTerminalActivityChannel";
+import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
 const SESSION = "cell-a";
 
@@ -208,20 +199,6 @@ class FakeSocket {
   close(): void {
     this.readyState = 3;
   }
-}
-
-/** The composer's grip asks jsdom whether this is a touch viewport. */
-function installMatchMedia(): void {
-  Object.defineProperty(window, "matchMedia", {
-    writable: true,
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 }
 
 /** The row — mounted from the cell whether or not the eye is open. */

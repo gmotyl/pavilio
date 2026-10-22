@@ -16,6 +16,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
 import { SpeechControlBar } from "../SpeechControlBar";
@@ -38,7 +39,6 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
  *  stable between notifications — a fresh `new Map()` per call is an infinite
  *  render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 
 /**
@@ -69,39 +69,21 @@ interface SpeechOverrides {
   autoplaySessionId?: string | null;
 }
 
-/** A cell that has played nothing has heard nothing — shared, like every other
- *  "nothing here" snapshot on a host. */
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
-
-function makeSpeech(over: SpeechOverrides = {}): GridSpeech {
+function speechWith(over: SpeechOverrides = {}): GridSpeech {
   const units = over.units ?? NO_UNITS;
 
-  return {
+  return makeSpeech({
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => units,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
     speechModeOf: (id: string) => (id === over.autoplaySessionId ? "autoplay" : "off"),
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 /** A cell that has spoken: an utterance under the cursor and units to draw. */
 function spokenSpeech(): GridSpeech {
   const current: Utterance = { id: "u-1", sessionId: "cell-a", text: "Something", at: 1 };
-  return makeSpeech({
+  return speechWith({
     state: "ready",
     queue: { ...emptyUtteranceQueue, current },
     units: [{ text: "Something", chars: 9, source: "Something" }],
@@ -200,7 +182,7 @@ function renderBar(speech: GridSpeech, send: (data: string) => boolean) {
 
 describe("LauncherPills", () => {
   it("renders a pill per configured launcher while the cell has nothing to play", () => {
-    renderBar(makeSpeech({ state: "empty" }), vi.fn());
+    renderBar(speechWith({ state: "empty" }), vi.fn());
 
     // Nothing stored, so the row shows the declared defaults, in order.
     expect(pillLabels()).toEqual(["claude", "codex", "opencode"]);
@@ -223,7 +205,7 @@ describe("LauncherPills", () => {
   it("sends the command with a trailing return, once, on click", async () => {
     const user = userEvent.setup();
     const send = vi.fn((_data: string) => true);
-    renderBar(makeSpeech({ state: "empty" }), send);
+    renderBar(speechWith({ state: "empty" }), send);
 
     await user.click(screen.getByRole("button", { name: "claude" }));
 
@@ -251,7 +233,7 @@ describe("LauncherPills", () => {
     // never lets it past.
     vi.useFakeTimers();
     const send = vi.fn((_data: string) => true);
-    renderBar(makeSpeech({ state: "empty" }), send);
+    renderBar(speechWith({ state: "empty" }), send);
 
     const generation = beginRetryTicket("cell-a");
     noteRetrySentOn("cell-a", "u-1", generation);
@@ -272,7 +254,7 @@ describe("LauncherPills", () => {
       { name: "resume", command: "claude --resume" },
     ]);
 
-    renderBar(makeSpeech({ state: "empty" }), send);
+    renderBar(speechWith({ state: "empty" }), send);
 
     // The name is the label — the command never appears on screen.
     expect(pillLabels()).toEqual(["resume"]);
@@ -286,7 +268,7 @@ describe("LauncherPills", () => {
 
   it("swaps the pills for the transport once the cell has spoken", () => {
     const send = vi.fn((_data: string) => true);
-    const view = renderBar(makeSpeech({ state: "empty" }), send);
+    const view = renderBar(speechWith({ state: "empty" }), send);
     expect(pillLabels()).toEqual(["claude", "codex", "opencode"]);
 
     view.rerender(
@@ -310,7 +292,7 @@ describe("LauncherPills", () => {
 
   it("arms a cell that has never spoken", async () => {
     const user = userEvent.setup();
-    const speech = makeSpeech({ state: "empty" });
+    const speech = speechWith({ state: "empty" });
     renderBar(speech, vi.fn());
 
     // The switch is the reason the row is reachable before the first answer.
@@ -338,7 +320,7 @@ describe("LauncherPills", () => {
    */
   describe("once a launcher has been used", () => {
     it("leaves a cell that has not launched showing its launchers", () => {
-      renderBar(makeSpeech({ state: "empty" }), vi.fn());
+      renderBar(speechWith({ state: "empty" }), vi.fn());
 
       // Three pills, all of them pressable, and no start pill. This is also
       // what proves the flag is cleared between tests — a case above clicked a
@@ -351,7 +333,7 @@ describe("LauncherPills", () => {
     it("replaces the launchers with a single start pill the moment one is clicked", async () => {
       const user = userEvent.setup();
       const send = vi.fn((_data: string) => true);
-      renderBar(makeSpeech({ state: "empty" }), send);
+      renderBar(speechWith({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
 
@@ -376,7 +358,7 @@ describe("LauncherPills", () => {
       const user = userEvent.setup();
       const send = vi.fn((_data: string) => true);
       await seedSessions([session("cell-b", "pavilio"), session("cell-a", "my-blog")]);
-      renderBar(makeSpeech({ state: "empty" }), send);
+      renderBar(speechWith({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
       resetSends(send);
@@ -395,7 +377,7 @@ describe("LauncherPills", () => {
       // The store loaded before this cell existed — the real case for a
       // terminal created a moment ago, which the 8s poll has not seen yet.
       await seedSessions([session("cell-b", "pavilio")]);
-      renderBar(makeSpeech({ state: "empty" }), send);
+      renderBar(speechWith({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
       resetSends(send);
@@ -413,7 +395,7 @@ describe("LauncherPills", () => {
       // Nothing loaded: the store has not loaded, which is the real case on a
       // fresh tab, and the refetch a miss earns finds no such session either.
       seedServer([]);
-      renderBar(makeSpeech({ state: "empty" }), send);
+      renderBar(speechWith({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
       resetSends(send);
@@ -433,7 +415,7 @@ describe("LauncherPills", () => {
       // HAS loaded and the cell IS in it, so a lookup that only guarded
       // `undefined` would send a trailing separator with nothing after it.
       await seedSessions([session("cell-a", "")]);
-      renderBar(makeSpeech({ state: "empty" }), send);
+      renderBar(speechWith({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
       resetSends(send);
@@ -447,7 +429,7 @@ describe("LauncherPills", () => {
       const user = userEvent.setup();
       const send = vi.fn((_data: string) => true);
       await seedSessions([session("cell-a", "pavilio")]);
-      renderBar(makeSpeech({ state: "empty" }), send);
+      renderBar(speechWith({ state: "empty" }), send);
 
       await user.click(screen.getByRole("button", { name: "claude" }));
       resetSends(send);
@@ -470,8 +452,8 @@ describe("LauncherPills", () => {
       const sendB = vi.fn((_data: string) => true);
       render(
         <>
-          {bar(makeSpeech({ state: "empty" }), sendA, "cell-a")}
-          {bar(makeSpeech({ state: "empty" }), sendB, "cell-b")}
+          {bar(speechWith({ state: "empty" }), sendA, "cell-a")}
+          {bar(speechWith({ state: "empty" }), sendB, "cell-b")}
         </>,
       );
 

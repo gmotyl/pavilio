@@ -1,27 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import express from "express";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
-import { tmpdir } from "os";
+import { rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
 import { join } from "path";
+import { configMock, makeApp, withProjectsDir } from "../test-kit";
 
-let tmpRoot = "";
-let projectsDir = "";
+const projects = withProjectsDir("pavilio-skills-route-");
 
-vi.mock("../config", () => ({ getConfig: () => ({ projectsDir }) }));
+vi.mock("../config", () => configMock(() => projects.dir()));
 
 import skillsRouter, { parseDescription } from "../routes/skills";
 
 type Skill = { name: string; description: string; path: string };
 
-function makeApp() {
-  const app = express();
-  app.use("/api/skills", skillsRouter);
-  return app;
-}
-
 function skillsDir(): string {
-  return join(tmpRoot, "skills");
+  return join(projects.root(), "skills");
 }
 
 function addSkill(name: string, frontmatter: string | null) {
@@ -31,21 +23,14 @@ function addSkill(name: string, frontmatter: string | null) {
 }
 
 async function list(): Promise<Skill[]> {
-  const res = await request(makeApp()).get("/api/skills");
+  const res = await request(makeApp(skillsRouter, "/api/skills")).get("/api/skills");
   expect(res.status).toBe(200);
   return (res.body as Skill[]).slice().sort((a, b) => a.name.localeCompare(b.name));
 }
 
 describe("GET /api/skills", () => {
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "pavilio-skills-route-"));
-    projectsDir = join(tmpRoot, "projects");
-    mkdirSync(projectsDir, { recursive: true });
     mkdirSync(skillsDir(), { recursive: true });
-  });
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it("lists every skill with its name, description and relative path", async () => {
@@ -98,17 +83,17 @@ describe("GET /api/skills", () => {
     for (const s of await list()) {
       expect(s.path.startsWith("skills/")).toBe(true);
       expect(s.path).toBe(`skills/${s.name}/SKILL.md`);
-      expect(s.path).not.toContain(tmpRoot);
+      expect(s.path).not.toContain(projects.root());
     }
   });
 
   it("follows a symlinked skill directory", async () => {
-    const outside = join(tmpRoot, "elsewhere", "linked");
+    const outside = join(projects.root(), "elsewhere", "linked");
     mkdirSync(outside, { recursive: true });
     writeFileSync(join(outside, "SKILL.md"), "---\ndescription: via link\n---\n");
     symlinkSync(outside, join(skillsDir(), "linked"));
     // A dangling link must not break the listing.
-    symlinkSync(join(tmpRoot, "nowhere"), join(skillsDir(), "dangling"));
+    symlinkSync(join(projects.root(), "nowhere"), join(skillsDir(), "dangling"));
     expect(await list()).toEqual([
       { name: "linked", description: "via link", path: "skills/linked/SKILL.md" },
     ]);
@@ -128,9 +113,9 @@ describe("GET /api/skills", () => {
     rmSync(skillsDir(), { recursive: true, force: true });
     // A file where the directory should be: readdir fails with ENOTDIR.
     writeFileSync(skillsDir(), "not a dir");
-    const res = await request(makeApp()).get("/api/skills");
+    const res = await request(makeApp(skillsRouter, "/api/skills")).get("/api/skills");
     expect(res.status).toBe(500);
-    expect(JSON.stringify(res.body)).not.toContain(tmpRoot);
+    expect(JSON.stringify(res.body)).not.toContain(projects.root());
     expect(JSON.stringify(res.body)).not.toContain("/");
     expect(res.body.error).toBeTruthy();
     // The details go to the server log instead.

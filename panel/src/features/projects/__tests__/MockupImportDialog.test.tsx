@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import MockupImportDialog from "../MockupImportDialog";
 import { MOCKUP_MAX_FILES, MOCKUP_MAX_TOTAL_BYTES } from "../mockupFiles";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
+import { jsonResponse, stubFetch } from "../../../test-utils";
 
 const MB = 1024 * 1024;
 
@@ -24,7 +25,7 @@ interface Calls {
  * `externalCounts` (by name), `import` answers with `importResult` built from
  * what was actually sent.
  */
-function stubFetch({
+function stubMockupFetch({
   externalCounts = {},
   importResult,
   serverDates = ["2026-10-07"],
@@ -41,38 +42,41 @@ function stubFetch({
 } = {}): Calls {
   const calls: Calls = { inspect: [], importBodies: [] };
   let todayCalls = 0;
-  const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/mockups/today")) {
-      const date = serverDates[Math.min(todayCalls++, serverDates.length - 1)];
-      if (date === null) return { ok: false, json: async () => ({}) } as Response;
-      return { ok: true, json: async () => ({ date }) } as Response;
-    }
-    const body = init?.body as FormData;
-    const names = body ? body.getAll("files").map((f) => (f as File).name) : [];
-    if (url.endsWith("/mockups/inspect")) {
-      calls.inspect.push(body);
-      return {
-        ok: true,
-        json: async () => ({
-          files: names.map((name) => ({ name, externalCount: externalCounts[name] ?? 0 })),
-        }),
-      } as Response;
-    }
-    if (url.endsWith("/mockups/import")) {
-      calls.importBodies.push(body);
-      const files = importResult
-        ? importResult(names)
-        : names.map((name) => ({
+  const sentNames = (body: FormData | undefined) =>
+    body ? body.getAll("files").map((f) => (f as File).name) : [];
+  const failed = () => jsonResponse({}, { status: 500 });
+  stubFetch(
+    {
+      "/mockups/today": () => {
+        const date = serverDates[Math.min(todayCalls++, serverDates.length - 1)];
+        return date === null ? failed() : jsonResponse({ date });
+      },
+      "/mockups/inspect": (_url: string, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        calls.inspect.push(body);
+        return jsonResponse({
+          files: sentNames(body).map((name) => ({
             name,
-            relativePath: `pavilio/mockups/2026-10-07-${name}`,
-            ok: true,
-          }));
-      return { ok: true, json: async () => ({ files }) } as Response;
-    }
-    return { ok: false, json: async () => ({}) } as Response;
-  });
-  vi.stubGlobal("fetch", fetchMock);
+            externalCount: externalCounts[name] ?? 0,
+          })),
+        });
+      },
+      "/mockups/import": (_url: string, init?: RequestInit) => {
+        const body = init?.body as FormData;
+        calls.importBodies.push(body);
+        const names = sentNames(body);
+        const files = importResult
+          ? importResult(names)
+          : names.map((name) => ({
+              name,
+              relativePath: `pavilio/mockups/2026-10-07-${name}`,
+              ok: true,
+            }));
+        return jsonResponse({ files });
+      },
+    },
+    failed,
+  );
   return calls;
 }
 
@@ -122,7 +126,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("dialog prefills slug from basename", async () => {
-    stubFetch();
+    stubMockupFetch();
     renderDialog([makeFile("Frame 12.png", { type: "image/png" }), makeFile("Hero Page.jpeg")]);
 
     const [png, jpeg] = rows();
@@ -144,7 +148,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("warns about external resources", async () => {
-    const calls = stubFetch({ externalCounts: { "landing.html": 3 } });
+    const calls = stubMockupFetch({ externalCounts: { "landing.html": 3 } });
     renderDialog([makeFile("landing.html", { type: "text/html" }), makeFile("a.png")]);
 
     const [html] = rows();
@@ -165,7 +169,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("rejects oversize and unsupported before upload", async () => {
-    const calls = stubFetch();
+    const calls = stubMockupFetch();
     const { onImported } = renderDialog([
       makeFile("huge.png", { size: 21 * MB }),
       makeFile("brief.pdf"),
@@ -190,7 +194,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("partial failure raises an alert", async () => {
-    stubFetch({
+    stubMockupFetch({
       importResult: (names) =>
         names.map((name) =>
           name === "fake.png"
@@ -212,7 +216,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("sends the edited slug as typed — the server normalises it", async () => {
-    const calls = stubFetch();
+    const calls = stubMockupFetch();
     renderDialog([makeFile("Frame 12.png")]);
 
     fireEvent.change(screen.getByTestId("mockup-import-slug"), {
@@ -223,7 +227,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("maps inspect results to the html row when an image precedes it", async () => {
-    const calls = stubFetch({ externalCounts: { "landing.html": 2 } });
+    const calls = stubMockupFetch({ externalCounts: { "landing.html": 2 } });
     renderDialog([makeFile("a.png"), makeFile("landing.html", { type: "text/html" })]);
 
     const [png, html] = rows();
@@ -238,7 +242,7 @@ describe("MockupImportDialog", () => {
 
   it("rejects files beyond the per-import limit and does not send them", async () => {
     expect(MOCKUP_MAX_FILES).toBe(50);
-    const calls = stubFetch();
+    const calls = stubMockupFetch();
     // An unsupported file does not use up one of the 50 slots.
     const files = [
       makeFile("brief.pdf"),
@@ -265,7 +269,7 @@ describe("MockupImportDialog", () => {
 
   it("rejects files past the 100 MB import total and does not send them", async () => {
     expect(MOCKUP_MAX_TOTAL_BYTES).toBe(100 * MB);
-    const calls = stubFetch();
+    const calls = stubMockupFetch();
     // 5 × 19 MB = 95 MB fit; the sixth crosses 100 MB; a 4 MB one still fits
     const files = [
       ...Array.from({ length: 6 }, (_, i) => makeFile(`big${i}.png`, { size: 19 * MB })),
@@ -351,7 +355,7 @@ describe("MockupImportDialog", () => {
 
   it("re-checks the date on confirm and stops when it changed", async () => {
     // Opened before the server's midnight, confirmed after it.
-    const calls = stubFetch({ serverDates: ["2026-10-07", "2026-10-08"] });
+    const calls = stubMockupFetch({ serverDates: ["2026-10-07", "2026-10-08"] });
     const { onImported } = renderDialog([makeFile("a.png")]);
     await waitFor(() =>
       expect(screen.getByTestId("mockup-import-prefix").textContent).toBe("2026-10-07-"),
@@ -375,7 +379,7 @@ describe("MockupImportDialog", () => {
   it("drops a shown date to the placeholder when the confirm-time re-check fails", async () => {
     // The shown date can no longer be vouched for (the server's midnight may
     // have passed), so it is not left on screen as if it were the saved name.
-    const calls = stubFetch({
+    const calls = stubMockupFetch({
       serverDates: ["2026-10-07", null],
       importResult: (names) =>
         names.map((name) => ({ name, relativePath: `pavilio/mockups/2026-10-08-${name}`, ok: true })),
@@ -395,7 +399,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("sends one import however fast confirm is clicked", async () => {
-    const calls = stubFetch();
+    const calls = stubMockupFetch();
     renderDialog([makeFile("a.png")]);
 
     await clickConfirm(2);
@@ -424,19 +428,19 @@ describe("MockupImportDialog", () => {
   });
 
   it("focuses the first name field on open", () => {
-    stubFetch();
+    stubMockupFetch();
     renderDialog([makeFile("brief.pdf"), makeFile("a.png"), makeFile("b.png")]);
     expect(document.activeElement).toBe(screen.getAllByTestId("mockup-import-slug")[0]);
   });
 
   it("focuses the dialog when no file can be named", () => {
-    stubFetch();
+    stubMockupFetch();
     renderDialog([makeFile("brief.pdf")]);
     expect(document.activeElement).toBe(screen.getByTestId("mockup-import-dialog"));
   });
 
   it("keeps Tab inside the dialog", async () => {
-    stubFetch();
+    stubMockupFetch();
     renderDialog([makeFile("a.png")]);
     const slug = screen.getByTestId("mockup-import-slug");
     const confirm = screen.getByTestId("mockup-import-confirm") as HTMLButtonElement;
@@ -452,7 +456,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("restores focus to the opener on close", () => {
-    stubFetch();
+    stubMockupFetch();
     const opener = document.createElement("button");
     document.body.appendChild(opener);
     opener.focus();
@@ -471,7 +475,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("escape closes the dialog without reaching other key handlers", () => {
-    stubFetch();
+    stubMockupFetch();
     const outerReact = vi.fn();
     const windowBubble = vi.fn();
     window.addEventListener("keydown", windowBubble);
@@ -533,7 +537,7 @@ describe("MockupImportDialog", () => {
   });
 
   it("cancel closes without uploading", () => {
-    const calls = stubFetch();
+    const calls = stubMockupFetch();
     const { onClose } = renderDialog([makeFile("Frame 12.png")]);
 
     fireEvent.click(screen.getByTestId("mockup-import-cancel"));
@@ -548,7 +552,7 @@ describe("MockupImportDialog lifecycle", () => {
   });
 
   it("revokes object URLs on unmount", () => {
-    stubFetch();
+    stubMockupFetch();
     const revoke = vi.fn();
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,

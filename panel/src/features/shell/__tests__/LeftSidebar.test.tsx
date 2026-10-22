@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   act,
+  cleanup,
   render,
   screen,
   fireEvent,
@@ -27,17 +28,10 @@ const speech = vi.hoisted(() => ({
   stateFor: (_sessionId: string) => "empty" as CellSpeechState,
 }));
 
-vi.mock("../../speech/useSpeechHost", async () => {
-  const { INERT_SPEECH_HOST } = await import(
-    "../../terminal/__tests__/speech.harness"
-  );
-  const host = {
-    ...INERT_SPEECH_HOST,
-    // Read through the holder so a test can swap the state before it renders.
-    stateFor: (sessionId: string) => speech.stateFor(sessionId),
-  };
-  return { useSpeechHost: () => host, default: () => host };
-});
+vi.mock("../../speech/useSpeechHost", () =>
+  // Read through the holder so a test can swap the state before it renders.
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useSpeechHost((sessionId) => speech.stateFor(sessionId))),
+);
 
 import LeftSidebar from "../LeftSidebar";
 import { writeLastPath } from "../lastPath";
@@ -47,6 +41,9 @@ import {
   _applyEventForTests,
   _resetForTests,
 } from "../../terminal/useTerminalActivityChannel";
+import { preferences } from "../../../preferences/declarations";
+import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import { __resetProjectColorsForTests } from "../../terminal/useProjectColors";
 
 // "vector" is the current project in most of these tests, matching the sibling
 // LeftSidebar.lastTab.test.tsx's mocked project. "atlas" is a second project
@@ -79,34 +76,38 @@ const sessions: SessionMeta[] = [
   },
 ];
 
-vi.mock("../../projects/useProjects", () => ({
-  useProjects: () => [
-    { name: "vector", repos: [] },
-    { name: "atlas", repos: [] },
-  ],
+/**
+ * The project list and the session list the sidebar is given, in a box so a
+ * describe below can pin its own shape without re-mocking the module. The
+ * file-level `beforeEach` puts back the default — "vector" and "atlas", and
+ * the `sessions` above — before every test.
+ */
+const shell = vi.hoisted(() => ({
+  projects: (): Array<{ name: string; repos: unknown[] }> => [],
+  sessions: (): SessionMeta[] => [],
 }));
-vi.mock("../../projects/useArchivedProjects", () => ({
-  useArchivedProjects: () => ({ archive: [], archivedNames: new Set() }),
-}));
-vi.mock("../../projects/useFavorites", () => ({
-  useFavorites: () => ({
-    isFavorite: () => false,
-    toggleFavorite: () => {},
-    favorites: [],
-  }),
-}));
-vi.mock("../../terminal/useAllTerminalSessions", () => ({
-  useAllTerminalSessions: () => ({ sessions, refresh: () => {} }),
-}));
-vi.mock("../../mobile-access/useMobileAccessStatus", () => ({
-  useMobileAccessStatus: () => ({ enabled: false }),
-}));
-vi.mock("../../auto-sync/useAutoSyncStatus", () => ({
-  useAutoSyncStatus: () => ({ status: null }),
-}));
-vi.mock("../../git/useGitStatus", () => ({
-  useGitStatus: () => ({ files: [], refetch: () => {} }),
-}));
+
+vi.mock("../../projects/useProjects", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useProjects(() => shell.projects())),
+);
+vi.mock("../../terminal/useAllTerminalSessions", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useAllTerminalSessions(() => shell.sessions())),
+);
+vi.mock("../../projects/useArchivedProjects", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useArchivedProjects()),
+);
+vi.mock("../../projects/useFavorites", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useFavorites()),
+);
+vi.mock("../../mobile-access/useMobileAccessStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useMobileAccessStatus()),
+);
+vi.mock("../../auto-sync/useAutoSyncStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useAutoSyncStatus()),
+);
+vi.mock("../../git/useGitStatus", () =>
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useGitStatus()),
+);
 
 const createTerminalSession = vi.fn();
 vi.mock("../../terminal/createTerminalSession", () => ({
@@ -174,6 +175,11 @@ beforeEach(() => {
   sessionStorage.clear();
   _resetForTests();
   speech.stateFor = () => "empty";
+  shell.projects = () => [
+    { name: "vector", repos: [] },
+    { name: "atlas", repos: [] },
+  ];
+  shell.sessions = () => sessions;
 });
 
 describe("LeftSidebar terminal-session row navigation", () => {
@@ -205,26 +211,6 @@ describe("LeftSidebar terminal-session row navigation", () => {
     setup();
     expandAndClickSession();
     expect(readTerminalFocus("vector")).toBe("s1");
-  });
-
-  it("the + new-terminal button still navigates straight to iterm (unchanged)", async () => {
-    createTerminalSession.mockResolvedValue({
-      id: "new1",
-      project: "vector",
-      name: "vector-2",
-      cwd: "/repo/vector",
-      pid: 9999,
-      createdAt: "2026-01-01T00:00:00.000Z",
-    } satisfies SessionMeta);
-    setup();
-    fireEvent.click(
-      screen.getByTestId("sidebar-project-create-terminal-vector"),
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId("location").textContent).toBe(
-        "/project/vector/iterm",
-      );
-    });
   });
 });
 
@@ -399,5 +385,189 @@ describe("LeftSidebar speech indicator", () => {
     expect(
       projectRow().querySelector('.terminal-led[data-state="busy"]'),
     ).not.toBeNull();
+  });
+});
+
+describe("LeftSidebar.mark", () => {
+  beforeEach(() => {
+    shell.sessions = () => [];
+    // Project colours and the preference store are module singletons the
+    // describes above already resolved; start from the state a file of its
+    // own would.
+    __resetProjectColorsForTests();
+    __resetPreferenceStoreForTests();
+  });
+
+  afterEach(() => {
+    cleanup();
+    __resetProjectColorsForTests();
+    localStorage.clear();
+    __resetPreferenceStoreForTests();
+  });
+
+  function setup() {
+    return render(
+      <MemoryRouter initialEntries={["/"]}>
+        <TerminalSpeechHost>
+          <LeftSidebar />
+        </TerminalSpeechHost>
+      </MemoryRouter>,
+    );
+  }
+
+  function row(name: string): HTMLElement {
+    return screen.getByTestId(`sidebar-project-expand-${name}`).parentElement as HTMLElement;
+  }
+
+  describe("LeftSidebar project mark", () => {
+    it("sidebar row leads with the project's mark tile", () => {
+      writePreference(preferences.projectMark, "lucide:rocket", "vector");
+      writePreference(preferences.projectColor, "#e06c75", "vector");
+      setup();
+      const r = row("vector");
+      const tile = r.querySelector("[data-testid='project-mark']") as HTMLElement;
+      expect(tile).toBeTruthy();
+      expect(tile.getAttribute("data-color")).toBe("#e06c75");
+      expect(tile.querySelector("[data-testid='project-mark-icon-rocket']")).toBeTruthy();
+      // Leads: before the project name link.
+      const link = screen.getByRole("link", { name: "vector" });
+      expect(tile.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("sidebar row without a mark shows the folder in the project colour", () => {
+      writePreference(preferences.projectColor, "#98c379", "atlas");
+      setup();
+      const tile = row("atlas").querySelector("[data-testid='project-mark']") as HTMLElement;
+      expect(tile.getAttribute("data-color")).toBe("#98c379");
+      expect(tile.querySelector("[data-testid='project-mark-icon-folder']")).toBeTruthy();
+    });
+  });
+});
+
+/**
+ * The unresolved-scope rule, at the one call site that read a preference
+ * without it.
+ *
+ * `storageKey` THROWS on a blank or whitespace scope — deliberately, so a
+ * missing project cannot key every project onto the same `key@`. The sidebar's
+ * hydration effect reads `shell.project.expanded` per project inside a
+ * `setExpandedState` updater, so a project whose name has not resolved would
+ * turn that throw into an unhandled render error. The pre-migration code
+ * answered `false` and carried on.
+ */
+describe("LeftSidebar.blankProject", () => {
+  beforeEach(() => {
+    // A blank name is what a project list mid-resolution looks like; the sidebar
+    // renders whatever `useProjects` hands it.
+    shell.projects = () => [{ name: "   ", repos: [] }, { name: "vector", repos: [] }];
+    shell.sessions = () => [];
+  });
+
+  describe("LeftSidebar with an unresolved project name", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
+
+    it("renders rather than throwing, and writes nothing for the blank scope", () => {
+      const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+        .__PAVILIO_PREFS__!;
+
+      expect(() =>
+        render(
+          <MemoryRouter initialEntries={["/"]}>
+            <TerminalSpeechHost>
+              <LeftSidebar />
+            </TerminalSpeechHost>
+          </MemoryRouter>,
+        ),
+      ).not.toThrow();
+
+      expect(screen.getByRole("link", { name: "vector" })).toBeInTheDocument();
+      // The blank scope produced no key at all — not `shell.project.expanded@`,
+      // and not a bare `shell.project.expanded`.
+      expect(Object.keys(doc).filter((k) => k.startsWith("shell.project.expanded"))).toEqual([]);
+    });
+  });
+});
+
+/**
+ * The same unresolved-scope rule as `LeftSidebar.blankProject` above, one
+ * step further out: a name that is `undefined` at runtime rather than blank.
+ *
+ * `LeftSidebar` guarded both of its scope sites with a bare `.trim()`, which
+ * throws a TypeError on `undefined` — during render in the hydration effect's
+ * `setExpandedState` updater, and inside the click handler on the way out.
+ * TypeScript types both as `string`, so only a test says otherwise. The rest
+ * of this change spells the guard `typeof x === "string" && x.trim() !== ""`;
+ * these two sites are the last to be brought into line.
+ *
+ * A describe of its own rather than a second case in `blankProject`, because
+ * each pins one shape of unresolved name in the `useProjects` box.
+ */
+describe("LeftSidebar.unresolvedProject", () => {
+  beforeEach(() => {
+    // `undefined` is what a route param that never resolved looks like once it
+    // has been through a `name ?? ""` chain the compiler believes.
+    shell.projects = () => [
+      { name: undefined as unknown as string, repos: [] },
+      { name: "vector", repos: [] },
+    ];
+    shell.sessions = () => [];
+  });
+
+  function prefsDoc(): Record<string, unknown> {
+    return (
+      (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+        .__PAVILIO_PREFS__ ?? {}
+    );
+  }
+
+  function expandedKeys(): string[] {
+    return Object.keys(prefsDoc()).filter((k) =>
+      k.startsWith("shell.project.expanded"),
+    );
+  }
+
+  describe("LeftSidebar with an undefined project name", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+      // React's list-key warning: `key={project.name}` is `undefined` for the
+      // fixture above. Expected, and not what these tests are about.
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function mount(): void {
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <TerminalSpeechHost>
+            <LeftSidebar />
+          </TerminalSpeechHost>
+        </MemoryRouter>,
+      );
+    }
+
+    it("hydrates rather than throwing, and writes nothing for the undefined scope", () => {
+      // The READ site: the hydration effect's `setExpandedState` updater.
+      expect(() => mount()).not.toThrow();
+
+      expect(screen.getByRole("link", { name: "vector" })).toBeInTheDocument();
+      expect(expandedKeys()).toEqual([]);
+    });
+
+    it("toggling the undefined project's row writes nothing and does not throw", () => {
+      // The WRITE site: `setExpanded`, reached from the row's chevron.
+      mount();
+
+      const toggle = screen.getByTestId("sidebar-project-expand-undefined");
+      expect(() => fireEvent.click(toggle)).not.toThrow();
+
+      expect(expandedKeys()).toEqual([]);
+    });
   });
 });

@@ -235,7 +235,7 @@ describe("scripts/panel process control", () => {
 
     expect(await waitUntil(() => panelLog().includes("stub panel listening"))).toBe(true);
     expect(panelLog()).toContain("stub pnpm start in panel");
-  }, 60000);
+  });
 
   it("start builds the bundle when dist is missing and aborts on a failed build", async () => {
     expect(existsSync(join(repo, "panel", "dist", "index.html"))).toBe(false);
@@ -258,7 +258,7 @@ describe("scripts/panel process control", () => {
     expect(failed.status).toBe(1);
     expect(failed.output).toContain("the bundle is broken");
     expect(portOpen(port)).toBe(false);
-  }, 90000);
+  });
 
   it("start reports an already-running panel with its pid and exits 0", async () => {
     expect(runPanel("start").status).toBe(0);
@@ -273,7 +273,7 @@ describe("scripts/panel process control", () => {
     expect(second.output).toContain(`http://localhost:${port}`);
     // The first server is still the one on the port: nothing was restarted.
     expect(listenerPid(port)).toBe(pid);
-  }, 60000);
+  });
 
   it("stop frees the port and is a no-op when nothing runs", async () => {
     expect(runPanel("start").status).toBe(0);
@@ -290,7 +290,7 @@ describe("scripts/panel process control", () => {
 
     expect(again.status).toBe(0);
     expect(again.output).toMatch(/not running|nothing to stop/i);
-  }, 60000);
+  });
 
   it("status distinguishes running from stopped with exit codes 0 and 3", async () => {
     const stopped = runPanel("status");
@@ -309,7 +309,7 @@ describe("scripts/panel process control", () => {
     expect(running.output).toContain(`port=${port}`);
     expect(running.output).toContain(`url=http://localhost:${port}`);
     expect(running.output).toContain("log=panel/.panel.log");
-  }, 60000);
+  });
 
   it("start names the port the panel really bound instead of claiming it never started", async () => {
     // Observed twice in a smoke run against a machine with 3010 already taken:
@@ -341,7 +341,7 @@ describe("scripts/panel process control", () => {
     const stopped = runPanel("stop", { PANEL_PORT: String(landed) });
     expect(stopped.status).toBe(0);
     expect(await waitUntil(() => !portOpen(landed), 15000)).toBe(true);
-  }, 90000);
+  });
 
   it("start still fails when the panel came up nowhere at all", async () => {
     // The other half: reading the log must not turn a dead panel into a
@@ -370,7 +370,7 @@ describe("scripts/panel process control", () => {
     expect(output).toMatch(/did not come up/i);
     expect(output).toContain("stub panel died on boot");
     expect(portOpen(port)).toBe(false);
-  }, 90000);
+  });
 
   it("root package.json start/stop/reboot/status delegate to scripts/panel", () => {
     const pkg = JSON.parse(readFileSync(ROOT_PACKAGE_JSON, "utf8")) as {

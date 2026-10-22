@@ -38,25 +38,18 @@ describe("buildTree", () => {
 });
 
 describe("parseViewPath", () => {
-  it("parses /view/project/subfolder", () => {
-    expect(parseViewPath("/view/my-work/notes")).toEqual({ project: "my-work", subfolder: "notes" });
-  });
-
-  it("parses /view/project only", () => {
-    expect(parseViewPath("/view/my-work")).toEqual({ project: "my-work", subfolder: "" });
-  });
-
-  it("returns null for non-view paths", () => {
-    expect(parseViewPath("/dashboard")).toBeNull();
-    expect(parseViewPath("/")).toBeNull();
+  it.each<[label: string, path: string, expected: { project: string; subfolder: string } | null]>([
+    ["parses /view/project/subfolder", "/view/my-work/notes", { project: "my-work", subfolder: "notes" }],
+    ["parses /view/project only", "/view/my-work", { project: "my-work", subfolder: "" }],
+    ["returns null for a non-view path", "/dashboard", null],
+    ["returns null for the root path", "/", null],
+    ["decodes an encoded project and subfolder", "/view/my%20work/my%20notes/a.md", { project: "my work", subfolder: "my notes" }],
+  ])("%s", (_label, path, expected) => {
+    expect(parseViewPath(path)).toEqual(expected);
   });
 });
 
 describe("encoded /view/ routes", () => {
-  it("parseViewPath decodes project and subfolder", () => {
-    expect(parseViewPath("/view/my%20work/my%20notes/a.md")).toEqual({ project: "my work", subfolder: "my notes" });
-  });
-
   it("activeViewPath matches the raw file path behind an encoded URL", () => {
     expect(activeViewPath("/view/p/notes/a%20b%23c.md", null)).toBe("/view/p/notes/a b#c.md");
     expect(activeViewPath("/project/p", "p/notes/x.md")).toBe("/view/p/notes/x.md");

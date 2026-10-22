@@ -16,83 +16,22 @@
  * focused element and a real second cell holding a real unheard utterance, the
  * claim has something to be false about.
  */
-import { act, renderHook } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-const synth = vi.hoisted(() => {
-  const buffers = new Map<string, ArrayBuffer>();
-  const bufferText = new Map<ArrayBuffer, string>();
-  const blobText = new Map<Blob, string>();
-  const cache = new Map<string, Promise<ArrayBuffer>>();
+import {
+  emitUtterance,
+  played,
+  resetSpeechHarness,
+  response,
+  selectSynth,
+  settle,
+  synthMock,
+  useWebSocketMock,
+} from "./speech.harness";
 
-  function bufferFor(text: string): ArrayBuffer {
-    const existing = buffers.get(text);
-    if (existing) return existing;
-    const buffer = new Uint8Array([text.length % 255]).buffer;
-    buffers.set(text, buffer);
-    bufferText.set(buffer, text);
-    return buffer;
-  }
-
-  function synthesizeSpeech(text: string, options: { voice?: string } = {}): Promise<ArrayBuffer> {
-    const key = `${options.voice ?? ""}::${text}`;
-    const cached = cache.get(key);
-    if (cached) return cached;
-    const promise = Promise.resolve(bufferFor(text));
-    cache.set(key, promise);
-    return promise;
-  }
-
-  return {
-    synthesizeSpeech,
-    prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
-      void synthesizeSpeech(text, options).catch(() => {});
-    },
-    toSpeechBlob: (buffer: ArrayBuffer): Blob => {
-      const blob = new Blob([buffer], { type: "audio/mpeg" });
-      blobText.set(blob, bufferText.get(buffer) ?? "unknown");
-      return blob;
-    },
-    textForBlob: (blob: Blob): string => blobText.get(blob) ?? "unknown",
-    reset: (): void => {
-      cache.clear();
-    },
-  };
-});
-
-vi.mock("../synth", () => ({
-  synthesizeSpeech: synth.synthesizeSpeech,
-  prefetchSpeech: synth.prefetchSpeech,
-  toSpeechBlob: synth.toSpeechBlob,
-  isSpeechSynthesized: () => false,
-  SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
-}));
-
-const ws = vi.hoisted(() => {
-  const setters = new Set<(message: Record<string, unknown> | null) => void>();
-  return {
-    setters,
-    emit(message: Record<string, unknown>): void {
-      for (const set of setters) set(message);
-    },
-  };
-});
-
-vi.mock("../../realtime/useWebSocket", async () => {
-  const React = await import("react");
-  return {
-    useWebSocket: () => {
-      const [lastMessage, setLastMessage] = React.useState<Record<string, unknown> | null>(null);
-      React.useEffect(() => {
-        ws.setters.add(setLastMessage);
-        return () => {
-          ws.setters.delete(setLastMessage);
-        };
-      }, []);
-      return { lastMessage };
-    },
-  };
-});
+vi.mock("../synth", () => synthMock());
+vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
 
 import type { MediaSessionTransportTarget } from "../useMediaSessionTransport";
 import { useMediaSessionTransport, TRANSPORT_SEEK_SECONDS } from "../useMediaSessionTransport";
@@ -482,9 +421,6 @@ describe("useMediaSessionTransport", () => {
 /* The real host                                                             */
 /* ------------------------------------------------------------------------ */
 
-const elements: HTMLMediaElement[] = [];
-/** The `src` of every unit the player actually started, in order. */
-const played: string[] = [];
 /** The `src` of every unit the player suspended, in order. */
 const pausedSrcs: string[] = [];
 
@@ -497,77 +433,16 @@ Object.defineProperty(HTMLMediaElement.prototype, "duration", {
   },
 });
 
-async function drain(): Promise<void> {
-  for (let i = 0; i < 100; i += 1) await Promise.resolve();
-}
-
-async function settle(action: () => void): Promise<void> {
-  await act(async () => {
-    action();
-    await drain();
-  });
-}
-
-async function emitUtterance(
-  sessionId: string,
-  id: string,
-  text: string,
-  at = Date.now(),
-): Promise<void> {
-  await act(async () => {
-    ws.emit({ type: "speech-utterance", id, sessionId, text, at });
-    await drain();
-  });
-}
-
-/** A response of `count` units, each comfortably inside the packing window. */
-function response(count: number, word = "Paragraph"): string {
-  return Array.from({ length: count }, (_, i) => {
-    const head = `${word} ${String(i).padStart(2, "0")} `;
-    return head + "x".repeat(238 - head.length) + ".";
-  }).join("\n\n");
-}
-
 describe("the transport acts on the playback, never on the focused cell", () => {
   let session: FakeMediaSession;
 
   beforeEach(() => {
-    synth.reset();
-    elements.length = 0;
-    played.length = 0;
+    resetSpeechHarness();
+    selectSynth("simple", "never");
     pausedSrcs.length = 0;
-    ws.setters.clear();
-    localStorage.clear();
     document.body.innerHTML = "";
     session = installMediaSession();
 
-    global.fetch = vi.fn(
-      async () => ({ ok: true, json: async () => ({ utterances: [] }) }) as Response,
-    ) as unknown as typeof fetch;
-
-    Object.defineProperty(URL, "createObjectURL", {
-      configurable: true,
-      writable: true,
-      value: (blob: Blob) => `blob:${synth.textForBlob(blob)}`,
-    });
-    Object.defineProperty(URL, "revokeObjectURL", {
-      configurable: true,
-      writable: true,
-      value: () => {},
-    });
-
-    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
-      this: HTMLMediaElement,
-    ) {
-      const src = this.getAttribute("src");
-      // The unlock trick plays a source-less element on purpose; it is not a
-      // unit starting, so it does not belong in the playback order.
-      if (src) {
-        elements.push(this);
-        played.push(src);
-      }
-      return Promise.resolve();
-    });
     vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (
       this: HTMLMediaElement,
     ) {

@@ -3,6 +3,17 @@ import { renderHook, act } from "@testing-library/react";
 
 import { useReadyPulseWindow, READY_PULSE_MS } from "../useReadyPulseWindow";
 
+type Props = { active: boolean; key: string | null };
+
+const mount = (initialProps: Props) =>
+  renderHook(({ active, key }: Props) => useReadyPulseWindow(active, key), { initialProps });
+
+const advance = (ms: number): void => {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+};
+
 describe("useReadyPulseWindow", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -12,101 +23,52 @@ describe("useReadyPulseWindow", () => {
     vi.useRealTimers();
   });
 
-  it("pulses immediately when active with a key", () => {
-    const { result } = renderHook(() => useReadyPulseWindow(true, "u1"));
-
-    expect(result.current).toBe(true);
-  });
-
-  it("stops after READY_PULSE_MS", () => {
-    const { result } = renderHook(() => useReadyPulseWindow(true, "u1"));
-
-    act(() => {
-      vi.advanceTimersByTime(READY_PULSE_MS - 1);
-    });
+  it("pulses at once when active with a key, and stops after READY_PULSE_MS", () => {
+    const { result } = mount({ active: true, key: "u1" });
     expect(result.current).toBe(true);
 
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
+    advance(READY_PULSE_MS - 1);
+    expect(result.current).toBe(true);
+
+    advance(1);
     expect(result.current).toBe(false);
   });
 
-  it("a new key restarts the window", () => {
-    const { result, rerender } = renderHook(
-      ({ key }: { key: string | null }) => useReadyPulseWindow(true, key),
-      { initialProps: { key: "u1" as string | null } },
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(READY_PULSE_MS);
-    });
+  it.each([
+    { trigger: "a new key", via: null, to: { active: true, key: "u2" } },
+    {
+      trigger: "re-entering active for the same key",
+      via: { active: false, key: "u1" },
+      to: { active: true, key: "u1" },
+    },
+  ])("$trigger restarts a full window", ({ via, to }) => {
+    const { result, rerender, unmount } = mount({ active: true, key: "u1" });
+    advance(READY_PULSE_MS);
     expect(result.current).toBe(false);
 
-    rerender({ key: "u2" });
+    if (via) rerender(via);
+    rerender(to);
     expect(result.current).toBe(true);
 
     // The fresh window is a full one, not the remainder of the first.
-    act(() => {
-      vi.advanceTimersByTime(READY_PULSE_MS - 1);
-    });
+    advance(READY_PULSE_MS - 1);
     expect(result.current).toBe(true);
 
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(result.current).toBe(false);
-  });
-
-  it("inactive is off at once", () => {
-    const { result, rerender } = renderHook(
-      ({ active }: { active: boolean }) => useReadyPulseWindow(active, "u1"),
-      { initialProps: { active: true } },
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(3_000);
-    });
-    expect(result.current).toBe(true);
-
-    rerender({ active: false });
-    expect(result.current).toBe(false);
-  });
-
-  it("is off with a null key", () => {
-    const { result } = renderHook(() => useReadyPulseWindow(true, null));
-
-    expect(result.current).toBe(false);
-  });
-
-  it("re-entering active restarts for the same key", () => {
-    const { result, rerender } = renderHook(
-      ({ active }: { active: boolean }) => useReadyPulseWindow(active, "u1"),
-      { initialProps: { active: true } },
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(READY_PULSE_MS);
-    });
-    expect(result.current).toBe(false);
-
-    rerender({ active: false });
-    rerender({ active: true });
-    expect(result.current).toBe(true);
-  });
-
-  it("unmount clears the timer", () => {
-    const clear = vi.spyOn(globalThis, "clearTimeout");
-    const { unmount } = renderHook(() => useReadyPulseWindow(true, "u1"));
-
+    // A timer that fired after unmount would warn about updating an unmounted
+    // hook, so the running window's timer goes with it.
     unmount();
-    expect(clear).toHaveBeenCalled();
-
-    // A fired timer after unmount would warn about updating an unmounted hook.
-    act(() => {
-      vi.advanceTimersByTime(READY_PULSE_MS * 2);
-    });
     expect(vi.getTimerCount()).toBe(0);
-    clear.mockRestore();
+  });
+
+  it.each([
+    { off: "inactive", to: { active: false, key: "u1" } },
+    { off: "a null key", to: { active: true, key: null } },
+  ])("is off at once when $off, mid-window", ({ to }) => {
+    const { result, rerender } = mount({ active: true, key: "u1" });
+    advance(3_000);
+    expect(result.current).toBe(true);
+
+    rerender(to);
+    expect(result.current).toBe(false);
   });
 });

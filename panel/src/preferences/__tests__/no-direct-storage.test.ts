@@ -341,31 +341,19 @@ describe("the exemption window", () => {
     expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([1]);
   });
 
-  it("still excuses a call whose own statement wraps onto the marker line", () => {
+  /**
+   * The other side of the window: it must still reach PAST the identifier's
+   * own line, or every wrapped call to a pending key turns red. Pins
+   * `STATEMENT_LOOKAHEAD > 1`.
+   */
+  it("still excuses a wrapped call whose key sits on the next line", () => {
     const source = [
-      "const focused = localStorage.getItem(",
+      "const v = localStorage.getItem(",
       "  `panel-example-pending-${project}`,",
       ");",
     ].join("\n");
 
     expect(offendingLines(source, /\blocalStorage\b/, FIXTURE_PENDING)).toEqual([]);
-  });
-
-  /**
-   * The only assertion left that the SHIPPED list is empty.
-   *
-   * "names the task that owns every raw key still allowed" used to say it too,
-   * and was removed here: with `PENDING_MIGRATIONS` empty both of its sides
-   * reduced to `expect([]).toEqual([])`, so it could not fail. Everything it
-   * covered is covered twice over — the emptiness by this test, the marker
-   * machinery by the two `FIXTURE_PENDING` tests above, and "a raw key is an
-   * offence" by every tree case below.
-   */
-  it("excuses nothing at all now that the shipped list is empty", () => {
-    const source = ["const focused = localStorage.getItem(", '  "anything",', ");"].join("\n");
-
-    expect(PENDING_MIGRATIONS).toEqual([]);
-    expect(offendingLines(source, /\blocalStorage\b/)).toEqual([1]);
   });
 });
 

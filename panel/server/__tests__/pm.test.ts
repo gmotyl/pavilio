@@ -141,7 +141,7 @@ describe("scripts/pm toolchain resolution", () => {
       .split(":")
       .filter((p) => p === pinned);
     expect(entries).toHaveLength(1);
-  }, 30000);
+  });
 
   it("falls through a stale pin to the newest nvm version", () => {
     writeLocalEnv(`PAVILIO_NODE_BIN="${join(sandbox, "gone")}"`);
@@ -165,7 +165,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(status).toBe(0);
     expect(field(output, "NODE_BIN_DIR")).toBe(newest);
     expect(field(output, "PATH")).not.toContain(join(sandbox, "gone"));
-  }, 30000);
+  });
 
   // pm_version_gt is hand-rolled (no `sort -V`: an external, and BSD sort has no
   // -V), so it gets a table of its own rather than only the fixture above.
@@ -213,7 +213,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(cases.map(([a, b], i) => `${a} > ${b} : ${actual[i]}`)).toEqual(
       cases.map(([a, b], i) => `${a} > ${b} : ${expected[i]}`),
     );
-  }, 30000);
+  });
 
   it("prefers pnpm, then corepack pnpm", () => {
     const withPnpm = join(sandbox, "with-pnpm");
@@ -253,7 +253,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(field(corepackRun.output, "PM_CMD")).toBe("corepack pnpm");
     expect(corepackRun.output).toContain("corepack pnpm -C panel run build");
     expect(corepackRun.output).not.toMatch(/^npm /m);
-  }, 30000);
+  });
 
   it("fails with a pnpm install hint when neither pnpm nor corepack exists, never npm", () => {
     const npmOnly = join(sandbox, "npm-only");
@@ -276,7 +276,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(existsSync(npmCalled)).toBe(false);
     // The resolver has no npm spelling left to fall back to.
     expect(readFileSync(PM_SCRIPT, "utf8")).not.toMatch(/\bnpm\b/);
-  }, 30000);
+  });
 
   it("pm_in spells an explicit run so a pnpm built-in cannot shadow the script", () => {
     // `setup`, `update` and `restart` are pnpm's own subcommands, and `up` and
@@ -298,7 +298,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(output).toContain("pnpm -C . run sync");
     // Never the shorthand: that is the spelling pnpm claims for itself.
     expect(output).not.toMatch(/pnpm -C \. (bootstrap|sync)\b/);
-  }, 30000);
+  });
 
   it("pm_install installs dependencies with the resolved pnpm command", () => {
     const withPnpm = join(sandbox, "with-pnpm");
@@ -328,7 +328,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(field(corepackRun.output, "PM_CMD")).toBe("corepack pnpm");
     expect(corepackRun.output).toContain("corepack pnpm -C panel install");
     expect(corepackRun.output).not.toContain("run install");
-  }, 30000);
+  });
 
   it("fails with a message naming pnpm bootstrap when no node is found", () => {
     // No local env file, an empty HOME and a PATH with nothing on it.
@@ -339,7 +339,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(output).toContain("pnpm bootstrap");
     expect(output).toContain(repo);
     expect(output).not.toContain("NODE_BIN_DIR=");
-  }, 30000);
+  });
 
   it("probes PNPM_HOME, nvm, fnm and volta in the documented order", () => {
     const pnpmHome = join(sandbox, "pnpm-home");
@@ -375,7 +375,7 @@ describe("scripts/pm toolchain resolution", () => {
     const voltaOnly = runHarness();
     expect(voltaOnly.status).toBe(0);
     expect(field(voltaOnly.output, "NODE_BIN_DIR")).toBe(voltaBin);
-  }, 30000);
+  });
 
   it("survives an nvm.sh that trips nounset and moves on to the next probe", () => {
     // Every entry point that sources pm runs under `set -u`
@@ -411,7 +411,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(field(output, "SURVIVED")).toBe("yes");
     expect(field(output, "NOUNSET")).toBe("on");
     expect(field(output, "NODE_BIN_DIR")).toBe(fnmNode);
-  }, 30000);
+  });
 
   it("short-circuits every probe when node is already on PATH", () => {
     // Step 2 of the documented order: a normal terminal already carrying a
@@ -433,7 +433,7 @@ describe("scripts/pm toolchain resolution", () => {
     expect(field(output, "PM")).toBe("pnpm");
     expect(field(output, "NODE_BIN_DIR")).toBe(stubBin);
     expect(field(output, "PATH")).toBe(stubBin);
-  }, 30000);
+  });
 
   it("reads a pin written with CRLF line endings and a BOM", () => {
     // scripts/start-panel-windows.local.env is edited on the Windows side, where
@@ -453,7 +453,7 @@ describe("scripts/pm toolchain resolution", () => {
     const bom = runHarness();
     expect(bom.status).toBe(0);
     expect(field(bom.output, "NODE_BIN_DIR")).toBe(pinned);
-  }, 30000);
+  });
 
   it("honours an exported PAVILIO_NODE_BIN whether or not the env file exists", () => {
     const exported = join(sandbox, "exported-bin");
@@ -479,5 +479,5 @@ describe("scripts/pm toolchain resolution", () => {
     const fileWins = runHarness(DEFAULT_BODY, { PAVILIO_NODE_BIN: exported });
     expect(fileWins.status).toBe(0);
     expect(field(fileWins.output, "NODE_BIN_DIR")).toBe(filePin);
-  }, 30000);
+  });
 });

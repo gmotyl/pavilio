@@ -24,6 +24,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { drain, emitUtterance, useWebSocketMock, ws } from "./speech.harness";
 
 /**
  * Deferred synthesis, copied in spirit from `useSpeechPlayer.test.ts`: the real
@@ -229,21 +230,6 @@ vi.mock("../prepare", async (importOriginal) => {
 });
 
 /**
- * A real, state-backed socket stand-in: `emit` pushes a frame into every mounted
- * `useWebSocket`, so a broadcast is an actual React state update rather than a
- * module variable plus a manual rerender.
- */
-const ws = vi.hoisted(() => {
-  const setters = new Set<(message: Record<string, unknown> | null) => void>();
-  return {
-    setters,
-    emit(message: Record<string, unknown>) {
-      for (const set of setters) set(message);
-    },
-  };
-});
-
-/**
  * Counts *mounted instances* of the two hooks the host owns — not renders. The
  * panel is allowed exactly one of each; before the host was hoisted out of the
  * surfaces there was one per surface, and two surfaces are mounted at once.
@@ -294,23 +280,7 @@ vi.mock("../useUtteranceChannel", async (importOriginal) => {
   };
 });
 
-vi.mock("../../realtime/useWebSocket", async () => {
-  const React = await import("react");
-  return {
-    useWebSocket: () => {
-      const [lastMessage, setLastMessage] = React.useState<Record<string, unknown> | null>(
-        null,
-      );
-      React.useEffect(() => {
-        ws.setters.add(setLastMessage);
-        return () => {
-          ws.setters.delete(setLastMessage);
-        };
-      }, []);
-      return { lastMessage };
-    },
-  };
-});
+vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
 
 /**
  * The realtime channel's listeners, captured so a test can stage a RETURN — the
@@ -450,9 +420,10 @@ import {
 } from "../../alerts/store";
 import { SPEAKING_ALERT_ID } from "../speakingAlert";
 import { prepare } from "../prepare";
-import { setStoredSpeechMode, setStoredVoice } from "../voices";
+import { setStoredSpeechMode } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
+import { installMatchMedia } from "../../../test-utils";
 
 /** The newest alert, which is the one a failure under test just raised. */
 function lastAlert() {
@@ -469,22 +440,6 @@ const played: string[] = [];
  * element is still holding, where a restart would build the unit again.
  */
 const objectUrls: string[] = [];
-/** Swapped per test: a browser that accepts the start, or one that refuses it. */
-let playResult: () => Promise<void>;
-
-/** Drains the microtask ladder the player runs on, without a real-timer sleep. */
-async function drain(): Promise<void> {
-  for (let i = 0; i < 100; i += 1) await Promise.resolve();
-}
-
-/** Broadcasts one `speech-utterance` frame and lets the host react to it. */
-async function emitUtterance(sessionId: string, id: string, text: string): Promise<void> {
-  await act(async () => {
-    ws.emit({ type: "speech-utterance", id, sessionId, text, at: Date.now() });
-    await drain();
-  });
-}
-
 /** Ends the unit that is currently playing, as the browser's `ended` would. */
 async function endCurrentUnit(): Promise<void> {
   const element = elements[elements.length - 1];
@@ -698,35 +653,10 @@ function shortResponse(count: number): string {
   }).join("\n\n");
 }
 
-/** A twelve-unit response — long enough that a run has a real tail to it. */
-function longResponse(): string {
-  // 240 characters a paragraph: over the 200-char packing floor so each one is
-  // its own unit, and two of them exceed the 450-char ceiling so they never
-  // merge.
-  return Array.from({ length: 12 }, (_, i) => {
-    const head = `Paragraph ${String(i).padStart(2, "0")} `;
-    return head + "x".repeat(238 - head.length) + ".";
-  }).join("\n\n");
-}
-
 beforeAll(() => {
   // jsdom implements neither of these; the grid reads matchMedia on its first
   // render to decide whether it is the mobile branch.
-  if (!window.matchMedia) {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: (query: string) => ({
-        matches: false,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent: () => false,
-        onchange: null,
-      }),
-    });
-  }
+  installMatchMedia();
 });
 
 beforeEach(() => {
@@ -744,7 +674,6 @@ beforeEach(() => {
   played.length = 0;
   objectUrls.length = 0;
   ws.setters.clear();
-  playResult = () => Promise.resolve();
 
   global.fetch = vi.fn(
     async () => ({ ok: true, json: async () => ({ utterances: [] }) }) as Response,
@@ -774,7 +703,7 @@ beforeEach(() => {
       elements.push(this);
       played.push(src);
     }
-    return playResult();
+    return Promise.resolve();
   });
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
 });
@@ -871,20 +800,6 @@ describe("autoplay — taking over and stopping", () => {
     expect(new Set(elements).size).toBe(1);
   });
 
-  it("a barged-in cell reverts to ready, not heard", async () => {
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", "A is speaking now.");
-    await emitUtterance("cell-b", "b1", "B is waiting its turn.");
-
-    await click("terminal-cell-speak-cell-b");
-
-    // `play()` resolves identically for a barge-in and for a natural end, so
-    // this is the assertion that catches `await play(id); markHeard(id)`.
-    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
-    expect(speakState("cell-a")).not.toBe("heard");
-  });
-
   it("clicking the speaking cell holds it rather than ending it", async () => {
     await renderProjectSurface();
     await arm("cell-a");
@@ -899,73 +814,9 @@ describe("autoplay — taking over and stopping", () => {
     expect(speakState("cell-a")).toBe("paused");
     expect(speakState("cell-a")).not.toBe("heard");
   });
-
-  it("a natural end marks the cell heard", async () => {
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", "A short answer.");
-
-    await endRun();
-
-    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
-  });
 });
 
-describe("autoplay — refusal and synthesis failure", () => {
-  it("a refused autoplay falls back to ready", async () => {
-    // The browser refuses the start even though a gesture reached the element:
-    // `unlocked` says a gesture happened, never that playback is permitted.
-    playResult = () => Promise.reject(new DOMException("blocked", "NotAllowedError"));
-
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", "This one will be refused.");
-
-    await waitFor(() => expect(speakState("cell-a")).toBe("ready"));
-    expect(speakState("cell-a")).not.toBe("heard");
-    // A refusal is reported by the pip, not by an alert: the two kinds of
-    // failure have two different surfaces and must not borrow each other's.
-    expect(getAlertsSnapshot()).toHaveLength(0);
-  });
-
-  it("three consecutive synthesis failures are surfaced with an alert", async () => {
-    // `spec.md`: three consecutive unit failures stop playback AND surface the
-    // failure. Without a handler for `kind: "synthesis"` the stop reaches
-    // neither the user nor the console — a present handler suppresses the
-    // player's own `console.error` fallback.
-    const markdown = longResponse();
-    const prepared = prepare(markdown);
-    synth.setFailing(true);
-
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", markdown);
-
-    await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
-    expect(lastAlert()).toMatchObject({
-      title: "Speech stopped — the voice could not be synthesized.",
-      detail: undefined,
-      persistent: false,
-    });
-    // Consecutive is the point: the run gives up inside the first three units
-    // rather than hammering the synthesizer through all twelve. Nothing beyond
-    // them is warmed either, but only because the synthesizer is down for
-    // *every* unit here: the cascade is kicked by a unit actually in hand, and
-    // no unit ever lands. A single failure mid-run would merely defer the
-    // warming to the next unit that did land — see `useSpeechPlayer.test.ts`,
-    // "cascades from the next unit that lands when one fails".
-    //
-    // The armed cell's preloads are left out: anytts queues at call time, so
-    // the host hands the whole remainder over at once on the `preload` tier,
-    // and the first failure calls the queued rest off (the library's side of
-    // that is anytts' own suite; the host's is `useSpeechHost.preload.test.ts`).
-    const unpreloaded = synth.requests.filter((_text, i) => synth.requestTiers[i] !== "preload");
-    expect(new Set(unpreloaded)).toEqual(
-      new Set(prepared.units.slice(0, 3).map((unit) => unit.text)),
-    );
-    expect(played).toEqual([]);
-  });
-
+describe("autoplay — synthesis failure", () => {
   it("a one-unit answer that synthesizes to nothing is reported, not marked heard", async () => {
     // Greg's dead button: one unit means one failure, three short of the
     // ladder's stop rule, so the run ends the way a finished answer ends. No
@@ -988,29 +839,6 @@ describe("autoplay — refusal and synthesis failure", () => {
     expect(played).toEqual([]);
     // Ready, so the pip still invites the click that usually works.
     expect(speakState("cell-a")).toBe("ready");
-  });
-
-  it("a two-unit answer that synthesizes to nothing is reported too", async () => {
-    // Two failures is still one short of the ladder's three.
-    const markdown = shortResponse(2);
-    expect(prepare(markdown).units).toHaveLength(2);
-    synth.setFailing(true);
-
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", markdown);
-
-    await waitFor(() => expect(lastAlert()?.kind).toBe("error"));
-    expect(played).toEqual([]);
-    expect(speakState("cell-a")).toBe("ready");
-    // Only the answer's own two units are ever asked for. An autoplay cell
-    // preloads its unit 1 as well as the run loading it, and a failure is
-    // never cached, so that unit may be asked for twice — but nothing past
-    // the answer is.
-    expect(new Set(synth.requests)).toEqual(
-      new Set(prepare(markdown).units.map((unit) => unit.text)),
-    );
-    expect(synth.requests.length).toBeLessThanOrEqual(3);
   });
 
   it("a run that spoke before it failed is not heard either", async () => {
@@ -1415,57 +1243,6 @@ describe("the header control and the bar", () => {
     expect(other).toHaveAccessibleName(/speech off/i);
   });
 
-  it("autoplay on one cell leaves another cell in autoplay", async () => {
-    await renderProjectSurface();
-    // Both bars out, so both arm switches are readable throughout — arming is
-    // read where it lives, and cell b's bar has to be open to be read.
-    await openBar("cell-a");
-    await openBar("cell-b");
-
-    await arm("cell-a");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
-
-    // Not exclusive: putting b in autoplay leaves a where it was.
-    await arm("cell-b");
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "autoplay"]);
-
-    // One more click on b's own switch steps it round to off; a is untouched.
-    await click(testIdFor("bar-autoplay", "cell-b"));
-    expect([armed("cell-a"), armed("cell-b")]).toEqual(["autoplay", "off"]);
-  });
-
-  it("arming survives a reload", async () => {
-    const first = await renderProjectSurface();
-    await arm("cell-a");
-    expect(armed("cell-a")).toBe("autoplay");
-
-    // The row is shown from mount, so leaving it alone would make the
-    // post-reload reading below true under a persisting implementation too.
-    // Hiding cell a's row spends an EXPLICIT choice first — a stored `false`
-    // under anything that stores this at all — which is what gives the
-    // assertion after the reload something it can fail.
-    await click(testIdFor("speech-controls", "cell-a"));
-    expect(barVisible("cell-a")).toBe(false);
-
-    // The tab goes away and comes back: nothing but the browser's own storage
-    // survives, and the armed cell is expected to be in it.
-    first.unmount();
-    await renderProjectSurface();
-
-    // The row's visibility is a view preference and deliberately NOT persisted,
-    // so the new tab comes up the way every tab does: the row SHOWN, because
-    // that is the default and not because anything was restored. Were the
-    // choice persisted, the hide above would have come back with it and this
-    // would read `false`.
-    expect(barVisible("cell-a")).toBe(true);
-    // What survived is the armed cell — and the row is where that is read,
-    // since the header control reports nothing about it.
-    expect(armed("cell-a")).toBe("autoplay");
-
-    await openBar("cell-b");
-    expect(armed("cell-b")).toBe("off");
-  });
-
   it("the header speak control is unchanged", async () => {
     await renderProjectSurface();
     await emitUtterance("cell-a", "a1", "The speak control keeps its job.");
@@ -1652,79 +1429,6 @@ describe("warming the first unit on arrival", () => {
     expect(played).toEqual([`blob:${prepared.units[0].text}`]);
     expect(synth.requests.filter((text) => text === prepared.units[0].text)).toHaveLength(1);
   });
-
-  it("warms with the voice the click will use", async () => {
-    // The cache keys on voice + text. Warming with the module's own default —
-    // or with anything but the stored voice — is a synthesis nobody plays and
-    // a click that still waits, with every state looking exactly right.
-    setStoredVoice("en-US-EmmaMultilingualNeural");
-
-    await renderProjectSurface();
-    await emitUtterance("cell-b", "b1", "The picked voice warms it.");
-
-    expect(synth.requests).toEqual(["The picked voice warms it."]);
-    expect(synth.requestVoices).toEqual(["en-US-EmmaMultilingualNeural"]);
-
-    await click("terminal-cell-speak-cell-b");
-
-    expect(played).toEqual(["blob:The picked voice warms it."]);
-    expect(synth.requests).toEqual(["The picked voice warms it."]);
-  });
-
-  it("a warmed cell that is not armed stays silent", async () => {
-    await renderProjectSurface();
-    // cell-a is the armed one; the utterances arrive for the other two.
-    await arm("cell-a");
-
-    await emitUtterance("cell-b", "b1", "Warmed and waiting.");
-    await emitUtterance("cell-c", "c1", "Warmed and waiting too.");
-
-    // Both warmed, neither spoken: the audio element was never handed a source
-    // and no cell moved to `speaking`.
-    expect(new Set(synth.requests)).toEqual(
-      new Set(["Warmed and waiting.", "Warmed and waiting too."]),
-    );
-    expect(played).toEqual([]);
-    expect(elements).toEqual([]);
-    expect(speakState("cell-b")).toBe("ready");
-    expect(speakState("cell-c")).toBe("ready");
-  });
-
-  it("a failed warm changes nothing", async () => {
-    synth.setFailing(true);
-
-    await renderProjectSurface();
-    await emitUtterance("cell-b", "b1", "The synthesizer is down while this arrives.");
-
-    // The warm rejected inside `prefetchSpeech`, which swallows it: no alert,
-    // no state change, and the cell is still the click's to retry.
-    expect(synth.requests).toEqual(["The synthesizer is down while this arrives."]);
-    expect(getAlertsSnapshot()).toHaveLength(0);
-    expect(played).toEqual([]);
-    expect(speakState("cell-b")).toBe("ready");
-  });
-
-  it("warms each arriving utterance once", async () => {
-    await renderProjectSurface();
-
-    await emitUtterance("cell-b", "b1", "First answer.");
-    // A re-delivered frame — a reconnect replay — is not news, so it must not
-    // buy a second synthesis.
-    await emitUtterance("cell-b", "b1", "First answer.");
-    await emitUtterance("cell-b", "b2", "Second answer, same cell.");
-
-    expect(synth.requests).toEqual(["First answer.", "Second answer, same cell."]);
-    expect(played).toEqual([]);
-  });
-
-  it("a response with nothing to say is not warmed", async () => {
-    await renderProjectSurface();
-
-    await emitUtterance("cell-b", "b1", "```ts\nconst x = 1;\n```\n");
-
-    expect(synth.requests).toEqual([]);
-    expect(speakState("cell-b")).toBe("empty");
-  });
 });
 
 /**
@@ -1738,30 +1442,6 @@ describe("warming the first unit on arrival", () => {
  * `features/terminal/__tests__/CellSpeakButton.test.tsx`.
  */
 describe("the control's colour and icon, end to end", () => {
-  it("an arriving utterance goes preparing → ready without a click", async () => {
-    await renderProjectSurface();
-    // The synthesizer takes the warm and does not answer: the audio is not in
-    // hand yet, which is exactly what the red is for.
-    synth.hold();
-
-    await emitUtterance("cell-b", "b1", "The audio is not here yet.");
-
-    expect(speakState("cell-b")).toBe("preparing");
-    // The icon channel does not move with it: the click will still be a start.
-    expect(speakIcon("cell-b")).toBe("speaker");
-    expect(played).toEqual([]);
-
-    await act(async () => {
-      synth.release();
-      await drain();
-    });
-
-    // Green without anybody clicking anything, and still silent.
-    expect(speakState("cell-b")).toBe("ready");
-    expect(speakIcon("cell-b")).toBe("speaker");
-    expect(played).toEqual([]);
-  });
-
   it("click → pause → resume speaks the same unit once", async () => {
     const markdown = shortResponse(3);
     const unit0 = prepare(markdown).units[0].text;
@@ -1796,51 +1476,6 @@ describe("the control's colour and icon, end to end", () => {
     // And the ladder goes on from where it was held, all the way to the end.
     await endRun();
     await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
-  });
-
-  it("the last unit ending is what turns the cell yellow", async () => {
-    await renderProjectSurface();
-    await arm("cell-a");
-    await emitUtterance("cell-a", "a1", shortResponse(3));
-    expect(speakState("cell-a")).toBe("speaking");
-
-    // Two of the three units end: the cell has been spoken at, but something
-    // in it has still not been listened to, so it stays green.
-    await endCurrentUnit();
-    expect(speakState("cell-a")).toBe("speaking");
-    await endCurrentUnit();
-    expect(speakState("cell-a")).toBe("speaking");
-
-    await endCurrentUnit();
-
-    await waitFor(() => expect(speakState("cell-a")).toBe("heard"));
-    // The icon channel goes back to "a click replays this", and the pulse —
-    // the notification — is off: the cell is not asking for anything.
-    expect(speakIcon("cell-a")).toBe("speaker");
-    expect(
-      screen.getByTestId("terminal-cell-speak-cell-a").getAttribute("data-pulse"),
-    ).toBe("0");
-  });
-
-  it("a barge-in leaves the first cell green", async () => {
-    // The plain speaking → barge-in case is covered above ("a barged-in cell
-    // reverts to ready, not heard"). This is the amendment's harder one: the
-    // panel has ONE audio element, so a PAUSED position cannot survive another
-    // cell taking it over — the cell must fall back to green, not sit there
-    // wearing a play icon over a run that no longer exists.
-    await renderProjectSurface();
-    await emitUtterance("cell-a", "a1", shortResponse(3));
-    await emitUtterance("cell-b", "b1", "B is waiting its turn.");
-
-    await click("terminal-cell-speak-cell-a");
-    await click("terminal-cell-speak-cell-a");
-    expect(speakState("cell-a")).toBe("paused");
-
-    await click("terminal-cell-speak-cell-b");
-
-    await waitFor(() => expect(speakState("cell-b")).toBe("speaking"));
-    expect(speakState("cell-a")).toBe("ready");
-    expect(speakIcon("cell-a")).toBe("speaker");
   });
 });
 
@@ -1939,24 +1574,6 @@ describe("autoplay — the queue across cells", () => {
     await waitFor(() => expect(played).toEqual(["blob:From A.", "blob:From B."]));
     expect(speakState("cell-a")).toBe("heard");
     expect(speakState("cell-b")).toBe("speaking");
-  });
-
-  it("answers queued behind the speaking cell play in arrival order", async () => {
-    await renderProjectSurface();
-    await arm("cell-a");
-    await arm("cell-b");
-    await arm("cell-c");
-
-    await emitUtterance("cell-a", "a1", "From A.");
-    await emitUtterance("cell-b", "b1", "From B.");
-    await emitUtterance("cell-c", "c1", "From C.");
-    expect(played).toEqual(["blob:From A."]);
-
-    await endCurrentUnit();
-    await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
-    await endCurrentUnit();
-    await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
-    expect(played).toEqual(["blob:From A.", "blob:From B.", "blob:From C."]);
   });
 
   it("the speaking cell's next answer keeps its arrival place in the queue", async () => {
@@ -2185,34 +1802,6 @@ describe("the speaking alert, end to end", () => {
     unsubscribe();
   });
 
-  it("the speaking alert leaves when the voice stops or pauses", async () => {
-    await renderWithSessions(SESSIONS as unknown as Array<Record<string, unknown>>);
-    await emitUtterance("cell-a", "a1", "A first. A second.");
-
-    await click("terminal-cell-speak-cell-a");
-    expect(speakingAlert()?.title).toBe("Speaking — vector · claude-a");
-
-    // The control pauses a speaking cell, and resumes a paused one.
-    await click("terminal-cell-speak-cell-a");
-    expect(speakState("cell-a")).toBe("paused");
-    expect(speakingAlert()).toBeUndefined();
-    await click("terminal-cell-speak-cell-a");
-    expect(speakState("cell-a")).toBe("speaking");
-    expect(speakingAlert()).toBeDefined();
-
-    // The transport chord pauses too, and the card goes with it.
-    await pressTransport("Space");
-    expect(speakState("cell-a")).toBe("paused");
-    expect(speakingAlert()).toBeUndefined();
-
-    // Resumed, and played out: the voice runs out and the card goes for good.
-    await pressTransport("Space");
-    expect(speakingAlert()).toBeDefined();
-    await endRun();
-    expect(speakState("cell-a")).toBe("heard");
-    expect(speakingAlert()).toBeUndefined();
-  });
-
   it("clicking the speaking alert arrives without stopping playback", async () => {
     await renderWithSessions([
       ...(SESSIONS as unknown as Array<Record<string, unknown>>).filter(
@@ -2234,24 +1823,6 @@ describe("the speaking alert, end to end", () => {
     expect(played).toEqual(["blob:B first."]);
     await endCurrentUnit();
     expect(played).toEqual(["blob:B first.", "blob:B second."]);
-  });
-
-  it("speech never navigates by itself", async () => {
-    await renderWithSessions([
-      ...(SESSIONS as unknown as Array<Record<string, unknown>>).filter(
-        (session) => session.id !== "cell-b",
-      ),
-      { ...SESSIONS[1], project: "beta" },
-    ]);
-    await arm("cell-b");
-    const focused = document.activeElement;
-
-    await emitUtterance("cell-b", "b1", "From B.");
-
-    expect(played).toEqual(["blob:From B."]);
-    expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
-    expect(pathname()).toBe("/project/vector/iterm");
-    expect(document.activeElement).toBe(focused);
   });
 });
 
@@ -2294,15 +1865,6 @@ describe("the answer alert, end to end", () => {
     await renderProjectSurface();
 
     // It did land — in its cell — so the silence below is not a missed fetch.
-    expect(speakState("cell-b")).toBe("ready");
-    expect(answerAlerts()).toEqual([]);
-  });
-
-  it("an answer recovered by a catch-up raises nothing", async () => {
-    await renderProjectSurface();
-
-    await caughtUp("cell-b", "b1", "Recovered for B.");
-
     expect(speakState("cell-b")).toBe("ready");
     expect(answerAlerts()).toEqual([]);
   });

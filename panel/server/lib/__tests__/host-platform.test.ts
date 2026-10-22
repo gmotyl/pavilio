@@ -9,24 +9,14 @@ const notWsl = () => false;
 const isWslStub = () => true;
 
 describe("detectHostPlatform", () => {
-  it("reports darwin on macOS", () => {
-    expect(detectHostPlatform("darwin", notWsl)).toBe("darwin");
-  });
-
-  it("reports win32 on Windows", () => {
-    expect(detectHostPlatform("win32", notWsl)).toBe("win32");
-  });
-
-  it("reports linux on a plain Linux host", () => {
-    expect(detectHostPlatform("linux", notWsl)).toBe("linux");
-  });
-
-  it("reports wsl when the Linux host is a WSL distro", () => {
-    expect(detectHostPlatform("linux", isWslStub)).toBe("wsl");
-  });
-
-  it("falls back to linux on an unrecognized platform", () => {
-    expect(detectHostPlatform("freebsd", notWsl)).toBe("linux");
+  it.each<[string, NodeJS.Platform, () => boolean, string]>([
+    ["darwin on macOS", "darwin", notWsl, "darwin"],
+    ["win32 on Windows", "win32", notWsl, "win32"],
+    ["linux on a plain Linux host", "linux", notWsl, "linux"],
+    ["wsl when the Linux host is a WSL distro", "linux", isWslStub, "wsl"],
+    ["linux as the fallback on an unrecognized platform", "freebsd", notWsl, "linux"],
+  ])("reports %s", (_label, platform, wsl, expected) => {
+    expect(detectHostPlatform(platform, wsl)).toBe(expected);
   });
 });
 

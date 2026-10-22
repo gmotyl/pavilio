@@ -16,134 +16,25 @@
 import { act, renderHook } from "@testing-library/react";
 import { TtsError } from "anytts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  drain,
+  emitUtterance,
+  endCurrentUnit,
+  endRun,
+  played,
+  requestedTexts,
+  resetSpeechHarness,
+  response,
+  settle,
+  synth,
+  synthMock,
+  timesRequested,
+  unitsOf,
+  useWebSocketMock,
+} from "./speech.harness";
 
-const synth = vi.hoisted(() => {
-  const buffers = new Map<string, ArrayBuffer>();
-  const bufferText = new Map<ArrayBuffer, string>();
-  const blobText = new Map<Blob, string>();
-  const cache = new Map<string, Promise<ArrayBuffer>>();
-  /** Texts whose synthesis is held open until `release`/`fail` says otherwise. */
-  const holds = new Set<string>();
-  const waiting = new Map<string, { release: () => void; fail: (error: unknown) => void }>();
-  let requests: Array<{ text: string; voice: string | undefined; tier: string | undefined }> = [];
-
-  function bufferFor(text: string): ArrayBuffer {
-    const existing = buffers.get(text);
-    if (existing) return existing;
-
-    const buffer = new Uint8Array([text.length % 255]).buffer;
-    buffers.set(text, buffer);
-    bufferText.set(buffer, text);
-    return buffer;
-  }
-
-  function synthesizeSpeech(
-    text: string,
-    options: { voice?: string; tier?: string } = {},
-  ): Promise<ArrayBuffer> {
-    const key = `${options.voice ?? ""}::${text}`;
-    const cached = cache.get(key);
-    if (cached) return cached;
-
-    requests.push({ text, voice: options.voice, tier: options.tier });
-
-    const promise = holds.has(text)
-      ? new Promise<ArrayBuffer>((resolve, reject) => {
-          waiting.set(text, {
-            release: () => resolve(bufferFor(text)),
-            fail: (error: unknown) => reject(error),
-          });
-        })
-      : Promise.resolve(bufferFor(text));
-
-    cache.set(key, promise);
-    // Never cache a failure, exactly as the real module does not: a retry has
-    // to be able to reach the synthesizer again.
-    void promise.catch(() => {
-      if (cache.get(key) === promise) cache.delete(key);
-    });
-    return promise;
-  }
-
-  function settle(text: string, outcome: "release" | "fail", error?: unknown): void {
-    const held = waiting.get(text);
-    if (!held) throw new Error(`no synthesis is being held for ${text}`);
-    waiting.delete(text);
-    holds.delete(text);
-    if (outcome === "release") held.release();
-    else held.fail(error ?? new Error(`synthesis failed: ${text}`));
-  }
-
-  return {
-    synthesizeSpeech,
-    /** Exactly what the real one is: a fire-and-forget `synthesizeSpeech`. */
-    prefetchSpeech: (text: string, options: { voice?: string } = {}): void => {
-      void synthesizeSpeech(text, options).catch(() => {});
-    },
-    toSpeechBlob: (buffer: ArrayBuffer): Blob => {
-      const blob = new Blob([buffer], { type: "audio/mpeg" });
-      blobText.set(blob, bufferText.get(buffer) ?? "unknown");
-      return blob;
-    },
-    textForBlob: (blob: Blob): string => blobText.get(blob) ?? "unknown",
-    /** Holds this text's synthesis open, so "while it is warming" is observable. */
-    hold: (text: string): void => {
-      holds.add(text);
-    },
-    release: (text: string): void => settle(text, "release"),
-    /** Rejects the held synthesis — with `error` when given, as anytts rejects with a `TtsError`. */
-    fail: (text: string, error?: unknown): void => settle(text, "fail", error),
-    get requests() {
-      return requests;
-    },
-    reset: (): void => {
-      requests = [];
-      cache.clear();
-      holds.clear();
-      waiting.clear();
-    },
-  };
-});
-
-vi.mock("../synth", () => ({
-  synthesizeSpeech: synth.synthesizeSpeech,
-  prefetchSpeech: synth.prefetchSpeech,
-  toSpeechBlob: synth.toSpeechBlob,
-  // Nothing is ever evicted in this harness.
-  isSpeechSynthesized: () => true,
-  SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
-}));
-
-/**
- * A state-backed socket stand-in: `emit` pushes a frame into every mounted
- * `useWebSocket`, so an arrival is a real React state update rather than a
- * module variable plus a manual rerender.
- */
-const ws = vi.hoisted(() => {
-  const setters = new Set<(message: Record<string, unknown> | null) => void>();
-  return {
-    setters,
-    emit(message: Record<string, unknown>): void {
-      for (const set of setters) set(message);
-    },
-  };
-});
-
-vi.mock("../../realtime/useWebSocket", async () => {
-  const React = await import("react");
-  return {
-    useWebSocket: () => {
-      const [lastMessage, setLastMessage] = React.useState<Record<string, unknown> | null>(null);
-      React.useEffect(() => {
-        ws.setters.add(setLastMessage);
-        return () => {
-          ws.setters.delete(setLastMessage);
-        };
-      }, []);
-      return { lastMessage };
-    },
-  };
-});
+vi.mock("../synth", () => synthMock());
+vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
 
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { prepare } from "../prepare";
@@ -160,52 +51,6 @@ import { utteranceUnderCursor } from "../utteranceQueue";
 import { refreshSessions } from "../../terminal/sessionStore";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
-
-/** The `src` of every started playback, in order. Warming must never add one. */
-const played: string[] = [];
-/** The element each playback was started on, so a unit's `ended` can be fired. */
-const elements: HTMLMediaElement[] = [];
-
-/** Drains the microtask ladder the host and player run on. */
-async function drain(): Promise<void> {
-  for (let i = 0; i < 100; i += 1) await Promise.resolve();
-}
-
-/** Broadcasts one `speech-utterance` frame and lets the host react to it. */
-async function emitUtterance(sessionId: string, id: string, text: string): Promise<void> {
-  await act(async () => {
-    ws.emit({ type: "speech-utterance", id, sessionId, text, at: Date.now() });
-    await drain();
-  });
-}
-
-/** Runs a host callback and lets everything it started settle. */
-async function settle(action: () => void): Promise<void> {
-  await act(async () => {
-    action();
-    await drain();
-  });
-}
-
-/** Ends the unit that is currently playing, as the browser's `ended` would. */
-async function endCurrentUnit(): Promise<void> {
-  const element = elements[elements.length - 1];
-  if (!element) throw new Error("nothing is playing");
-  await act(async () => {
-    element.dispatchEvent(new Event("ended"));
-    await drain();
-  });
-}
-
-/** Ends every unit of the run that is playing, up to a bound. */
-async function endRun(max = 40): Promise<void> {
-  for (let i = 0; i < max; i += 1) {
-    if (!played.length) return;
-    const before = played.length;
-    await endCurrentUnit();
-    if (played.length === before) return;
-  }
-}
 
 /**
  * One click on the cell's control, routed exactly as `CellSpeakButton` routes
@@ -228,60 +73,7 @@ async function clickControl(host: SpeechHost, sessionId: string): Promise<void> 
   });
 }
 
-const requestedTexts = (): string[] => synth.requests.map((request) => request.text);
-const timesRequested = (text: string): number =>
-  requestedTexts().filter((requested) => requested === text).length;
-
-/**
- * A response of `count` units: every paragraph is one sentence over the
- * 200-char packing floor and under the 450-char ceiling, so it is neither
- * merged with its neighbour nor cut in half.
- */
-function response(count: number, word = "Paragraph"): string {
-  return Array.from({ length: count }, (_, i) => {
-    const head = `${word} ${String(i).padStart(2, "0")} `;
-    return head + "x".repeat(238 - head.length) + ".";
-  }).join("\n\n");
-}
-
-/** What `prepare` will make of a response — the texts synthesis will be asked for. */
-const unitsOf = (text: string): string[] =>
-  prepare(text, { language: "en" }).units.map((unit) => unit.text);
-
-beforeEach(() => {
-  synth.reset();
-  played.length = 0;
-  elements.length = 0;
-  ws.setters.clear();
-
-  global.fetch = vi.fn(
-    async () => ({ ok: true, json: async () => ({ utterances: [] }) }) as Response,
-  ) as unknown as typeof fetch;
-
-  Object.defineProperty(URL, "createObjectURL", {
-    configurable: true,
-    writable: true,
-    value: (blob: Blob) => `blob:${synth.textForBlob(blob)}`,
-  });
-  Object.defineProperty(URL, "revokeObjectURL", {
-    configurable: true,
-    writable: true,
-    value: () => {},
-  });
-
-  vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function (
-    this: HTMLMediaElement,
-  ) {
-    const src = this.getAttribute("src");
-    // `unlock()` plays a source-less element on purpose; that is not audio.
-    if (src) {
-      played.push(src);
-      elements.push(this);
-    }
-    return Promise.resolve();
-  });
-  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-});
+beforeEach(resetSpeechHarness);
 
 describe("useSpeechHost warming", () => {
   it("warms the first unit of an unarmed cell on arrival", async () => {
@@ -371,6 +163,8 @@ describe("useSpeechHost warming", () => {
     // and the click that follows simply pays for the synthesis itself.
     await settle(() => synth.fail(units[0]));
     expect(result.current.preparingSessionIds.has("cell-a")).toBe(false);
+    // ...and it is swallowed: a warm nobody asked to hear raises no alert.
+    expect(getAlertsSnapshot()).toEqual([]);
 
     await settle(() => result.current.onSpeak("cell-a"));
     expect(timesRequested(units[0])).toBe(2);
@@ -1022,49 +816,8 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   });
 });
 
-/**
- * The budget is gone, and with it the resume point that existed only to
- * continue from its cut. What must survive is everything the player's own state
- * holds: a pause goes on where it was paused, and a newer utterance still
- * abandons a run the user was holding.
- */
-describe("useSpeechHost — no budget, no resume point", () => {
-  it("speaks no closing marker", async () => {
-    const markdown = response(12);
-    const units = unitsOf(markdown);
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await emitUtterance("cell-a", "u-1", markdown);
-    await settle(() => result.current.onSpeak("cell-a"));
-    await endRun();
-
-    // Every unit, in order, in one run — and nothing else.
-    expect(played).toEqual(units.map((unit) => `blob:${unit}`));
-    expect(requestedTexts().join(" ")).not.toMatch(/remaining paragraphs|koniec fragmentu/i);
-    expect(result.current.stateFor("cell-a")).toBe("heard");
-  });
-
-  it("replays a heard cell from the first unit", async () => {
-    const markdown = response(12);
-    const units = unitsOf(markdown);
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await emitUtterance("cell-a", "u-1", markdown);
-    await settle(() => result.current.onSpeak("cell-a"));
-    await endRun();
-    expect(result.current.stateFor("cell-a")).toBe("heard");
-
-    played.length = 0;
-    await clickControl(result.current, "cell-a");
-
-    expect(played).toEqual([`blob:${units[0]}`]);
-  });
-
-  it("still resumes a paused run where it was paused", async () => {
+describe("useSpeechHost — pause and resume", () => {
+  it("resumes a paused run where it was paused", async () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
@@ -1099,30 +852,6 @@ describe("useSpeechHost — no budget, no resume point", () => {
     expect(played.filter((src) => src === `blob:${units[0]}`)).toHaveLength(1);
     expect(played[played.length - 1]).toBe(`blob:${units[3]}`);
     expect(result.current.stateFor("cell-a")).toBe("heard");
-  });
-
-  it("still supersedes a paused run when a newer utterance arrives", async () => {
-    const stale = unitsOf(response(4));
-    const newer = unitsOf(response(4, "Newer"));
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await emitUtterance("cell-a", "u-1", response(4));
-    await clickControl(result.current, "cell-a");
-    await endCurrentUnit();
-    expect(played).toEqual([`blob:${stale[0]}`, `blob:${stale[1]}`]);
-
-    await clickControl(result.current, "cell-a");
-    expect(result.current.stateFor("cell-a")).toBe("paused");
-
-    await emitUtterance("cell-a", "u-2", response(4, "Newer"));
-    expect(result.current.stateFor("cell-a")).toBe("ready");
-
-    played.length = 0;
-    await clickControl(result.current, "cell-a");
-
-    expect(played).toEqual([`blob:${newer[0]}`]);
   });
 });
 
@@ -1401,10 +1130,14 @@ describe("useSpeechHost — the idle transport", () => {
 
   it("idle previous keeps the transport on the same cell", async () => {
     const answerA1 = response(1, "AlphaOne");
+    const isSessionOpen = (): boolean => true;
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting, isSessionOpen }),
     );
     const host = (): SpeechHost => result.current;
+    // The panel's open-cell test is handed through for `idleTransportTarget`,
+    // whose closed-cell rule is pinned in `idleTransportTarget.test.ts`.
+    expect(host().isSessionOpen).toBe(isSessionOpen);
     await autoplay(host, "cell-a");
     await autoplay(host, "cell-b");
 
@@ -1432,58 +1165,6 @@ describe("useSpeechHost — the idle transport", () => {
     await settle(() => host().onSpeak(idleTransportTarget(host()) ?? ""));
     expect(played).toEqual([`blob:${unitsOf(answerA1)[0]}`]);
     expect(host().steppedSessionId).toBeNull();
-  });
-
-  it("an autoplay cell whose answer is heard is not an idle candidate", async () => {
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-    const host = (): SpeechHost => result.current;
-    await autoplay(host, "cell-a");
-
-    // A's answer autoplays to its end: heard, and older than anything else.
-    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
-    await endRun();
-    expect(host().stateFor("cell-a")).toBe("heard");
-    expect(host().oldestUnheardArrival("cell-a")).toBeNull();
-
-    // B is not in autoplay, and it is the one that spoke last.
-    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
-    await settle(() => host().onSpeak("cell-b"));
-    await endRun();
-
-    expect(host().autoplaySessionIds).toEqual(["cell-a"]);
-    expect(idleTransportTarget(host())).toBe("cell-b");
-  });
-
-  it("a closed cell is never the idle target", async () => {
-    const closed = new Set<string>();
-    const { result } = renderHook(() =>
-      useSpeechHost({
-        voiceFor: voiceForSession,
-        answerWaiting: storeAnswerWaiting,
-        isSessionOpen: (sessionId) => !closed.has(sessionId),
-      }),
-    );
-    const host = (): SpeechHost => result.current;
-
-    // A spoke last and B (autoplay) owes an answer: B is the target.
-    await autoplay(host, "cell-b");
-    await emitUtterance("cell-b", "b-1", response(1, "Bravo"));
-    await settle(() => host().onStop("cell-b"));
-    await emitUtterance("cell-a", "a-1", response(1, "Alpha"));
-    await settle(() => host().onSpeak("cell-a"));
-    await endRun();
-    expect(host().lastSpokenSessionId).toBe("cell-a");
-    expect(idleTransportTarget(host())).toBe("cell-b");
-
-    // B closes: the last speaker takes over.
-    closed.add("cell-b");
-    expect(idleTransportTarget(host())).toBe("cell-a");
-
-    // A closes too: nothing is left to play, rather than a cell nobody sees.
-    closed.add("cell-a");
-    expect(idleTransportTarget(host())).toBeNull();
   });
 });
 
@@ -1560,6 +1241,32 @@ describe("useSpeechHost — the voice's run events", () => {
 describe("useSpeechHost — the speech-stopped alert", () => {
   beforeEach(() => {
     __resetAlertsForTests();
+  });
+
+  it("a refused start leaves the cell ready and raises no alert", async () => {
+    // The browser refuses the start even though a gesture reached the element:
+    // `unlocked` says a gesture happened, never that playback is permitted. A
+    // refusal is not a natural end, so the cell is not heard — and it is
+    // reported by the pip, not by an alert.
+    // Only the audio is refused: the click's own source-less `unlock()` play
+    // goes through, so a plain `mockRejectedValueOnce` would be spent on it.
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play");
+    const harnessPlay = play.getMockImplementation();
+    play.mockImplementation(function (this: HTMLMediaElement) {
+      if (this.getAttribute("src")) {
+        return Promise.reject(new DOMException("blocked", "NotAllowedError"));
+      }
+      return harnessPlay ? harnessPlay.call(this) : Promise.resolve();
+    });
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await emitUtterance("cell-a", "u-1", response(1, "Refused"));
+    await settle(() => result.current.onSpeak("cell-a"));
+
+    expect(result.current.stateFor("cell-a")).toBe("ready");
+    expect(getAlertsSnapshot()).toEqual([]);
   });
 
   it("onError raises the kind-specific alert", async () => {

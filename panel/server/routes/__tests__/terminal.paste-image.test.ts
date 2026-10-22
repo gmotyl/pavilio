@@ -8,7 +8,6 @@ import {
   beforeEach,
   vi,
 } from "vitest";
-import express from "express";
 import request from "supertest";
 import { randomBytes } from "crypto";
 import {
@@ -29,15 +28,14 @@ import {
 } from "fs";
 import { tmpdir, userInfo } from "os";
 import { basename, join } from "path";
+import { configMock, makeApp } from "../../test-kit";
 
 const state = vi.hoisted(() => ({
   ids: [] as string[],
   owner: undefined as { uid: number; gid: number } | undefined,
 }));
 
-vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/unused" }),
-}));
+vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
   listSessions: vi.fn(() => state.ids.map((id) => ({ id }))),
@@ -51,13 +49,6 @@ vi.mock("../../lib/terminal-manager", () => ({
 }));
 
 import terminalRouter, { pasteDir, sweepOldPastes } from "../terminal";
-
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/terminal", terminalRouter);
-  return app;
-}
 
 // 1x1 transparent PNG
 const PNG = Buffer.from(
@@ -174,7 +165,7 @@ describe("POST /api/terminal/paste-image", () => {
     chmodSync(tmp, 0o700);
     const chown = vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
@@ -200,7 +191,7 @@ describe("POST /api/terminal/paste-image", () => {
     state.owner = { uid: panel.uid, gid: panel.gid };
     const chown = vi.spyOn(fsp, "chown");
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
@@ -214,12 +205,12 @@ describe("POST /api/terminal/paste-image", () => {
   it("rejects missing and unknown sessions without output", async () => {
     const before = pasteNames();
 
-    const missing = await request(makeApp())
+    const missing = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
     expect(missing.status).toBe(400);
 
-    const unknown = await request(makeApp())
+    const unknown = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-gone")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
@@ -229,14 +220,14 @@ describe("POST /api/terminal/paste-image", () => {
   });
 
   it("rejects a missing file", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1");
     expect(res.status).toBe(400);
   });
 
   it("rejects non-image uploads", async () => {
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", Buffer.from("hello"), {
@@ -250,7 +241,7 @@ describe("POST /api/terminal/paste-image", () => {
     const before = pasteNames();
     vi.spyOn(fsp, "chown").mockRejectedValue(new Error("EPERM"));
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
@@ -264,7 +255,7 @@ describe("POST /api/terminal/paste-image", () => {
   it("names the paste with cryptographic entropy", async () => {
     vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
@@ -283,7 +274,7 @@ describe("POST /api/terminal/paste-image", () => {
     const open = vi.spyOn(fsp, "open");
     const chmod = vi.spyOn(fsp, "chmod");
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" });
@@ -311,7 +302,7 @@ describe("POST /api/terminal/paste-image", () => {
     symlinkSync(decoy, linked);
     process.env.PAVILIO_PASTE_DIR = linked;
 
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .field("sessionId", "sess-1")
       .attach("image", PNG, {
@@ -335,7 +326,7 @@ describe("POST /api/terminal/paste-image", () => {
       chownSync(foreign, panel.uid + 1, panel.gid + 1);
       process.env.PAVILIO_PASTE_DIR = foreign;
 
-      const res = await request(makeApp())
+      const res = await request(makeApp(terminalRouter, "/api/terminal"))
         .post("/api/terminal/paste-image")
         .field("sessionId", "sess-1")
         .attach("image", PNG, {
@@ -358,7 +349,7 @@ describe("POST /api/terminal/paste-image", () => {
     vi.spyOn(fsp, "chown").mockResolvedValue(undefined);
 
     // imagePaste.ts appends the file first and the session id second.
-    const res = await request(makeApp())
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
       .post("/api/terminal/paste-image")
       .attach("image", PNG, { filename: "paste.png", contentType: "image/png" })
       .field("sessionId", "sess-1");

@@ -5,7 +5,7 @@ import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import TerminalDrawer from "../TerminalDrawer";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
-import { MOBILE_QUERY } from "../../../lib/breakpoints";
+import { installMatchMedia } from "../../../test-utils";
 
 /**
  * The drawer's open intent, width and side are PORTABLE: the shape of the
@@ -22,8 +22,10 @@ const sidePref = () => readPreference(preferences.terminalDrawerSide);
 
 vi.mock("../ProjectTerminalsSurface", () => ({
   __esModule: true,
-  default: ({ projectName }: { projectName: string }) => (
-    <div data-testid="surface">{projectName}</div>
+  default: ({ projectName, fill }: { projectName: string; fill?: boolean }) => (
+    <div data-testid="surface" data-fill={String(Boolean(fill))}>
+      {projectName}
+    </div>
   ),
 }));
 
@@ -101,6 +103,9 @@ describe("TerminalDrawer", () => {
     expect(drawer).toBeInTheDocument();
     expect(drawer).toHaveStyle({ width: "520px" });
     expect(screen.getByTestId("surface")).toHaveTextContent("vector");
+    // The drawer sizes the surface itself, so it asks for fill mode: no
+    // viewport-height (100dvh / --vv-height) cap inside a docked panel.
+    expect(screen.getByTestId("surface")).toHaveAttribute("data-fill", "true");
   });
 
   it("closes when the close button is clicked", () => {
@@ -450,19 +455,7 @@ describe("TerminalDrawer", () => {
    */
   it("stands down entirely on a phone", () => {
     const native = Object.getOwnPropertyDescriptor(window, "matchMedia");
-    const mql = {
-      matches: true,
-      media: MOBILE_QUERY,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-    };
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      configurable: true,
-      value: () => mql,
-    });
+    installMatchMedia({ mobile: true });
     try {
       renderAt("/project/vector/memo", true, 480, "left");
       expect(screen.queryByTestId("terminal-drawer")).not.toBeInTheDocument();

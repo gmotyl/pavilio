@@ -54,48 +54,39 @@ describe("appendReconnectMetric", () => {
     });
     const rec = JSON.parse(readFileSync(file(), "utf8").trim());
     expect(rec.trigger).toBe("manual");
-
-    expect(normalizeTrigger("manual")).toBe("manual");
-    expect(normalizeTrigger("disconnect")).toBe("disconnect");
-    expect(normalizeTrigger("auto-blank")).toBe("auto-blank");
-    expect(normalizeTrigger("Disconnect")).toBe("manual");
-    expect(normalizeTrigger(undefined)).toBe("manual");
-    expect(normalizeTrigger(7)).toBe("manual");
   });
 
-  it("passes auto-activate through unchanged", () => {
-    expect(normalizeTrigger("auto-activate")).toBe("auto-activate");
-  });
-
-  it("passes manual-all through unchanged", () => {
-    expect(normalizeTrigger("manual-all")).toBe("manual-all");
-  });
-
-  it("normalizeTrigger accepts auto-return", () => {
-    // The return-driven reopens this enum member names must stay apart from
-    // `manual`: a click and a reopen the user never asked for are the two
-    // things this column exists to tell apart.
-    expect(normalizeTrigger("auto-return")).toBe("auto-return");
-    appendReconnectMetric({ sessionId: "s1", trigger: "auto-return" });
-    const rec = JSON.parse(readFileSync(file(), "utf8").trim());
-    expect(rec.trigger).toBe("auto-return");
-  });
-
-  it("normalizeTrigger still coerces an unknown trigger to manual", () => {
-    // Widening the enum must not turn the column into free text: an older or
-    // hand-rolled client's stray value still lands as `manual`.
-    expect(normalizeTrigger("auto-activated")).toBe("manual");
-    expect(normalizeTrigger("auto-returned")).toBe("manual");
-    expect(normalizeTrigger("all")).toBe("manual");
+  // The return-driven reopens (`auto-return`) must stay apart from `manual`:
+  // a click and a reopen the user never asked for are the two things this
+  // column exists to tell apart. Widening the enum must not turn the column
+  // into free text either: an older or hand-rolled client's stray value
+  // still lands as `manual`.
+  it.each<[unknown, string]>([
+    ["manual", "manual"],
+    ["disconnect", "disconnect"],
+    ["auto-blank", "auto-blank"],
+    ["auto-activate", "auto-activate"],
+    ["manual-all", "manual-all"],
+    ["auto-return", "auto-return"],
+    ["Disconnect", "manual"],
+    [undefined, "manual"],
+    [7, "manual"],
+    ["auto-activated", "manual"],
+    ["auto-returned", "manual"],
+    ["all", "manual"],
+  ])("normalizeTrigger(%j) is %s", (input, expected) => {
+    expect(normalizeTrigger(input)).toBe(expected);
   });
 
   it("keeps the recognised triggers verbatim", () => {
     appendReconnectMetric({ sessionId: "a", trigger: "disconnect" });
     appendReconnectMetric({ sessionId: "b", trigger: "auto-blank" });
+    appendReconnectMetric({ sessionId: "c", trigger: "auto-return" });
     const lines = readFileSync(file(), "utf8").trim().split("\n");
     expect(lines.map((l) => JSON.parse(l).trigger)).toEqual([
       "disconnect",
       "auto-blank",
+      "auto-return",
     ]);
   });
 

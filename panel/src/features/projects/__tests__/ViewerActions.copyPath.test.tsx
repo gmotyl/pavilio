@@ -134,13 +134,6 @@ async function copied(testId: string): Promise<string> {
 }
 
 describe("ViewerActions copy path", () => {
-  it("copy path copies the workspace-relative path", async () => {
-    render(
-      <ViewerActions absolutePath={NOTE_ABSOLUTE} relativePath={NOTE_RELATIVE} />,
-    );
-    expect(await copied("file-viewer-copy-path")).toBe(NOTE_RELATIVE);
-  });
-
   it("copy absolute copies the absolute path", async () => {
     render(
       <ViewerActions absolutePath={NOTE_ABSOLUTE} relativePath={NOTE_RELATIVE} />,
@@ -173,29 +166,6 @@ describe("ViewerActions copy path", () => {
     expect(openInVSCode).toHaveBeenCalledWith(NOTE_ABSOLUTE);
     // The copy button is independent of it.
     expect(await copied("file-viewer-copy-path")).toBe(NOTE_RELATIVE);
-  });
-
-  it("linked repo file copies a ../ path", async () => {
-    render(
-      <MemoryRouter initialEntries={[`/?file=${encodeURIComponent(LINKED_PLAN)}`]}>
-        <PlansTab projectName="alokai" />
-      </MemoryRouter>,
-    );
-    expect(await copied("file-viewer-copy-path")).toBe(LINKED_RELATIVE);
-  });
-
-  it("projects dir name is not hardcoded", async () => {
-    // A projects directory called "notes", one level under the workspace root.
-    stubServer("/w");
-    render(
-      <FileViewer
-        filePath="metro/a.md"
-        content="# A"
-        absolutePath="/w/notes/metro/a.md"
-        loading={false}
-      />,
-    );
-    expect(await copied("file-viewer-copy-path")).toBe("notes/metro/a.md");
   });
 });
 

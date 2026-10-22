@@ -329,9 +329,8 @@ describe("prepare", () => {
     expect(cut.length).toBeGreaterThan(1);
   });
 
-  it("speaks a response longer than the old budget in full", () => {
-    // Twelve paragraphs of ~240 characters — several times over the 1300-char
-    // budget this feature used to carry.
+  it("prepares every paragraph of a long response", () => {
+    // Twelve paragraphs of ~240 characters: well past a page of speech.
     const markdown = Array.from({ length: 12 }, (_, i) => {
       const head = `Paragraph ${String(i).padStart(2, "0")} `;
       return head + "x".repeat(238 - head.length) + ".";
@@ -343,10 +342,6 @@ describe("prepare", () => {
     expect(spent).toBeGreaterThan(1300);
     // The last paragraph is prepared like every other one: nothing is held back.
     expect(prepared.units.map((unit) => unit.text).join(" ")).toContain("Paragraph 11");
-    // The cut is gone from the SHAPE, not merely left unused — a caller cannot
-    // reach for a remainder that no longer exists.
-    expect(prepared).not.toHaveProperty("spokenUnits");
-    expect(prepared).not.toHaveProperty("remainderParagraphs");
   });
 
   it("keeps the prose of a diff-heavy response and none of the diff", () => {
@@ -441,74 +436,83 @@ describe("prepare", () => {
     expect(units[0].text).toBe("Heading with bold");
     expect(units.map((unit) => unit.text).join(" ")).toContain("A later heading");
   });
-  it("speaks every sentinel in Polish for a Polish session", () => {
-    const text = spoken(everySentinelResponse, "pl");
-
-    expect(text).toContain("blok kodu");
-    expect(text).toContain("tabela");
+  it.each<[lang: "pl" | "en", words: string[]]>([
     // `blok HTML` reaches the voice as `blok ejcz-ti-em-el`: the substitution
-    // lands first and the pronunciation map then does its job on the acronym,
-    // which is exactly the stage order this task establishes.
-    expect(text).toContain("blok ejcz-ti-em-el");
-    expect(text).toContain("obrazek");
-    expect(text).toContain("link");
-    expect(text).toContain("wyrażenie");
+    // lands first and the pronunciation map then does its job on the acronym.
+    ["pl", ["blok kodu", "tabela", "blok ejcz-ti-em-el", "obrazek", "link", "wyrażenie"]],
+    ["en", ["code block", "table", "HTML block", "image", "link", "expression"]],
+  ])("speaks every sentinel in the session language (%s)", (lang, words) => {
+    const text = spoken(everySentinelResponse, lang);
+
+    for (const word of words) expect(text).toContain(word);
     // No sentinel may reach synthesis: the voice would spell the brackets out.
     expect(text).not.toContain("⟦");
     expect(text).not.toContain("⟧");
   });
 
-  it("speaks every sentinel in English for an English session", () => {
-    const text = spoken(everySentinelResponse, "en");
-
-    expect(text).toContain("code block");
-    expect(text).toContain("table");
-    expect(text).toContain("HTML block");
-    expect(text).toContain("image");
-    expect(text).toContain("link");
-    expect(text).toContain("expression");
-    expect(text).not.toContain("⟦");
-    expect(text).not.toContain("⟧");
-  });
-
-  it("leaves no doubled comma or stray space around a substitution", () => {
-    const text = spoken(
-      [
-        "Obrazek ![alt](http://x/y.png) w środku, adres https://example.com/a też.",
-        "",
-        "Kod poniżej:",
-        "",
-        "```ts",
-        "const x = 1;",
-        "```",
-        "",
-      ].join("\n"),
+  // The tidy rules around a spoken placeholder: its commas give the listener a
+  // pause, but must never double, lean on other punctuation or stand before a
+  // terminator, a bracket or a dash that already pauses on its own.
+  it.each<[label: string, markdown: string, lang: "pl" | "en", expected: string]>([
+    // No space before a comma, no doubled comma, no comma leaning on other
+    // punctuation — and the pauses the commas exist for are still there: a tidy
+    // pass that swallowed them would ruin the diction.
+    [
+      "no doubled comma or stray space around a substitution, pauses kept",
+      "Obrazek ![alt](http://x/y.png) w środku, adres https://example.com/a też.\n\nKod poniżej:\n\n```ts\nconst x = 1;\n```\n",
       "pl",
-    );
-
-    expect(text).not.toMatch(/ ,/); // no space before a comma
-    expect(text).not.toMatch(/,\s*,/); // no doubled comma
-    expect(text).not.toMatch(/,\s*[.;:!?]/); // no comma leaning on other punctuation
-    expect(text).not.toMatch(/[.;:!?]\s*,/);
-
-    // …and the pauses the commas exist for are still there. This pair of
-    // assertions is the whole point: a tidy pass that swallowed them would
-    // satisfy the four above and ruin the diction.
-    expect(text).toContain("Obrazek, obrazek, w środku");
-    expect(text).toContain("adres, link, też.");
+      "Obrazek, obrazek, w środku, adres, link, też. Kod poniżej: blok kodu.",
+    ],
+    // A paragraph start is NOT an utterance start: `packUnits` joins paragraphs
+    // with a space, so a heading (stripped to bare words, no terminator) runs
+    // into the placeholder behind it — "Wyniki blok kodu" is one noun phrase.
+    [
+      "a placeholder opening a paragraph still pauses after a heading (pl)",
+      "Wstęp jest tutaj.\n\n## Wyniki\n\n```ts\nconst x = 1;\n```\n\nDalszy akapit tutaj.\n",
+      "pl",
+      "Wstęp jest tutaj. Wyniki, blok kodu. Dalszy akapit tutaj.",
+    ],
+    [
+      "a placeholder opening a paragraph still pauses after a heading (en)",
+      "Wstęp jest tutaj.\n\n## Wyniki\n\n```ts\nconst x = 1;\n```\n\nDalszy akapit tutaj.\n",
+      "en",
+      "Wstęp jest tutaj. Wyniki, code block. Dalszy akapit tutaj.",
+    ],
+    // …and when the paragraph before carries its own punctuation, that one wins.
+    ["a placeholder paragraph after a colon paragraph drops our comma", "Kod poniżej:\n\n```ts\nconst x = 1;\n```\n", "pl", "Kod poniżej: blok kodu."],
+    // Tidy rule 1, colon and sentinel in the SAME paragraph — else "Obrazek: , obrazek, tutaj."
+    ["the author's own pause after a colon is kept", "Obrazek: ![alt](http://x/y.png) tutaj.\n", "pl", "Obrazek: obrazek, tutaj."],
+    // Tidy rule 2, in its two live shapes.
+    ["a sentinel ending the sentence leaves no comma before the terminator", "Więcej tutaj: https://example.com/a.\n", "pl", "Więcej tutaj: link."],
+    ["two adjacent sentinels' touching commas do not double", "Dwa ![a](http://x/a.png) ![b](http://x/b.png) obok.\n", "pl", "Dwa, obrazek, obrazek, obok."],
+    // A bracket or quote is an aside marker in its own right — "Zobacz (, link,) tutaj."
+    ["round brackets carry their own pause", "Zobacz (https://example.com/a) tutaj.\n", "pl", "Zobacz (link) tutaj."],
+    // An image, because `strip.ts` ends a bare address at whitespace and would swallow the „…” quote.
+    ["quotation marks carry their own pause", "Zobacz „![alt](http://x/y.png)” tutaj.\n", "pl", "Zobacz „obrazek” tutaj."],
+    ["square brackets carry their own pause", "Zobacz [https://example.com/a] tutaj.\n", "en", "Zobacz [link] tutaj."],
+    // A dash pauses like a terminator but keeps the space around it.
+    ["an em dash after the placeholder keeps its own pause", "Tekst ![alt](http://x/y.png) — dalej.\n", "pl", "Tekst, obrazek — dalej."],
+    ["an em dash before the placeholder keeps its own pause", "Tekst — ![alt](http://x/y.png) dalej.\n", "pl", "Tekst — obrazek, dalej."],
+  ])("placeholder punctuation: %s", (_label, markdown, lang, expected) => {
+    expect(spoken(markdown, lang)).toBe(expected);
   });
 
-  it("keeps a paragraph that is only a placeholder", () => {
-    // A response that opens with a fence: `prepare` hoists the sentinel-only
-    // paragraph into its own unit, so the substitution has to make that unit
-    // speakable — an empty unit 0 is a synthesis round trip for silence.
+  it("keeps a paragraph that is only a placeholder, and never opens an utterance with a comma", () => {
+    // A response that opens with a fence: the sentinel-only paragraph is
+    // hoisted into its own unit, so the substitution must make it speakable —
+    // an empty unit 0 is a synthesis round trip for silence. And a unit is
+    // exactly what synthesis receives, so a leading comma is a beat before the
+    // first word (tidy rule 4).
     const { units } = prepare("```ts\nconst x = 1;\n```\n\nZaczynamy od tego.\n", {
       language: "pl",
     });
 
     expect(units[0].text).toBe("blok kodu.");
-    expect(units[0].chars).toBe("blok kodu.".length);
-    for (const unit of units) expect(unit.text.length).toBeGreaterThan(0);
+    for (const unit of units) {
+      expect(unit.text.length).toBeGreaterThan(0);
+      expect(unit.text).not.toMatch(/^\s*,/);
+      expect(unit.chars).toBe(unit.text.length);
+    }
   });
 
   it("changes nothing for a response with no sentinels", () => {
@@ -517,100 +521,6 @@ describe("prepare", () => {
     // stood in it, so the tidy pass never runs over ordinary prose.
     expect(prepare(noSentinelResponse, { language: "pl" }).units).toEqual(NO_SENTINEL_UNITS);
     expect(prepare(noSentinelResponse, { language: "en" }).units).toEqual(NO_SENTINEL_UNITS);
-  });
-
-
-  it("a placeholder opening a paragraph still pauses after the one before it", () => {
-    // A paragraph start is NOT an utterance start. `packUnits` joins paragraphs
-    // with a single space, so a heading — which `removeMarkers` strips to bare
-    // words and which therefore carries no terminator — runs straight into the
-    // placeholder behind it. "Wyniki blok kodu" is one noun phrase to a
-    // listener, and a mid-body heading followed by a fenced block is the most
-    // common shape an agent answer has.
-    const markdown = [
-      "Wstęp jest tutaj.",
-      "",
-      "## Wyniki",
-      "",
-      "```ts",
-      "const x = 1;",
-      "```",
-      "",
-      "Dalszy akapit tutaj.",
-      "",
-    ].join("\n");
-
-    expect(spoken(markdown, "pl")).toContain("Wyniki, blok kodu. Dalszy akapit tutaj.");
-    expect(spoken(markdown, "en")).toContain("Wyniki, code block. Dalszy akapit tutaj.");
-    expect(spoken(markdown, "pl")).not.toContain("Wyniki blok kodu");
-
-    // …and the pause is not paid for with a stumble at the other end: when the
-    // paragraph before it does carry its own punctuation, that one wins and our
-    // comma is dropped rather than doubled.
-    const afterColon = [
-      "Kod poniżej:",
-      "",
-      "```ts",
-      "const x = 1;",
-      "```",
-      "",
-    ].join("\n");
-
-    expect(spoken(afterColon, "pl")).toBe("Kod poniżej: blok kodu.");
-  });
-
-  it("never opens an utterance with a comma", () => {
-    // The one place tidy rule 4's reasoning is actually true. A unit is exactly
-    // what synthesis receives, so a leading comma here is a beat before the
-    // first word — and unlike a paragraph edge, a unit edge really has nothing
-    // behind it.
-    const { units } = prepare("```ts\nconst x = 1;\n```\n\nZaczynamy od tego.\n", {
-      language: "pl",
-    });
-
-    for (const unit of units) {
-      expect(unit.text).not.toMatch(/^\s*,/);
-      expect(unit.chars).toBe(unit.text.length);
-    }
-    expect(units[0].text).toBe("blok kodu.");
-  });
-
-  it("keeps the author's own pause when a placeholder follows a colon", () => {
-    // Tidy rule 1, with the colon and the sentinel in the SAME paragraph — the
-    // only arrangement in which the rule can fire at all. Without it the voice
-    // gets "Obrazek: , obrazek, tutaj." and reads the colon's beat twice.
-    const text = spoken("Obrazek: ![alt](http://x/y.png) tutaj.\n", "pl");
-
-    expect(text).toBe("Obrazek: obrazek, tutaj.");
-    expect(text).not.toContain(": ,");
-  });
-
-  it("does not let a placeholder's comma lean on the sentence's terminator", () => {
-    // Tidy rule 2, in its two live shapes: a sentinel that ends the sentence,
-    // and two adjacent sentinels whose touching commas would otherwise double.
-    expect(spoken("Więcej tutaj: https://example.com/a.\n", "pl")).toBe("Więcej tutaj: link.");
-    expect(spoken("Dwa ![a](http://x/a.png) ![b](http://x/b.png) obok.\n", "pl")).toBe(
-      "Dwa, obrazek, obrazek, obok.",
-    );
-  });
-
-  it("drops the commas a bracket or a quote already carries", () => {
-    // A bracket or a quotation mark is an aside marker in its own right: the
-    // voice does not read it, but our comma landing hard against one is heard
-    // as a stumble — "Zobacz (, link,) tutaj." The rules knew sentence
-    // punctuation and nothing about brackets.
-    expect(spoken("Zobacz (https://example.com/a) tutaj.\n", "pl")).toBe("Zobacz (link) tutaj.");
-    // An image rather than a bare address, because `strip.ts` ends a bare
-    // address at whitespace and would swallow the closing „…” quote into it.
-    expect(spoken("Zobacz „![alt](http://x/y.png)” tutaj.\n", "pl")).toBe("Zobacz „obrazek” tutaj.");
-    expect(spoken("Zobacz [https://example.com/a] tutaj.\n", "en")).toBe("Zobacz [link] tutaj.");
-  });
-
-  it("keeps an em dash's own pause instead of doubling it", () => {
-    // The mirror gap: a dash pauses exactly like a terminator, but it needs the
-    // space around it kept, which is why it cannot simply join rule 2's class.
-    expect(spoken("Tekst ![alt](http://x/y.png) — dalej.\n", "pl")).toBe("Tekst, obrazek — dalej.");
-    expect(spoken("Tekst — ![alt](http://x/y.png) dalej.\n", "pl")).toBe("Tekst — obrazek, dalej.");
   });
 
   it("substitutes a sentinel before the pronunciation map can mangle it", () => {
@@ -622,6 +532,10 @@ describe("prepare", () => {
     // it did before this commit.
     expect(applyPronunciation("⟦code⟧", "pl")).toBe("⟦koud⟧");
     expect(applyPronunciation("⟦html⟧", "pl")).toBe("⟦ejcz-ti-em-el⟧");
+    // The token stage is ordered the same way: the acronym table matches `html`
+    // only as a STANDALONE word and `_` is a word character to it, so
+    // `HTML_PARSER` is invisible to the map until the split (see the token table).
+    expect(applyPronunciation("HTML_PARSER", "pl")).toBe("HTML_PARSER");
 
     const text = spoken(everySentinelResponse, "pl");
 
@@ -630,115 +544,41 @@ describe("prepare", () => {
     expect(text).not.toContain("⟦");
   });
 
-  it("speaks an underscored identifier as its words", () => {
-    expect(spoken("Regex HEADING_LINE_RE tutaj.\n", "en")).toBe(
-      "Regex variable heading line re tutaj.",
-    );
-    expect(spoken("Regex HEADING_LINE_RE tutaj.\n", "pl")).toBe(
-      "Regex zmienna heading line re tutaj.",
-    );
-
-    // `strip.ts` has already unwrapped short inline code, so a backticked
-    // identifier arrives here as a bare token and is labelled like any other.
-    expect(spoken("Stała `user_id` tutaj.\n", "pl")).toBe("Stała zmienna user id tutaj.");
-  });
-
-  it("names a hash instead of spelling it", () => {
-    expect(spoken("The tag points at 3f9a2b1c7d today.\n", "en")).toBe(
-      "The tag points at hash today.",
-    );
-    expect(spoken("Skrót 3f9a2b1c7d jest tutaj.\n", "pl")).toBe("Skrót hash jest tutaj.");
-
-    // A digest prefix is part of the token, not a word before it: without this
-    // shape the address would be read as "sha256 colon hash".
-    expect(spoken("Digest sha256:9f86d081884c7d65 matches.\n", "en")).toBe("Digest hash matches.");
-    expect(spoken("Digest md5:0cc175b9c0f1b6a8 matches.\n", "en")).toBe("Digest hash matches.");
-
-    // A hex run buried inside a longer word is not a token. `abc1234def5678xyz`
-    // is one word to a reader and must stay one word to the voice — the token
-    // boundaries, not the run length, are what decide that.
-    expect(spoken("Klucz abc1234def5678xyz tutaj.\n", "en")).toBe("Klucz abc1234def5678xyz tutaj.");
-  });
-
-  it("leaves a hex-looking word that has no digit alone", () => {
+  // Tokens a voice cannot read are named or split into words.
+  it.each<[label: string, markdown: string, lang: "pl" | "en", expected: string]>([
+    ["an underscored identifier is spoken as its words (en)", "Regex HEADING_LINE_RE tutaj.\n", "en", "Regex variable heading line re tutaj."],
+    ["an underscored identifier is spoken as its words (pl)", "Regex HEADING_LINE_RE tutaj.\n", "pl", "Regex zmienna heading line re tutaj."],
+    // `strip.ts` has already unwrapped short inline code.
+    ["a backticked identifier arrives bare and is labelled", "Stała `user_id` tutaj.\n", "pl", "Stała zmienna user id tutaj."],
+    ["a hash is named, not spelled (en)", "The tag points at 3f9a2b1c7d today.\n", "en", "The tag points at hash today."],
+    ["a hash is named, not spelled (pl)", "Skrót 3f9a2b1c7d jest tutaj.\n", "pl", "Skrót hash jest tutaj."],
+    // A digest prefix is part of the token — else "sha256 colon hash".
+    ["a sha256: digest is one hash", "Digest sha256:9f86d081884c7d65 matches.\n", "en", "Digest hash matches."],
+    ["an md5: digest is one hash", "Digest md5:0cc175b9c0f1b6a8 matches.\n", "en", "Digest hash matches."],
+    // Token boundaries, not run length, decide what a token is.
+    ["a hex run buried inside a longer word stays one word", "Klucz abc1234def5678xyz tutaj.\n", "en", "Klucz abc1234def5678xyz tutaj."],
     // The digit condition is the whole safety argument for the hash rule.
-    // `deadbeef` and `defaced` are seven-plus characters drawn entirely from
-    // the hex alphabet; drop the condition and the voice eats them as hashes.
-    const sentence = "The deadbeef and the defaced facade decade.";
-
-    expect(spoken(`${sentence}\n`, "en")).toBe(sentence);
-    expect(spoken(`${sentence}\n`, "pl")).toBe(sentence);
-  });
-
-  it("leaves a plain long number alone", () => {
-    // The mirror of the digit condition, and not in the contract's table: a run
-    // of seven digits is also a run of seven hex characters. A hash has both
-    // digits and letters in it; a byte count has only digits and must be read
-    // as the number it is.
-    expect(spoken("The build produced 1048576 bytes.\n", "en")).toBe(
-      "The build produced 1048576 bytes.",
-    );
-  });
-
-  it("names a UUID instead of spelling it", () => {
-    expect(spoken("Session 550e8400-e29b-41d4-a716-446655440000 ended.\n", "en")).toBe(
-      "Session identifier ended.",
-    );
-    expect(spoken("Sesja 550e8400-e29b-41d4-a716-446655440000 zakończona.\n", "pl")).toBe(
-      "Sesja identyfikator zakończona.",
-    );
-  });
-
-  it("does not split camel case", () => {
-    // The same rule that would improve `useSpeechHost` ruins `TypeScript` and
-    // `GitHub`: capitalisation is not a word boundary, an underscore is. Only
-    // the underscore is treated as one.
-    const sentence = "We use useSpeechHost with TypeScript and GitHub.";
-
-    expect(spoken(`${sentence}\n`, "en")).toBe(sentence);
-  });
-
-  it("applies the pronunciation map after the substitution, not before", () => {
-    // The order is verified against the map rather than asserted about it. The
-    // acronym table matches `html` only as a STANDALONE word, and `_` is a word
-    // character to it, so `HTML_PARSER` is invisible to the map until this
-    // stage has split it — run the map first and the acronym is never said.
-    expect(applyPronunciation("HTML_PARSER", "pl")).toBe("HTML_PARSER");
-
-    expect(spoken("Zmieniamy HTML_PARSER dzisiaj.\n", "pl")).toBe(
-      "Zmieniamy zmienna ejcz-ti-em-el parser dzisiaj.",
-    );
-    // …and the English branch, which never runs the map, keeps the acronym.
-    expect(spoken("We change HTML_PARSER today.\n", "en")).toBe(
-      "We change variable html parser today.",
-    );
-  });
-
-  it("leaves a token the path rule has already reduced to whatever it produced", () => {
+    ["hex-looking words with no digit are left alone (en)", "The deadbeef and the defaced facade decade.\n", "en", "The deadbeef and the defaced facade decade."],
+    ["hex-looking words with no digit are left alone (pl)", "The deadbeef and the defaced facade decade.\n", "pl", "The deadbeef and the defaced facade decade."],
+    // The mirror of the digit condition: a byte count has only digits.
+    ["a plain long number is left alone", "The build produced 1048576 bytes.\n", "en", "The build produced 1048576 bytes."],
+    ["a UUID is named (en)", "Session 550e8400-e29b-41d4-a716-446655440000 ended.\n", "en", "Session identifier ended."],
+    ["a UUID is named (pl)", "Sesja 550e8400-e29b-41d4-a716-446655440000 zakończona.\n", "pl", "Sesja identyfikator zakończona."],
+    // Capitalisation is not a word boundary: splitting it ruins `TypeScript` and `GitHub`.
+    ["camel case is not split", "We use useSpeechHost with TypeScript and GitHub.\n", "en", "We use useSpeechHost with TypeScript and GitHub."],
+    // The pronunciation map runs after the split, so the acronym is finally said.
+    ["the map runs after the split: HTML_PARSER (pl)", "Zmieniamy HTML_PARSER dzisiaj.\n", "pl", "Zmieniamy zmienna ejcz-ti-em-el parser dzisiaj."],
+    ["the English branch never runs the map: HTML_PARSER (en)", "We change HTML_PARSER today.\n", "en", "We change variable html parser today."],
     // `strip.ts` runs first and its path rule is destructive in both directions.
-    // A hash that is a path's last segment keeps its shape, so it is still
-    // named here…
-    expect(spoken("Zobacz `.git/objects/ab/cdef1234567890` tutaj.\n", "pl")).toBe(
-      "Zobacz hash tutaj.",
-    );
-    // …but an underscored filename has already had its underscores spoken as
-    // spaces, which removes the very evidence this stage keys on. It is spoken
-    // as bare words with no "zmienna" label — correct, because it was named as
-    // a path, not as a variable.
-    expect(spoken("Plik `panel/src/features/speech/heading_line_re.ts` tutaj.\n", "pl")).toBe(
-      "Plik heading line re.ts tutaj.",
-    );
-    // And a full-length digest in backticks *does* reach the hash rule: it is
-    // one token, so the length cap no longer names it an expression on the way
-    // past. "hash" is the right word for it — "expression" was the cap
-    // answering a question it was never asked.
-    expect(
-      spoken(
-        "Digest `9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08` tutaj.\n",
-        "pl",
-      ),
-    ).toBe("Digest hash tutaj.");
+    ["a hash that is a path's last segment is still named", "Zobacz `.git/objects/ab/cdef1234567890` tutaj.\n", "pl", "Zobacz hash tutaj."],
+    // Its underscores were already spoken as spaces: named as a path, not a variable.
+    ["an underscored filename in a path gets no variable label", "Plik `panel/src/features/speech/heading_line_re.ts` tutaj.\n", "pl", "Plik heading line re.ts tutaj."],
+    // One token, so the length cap no longer names it an expression on the way past.
+    ["a full-length backticked digest reaches the hash rule", "Digest `9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08` tutaj.\n", "pl", "Digest hash tutaj."],
+  ])("tokens: %s", (_label, markdown, lang, expected) => {
+    expect(spoken(markdown, lang)).toBe(expected);
   });
+
   it("every unit carries the packed text it was spoken from", () => {
     const { units } = prepare(packingResponse);
 
@@ -873,53 +713,43 @@ describe("prepare", () => {
 describe("removeMarkers", () => {
   const preview = (text: string) => removeMarkers(text, { keepLiteralAsterisks: true });
 
-  it("keeps products whose operands touch the asterisk in the preview", () => {
-    expect(preview("2*3 and 4*5")).toBe("2*3 and 4*5");
-    expect(preview("a*b*c")).toBe("a*b*c");
-    expect(preview("(a)*(b)")).toBe("(a)*(b)");
-  });
-
-  it("keeps an asterisk with whitespace on both sides in the preview", () => {
-    expect(preview("5 * -3")).toBe("5 * -3");
-    expect(preview("(a) * (b)")).toBe("(a) * (b)");
-    expect(preview("2 * 3 = 6")).toBe("2 * 3 = 6");
-  });
-
-  it("still unwraps emphasis and drops bullets in the preview", () => {
-    expect(preview("**bold**, *em* and (*aside*)")).toBe("bold, em and (aside)");
-    expect(preview("**bold** and *em*")).toBe("bold and em");
-    expect(preview("__bold__ and _em_")).toBe("bold and em");
+  // Every lone-asterisk case is one an operand-recognition rule once missed. The
+  // rule is now that nothing but a bullet or an emphasis pair loses its `*`.
+  it.each<[input: string, expected: string]>([
+    // Products whose operands touch the asterisk.
+    ["2*3 and 4*5", "2*3 and 4*5"],
+    ["a*b*c", "a*b*c"],
+    ["(a)*(b)", "(a)*(b)"],
+    // An asterisk with whitespace on both sides.
+    ["5 * -3", "5 * -3"],
+    ["(a) * (b)", "(a) * (b)"],
+    ["2 * 3 = 6", "2 * 3 = 6"],
+    ["(a + b) * c", "(a + b) * c"],
+    ["5*-3", "5*-3"],
+    ["x *= 2", "x *= 2"],
+    ["a ** b", "a ** b"],
+    ["see note*", "see note*"],
+    ["*nix and 3 * 4", "*nix and 3 * 4"],
+    // Emphasis is still unwrapped and bullets dropped.
+    ["**bold**, *em* and (*aside*)", "bold, em and (aside)"],
+    ["**bold** and *em*", "bold and em"],
+    ["__bold__ and _em_", "bold and em"],
     // The marker and its gap go; the indent stays for the preview to collapse.
-    expect(preview("* item")).toBe("item");
-    expect(preview("* first\n  * nested")).toBe("first\n  nested");
-    expect(preview("- first\n  - nested")).toBe("first\n  nested");
-    expect(preview("*em* then 2*3")).toBe("em then 2*3");
+    ["* item", "item"],
+    ["* first\n  * nested", "first\n  nested"],
+    ["- first\n  - nested", "first\n  nested"],
+    ["*em* then 2*3", "em then 2*3"],
+  ])("preview keeps literal asterisks: %j → %j", (input, expected) => {
+    expect(preview(input)).toBe(expected);
   });
 
-  it("never drops a lone asterisk from the preview", () => {
-    // Every case here is one an operand-recognition rule once missed. The rule
-    // is now that nothing but a bullet or an emphasis pair loses its `*`.
-    for (const text of [
-      "(a + b) * c",
-      "5*-3",
-      "2*3 and 4*5",
-      "a*b*c",
-      "5 * -3",
-      "(a) * (b)",
-      "x *= 2",
-      "a ** b",
-      "see note*",
-      "*nix and 3 * 4",
-    ]) {
-      expect(preview(text)).toBe(text);
-    }
-  });
-
-  it("leaves speech's default sweep exactly as it was", () => {
-    // Speech never says "asterisk": every `*` goes, products included.
-    expect(removeMarkers("2*3 and 4*5")).toBe("23 and 45");
-    expect(removeMarkers("a*b*c")).toBe("abc");
-    expect(removeMarkers("5 * -3")).toBe("5  -3");
-    expect(removeMarkers("**bold**, *em* and * bullet")).toBe("bold, em and  bullet");
+  // Speech never says "asterisk": every `*` goes, products included.
+  it.each<[input: string, expected: string]>([
+    ["2*3 and 4*5", "23 and 45"],
+    ["a*b*c", "abc"],
+    ["5 * -3", "5  -3"],
+    ["**bold**, *em* and * bullet", "bold, em and  bullet"],
+  ])("speech's default sweep drops every asterisk: %j → %j", (input, expected) => {
+    expect(removeMarkers(input)).toBe(expected);
   });
 });

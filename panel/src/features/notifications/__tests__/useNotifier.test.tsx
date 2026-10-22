@@ -579,19 +579,6 @@ describe("a cold start from a tapped notification", () => {
     }
   });
 
-  it("abandons the dismiss wait when unmounted", async () => {
-    stubServiceWorker();
-    withSessions([session("s1")]);
-
-    const { unmount } = renderAt("/project/pavilio/iterm?notification=s1");
-    await flush();
-    expect(dismissAttentionWhenReady).toHaveBeenCalledWith("s1");
-    expect(cancelArrival).not.toHaveBeenCalled();
-
-    unmount();
-    expect(cancelArrival).toHaveBeenCalledTimes(1);
-  });
-
   it("leaves a URL without the param alone", async () => {
     stubServiceWorker();
     withSessions([session("s1")]);

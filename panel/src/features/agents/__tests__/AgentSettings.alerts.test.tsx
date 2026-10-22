@@ -5,21 +5,14 @@ import userEvent from "@testing-library/user-event";
 import AgentSettings from "../AgentSettings";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
+import { stubFetch } from "../../../test-utils";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The settings page lists agent config files over `fetch`; it needs none here. */
-function stubEmptyAgentSettingsApi(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => [] }) as unknown as Response),
-  );
-}
-
 async function renderSettings(): Promise<HTMLInputElement> {
-  stubEmptyAgentSettingsApi();
+  stubFetch({}, []);
   render(<AgentSettings />);
   await screen.findByRole("heading", { level: 1, name: "Settings" });
   return screen.getByRole("spinbutton", { name: "Show alerts for" }) as HTMLInputElement;

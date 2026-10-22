@@ -40,10 +40,12 @@ import { join } from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSpeech } from "../../speech/__tests__/speech.harness";
 
 import { prepare } from "../../speech/prepare";
 import type { CellSpeechState, GridSpeech, SpeechUnit, Utterance } from "../../speech/types";
 import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utteranceQueue";
+import { StubResizeObserver } from "../../../test-utils";
 
 /** The terminal instance stand-in, for the one test that drives the whole cell. */
 const term = vi.hoisted(() => ({ writes: [] as string[] }));
@@ -95,17 +97,13 @@ vi.mock("../terminalInstances", () => {
 vi.mock("../useMobileReconnect", () => ({ useMobileReconnect: () => {} }));
 
 // mermaid pulls in a browser-only rendering stack the pane never needs here.
-vi.mock("../../markdown/MermaidDiagram", () => ({
-  default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
-}));
+vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
 
 // The synthesis cache the bar peeks into: everything is cold, and nothing
 // notifies. The segments' own states are asserted in `SpeechControlBar.test.tsx`.
 vi.mock("../../speech/synth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/synth")>()),
-  isSpeechSynthesized: () => false,
-  speechCacheState: () => "cold",
-  subscribeSpeechCache: () => () => {},
+  ...(await import("./answerPane.mocks")).synthMock(),
 }));
 
 // Imported after the mocks so they pick them up.
@@ -122,8 +120,6 @@ const answerAt = (id: string): Utterance => ({ id, sessionId: SESSION, text: ANS
 
 /** Shared, because a `useSyncExternalStore` snapshot must be referentially
  *  stable between notifications — a fresh value per call is a render loop. */
-const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
-const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 
 interface HostOverrides {
@@ -132,27 +128,12 @@ interface HostOverrides {
   units?: readonly SpeechUnit[];
 }
 
-function makeSpeech(over: HostOverrides = {}): GridSpeech {
-  return {
+function speechWith(over: HostOverrides = {}): GridSpeech {
+  return makeSpeech({
     stateFor: () => over.state ?? "empty",
     queueFor: () => over.queue ?? emptyUtteranceQueue,
-    heardFor: () => NOTHING_HEARD,
     unitsFor: () => over.units ?? NO_UNITS,
-    subscribeProgress: () => () => {},
-    progressFor: () => null,
-    unitDurationsFor: () => NO_DURATIONS,
-    speechModeOf: () => "off",
-    onSpeak: vi.fn(),
-    onPause: vi.fn(),
-    onResume: vi.fn(),
-    onStop: vi.fn(),
-    onPrevious: vi.fn(),
-    onNext: vi.fn(),
-    onNewestAnswer: vi.fn(),
-    cycleSpeechMode: vi.fn(),
-    onJumpToUnit: vi.fn(),
-    onSeekWithinUnit: vi.fn(),
-  };
+  });
 }
 
 /**
@@ -162,7 +143,7 @@ function makeSpeech(over: HostOverrides = {}): GridSpeech {
  * that would disable them for a second reason.
  */
 function spokenSpeech(): GridSpeech {
-  return makeSpeech({
+  return speechWith({
     state: "ready",
     queue: {
       previous: [answerAt("u-0")],
@@ -172,12 +153,6 @@ function spokenSpeech(): GridSpeech {
     },
     units: prepare(ANSWER).units,
   });
-}
-
-class StubResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
 }
 
 const noop = (): void => {};
@@ -258,6 +233,9 @@ const rowOf = (): HTMLElement =>
   screen.getByTestId(`speech-bar-${SESSION}`).querySelector(".speech-bar-row") as HTMLElement;
 
 beforeEach(() => {
+  // Fake clock, still advancing in real time so `waitFor` polls as before;
+  // the settle helpers step it instead of sleeping.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   term.writes.length = 0;
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   __resetAnswerWaitingForTests();
@@ -266,6 +244,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   forgetAnswerPane(SESSION);
@@ -274,7 +253,7 @@ afterEach(() => {
 
 describe("the bar always carries the eye and the transport", () => {
   it("a cell that has never spoken still shows the eye", () => {
-    renderBar(makeSpeech());
+    renderBar(speechWith());
 
     // The eye is on the row from mount, and it is a live control — it has a
     // pane to open, which is exactly the reason that lapsed.
@@ -290,7 +269,7 @@ describe("the bar always carries the eye and the transport", () => {
   });
 
   it("a cell that has never spoken shows the transport disabled", () => {
-    const speech = makeSpeech();
+    const speech = speechWith();
     renderBar(speech);
 
     // Reasons one and two of the old comment, kept — as DISABLED rather than
@@ -313,7 +292,7 @@ describe("the bar always carries the eye and the transport", () => {
   });
 
   it("a cell that has never spoken has a scrubber with nothing in it", () => {
-    renderBar(makeSpeech());
+    renderBar(speechWith());
 
     // No segments, because there are no units — and so no fill and no
     // playhead: the strip claims no progress it does not have.
@@ -326,7 +305,7 @@ describe("the bar always carries the eye and the transport", () => {
 
   it("the eye works before the first answer", () => {
     const onToggleAnswer = vi.fn();
-    renderBar(makeSpeech(), onToggleAnswer);
+    renderBar(speechWith(), onToggleAnswer);
 
     fireEvent.click(eye() as HTMLElement);
 
@@ -338,7 +317,7 @@ describe("the bar always carries the eye and the transport", () => {
     render(
       <SpeechControlBar
         sessionId={SESSION}
-        speech={makeSpeech()}
+        speech={speechWith()}
         answerOpen={false}
         onToggleAnswer={noop}
         send={send}
@@ -353,14 +332,14 @@ describe("the bar always carries the eye and the transport", () => {
     // ...and they still run their command.
     fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await vi.advanceTimersByTimeAsync(80);
     });
     expect(send).toHaveBeenCalled();
     expect(send.mock.calls.map(([data]) => data)).toEqual(["claude", "\r"]);
   });
 
   it("the first answer enables the transport", () => {
-    const view = renderBar(makeSpeech());
+    const view = renderBar(speechWith());
 
     expect(playPause()).toBeDisabled();
     const pillsBefore = pillLabels();
@@ -402,17 +381,17 @@ describe("the bar always carries the eye and the transport", () => {
   it("the eye reopens a pane closed with Escape", async () => {
     render(
       <MemoryRouter>
-        <TerminalView sessionId={SESSION} speech={makeSpeech()} speechBarVisible />
+        <TerminalView sessionId={SESSION} speech={speechWith()} speechBarVisible />
       </MemoryRouter>,
     );
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await vi.advanceTimersByTimeAsync(400);
     });
 
     // A launcher press is what opens the pane on a cell that has never spoken.
     fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await vi.advanceTimersByTimeAsync(80);
     });
     expect(screen.queryByTestId(`answer-pane-${SESSION}`)).not.toBeNull();
 
@@ -472,7 +451,7 @@ describe("the bar always carries the eye and the transport", () => {
     }
 
     it("the row's height is the same before and after the first answer", () => {
-      const view = renderBar(makeSpeech());
+      const view = renderBar(speechWith());
       const empty = getComputedStyle(rowOf());
       const emptyHeight = empty.height;
 
@@ -506,7 +485,7 @@ describe("the bar always carries the eye and the transport", () => {
     });
 
     it("the empty row's line is no wider than the one the cell already carries", () => {
-      const view = renderBar(makeSpeech());
+      const view = renderBar(speechWith());
       const withPills = minimumRowWidth(rowOf());
 
       view.rerender(
