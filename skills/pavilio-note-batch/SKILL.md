@@ -1,6 +1,6 @@
 ---
 name: pavilio-note-batch
-description: Batch-process unprocessed meetings from every connected notetaker MCP (Quill, Wispr Flow) — guess the owning project from transcript keywords, let the user pick which to process (with project override), fan out subagents running the pavilio-note skill in batch -yolo mode, then one combined Todoist selection and a single commit. Use when the user invokes `/pavilio-note-batch`, or asks to "process all unprocessed meetings".
+description: Batch-process unprocessed meetings from every connected notetaker MCP (Quill, Wispr Flow) — guess the owning project from transcript keywords, let the user pick which to process (with project override), fan out subagents running the pavilio-note skill in batch -yolo mode, then one combined Todoist selection, a single commit, and one wiki ingest per project with a wiki. Use when the user invokes `/pavilio-note-batch`, or asks to "process all unprocessed meetings".
 ---
 
 # Batch Meeting Processing
@@ -105,6 +105,22 @@ git add projects/
 git commit -m "notes: batch-process <N> meetings (<project list>)"
 git push
 ```
+
+### 10. Wiki checkpoint
+
+The fan-out subagents skip pavilio-note's wiki checkpoint (several notes of one project would race
+that wiki's ingest lock), so the parent runs it once per project after the commit:
+
+1. For each project with at least one `status: ok` note: no `projects/<project>/wiki/` → one hint
+   line `/pavilio-wiki-migrate <project>` builds the wiki, nothing else. Otherwise collect the
+   project's new note paths that `scripts/wiki pending <project> --only notes/<file>.md` still lists.
+2. One ingest per project, all of that project's notes in one run — `/pavilio-wiki <project> ingest
+   projects/<project>/notes/<a>.md projects/<project>/notes/<b>.md …` per [[pavilio-wiki]] § Ingest
+   (it locks, writes and commits only `wiki/`). Different projects → parallel background subagents
+   (one wiki lock each); the same project never twice at once.
+3. Report one line per project (the ingest's checkpoint report). A failed or skipped ingest leaves
+   the notes pending for the next catch-up (session-start or `/pavilio-wiki <project> ingest`) —
+   it never fails the batch.
 
 ## Rules
 
