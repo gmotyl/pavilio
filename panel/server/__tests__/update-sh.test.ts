@@ -405,6 +405,25 @@ describe("scripts/update.sh sync commit", () => {
     expect(destStatus()).toBe("");
   });
 
+  it("skips the retired-skill cleanup when the workspace skills/ is a symlink", () => {
+    initDestRepo();
+    // skills/ points outside the workspace: rm -rf through it would delete foreign files.
+    const elsewhere = join(sandbox, "elsewhere-skills");
+    mkdirSync(join(elsewhere, "pavilio-bootstrap"), { recursive: true });
+    writeFileSync(join(elsewhere, "pavilio-bootstrap", "SKILL.md"), "# not the workspace's\n");
+    symlinkSync(elsewhere, join(dest, "skills"));
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "workspace skills link");
+    writeFileSync(join(upstream, "skills", "RETIRED"), "pavilio-bootstrap\n");
+    commitUpstream("retire pavilio-bootstrap");
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(existsSync(join(elsewhere, "pavilio-bootstrap", "SKILL.md"))).toBe(true);
+    expect(output).toMatch(/skills\/ is a symlink/);
+  });
+
   it("commits the synced files so the workspace is left clean", () => {
     initDestRepo();
 
