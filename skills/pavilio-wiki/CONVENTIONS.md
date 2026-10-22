@@ -34,14 +34,14 @@ Never edit one by hand; regenerate it.
   an archived change's `proposal.md` / `design.md`. Never `tasks.md`, delta specs, or today's
   progress. Records are cited in place by their project-relative path, never copied.
 - **Raw file** — anything without a stable workspace home, snapshotted verbatim under `wiki/raw/`:
-  `<slug>.md` (outside file), `article-<slug>.md`, `snippet-<YYYY-MM-DD>-<slug>.md`,
+  `<slug>.md` (outside file), `article-<slug>.md`, `youtube-<id>.md`, `snippet-<YYYY-MM-DD>-<slug>.md`,
   `context-snapshot-<YYYY-MM-DD>.md`, its per-section split
   `context-snapshot-<YYYY-MM-DD>/<nn>-<section-slug>.md` (written by migrate; source page
   `sources/context-snapshot-<YYYY-MM-DD>-<section-slug>.md`), `repos/<owner>-<repo>/`. A raw file
   is never rewritten (clones are refreshed in place by `clone-repo`).
 - **Source page** — `wiki/sources/<kind>-<stem>.md`, one per record or raw file. `<kind>` is
-  `note`, `memo`, `progress`, `adr`, `proposal`, `design`, `file`, `article`, `snippet` or
-  `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change id for
+  `note`, `memo`, `progress`, `adr`, `proposal`, `design`, `file`, `article`, `youtube`,
+  `snippet` or `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change id for
   `proposal`/`design`), so raw `article-edge-tts.md` → `sources/article-edge-tts.md`, never
   `article-article-…`. On a stem collision append the parent directory name. A changed record rewrites its existing source page.
 - **Slug** — lowercase kebab-case ASCII; people `first-last`. Frontmatter lists carry bare names
@@ -62,6 +62,8 @@ Never edit one by hand; regenerate it.
 A knowledge page (`entities/`, `concepts/`) is written only when ≥2 distinct source-like pages
 name its slug. Source-like = `sources/**` and `repos/<repo>/**`; `questions/` and `notes/` never
 count. A term `CONTEXT.md` links as `See [[wiki/concepts/<slug>]]` qualifies with one source.
+The `knowledge` project is the exception: it has no source pages, its pages are written only by
+the knowledge harvest, and the user's pick is the promotion (`SKILL.md § 5. Knowledge harvest`).
 `scripts/wiki mentions` counts; never create a knowledge page `scripts/wiki backlog` does not list
 under `create`.
 
@@ -75,7 +77,7 @@ next run picks them up; a page with an empty backlog is up to date.
 
 | Path | Writer | Regime |
 |---|---|---|
-| `raw/` | ingest routing, `fetch-article`, `clone-repo` | written once; clones refreshed |
+| `raw/` | ingest routing, `fetch-article`, `fetch-youtube`, `clone-repo` | written once; clones refreshed |
 | `sources/` | `source_writer` | one per record; rewritten when its hash changes |
 | `entities/`, `concepts/` | `page_writer` | incremental rewrite from the existing page + new source pages only |
 | `repos/<repo>/` | `repo_writer` | `ARCHITECTURE.md` rewritten on clone refresh; notes added |
@@ -83,8 +85,10 @@ next run picks them up; a page with an empty backlog is up to date.
 | `index.md` files | `scripts/wiki index` | generated |
 | `questions/` | query | one new page per explicit query; never edited after |
 | `notes/` | query | new, or enriched in place |
-| `open-questions.md` | query, ingest | append items; people resolve and delete them |
-| `log.md` | query, ingest, `scripts/wiki record` | append-only |
+| `open-questions.md` | query, ingest, harvest | append items; people resolve and delete them; the harvest clears the candidates it saw (`scripts/wiki clear-candidates`) |
+| `log.md` | query, ingest, harvest, `scripts/wiki record` | append-only |
+| `sources/` `## Knowledge` | `scripts/wiki backlink` | appended by the harvest, idempotent |
+| `knowledge/wiki/entities/`, `concepts/` | `page_writer` (knowledge-wiki mode) | harvest only |
 | `CONTEXT.md` | archive-plan, migrate | never this skill |
 
 People may edit any page. Writers keep `created` and human-added `aliases`.
@@ -100,7 +104,15 @@ One syntax (D14): `[[<path from project root>]]`, no `.md`, optional `<project>:
 - `[[metro:wiki/entities/jane-doe]]` — another project
 
 Never relative paths (`../`), never markdown links to workspace files, never a bare slug
-(`[[utterance]]`). Every claim on a knowledge page cites the source page it came from.
+(`[[utterance]]`). Every claim on a knowledge page cites the source page it came from. A
+`<project>:` link resolves under `projects/<p>/`, then `projects/archived/<p>/`, so it survives
+archiving.
+
+These are the links *inside* wiki pages. An answer given to the user (a query, a research
+answer) cites pages as panel links instead — `scripts/wiki panel-link <projects-relative path>`
+returns `/project/<p>/wiki?file=…` for a wiki page and `/view/…` for any other file, the same
+route the panel's wikilink renderer builds. Origin-relative: never a host or port, never a bare
+path, never a hand-encoded URL.
 
 Body wikilinks point only at pages that exist — the ones `wiki/entities/index.md` and
 `wiki/concepts/index.md` list, the source pages being cited, and records. A name with no page yet
@@ -133,7 +145,11 @@ It is the budget, not a minimum — stop as soon as the question is answered.
 5. `wiki/repos/<repo>/` only when the question or task is about code — descend from the
    repository entity page (`repos/<repo>/index.md`, then ≤2 repo pages). Never for a general
    question.
-6. A `<project>:` link to another project's wiki only when the page in hand does not answer.
+6. A `<project>:` link to another project's wiki only when the page in hand does not answer —
+   including the `[[knowledge:wiki/…]]` back-links under a source page's `## Knowledge`. When the
+   target project is `kind: research` (`scripts/wiki project --name <p>` → `kind`), every claim
+   taken from it is labelled `(research, unverified)` in the answer, unless the reader is itself
+   a research project.
 
 No `wiki/` → read `CONTEXT.md` whole, as before. Readers other than `/pavilio-wiki` queries walk
 the ladder without logging or writing anything.
