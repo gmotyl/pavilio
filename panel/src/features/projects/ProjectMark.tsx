@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 
+import type { ProjectKind } from "../../../server/lib/projects/kind";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, subscribePreference } from "../../preferences/store";
 import { useProjectColors } from "../terminal/useProjectColors";
@@ -40,11 +41,11 @@ export interface ProjectMarkProps {
    * The project's kind. `research` draws a flask and `knowledge` a book in
    * place of the project's own mark; `project` (or absent) draws that mark.
    */
-  kind?: "project" | "research" | "knowledge";
+  kind?: ProjectKind;
 }
 
 /** Kinds that draw a fixed icon instead of the project's own mark. */
-const KIND_MARKS: Partial<Record<NonNullable<ProjectMarkProps["kind"]>, string>> = {
+const KIND_MARKS: Partial<Record<ProjectKind, string>> = {
   research: "lucide:flask",
   knowledge: "lucide:book",
 };
