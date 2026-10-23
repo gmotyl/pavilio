@@ -6,6 +6,7 @@ import {
   statSync,
   lstatSync,
   realpathSync,
+  rmSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
 import { discoverProjects, findProject, resolveProjectRoot, type RepoEntry } from "../lib/discovery.js";
@@ -742,10 +743,27 @@ router.post("/", (req, res) => {
   if (found?.archived) return res.status(409).json({ reason: "archived", name });
   if (found || existsSync(join(projectsDir, name))) return res.status(409).json({ reason: "exists", name });
 
+  // existsSync follows links: a dangling symlink here is not ours to clean up after a throw.
+  const hadEntry = (() => {
+    try {
+      lstatSync(join(projectsDir, name));
+      return true;
+    } catch {
+      return false;
+    }
+  })();
   try {
     const result = scaffoldProject({ projectsDir, name, kind, topic: topic?.trim() || undefined, today: localISODate() });
     if (!result.ok) return res.status(409).json({ reason: result.reason, name });
   } catch (err) {
+    // The folder did not exist before this request, so whatever is there now is a partial
+    // scaffold; left behind it would turn every retry into 409 `exists`. The registry row is the
+    // scaffold's last write, so a throw means it was never added and needs no revert.
+    try {
+      if (!hadEntry) rmSync(join(projectsDir, name), { recursive: true, force: true });
+    } catch {
+      // best effort: the 500 below still reports the original failure
+    }
     return res.status(500).json({ error: (err as Error).message });
   }
   res.status(201).json({ name });

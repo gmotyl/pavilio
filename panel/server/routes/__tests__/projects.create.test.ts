@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, relative } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
@@ -27,6 +27,26 @@ async function childProcessSpies(importOriginal: () => Promise<Record<string, un
 vi.mock("child_process", (importOriginal) => childProcessSpies(importOriginal));
 vi.mock("node:child_process", (importOriginal) => childProcessSpies(importOriginal));
 
+// Call-through scaffold; `failAfterWrite` makes the next call write part of the project, then throw.
+const scaffoldFault = vi.hoisted(() => ({ failAfterWrite: false }));
+vi.mock("../../lib/projects/scaffold", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/projects/scaffold")>();
+  const fs = await import("fs");
+  const path = await import("path");
+  return {
+    ...actual,
+    scaffoldProject: (input: Parameters<typeof actual.scaffoldProject>[0]) => {
+      if (scaffoldFault.failAfterWrite) {
+        scaffoldFault.failAfterWrite = false;
+        fs.mkdirSync(path.join(input.projectsDir, input.name, "wiki"), { recursive: true });
+        fs.writeFileSync(path.join(input.projectsDir, input.name, "PROJECT.md"), "partial\n");
+        throw new Error("disk full");
+      }
+      return actual.scaffoldProject(input);
+    },
+  };
+});
+
 import projectsRouter from "../projects";
 import { scaffoldProject } from "../../lib/projects/scaffold";
 import { localISODate } from "../../lib/dateLocal";
@@ -49,6 +69,7 @@ function tree(dir: string): Record<string, string> {
 
 beforeEach(() => {
   spawned.names.length = 0;
+  scaffoldFault.failAfterWrite = false;
 });
 
 describe("POST /api/projects", () => {
@@ -119,6 +140,30 @@ describe("POST /api/projects", () => {
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ reason: "archived", name: "beta" });
     expect(existsSync(join(projects.dir(), "beta"))).toBe(false);
+  });
+
+  it("500 removes the partial project dir, so a retry can create it", async () => {
+    mkdirSync(join(projects.dir(), "neighbour"));
+    writeFileSync(join(projects.dir(), "neighbour", "PROJECT.md"), "# neighbour\n");
+    scaffoldFault.failAfterWrite = true;
+
+    const failed = await request(app()).post("/api/projects").send({ title: "Gamma", kind: "project" });
+    expect(failed.status).toBe(500);
+    expect(failed.body).toEqual({ error: "disk full" });
+    expect(existsSync(join(projects.dir(), "gamma"))).toBe(false);
+    expect(readFileSync(join(projects.dir(), "neighbour", "PROJECT.md"), "utf-8")).toBe("# neighbour\n");
+
+    const retry = await request(app()).post("/api/projects").send({ title: "Gamma", kind: "project" });
+    expect(retry.status).toBe(201);
+    expect(retry.body).toEqual({ name: "gamma" });
+    expect(existsSync(join(projects.dir(), "gamma", "STATUS.md"))).toBe(true);
+  });
+
+  it("500 leaves a pre-existing dangling symlink alone", async () => {
+    symlinkSync(join(projects.dir(), "..", "nowhere"), join(projects.dir(), "delta"));
+    const res = await request(app()).post("/api/projects").send({ title: "Delta", kind: "project" });
+    expect(res.status).toBe(500);
+    expect(lstatSync(join(projects.dir(), "delta")).isSymbolicLink()).toBe(true);
   });
 
   it("400 for empty slug, missing topic, knowledge kind", async () => {
