@@ -6,6 +6,7 @@ import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
 import { renderIndexes } from "../wiki/index-md";
 import { WIKI_GITIGNORE_LINES } from "../wiki/lock";
 import type { ProjectKind } from "./kind";
+import { isValidProjectSlug } from "./slug";
 
 /**
  * The project scaffold: the deterministic skeleton of a new project, the same for every entry
@@ -25,11 +26,6 @@ export type ScaffoldInput = { projectsDir: string; name: string; kind: ProjectKi
 export type ScaffoldResult =
   | { ok: true; created: string[] } // project-relative paths written
   | { ok: false; ask: true; reason: "exists" | "archived" };
-
-/** A slug (lowercase letters, digits, `.`, `_`, `-`; starts alphanumeric), not the archive dir itself. */
-export function isValidProjectName(name: string): boolean {
-  return /^[a-z0-9][a-z0-9._-]*$/.test(name) && name !== "archived";
-}
 
 function projectCard(input: ScaffoldInput): string {
   const { name, kind, topic, today } = input;
@@ -168,7 +164,7 @@ function assertWritable(projectsDir: string, name: string, files: [string, strin
  */
 export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const { projectsDir, name } = input;
-  if (!isValidProjectName(name)) throw new Error(`invalid project name: ${JSON.stringify(name)}`);
+  if (!isValidProjectSlug(name)) throw new Error(`invalid project name: ${JSON.stringify(name)}`);
   if (input.kind === "research" && !input.topic?.trim()) {
     throw new Error("a topic is required for research projects (--topic \"…\")");
   }
