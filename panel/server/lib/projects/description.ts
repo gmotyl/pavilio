@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync, realpathSync } from "fs";
+import { isAbsolute, join, relative } from "path";
 
 import { splitFrontmatter } from "./frontmatter";
 
@@ -8,8 +8,20 @@ export const DESCRIPTION_MAX = 140;
 
 const OVERVIEW_HEADING = /^##\s+.*overview\s*$/i;
 
-function readText(path: string): string | null {
-  return existsSync(path) ? readFileSync(path, "utf8") : null;
+/**
+ * The file's text when it exists and its realpath stays under the project dir's realpath — a
+ * symlinked card or wiki must not surface an arbitrary file's opening chars in the archive list.
+ */
+function readText(projectDir: string, path: string): string | null {
+  try {
+    const root = realpathSync(projectDir);
+    const real = realpathSync(path);
+    const rel = relative(root, real);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
+    return readFileSync(real, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 /** First paragraph (non-heading lines up to a blank line or heading), joined on spaces. */
@@ -57,7 +69,7 @@ function cut(text: string): string {
  * `wiki/overview.md`. Cut to {@link DESCRIPTION_MAX} chars with an ellipsis; null when none.
  */
 export function projectDescription(projectDir: string): string | null {
-  const card = readText(join(projectDir, "PROJECT.md"));
+  const card = readText(projectDir, join(projectDir, "PROJECT.md"));
   if (card !== null) {
     const { data, body } = splitFrontmatter(card);
     const topic = typeof data.topic === "string" ? data.topic.trim() : "";
@@ -65,7 +77,7 @@ export function projectDescription(projectDir: string): string | null {
     const sentence = overviewSentence(body);
     if (sentence) return cut(sentence);
   }
-  const overview = readText(join(projectDir, "wiki", "overview.md"));
+  const overview = readText(projectDir, join(projectDir, "wiki", "overview.md"));
   if (overview !== null) {
     const para = firstParagraph(splitFrontmatter(overview).body.split(/\r?\n/));
     if (para) return cut(para);

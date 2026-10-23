@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 
@@ -69,5 +69,36 @@ describe("projectDescription", () => {
     expect(desc!.length).toBeLessThanOrEqual(140);
     expect(desc!.endsWith("…")).toBe(true);
     expect(topic.startsWith(desc!.slice(0, -1))).toBe(true);
+  });
+
+  it("description ignores a PROJECT.md or wiki that links outside the project", () => {
+    const outside = mkdtempSync(join(tmpdir(), "project-description-outside-"));
+    try {
+      writeFileSync(join(outside, "secret.md"), "---\ntopic: top secret\n---\n");
+      mkdirSync(join(outside, "wiki"));
+      writeFileSync(join(outside, "wiki", "overview.md"), "Secret wiki paragraph.\n");
+      symlinkSync(join(outside, "secret.md"), join(projectDir, "PROJECT.md"));
+      symlinkSync(join(outside, "wiki"), join(projectDir, "wiki"));
+      expect(projectDescription(projectDir)).toBeNull();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("description follows a link that stays inside the project", () => {
+    write("docs/card.md", "---\ntopic: inside link\n---\n");
+    symlinkSync(join(projectDir, "docs", "card.md"), join(projectDir, "PROJECT.md"));
+    expect(projectDescription(projectDir)).toBe("inside link");
+  });
+
+  it("description reads a project dir reached through a link", () => {
+    write("PROJECT.md", "---\ntopic: linked dir\n---\n");
+    const alias = `${projectDir}-alias`;
+    symlinkSync(projectDir, alias);
+    try {
+      expect(projectDescription(alias)).toBe("linked dir");
+    } finally {
+      rmSync(alias, { force: true });
+    }
   });
 });
