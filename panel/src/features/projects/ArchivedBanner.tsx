@@ -51,6 +51,7 @@ export default function ArchivedBanner({ project, archivedAt, onRestored }: Prop
       </span>
       <button
         type="button"
+        data-testid="archived-banner-restore"
         onClick={onRestore}
         disabled={busy}
         className="ml-auto flex flex-none items-center gap-1.5 px-3 py-1 rounded text-[12px]"

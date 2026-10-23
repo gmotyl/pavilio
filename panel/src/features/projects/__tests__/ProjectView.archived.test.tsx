@@ -121,8 +121,8 @@ describe("ProjectView — archived project", () => {
     expect(banner.textContent).toContain(BANNER_TEXT);
     // Amber: the panel's yellow token, as the mockup's banner.
     expect(banner.getAttribute("style")).toContain("var(--yellow)");
-    const restore = within(banner).getByRole("button", { name: "Restore to sidebar" });
-    expect(restore).toBeTruthy();
+    const restore = within(banner).getByTestId("archived-banner-restore");
+    expect(restore.textContent).toBe("Restore to sidebar");
 
     // The normal tabs render below the banner.
     const overview = tabLink(`/project/${NAME}`);
@@ -157,7 +157,7 @@ describe("ProjectView — archived project", () => {
     const banner = await screen.findByTestId("archived-banner");
     expect(tabLink(`/project/${NAME}/iterm`)).toBeNull();
 
-    fireEvent.click(within(banner).getByRole("button", { name: "Restore to sidebar" }));
+    fireEvent.click(within(banner).getByTestId("archived-banner-restore"));
 
     await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
     expect(fetchMock).toHaveBeenCalledWith(`/api/archive/${NAME}/restore`, { method: "POST" });
