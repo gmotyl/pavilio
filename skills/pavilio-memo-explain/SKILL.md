@@ -28,6 +28,16 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. **F
 - Resolve the project and memo through the base contract.
 - Read the resolved project's `PROJECT.md` and relevant context for the explanation.
 
+### 1b. Pull what the wiki already knows
+
+If `projects/<p>/wiki/` exists, gather knowledge from it before reading code or records: walk the reading ladder in [pavilio-wiki CONVENTIONS](../pavilio-wiki/CONVENTIONS.md#reading-ladder) (glossary → `wiki/index.md` → ≤2 section indexes → ≤3 pages, knowledge pages first; `wiki/repos/` only for a code topic). Read only — no question page, no `log.md` entry, no lock.
+
+- The wiki's concept pages carry the *why* — decisions, what broke, dated history. Build the diagrams from those claims, and go to code only for what the wiki doesn't cover or to confirm it still holds.
+- A wiki page that already has a ```` ```mermaid ```` block is a starting point — adapt it, don't redraw from scratch.
+- Wiki and code disagree → the code is current; say so in the memo in one line, naming the page.
+- End the memo with `## Sources` listing every wiki page used as a panel link (`scripts/wiki panel-link <p>/wiki/<page>.md`), never a bare path.
+- No `wiki/` → still try ladder step 7, the shared `knowledge` wiki, when the topic is a tool, library or technique; otherwise skip this step and don't suggest creating one.
+
 ### 2. Analyse the topic → pick diagrams by angle
 
 Don't default to a flowchart. Enumerate the *dimensions* the topic actually has, then map each to the diagram type that expresses it best. A good explanatory memo usually needs 2–4 complementary charts — each a different lens — not one chart repeated.

@@ -76,7 +76,8 @@ sources: ["wiki/sources/….md", "wiki/sources/….md"]
 ```
 
 Body: `# <term>`, definition (agreeing with the `CONTEXT.md` line when one exists), why it is so,
-history and what broke, related concepts, each claim cited. Implementation lives behind a link to
+history and what broke, related concepts, each claim cited. Optional: one or two mermaid diagrams
+summarising the prose (CONVENTIONS.md § Diagrams). Implementation lives behind a link to
 `wiki/repos/<repo>/…` — no code identifiers (CONVENTIONS.md § No code identifiers outside `repos/`).
 
 ## Repo pages — `wiki/repos/<repo>/`
@@ -101,7 +102,7 @@ Repo pages count as sources for the ≥2 threshold.
 ## Overview — `wiki/overview.md`
 
 `type: overview`. What the project is, its main actors and concepts, and where to start reading:
-≤40 lines, links only to pages that exist.
+≤40 lines, links only to pages that exist. Optional: one mermaid map (CONVENTIONS.md § Diagrams).
 
 ## Question — `wiki/questions/<YYYY-MM-DD>-<slug>.md`
 

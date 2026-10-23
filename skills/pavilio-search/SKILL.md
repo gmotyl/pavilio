@@ -62,6 +62,10 @@ a context window dies and it is the failure this skill exists to prevent.
 If the top score is weak (below ~40%), say the project has little written on the topic
 rather than padding the pack with near-misses.
 
+### 2b. Read the wiki — what is already synthesised
+
+When `projects/<project>/wiki/` exists, walk the reading ladder for the topic (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`), read-only — no question page, no log entry, no lock. Wiki pages are already-cited syntheses of the notes: take their claims with the page's own citations, and use qmd hits for what the wiki doesn't cover or for records newer than the page's `updated`. A wiki claim that a newer note contradicts goes to **Open questions & contradictions** with both dates. Ladder step 7 (the shared `knowledge` wiki) only when the topic is a tool, library or technique.
+
 ### 3. Probe the code — only where the notes point
 
 Read `projects/<project>/repos.json` for the repo paths. From the retrieved chunks, pull
@@ -79,7 +83,7 @@ Sections, in this order, omitting any that is empty:
 **Decisions** — hits from `DECISIONS.md` and `STATUS.md` → Recent Decisions (legacy: `PROJECT.md` → Key Decisions). First, because a decision
 outranks narrative. A decision dated after a memo supersedes it.
 
-**What's established** — one claim per line, each tagged `path · date`.
+**What's established** — one claim per line, each tagged `path · date` (a wiki claim: the wiki page and the source page it cites).
 
 **Open questions & contradictions** — where sources disagree, show **both** with their
 dates. Do not silently pick a winner. For ticket-writing this is the most valuable

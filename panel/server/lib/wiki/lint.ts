@@ -40,8 +40,13 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  *   `camelCase(`; `path` — a `*.ts` / `*.tsx` path anywhere; `component` — a multi-hump
  *   `PascalCase` name that is backticked or written `<Component …>`, minus a small allowlist of
  *   product names (`TypeScript`, `GitHub`, …); `fence` — a fenced code block, itself a violation
- *   in a knowledge page (its contents are scanned too). A name that is part of a reported path on
- *   the same line is reported once, as the path.
+ *   in a knowledge page (its contents are scanned too). A ```mermaid fence is allowed: diagrams
+ *   belong on knowledge pages, and their node ids are routinely PascalCase, so it is neither a
+ *   `fence` nor scanned for `call` / `component` — only for `path`. A name that is part of a
+ *   reported path on the same line is reported once, as the path.
+ *
+ * Mermaid blocks are parse-checked separately, by `lintDiagrams` (./diagrams), which the CLI merges
+ * into the same report as `diagrams`.
  */
 
 export type BrokenLink = { page: string; target: string };
@@ -162,6 +167,9 @@ const PRODUCT_NAMES = new Set([
   "WebSocket", "OAuth", "GraphQL", "JetBrains", "IntelliJ", "PyPI", "VsCode", "ChatGPT", "DynamoDB",
 ]);
 
+/** The info string of a fence that holds a Mermaid diagram (```mermaid, any case). */
+export const isMermaidInfo = (info: string) => /^mermaid$/i.test(info.trim());
+
 function scanCodeIdentifiers(page: string, text: string, firstLine: number): CodeIdentifier[] {
   const found: CodeIdentifier[] = [];
   const add = (line: number, rule: CodeIdentifierRule, match: string) =>
@@ -173,7 +181,7 @@ function scanCodeIdentifiers(page: string, text: string, firstLine: number): Cod
     for (const m of code.matchAll(CALL)) add(line, "call", m[0].replace(/\s+/g, ""));
     for (const m of code.matchAll(BACKTICKED_PASCAL)) addComponent(line, m[0]);
   };
-  let fence: { char: string; len: number } | null = null;
+  let fence: { char: string; len: number; mermaid: boolean } | null = null;
   text.split("\n").forEach((content, i) => {
     const line = firstLine + i;
     const open = /^ {0,3}(`{3,}|~{3,})/.exec(content);
@@ -182,14 +190,15 @@ function scanCodeIdentifiers(page: string, text: string, firstLine: number): Cod
         && content.slice(open[0].length).trim() === "";
       if (close) fence = null;
       else {
-        scanCode(content, line);
+        if (!fence.mermaid) scanCode(content, line);
         for (const m of content.matchAll(PATH)) add(line, "path", m[0]);
       }
       return;
     }
     if (open) {
-      fence = { char: open[1][0], len: open[1].length };
-      add(line, "fence", content);
+      const mermaid = isMermaidInfo(content.slice(open[0].length));
+      fence = { char: open[1][0], len: open[1].length, mermaid };
+      if (!mermaid) add(line, "fence", content);
       return;
     }
     for (const m of content.matchAll(CODE_SPAN)) scanCode(m[2], line);
@@ -204,7 +213,7 @@ function scanCodeIdentifiers(page: string, text: string, firstLine: number): Cod
 }
 
 /** 1-based file line of the body's first line: the frontmatter block sits above it. */
-function bodyFirstLine(absPath: string, body: string): number {
+export function bodyFirstLine(absPath: string, body: string): number {
   try {
     const text = readFileSync(absPath, "utf8");
     const prefix = text.slice(0, text.length - body.length);

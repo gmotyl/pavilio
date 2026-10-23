@@ -35,6 +35,8 @@ Shaped per `skills/pavilio-wiki/PAGES.md § Repo pages`, with `commit: <commitSh
 - Architecture mode: one file, `wiki/repos/<repo>/ARCHITECTURE.md` (rewrite; keep `created`).
 - Question mode: one new file, `wiki/repos/<repo>/<topic-slug>.md`, answering the question with
   file paths and symbols. Never edit `ARCHITECTURE.md` in this mode.
+- Architecture mode may carry one or two ```` ```mermaid ```` diagrams — module map, request flow
+  (`skills/pavilio-wiki/CONVENTIONS.md § Diagrams`); only what the page states, labels quoted.
 - Code identifiers belong here. List the entities and concepts the page explains in
   `entities:` / `concepts:` (bare names), always including `<repo>` in `entities`.
 

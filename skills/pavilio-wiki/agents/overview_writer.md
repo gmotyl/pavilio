@@ -29,6 +29,9 @@ One file, `wiki/overview.md`, shaped per `skills/pavilio-wiki/PAGES.md § Overvi
 project is, its main actors and concepts, where to start reading. ≤40 lines, D14 links only to
 pages listed in the indexes, no code identifiers, keep `created`, bump `updated`. No
 `overview.md` yet (a first ingest or a migration) → create it with `created` = `updated` = today.
+One ```` ```mermaid ```` map of the main actors and concepts and how they relate is allowed
+(`skills/pavilio-wiki/CONVENTIONS.md § Diagrams`): only relations the page states, labels quoted, under ~25 nodes; keep and update an
+existing one.
 
 - Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
   double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `

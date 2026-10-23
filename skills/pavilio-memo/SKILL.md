@@ -69,12 +69,13 @@ Check that the decoded `file` value points to the memo just saved, including any
 3. **Read project context** from `projects/projectname/_index.json` if it exists
    - Use this to understand terminology, people, technologies mentioned
    - Add relevant context references (e.g., link to related decisions or people)
+   - When the memo names a concept, tool or decision the index doesn't explain, walk the wiki reading ladder for it (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` — the project's `wiki/`, then the shared `knowledge` wiki), read-only. Link a page you used as a panel link (`scripts/wiki panel-link <p>/wiki/<page>.md`)
 4. **Enhance the text** with light adjustments:
    - Fix typos and grammar
    - Add proper punctuation and formatting
    - Make it more understandable by adding context from `_index.json`
-   - If something is unclear and context is not in `_index.json`, ask a brief follow-up question (unless `--yolo` mode: then make reasonable assumptions)
-   - Do NOT invent context - only use what's in `_index.json` or confirmed by user
+   - If something is unclear and context is not in `_index.json` or the wiki, ask a brief follow-up question (unless `--yolo` mode: then make reasonable assumptions)
+   - Do NOT invent context - only use what's in `_index.json`, the wiki, or confirmed by user
 5. Save the content with the naming and header from **Shared memo contract**
 6. Return the panel link, including in `--yolo` mode (it skips questions, not the result)
 
@@ -88,8 +89,8 @@ Check that the decoded `file` value points to the memo just saved, including any
 
 ## Rules
 
-- Read `_index.json` if present for context
-- Ask follow-up questions ONLY if something is genuinely unclear and not in `_index.json`
+- Read `_index.json` if present for context, and the wiki (project, then `knowledge`) for terms it doesn't explain — read-only, never log or write to it
+- Ask follow-up questions ONLY if something is genuinely unclear and not in `_index.json` or the wiki
 - Do NOT invent context or details
 - Do NOT add unnecessary structure or sections
 - Do NOT create PROJECT.md, _index.json, or other files

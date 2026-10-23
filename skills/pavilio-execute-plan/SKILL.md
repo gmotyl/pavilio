@@ -79,12 +79,23 @@ Two agents committing to the same branch race `.git/index.lock`. Parallelise *wo
 Keep the session progress file (opened by [[pavilio-session-start]]) updated as you orchestrate — decisions, sub-agent outcomes, review loops, problems.
 
 ### Step 3 — Finish (main thread)
+The run's end state is **a PR that is ready for the user's manual check**: green CI, no open reviewer comments, and only then a request to test. The user's manual check is the last gate, never the first — don't ask them to test, or to set anything up, while CI is red or a reviewer thread is still open.
+
 After all tasks are complete and reviewed:
-1. Run the full test/build suite and confirm it's green — paste the actual result, don't assert success without evidence.
+1. Run the full test/build suite and lint and confirm they're green — paste the actual result, don't assert success without evidence.
 2. Optionally dispatch [[pavilio-code-review]] for a branch-level two-axis (Standards + Spec) review across the whole diff.
-3. Present the completion options and let the user choose: **merge**, **open a PR**, or **leave the branch as-is**. Execute the chosen option; never merge to `main`/`master` without explicit consent.
-4. If the user chose **merge** (the change landed in this session), suggest [[pavilio-archive-plan]] to fold the change's delta specs into the living specs and move the change dir under `openspec/changes/archive/` — suggest, don't run unasked. If the PR stays open, skip this: [[pavilio-manager]] flags merged-but-unarchived changes later.
-5. Hand off to [[pavilio-session-end]] to verify the progress note, commit, and propose any follow-ups.
+3. **Push the branch and open a PR** against `main` (`gh pr create`). Don't ask whether to — the PR is the default end state; skip it only when the user said so (then leave the branch and go to step 8).
+4. **Drive the PR to clean.** Loop until both hold, bounded like the per-task loop (stop and ask if it doesn't converge):
+   - **CI green** — `gh pr checks <n> --watch`. A failure is a fix task for an implementer; push and re-check.
+   - **No open reviewer comments** — read every review-bot (Kilo) and human comment: inline threads (`gh api repos/{owner}/{repo}/pulls/<n>/comments`) and review bodies. **Validate each against the code before acting** — review bots cite conventions that don't exist; grep before complying. Real issue → an implementer fixes it, push, reply with the fixing SHA. Not real → reply with the reason. Resolve the thread either way. The bot re-reviews on every push, so wait for its next pass on the final head before calling it clean.
+5. **Ask for the manual check** — one self-contained message: PR link, CI status, reviewer comments (fixed / rejected and why), what to check by hand, and the offer: *"Say go and I'll switch `<primary clone path>` to `<branch>` and get it ready to test."* Then **wait**. Never switch on your own: the primary clone may be dirty, or in use by another session.
+6. **On go, prepare the test environment yourself** — the user does not set it up. In the primary clone (the first entry of `git worktree list`, not the worktree you built in):
+   - `git status --short` and check for an in-progress rebase/merge. Dirty or busy → report exactly what's there and stop; never stash, restore or commit the user's work to make room.
+   - The branch is checked out in your build worktree, so `git checkout <branch>` refuses there — `git fetch origin <branch> && git switch --detach FETCH_HEAD`.
+   - Do whatever the project needs to run that head (install, build, restart the dev server/app — per its `AGENTS.md`/`PROJECT.md`), then say what you ran and where to look.
+7. **Act on the result.** Issues → fix in the build worktree, push, back to step 4, then re-offer step 5. Pass → merge only on the user's explicit go (`gh pr merge`), never to `main`/`master` without it; then offer to switch the primary clone back to `main`.
+8. If the change merged in this session, suggest [[pavilio-archive-plan]] to fold the change's delta specs into the living specs and move the change dir under `openspec/changes/archive/` — suggest, don't run unasked. If the PR stays open, skip this: [[pavilio-manager]] flags merged-but-unarchived changes later.
+9. Hand off to [[pavilio-session-end]] to verify the progress note, commit, and propose any follow-ups.
 
 ## When to stop and ask
 
@@ -109,6 +120,7 @@ Return to Step 1 (review) when the user updates the plan based on your feedback,
 - **Never let an agent restore broadly.** `git checkout -- <exact path>`, never `.` — a broad restore discards the user's unrelated uncommitted work and no commit will show you did it.
 - **Serialise commits** even when work is parallel; two agents on one branch race `.git/index.lock`.
 - **Check `git status` after each agent**, against the Step 1 snapshot — an agent's own report is the first signal something was clobbered, not the last word.
+- **Finish at a clean PR, then the manual check** — green CI and no open reviewer comments before asking the user to test; switch the primary clone only on their go, and prepare the test environment yourself.
 - Stop when blocked; bound the fix loop; never guess your way past a failure.
 
 ## Non-goals

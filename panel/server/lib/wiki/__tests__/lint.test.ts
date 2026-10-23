@@ -197,6 +197,27 @@ describe("lintWiki", () => {
     ]);
   });
 
+  it("allows mermaid fences and scans them only for paths", () => {
+    const body = [
+      "```mermaid", // line 7
+      "flowchart TD", // line 8
+      "  RelayServer --> `startRelay()` --> panel/server/relay.ts", // line 9
+      "```", // line 10
+      "```Mermaid  ", // line 11
+      "  SpeechPane --> AppShell", // line 12
+      "```", // line 13
+      "```mermaidjs", // line 14
+      "  `doThing()`", // line 15
+      "```", // line 16
+    ].join("\n");
+    write(`${W}/concepts/linked.md`, page("concept", `${body}\n`));
+    expect(lintWiki(root, "pavilio").codeIdentifiers).toEqual([
+      { page: "wiki/concepts/linked.md", line: 9, rule: "path", match: "panel/server/relay.ts" },
+      { page: "wiki/concepts/linked.md", line: 14, rule: "fence", match: "```mermaidjs" },
+      { page: "wiki/concepts/linked.md", line: 15, rule: "call", match: "doThing(" },
+    ]);
+  });
+
   it("does not write", () => {
     write(`${W}/concepts/untyped.md`, page(null, "[[wiki/concepts/missing]] `fooBar()`\n"));
     const snapshot = () => {

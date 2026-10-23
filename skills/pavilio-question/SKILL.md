@@ -18,10 +18,10 @@ Search project notes, understand project context, and answer questions based on 
 ## Process
 
 1. **Determine scope**: Ask user if the question is about a specific project or all projects
-2. **Load context**: Read the relevant `_index.json`, `PROJECT.md` (stable card) and `STATUS.md` (current focus, open questions, active team) files
+2. **Load context**: Read the relevant `_index.json`, `PROJECT.md` (stable card) and `STATUS.md` (current focus, open questions, active team) files. For *why* and *how* questions (a decision's reasons, how a concept works, what broke), walk the wiki reading ladder too (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`): the project's `wiki/` first — it has already synthesised the notes with citations — then the shared `knowledge` wiki for tools and techniques. Read-only: no question page, no log entry; that is `/pavilio-wiki`'s query.
 3. **Search**: Use the index to find relevant notes
 4. **Deep dive**: Read specific notes if needed for detailed answers
-5. **Respond**: Provide answers with references to source notes
+5. **Respond**: Provide answers with references to source notes, and wiki pages used as panel links (`scripts/wiki panel-link <p>/wiki/<page>.md`)
 
 ---
 
@@ -33,7 +33,7 @@ If user specifies a project (e.g., "in my-work project" or "for my-blog"):
 ```
 1. Read projects/projectname/_index.json
 2. Read projects/projectname/PROJECT.md and projects/projectname/STATUS.md (if present)
-3. Search index for relevant keywords
+3. Search index for relevant keywords; for why/how questions, walk the wiki reading ladder (project wiki, then knowledge)
 4. If needed, read specific notes from projects/projectname/YYYY-MM-DD_*.md
 5. Provide answer with note references
 ```

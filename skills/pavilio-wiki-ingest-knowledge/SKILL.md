@@ -15,3 +15,8 @@ through when given:
 
 Follow `skills/pavilio-wiki/SKILL.md § 5. Knowledge harvest` exactly. Every step, threshold,
 write, commit and report lives there; this skill restates none of them.
+
+One reminder, because the harvest runs many `scripts/wiki` commands: an exit 1 stops the run only
+when stdout carries a JSON `error`. A failure with no JSON (e.g. the sandbox refusing tsx's IPC
+pipe with `EPERM`) means the CLI never started and nothing changed — retry that command once
+through another executor, per `skills/pavilio-wiki/SKILL.md § Reading a scripts/wiki failure`.

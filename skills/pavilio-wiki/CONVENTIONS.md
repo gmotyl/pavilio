@@ -134,7 +134,27 @@ paths with `.md`. A YAML list item that starts with `[[` must be quoted (`- "[[w
 who decided. They never name files, paths, functions, classes, components, flags or env vars. Where
 a concept is implemented, link the repo page: `see [[wiki/repos/pavilio/speech-relay]]`. Code-level
 detail lives only under `wiki/repos/<repo>/`. `scripts/wiki lint` flags violations as
-`codeIdentifiers`.
+`codeIdentifiers`. A ```` ```mermaid ```` diagram is not a code block: lint does not report it as a
+fence, but a file path inside it is still a violation (§ Diagrams).
+
+## Diagrams
+
+Concept, overview and repo pages may carry one or two ```` ```mermaid ```` diagrams where the
+page describes a lifecycle, a decision rule, an ordering between actors or a map of how parts
+relate — the angles prose spreads over several sections. Source, entity, question and note pages
+carry none (a source page keeps a diagram its record already had).
+
+- **A diagram summarises cited prose; it never carries a claim of its own.** Every node and edge
+  restates something the page's text already says with a citation. Nothing inferred to make the
+  picture complete.
+- Pick the type by angle: `stateDiagram-v2` for a lifecycle, `flowchart TD` for a decision rule,
+  `sequenceDiagram` for actor ordering, `flowchart LR` for a map. Under ~25 nodes.
+- Labels in quotes — `id["…"]`, `-->|"…"|`; no em dash in a bare `subgraph` title. Domain words in
+  labels, never code identifiers.
+- On rewrite, keep an existing diagram and update it when its claims changed; drop it only when
+  the prose it summarised is gone.
+- `scripts/wiki lint` parses every diagram and reports failures as `diagrams` (page + line). A
+  `diagramCheck: "unavailable: …"` means the parser could not load — nothing was checked.
 
 ## Reading ladder
 
@@ -155,5 +175,9 @@ It is the budget, not a minimum — stop as soon as the question is answered.
    taken from it is labelled `(research, unverified)` in the answer, unless the reader is itself
    a research project.
 
-No `wiki/` → read `CONTEXT.md` whole, as before. Readers other than `/pavilio-wiki` queries walk
-the ladder without logging or writing anything.
+7. The shared `knowledge` wiki (`projects/knowledge/wiki/`: `index.md` → ≤2 section indexes → ≤2
+   pages) when the topic is a tool, library, platform or technique rather than this project's own
+   decisions, or when the project's wiki did not answer. Cite it as `knowledge:wiki/…`.
+
+No `wiki/` → read `CONTEXT.md` whole, as before, then step 7 when it applies. Readers other than
+`/pavilio-wiki` queries walk the ladder without logging, writing or taking the lock.
