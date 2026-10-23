@@ -342,6 +342,14 @@ export const preferences = {
     codec: bool,
     portable: true,
   }),
+  /** The left sidebar's Research section; unset = expanded. */
+  researchSectionCollapsed: definePreference({
+    key: "shell.research.collapsed", // was: nothing — new with the Research section
+    scope: "global",
+    default: false,
+    codec: bool,
+    portable: true,
+  }),
   /**
    * Scope argument: the view key, e.g. "viewer", "repos", "notes".
    *

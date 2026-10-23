@@ -31,6 +31,7 @@ const PORTABLE = [
   "shell.leftSidebar.expanded",
   "shell.leftSidebar.width",
   "shell.project.expanded",
+  "shell.research.collapsed",
   "shell.rightSidebar.expanded",
   "shell.rightSidebar.section.expanded",
   "shell.rightSidebar.width",
@@ -156,6 +157,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   // The two fixed sidebar widths the stylesheet used to carry, as numbers.
   ["shell.leftSidebar.width", 240, "global"],
   ["shell.project.expanded", false, "project"],
+  // Expanded until the Research header's chevron is pressed.
+  ["shell.research.collapsed", false, "global"],
   ["shell.rightSidebar.expanded", true, "global"],
   ["shell.rightSidebar.section.expanded", true, "project"],
   ["shell.rightSidebar.width", 264, "global"],
@@ -554,5 +557,17 @@ describe("the wiki's preferences", () => {
     expect(model.default).toBe("haiku");
     expect(preferences.wikiSessionStartIngest).toBe(ingest);
     expect(preferences.wikiWriterModel).toBe(model);
+  });
+});
+
+describe("the sidebar's Research section", () => {
+  it("research collapsed preference is declared global, portable, default false", () => {
+    const collapsed = keyOf("shell.research.collapsed");
+    expect(collapsed).toBe(preferences.researchSectionCollapsed);
+    expect(collapsed.scope).toBe("global");
+    expect(collapsed.portable).toBe(true);
+    expect(collapsed.default).toBe(false);
+    // Unset reads false: the section opens expanded.
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(false);
   });
 });

@@ -33,6 +33,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "shell.rightSidebar.expanded": [true, false],
   "shell.rightSidebar.section.expanded": [true, false],
   "shell.project.expanded": [true, false],
+  "shell.research.collapsed": [true, false],
   "view.wide": [true, false],
   "fileList.sidebarCollapsed": [true, false],
   "wiki.sessionStartIngest": [true, false],
@@ -124,7 +125,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 54;
+const DECLARATION_COUNT = 55;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

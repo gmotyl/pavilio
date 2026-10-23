@@ -36,13 +36,24 @@ export interface ProjectMarkProps {
   color?: string;
   /** Tile edge in px. */
   size?: number;
+  /**
+   * The project's kind. `research` draws a flask and `knowledge` a book in
+   * place of the project's own mark; `project` (or absent) draws that mark.
+   */
+  kind?: "project" | "research" | "knowledge";
 }
 
-export function ProjectMark({ project, mark, color, size = 22 }: ProjectMarkProps) {
+/** Kinds that draw a fixed icon instead of the project's own mark. */
+const KIND_MARKS: Partial<Record<NonNullable<ProjectMarkProps["kind"]>, string>> = {
+  research: "lucide:flask",
+  knowledge: "lucide:book",
+};
+
+export function ProjectMark({ project, mark, color, size = 22, kind }: ProjectMarkProps) {
   const { colorFor } = useProjectColors();
   const stored = useStoredMark(project);
   const hex = color ?? colorFor(project);
-  const parsed = parseProjectMark(mark ?? stored);
+  const parsed = parseProjectMark((kind && KIND_MARKS[kind]) ?? mark ?? stored);
   const emoji = parsed.startsWith("emoji:") ? parsed.slice(6) : null;
   const name = parsed.startsWith("lucide:") ? parsed.slice(7) : "folder";
   const Icon = PROJECT_MARK_COMPONENTS[name] ?? Folder;
