@@ -35,6 +35,7 @@ import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { ProjectMark } from "../projects/ProjectMark";
+import NewProjectDialog, { type NewProjectKind } from "../projects/NewProjectDialog";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
 import { SessionIndicator } from "../terminal/SessionIndicator";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
@@ -64,6 +65,7 @@ function SectionHeader({
   collapse,
   count,
   testId,
+  onNew,
 }: {
   icon: typeof FolderOpen;
   label: string;
@@ -73,7 +75,21 @@ function SectionHeader({
   /** Row count shown after the label; stays visible while collapsed. */
   count?: number;
   testId?: string;
+  /** Adds a **new** button at the right end of the header. */
+  onNew?: () => void;
 }) {
+  const newButton = onNew && (
+    <button
+      type="button"
+      data-testid={testId ? `${testId}-new` : undefined}
+      onClick={onNew}
+      title={`New ${label.toLowerCase()}`}
+      className="ml-auto text-[11px] rounded px-1"
+      style={{ color: "var(--text-tertiary)" }}
+    >
+      new
+    </button>
+  );
   if (collapse) {
     const Chevron = collapse.collapsed ? ChevronRight : ChevronDown;
     return (
@@ -104,6 +120,7 @@ function SectionHeader({
             </span>
           )}
         </button>
+        {newButton}
       </div>
     );
   }
@@ -117,6 +134,7 @@ function SectionHeader({
       >
         {label}
       </h2>
+      {newButton}
     </div>
   );
 }
@@ -185,7 +203,8 @@ export default function LeftSidebar() {
   const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
   const isMobile = useIsMobile();
-  const { archive, archivedNames } = useArchivedProjects();
+  const { archive, archivedNames, restore } = useArchivedProjects();
+  const [newKind, setNewKind] = useState<NewProjectKind | null>(null);
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
   const [lanAccessOpen, setLanAccessOpen] = useState(false);
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
@@ -646,6 +665,8 @@ export default function LeftSidebar() {
           icon={FolderOpen}
           label="Projects"
           leading={starredIsFirst ? undefined : hamburgerSlot}
+          testId="sidebar-section-projects"
+          onNew={() => setNewKind("project")}
         />
         <ul className="space-y-0.5">
           {otherProjects.map(renderProjectRow)}
@@ -661,6 +682,7 @@ export default function LeftSidebar() {
             collapsed: researchCollapsed,
             onToggle: () => setResearchCollapsed((v) => !v),
           }}
+          onNew={() => setNewKind("research")}
         />
         {!researchCollapsed && (
           <ul className="space-y-0.5">
@@ -846,6 +868,13 @@ export default function LeftSidebar() {
         <LanAccessModal onClose={() => setLanAccessOpen(false)} />
       )}
       {autoSyncOpen && <AutoSyncModal onClose={() => setAutoSyncOpen(false)} />}
+      {newKind && (
+        <NewProjectDialog
+          initialKind={newKind}
+          onClose={() => setNewKind(null)}
+          restore={restore}
+        />
+      )}
     </div>
   );
 }

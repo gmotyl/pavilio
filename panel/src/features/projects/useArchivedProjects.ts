@@ -27,19 +27,24 @@ export function useArchivedProjects() {
     refresh();
   }, [refresh]);
 
+  /** POSTs `url`, then refreshes. Resolves to the error message, or null on success. */
   const mutate = useCallback(
-    async (url: string) => {
+    async (url: string): Promise<string | null> => {
       setError(null);
       try {
         const res = await fetch(url, { method: "POST" });
         if (!res.ok) {
           const body = await res.json().catch(() => null);
-          setError(body?.error ?? `Request failed (${res.status})`);
-          return;
+          const message: string = body?.error ?? `Request failed (${res.status})`;
+          setError(message);
+          return message;
         }
         await refresh();
+        return null;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Request failed");
+        const message = e instanceof Error ? e.message : "Request failed";
+        setError(message);
+        return message;
       }
     },
     [refresh],
