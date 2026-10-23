@@ -137,7 +137,7 @@ export type ProjectDetail = Project & { archived: boolean; archivedAt?: string }
 
 /** True for a single path segment that can name a project dir (no separators, no dot-dirs). */
 function isProjectName(name: string): boolean {
-  return name.length > 0 && name !== "." && name !== ".." && !/[/\\]/.test(name);
+  return name.length > 0 && name !== "." && name !== ".." && !/[/\\]/.test(name) && !name.includes("\0");
 }
 
 /** The project dir for `name` — live first, then `archived/` — or null when it is in neither. */
