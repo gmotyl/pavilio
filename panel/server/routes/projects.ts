@@ -15,6 +15,9 @@ import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
 import { getAllDefaultUsers, setDefaultUser } from "../lib/project-default-user.js";
 import { listOsUsers } from "../lib/os-users.js";
 import { buildWikiTree } from "../lib/wiki/tree.js";
+import { scaffoldProject } from "../lib/projects/scaffold.js";
+import { isValidProjectSlug, slugifyProjectTitle } from "../lib/projects/slug.js";
+import { localISODate } from "../lib/dateLocal.js";
 
 export type { WikiTree, WikiPageInfo, WikiPageGroup } from "../lib/wiki/tree.js";
 
@@ -718,6 +721,34 @@ router.get("/:name/wiki", (req, res) => {
 router.get("/", (_req, res) => {
   const projects = discoverProjects();
   res.json(projects);
+});
+
+// Create from the panel: the same skeleton `scripts/project new` writes, scaffolded in-process.
+// `knowledge` is not offered — the workspace has exactly one, made by the CLI.
+router.post("/", (req, res) => {
+  const { title, kind, topic } = (req.body ?? {}) as { title?: unknown; kind?: unknown; topic?: unknown };
+  if (typeof title !== "string") return res.status(400).json({ error: "title must be a string" });
+  if (kind !== "project" && kind !== "research") {
+    return res.status(400).json({ error: 'kind must be "project" or "research"' });
+  }
+  if (topic !== undefined && typeof topic !== "string") return res.status(400).json({ error: "topic must be a string" });
+  const name = slugifyProjectTitle(title);
+  if (!isValidProjectSlug(name)) return res.status(400).json({ error: `no valid project name from title ${JSON.stringify(title)}` });
+  if (kind === "research" && !topic?.trim()) return res.status(400).json({ error: "a topic is required for research projects" });
+
+  const { projectsDir } = getConfig();
+  // Any existing folder is taken, card or not: unlike the CLI, the panel never fills in a notes dir.
+  const found = resolveProjectRoot(projectsDir, name);
+  if (found?.archived) return res.status(409).json({ reason: "archived", name });
+  if (found || existsSync(join(projectsDir, name))) return res.status(409).json({ reason: "exists", name });
+
+  try {
+    const result = scaffoldProject({ projectsDir, name, kind, topic: topic?.trim() || undefined, today: localISODate() });
+    if (!result.ok) return res.status(409).json({ reason: result.reason, name });
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+  res.status(201).json({ name });
 });
 
 export default router;
