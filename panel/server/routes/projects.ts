@@ -6,15 +6,25 @@ import {
   statSync,
   lstatSync,
   realpathSync,
+  rmSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
-import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
+import {
+  discoverProjects,
+  findProject,
+  resolveProjectRoot,
+  resolvesInsideProjectsDir,
+  type RepoEntry,
+} from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
 import { getAllDefaultUsers, setDefaultUser } from "../lib/project-default-user.js";
 import { listOsUsers } from "../lib/os-users.js";
 import { buildWikiTree } from "../lib/wiki/tree.js";
+import { scaffoldProject } from "../lib/projects/scaffold.js";
+import { isValidProjectSlug, slugifyProjectTitle } from "../lib/projects/slug.js";
+import { localISODate } from "../lib/dateLocal.js";
 
 export type { WikiTree, WikiPageInfo, WikiPageGroup } from "../lib/wiki/tree.js";
 
@@ -30,6 +40,20 @@ function isPathUnder(abs: string, root: string): boolean {
   if (abs === root) return true;
   const rel = relative(root, abs);
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * The dir a project-scoped read route serves: a live project, then `archived/<name>` (the
+ * archived view keeps context and plans readable), then any other existing dir under
+ * projectsDir, as before. Null for a traversal-shaped name, a dir that is not there, or one
+ * whose realpath leaves projectsDir (the allowlists compare lexical paths).
+ */
+function projectDirFor(projectsDir: string, name: string): string | null {
+  const direct = resolve(projectsDir, name);
+  if (!isPathUnder(direct, projectsDir) || direct === projectsDir) return null;
+  const found = resolveProjectRoot(projectsDir, name);
+  if (found) return join(found.root, name);
+  return resolvesInsideProjectsDir(projectsDir, direct) ? direct : null;
 }
 
 interface ContextSource {
@@ -515,6 +539,14 @@ router.get("/default-terminal-users", (_req, res) => {
   res.json({ users });
 });
 
+// Live project first, then `archived/<name>` — the project view's fallback when the name is
+// missing from the live list. Registered after the literal `/default-terminal-users`.
+router.get("/:name", (req, res) => {
+  const project = findProject(req.params.name);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  res.json(project);
+});
+
 router.put("/:name/default-terminal-user", (req, res) => {
   // Existence comes from discovery — same source `GET /` uses —
   // so a traversal-shaped name is rejected here instead of reaching the store.
@@ -535,10 +567,8 @@ router.put("/:name/default-terminal-user", (req, res) => {
 
 router.get("/:name/context", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
 
   const repos = readReposJson(projectDir);
   const sources: ContextSource[] = [
@@ -578,10 +608,8 @@ router.get("/:name/context", (req, res) => {
 
 router.get("/:name/context/read", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";
   if (!pathParam) return res.status(400).json({ error: "Missing 'path' query parameter" });
 
@@ -600,10 +628,8 @@ router.get("/:name/context/read", (req, res) => {
 
 router.get("/:name/plans-tree", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
 
   // OpenSpec sources are collected first: whether any of them actually
   // contributed a change decides if the (often permanently empty) legacy flat
@@ -662,10 +688,8 @@ router.get("/:name/plans-tree", (req, res) => {
 
 router.get("/:name/plans/read", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";
   if (!pathParam) return res.status(400).json({ error: "Missing 'path' query parameter" });
 
@@ -697,16 +721,67 @@ router.get("/:name/wiki", (req, res) => {
   if (!isPathUnder(projectDir, projectsDir) || dirname(projectDir) !== resolve(projectsDir)) {
     return res.status(404).json({ error: "Project not found" });
   }
-  const wikiDir = join(projectDir, "wiki");
+  // Falls back to `archived/<name>`; page paths stay project-relative either way.
+  const found = resolveProjectRoot(projectsDir, req.params.name);
+  const root = found?.root ?? projectsDir;
+  if (!resolvesInsideProjectsDir(projectsDir, join(root, req.params.name))) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  const wikiDir = join(root, req.params.name, "wiki");
   if (!existsSync(wikiDir) || !statSync(wikiDir).isDirectory()) {
     return res.status(404).json({ error: "Project has no wiki" });
   }
-  res.json(buildWikiTree(projectsDir, req.params.name));
+  res.json(buildWikiTree(root, req.params.name));
 });
 
 router.get("/", (_req, res) => {
   const projects = discoverProjects();
   res.json(projects);
+});
+
+// Create from the panel: the same skeleton `scripts/project new` writes, scaffolded in-process.
+// `knowledge` is not offered — the workspace has exactly one, made by the CLI.
+router.post("/", (req, res) => {
+  const { title, kind, topic } = (req.body ?? {}) as { title?: unknown; kind?: unknown; topic?: unknown };
+  if (typeof title !== "string") return res.status(400).json({ error: "title must be a string" });
+  if (kind !== "project" && kind !== "research") {
+    return res.status(400).json({ error: 'kind must be "project" or "research"' });
+  }
+  if (topic !== undefined && typeof topic !== "string") return res.status(400).json({ error: "topic must be a string" });
+  const name = slugifyProjectTitle(title);
+  if (!isValidProjectSlug(name)) return res.status(400).json({ error: `no valid project name from title ${JSON.stringify(title)}` });
+  if (kind === "research" && !topic?.trim()) return res.status(400).json({ error: "a topic is required for research projects" });
+
+  const { projectsDir } = getConfig();
+  // Any existing folder is taken, card or not: unlike the CLI, the panel never fills in a notes dir.
+  const found = resolveProjectRoot(projectsDir, name);
+  if (found?.archived) return res.status(409).json({ reason: "archived", name });
+  if (found || existsSync(join(projectsDir, name))) return res.status(409).json({ reason: "exists", name });
+
+  // existsSync follows links: a dangling symlink here is not ours to clean up after a throw.
+  const hadEntry = (() => {
+    try {
+      lstatSync(join(projectsDir, name));
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  try {
+    const result = scaffoldProject({ projectsDir, name, kind, topic: topic?.trim() || undefined, today: localISODate() });
+    if (!result.ok) return res.status(409).json({ reason: result.reason, name });
+  } catch (err) {
+    // The folder did not exist before this request, so whatever is there now is a partial
+    // scaffold; left behind it would turn every retry into 409 `exists`. The registry row is the
+    // scaffold's last write, so a throw means it was never added and needs no revert.
+    try {
+      if (!hadEntry) rmSync(join(projectsDir, name), { recursive: true, force: true });
+    } catch {
+      // best effort: the 500 below still reports the original failure
+    }
+    return res.status(500).json({ error: (err as Error).message });
+  }
+  res.status(201).json({ name });
 });
 
 export default router;

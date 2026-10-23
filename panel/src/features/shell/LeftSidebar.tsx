@@ -4,6 +4,7 @@ import {
   Archive as ArchiveIcon,
   ChevronDown,
   ChevronRight,
+  FlaskConical,
   FolderOpen,
   GitBranch,
   HelpCircle,
@@ -21,6 +22,8 @@ import { useIsMobile } from "./useIsMobile";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
+import { usePreference } from "../../preferences/usePreference";
+import type { ProjectKind } from "../../../server/lib/projects/kind";
 import GitSummary from "../git/GitSummary";
 import { MobileAccessModal } from "../mobile-access/MobileAccessModal";
 import { LanAccessModal } from "../lan-access/LanAccessModal";
@@ -32,6 +35,7 @@ import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { ProjectMark } from "../projects/ProjectMark";
+import NewProjectDialog, { type NewProjectKind } from "../projects/NewProjectDialog";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
 import { SessionIndicator } from "../terminal/SessionIndicator";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
@@ -58,11 +62,68 @@ function SectionHeader({
   icon: Icon,
   label,
   leading,
+  collapse,
+  count,
+  testId,
+  onNew,
 }: {
   icon: typeof FolderOpen;
   label: string;
   leading?: ReactNode;
+  /** Makes the header a ▾/▸ toggle for its section. */
+  collapse?: { collapsed: boolean; onToggle: () => void };
+  /** Row count shown after the label; stays visible while collapsed. */
+  count?: number;
+  testId?: string;
+  /** Adds a **new** button at the right end of the header. */
+  onNew?: () => void;
 }) {
+  const newButton = onNew && (
+    <button
+      type="button"
+      data-testid={testId ? `${testId}-new` : undefined}
+      onClick={onNew}
+      title={`New ${label.toLowerCase()}`}
+      className="ml-auto text-[11px] rounded px-1"
+      style={{ color: "var(--text-tertiary)" }}
+    >
+      new
+    </button>
+  );
+  if (collapse) {
+    const Chevron = collapse.collapsed ? ChevronRight : ChevronDown;
+    return (
+      <div className="flex items-center gap-2 mb-2 px-1">
+        {leading}
+        <button
+          type="button"
+          data-testid={testId ? `${testId}-toggle` : undefined}
+          aria-expanded={!collapse.collapsed}
+          onClick={collapse.onToggle}
+          className="flex items-center gap-2 text-left"
+        >
+          <Chevron size={12} style={{ color: "var(--text-tertiary)" }} />
+          <Icon size={12} style={{ color: "var(--text-tertiary)" }} />
+          <h2
+            className="text-[11px] font-semibold uppercase tracking-widest"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            {label}
+          </h2>
+          {count !== undefined && (
+            <span
+              data-testid={testId ? `${testId}-count` : undefined}
+              className="text-[11px] tabular-nums"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {count}
+            </span>
+          )}
+        </button>
+        {newButton}
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2 mb-2 px-1">
       {leading}
@@ -73,8 +134,53 @@ function SectionHeader({
       >
         {label}
       </h2>
+      {newButton}
     </div>
   );
+}
+
+type SidebarProject = {
+  name: string;
+  kind?: ProjectKind;
+  lastActivity?: string | null;
+};
+
+/** A research row older than this many days is dimmed (unless a terminal runs). */
+const STALE_AFTER_DAYS = 30;
+
+function kindOf(project: SidebarProject): ProjectKind {
+  return project.kind ?? "project";
+}
+
+/**
+ * Research order: knowledge first, then research by last activity, newest
+ * first, undated last. `YYYY-MM-DD` compares correctly as a string.
+ */
+function compareResearch(a: SidebarProject, b: SidebarProject): number {
+  const ak = kindOf(a) === "knowledge" ? 0 : 1;
+  const bk = kindOf(b) === "knowledge" ? 0 : 1;
+  if (ak !== bk) return ak - bk;
+  const ad = a.lastActivity ?? null;
+  const bd = b.lastActivity ?? null;
+  if (ad === bd) return 0;
+  if (ad === null) return 1;
+  if (bd === null) return -1;
+  return ad < bd ? 1 : -1;
+}
+
+/**
+ * Whole days from a `YYYY-MM-DD` date to today, both read as local calendar
+ * days so the label does not shift with the time of day. Null for no date or
+ * one that does not parse.
+ */
+function ageInDays(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return null;
+  const then = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.round((today.getTime() - then.getTime()) / 86_400_000));
 }
 
 /**
@@ -97,7 +203,8 @@ export default function LeftSidebar() {
   const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
   const isMobile = useIsMobile();
-  const { archive, archivedNames } = useArchivedProjects();
+  const { archive, archivedNames, restore } = useArchivedProjects();
+  const [newKind, setNewKind] = useState<NewProjectKind | null>(null);
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
   const [lanAccessOpen, setLanAccessOpen] = useState(false);
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
@@ -245,9 +352,20 @@ export default function LeftSidebar() {
 
   const onAutoSyncToggle = (next: boolean) => { if (next) enableSync(); else disableSync(); };
 
+  const [researchCollapsed, setResearchCollapsed] = usePreference(
+    preferences.researchSectionCollapsed,
+  );
+
+  // Starred keeps every kind; the rest split by kind — `project` into
+  // Projects, `research` and `knowledge` into Research. A row with no kind
+  // (an older server) is a project.
   const visibleProjects = projects.filter((p) => !archivedNames.has(p.name));
   const starredProjects = visibleProjects.filter((p) => isFavorite(p.name));
-  const otherProjects = visibleProjects.filter((p) => !isFavorite(p.name));
+  const unstarred = visibleProjects.filter((p) => !isFavorite(p.name));
+  const otherProjects = unstarred.filter((p) => kindOf(p) === "project");
+  const researchProjects = unstarred
+    .filter((p) => kindOf(p) !== "project")
+    .sort(compareResearch);
 
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
@@ -298,10 +416,17 @@ export default function LeftSidebar() {
       ? `/project/${encodeURIComponent(name)}/iterm`
       : `/project/${encodeURIComponent(name)}`;
 
-  const renderProjectRow = (project: { name: string }) => {
+  const renderProjectRow = (project: SidebarProject) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
     const projectSessionIds = projectSessions.map((s) => s.id);
     const expandedNow = isExpanded(project.name);
+    const kind = kindOf(project);
+    // Only research rows age: knowledge is permanent and projects have their
+    // own lifecycle. Past STALE_AFTER_DAYS the row dims as a hint to archive
+    // it — unless one of its terminals is running, which means it is in use.
+    const age = kind === "research" ? ageInDays(project.lastActivity) : null;
+    const dimmed =
+      age !== null && age > STALE_AFTER_DAYS && projectSessions.length === 0;
     /**
      * Read the open path the way the router reads it, rather than rebuilding
      * this project's path and comparing the two strings. The rebuilt form has
@@ -326,9 +451,12 @@ export default function LeftSidebar() {
     return (
       <li key={project.name}>
         <div
+          data-testid={`sidebar-project-row-${project.name}`}
+          data-dimmed={dimmed ? "true" : "false"}
           className="group flex items-center gap-1 rounded-md px-1 py-0.5"
           style={{
             background: isCurrent ? "var(--bg-active)" : "transparent",
+            ...(dimmed ? { opacity: 0.55 } : {}),
           }}
         >
           <button
@@ -358,7 +486,7 @@ export default function LeftSidebar() {
           )}
           {/* An unresolved (blank) name is not a preference scope: no tile for it. */}
           {typeof project.name === "string" && project.name.trim() !== "" && (
-            <ProjectMark project={project.name} size={18} />
+            <ProjectMark project={project.name} size={18} kind={kind} />
           )}
           <NavLink
             to={projectHref(project.name)}
@@ -372,6 +500,15 @@ export default function LeftSidebar() {
           >
             {project.name}
           </NavLink>
+          {age !== null && (
+            <span
+              data-testid={`sidebar-project-age-${project.name}`}
+              className="text-[11px] tabular-nums shrink-0"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {age}d
+            </span>
+          )}
           <button
             type="button"
             data-testid={`sidebar-project-create-terminal-${project.name}`}
@@ -406,24 +543,28 @@ export default function LeftSidebar() {
           >
             <Star size={11} fill={fav ? "var(--accent)" : "none"} />
           </button>
-          <button
-            type="button"
-            data-testid={`sidebar-project-archive-${project.name}`}
-            onClick={(e) => {
-              e.preventDefault();
-              archive(project.name);
-              if (currentProject === project.name) navigate("/");
-            }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
-            style={{
-              border: "1px solid var(--border-subtle)",
-              color: "var(--text-tertiary)",
-            }}
-            title={`Archive ${project.name}`}
-            aria-label={`Archive ${project.name}`}
-          >
-            <ArchiveIcon size={11} />
-          </button>
+          {/* The knowledge project is shared by every research round and is
+              never archived from the sidebar. */}
+          {kind !== "knowledge" && (
+            <button
+              type="button"
+              data-testid={`sidebar-project-archive-${project.name}`}
+              onClick={(e) => {
+                e.preventDefault();
+                archive(project.name);
+                if (currentProject === project.name) navigate("/");
+              }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded shrink-0"
+              style={{
+                border: "1px solid var(--border-subtle)",
+                color: "var(--text-tertiary)",
+              }}
+              title={`Archive ${project.name}`}
+              aria-label={`Archive ${project.name}`}
+            >
+              <ArchiveIcon size={11} />
+            </button>
+          )}
         </div>
         {expandedNow && projectSessions.length > 0 && (
           <ul
@@ -512,54 +653,79 @@ export default function LeftSidebar() {
     // change than the misalignment earns.
     <div className="p-3 overflow-auto h-full flex flex-col gap-5">
       {starredIsFirst && (
-        <section>
+        <section data-testid="sidebar-section-starred">
           <SectionHeader icon={Star} label="Starred" leading={hamburgerSlot} />
           <ul className="space-y-0.5">
             {starredProjects.map(renderProjectRow)}
           </ul>
         </section>
       )}
-      <section>
+      <section data-testid="sidebar-section-projects">
         <SectionHeader
           icon={FolderOpen}
           label="Projects"
           leading={starredIsFirst ? undefined : hamburgerSlot}
+          testId="sidebar-section-projects"
+          onNew={() => setNewKind("project")}
         />
         <ul className="space-y-0.5">
           {otherProjects.map(renderProjectRow)}
-          <li>
-            <NavLink
-              to="/terminals"
-              data-testid="sidebar-terminals-link"
-              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
-              style={({ isActive }) => ({
-                color: isActive
-                  ? "var(--text-primary)"
-                  : "var(--text-tertiary)",
-                background: isActive ? "var(--bg-active)" : "transparent",
-              })}
-            >
-              <TerminalIcon size={12} />
-              <span>Terminals</span>
-            </NavLink>
-          </li>
-          <li>
-            <NavLink
-              to="/archive"
-              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
-              style={({ isActive }) => ({
-                color: isActive
-                  ? "var(--text-primary)"
-                  : "var(--text-tertiary)",
-                background: isActive ? "var(--bg-active)" : "transparent",
-              })}
-            >
-              <Inbox size={12} />
-              <span>Archive</span>
-            </NavLink>
-          </li>
         </ul>
       </section>
+      <section data-testid="sidebar-section-research">
+        <SectionHeader
+          icon={FlaskConical}
+          label="Research"
+          testId="sidebar-section-research"
+          count={researchProjects.length}
+          collapse={{
+            collapsed: researchCollapsed,
+            onToggle: () => setResearchCollapsed((v) => !v),
+          }}
+          onNew={() => setNewKind("research")}
+        />
+        {!researchCollapsed && (
+          <ul className="space-y-0.5">
+            {researchProjects.map(renderProjectRow)}
+          </ul>
+        )}
+      </section>
+      {/* Footer links, after every project list. The Archive link carries no
+          count: one would cost an archive request on every page. */}
+      <ul className="space-y-0.5">
+        <li>
+          <NavLink
+            to="/terminals"
+            data-testid="sidebar-terminals-link"
+            className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
+            style={({ isActive }) => ({
+              color: isActive
+                ? "var(--text-primary)"
+                : "var(--text-tertiary)",
+              background: isActive ? "var(--bg-active)" : "transparent",
+            })}
+          >
+            <TerminalIcon size={12} />
+            <span>Terminals</span>
+          </NavLink>
+        </li>
+        <li>
+          <NavLink
+            to="/archive"
+            data-testid="sidebar-archive-link"
+            className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[12px]"
+            style={({ isActive }) => ({
+              color: isActive
+                ? "var(--text-primary)"
+                : "var(--text-tertiary)",
+              background: isActive ? "var(--bg-active)" : "transparent",
+            })}
+          >
+            <Inbox size={12} />
+            <span>Archive</span>
+          </NavLink>
+        </li>
+      </ul>
 
       <section className="mt-auto">
         <SectionHeader icon={GitBranch} label="Git" />
@@ -702,6 +868,13 @@ export default function LeftSidebar() {
         <LanAccessModal onClose={() => setLanAccessOpen(false)} />
       )}
       {autoSyncOpen && <AutoSyncModal onClose={() => setAutoSyncOpen(false)} />}
+      {newKind && (
+        <NewProjectDialog
+          initialKind={newKind}
+          onClose={() => setNewKind(null)}
+          restore={restore}
+        />
+      )}
     </div>
   );
 }

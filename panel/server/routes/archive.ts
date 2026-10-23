@@ -4,13 +4,15 @@ import {
   mkdirSync,
   renameSync,
   readdirSync,
-  statSync,
   utimesSync,
 } from "fs";
 import { join } from "path";
 import { getConfig } from "../config.js";
 import { rebuildIndex } from "../lib/file-index.js";
 import { markArchivedInRegistry, markRestoredInRegistry } from "../lib/registry.js";
+import { projectDescription } from "../lib/projects/description.js";
+import { projectKind } from "../lib/projects/kind.js";
+import { archivedAt, archivedRoot } from "../lib/discovery.js";
 
 const router = Router();
 
@@ -28,13 +30,19 @@ function isSafeName(name: string): boolean {
 
 router.get("/", (_req, res) => {
   const { projectsDir } = getConfig();
-  const archivedDir = join(projectsDir, "archived");
+  const archivedDir = archivedRoot(projectsDir);
   if (!existsSync(archivedDir)) return res.json([]);
   const list = readdirSync(archivedDir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => {
-      const stat = statSync(join(archivedDir, e.name));
-      return { name: e.name, archivedAt: stat.mtime.toISOString() };
+      const dir = join(archivedDir, e.name);
+      return {
+        name: e.name,
+        archivedAt: archivedAt(dir),
+        // Resolve against archived/ so a live project of the same name never answers.
+        kind: projectKind(archivedDir, e.name),
+        description: projectDescription(dir),
+      };
     })
     .sort((a, b) => b.archivedAt.localeCompare(a.archivedAt));
   res.json(list);

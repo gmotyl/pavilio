@@ -553,3 +553,42 @@ describe("GET /api/projects/:name/plans-tree — empty legacy flat source", () =
     expect(sources[openspecIdx[0]].kind).toBe("openspec-error");
   });
 });
+
+describe("plans routes — archived project", () => {
+  it("lists and reads an archived project's plans and OpenSpec changes", async () => {
+    const dir = join(projectsDir, "archived", "delta");
+    seedFile(join(dir, "PROJECT.md"));
+    seedFile(join(dir, "plans", "2026-01-01-foo.md"), "# foo");
+    seedFile(join(dir, "plans", "openspec", "changes", "2026-02-02-bar", "tasks.md"), "# bar");
+    const app = makeApp(projectsRouter, "/api/projects");
+
+    const tree = await request(app).get("/api/projects/delta/plans-tree");
+    expect(tree.status).toBe(200);
+    const project = tree.body.sources.find((s: { id: string }) => s.id === "project");
+    expect(project.files.map((f: { relativeToProjectsDir: string }) => f.relativeToProjectsDir)).toEqual([
+      "archived/delta/plans/2026-01-01-foo.md",
+    ]);
+    expect(tree.body.sources.some((s: { kind?: string }) => s.kind === "openspec")).toBe(true);
+
+    const read = await request(app).get(
+      `/api/projects/delta/plans/read?path=${encodeURIComponent(join(dir, "plans", "2026-01-01-foo.md"))}`,
+    );
+    expect(read.status).toBe(200);
+    expect(read.body.content).toBe("# foo");
+  });
+
+  it("a live project wins over an archived one of the same name", async () => {
+    seedFile(join(projectsDir, "delta", "PROJECT.md"));
+    seedFile(join(projectsDir, "delta", "plans", "live.md"), "# live");
+    seedFile(join(projectsDir, "archived", "delta", "PROJECT.md"));
+    seedFile(join(projectsDir, "archived", "delta", "plans", "old.md"), "# old");
+    const app = makeApp(projectsRouter, "/api/projects");
+    const tree = await request(app).get("/api/projects/delta/plans-tree");
+    const project = tree.body.sources.find((s: { id: string }) => s.id === "project");
+    expect(project.files.map((f: { filename: string }) => f.filename)).toEqual(["live.md"]);
+    const read = await request(app).get(
+      `/api/projects/delta/plans/read?path=${encodeURIComponent(join(projectsDir, "archived", "delta", "plans", "old.md"))}`,
+    );
+    expect(read.status).toBe(403);
+  });
+});

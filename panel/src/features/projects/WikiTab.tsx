@@ -11,6 +11,8 @@ import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useProjectWiki, useWikiPage, type WikiPageInfo, type WikiTree } from "./useProjectWiki";
 import { clearLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
+import CopyIconButton from "../shell/CopyIconButton";
+import { expandCommand } from "../terminal/expandCommand";
 
 /** Rows a page list shows before folding the rest behind "+ N more". */
 const LIST_LIMIT = 5;
@@ -502,6 +504,31 @@ function WikiPageView({
   );
 }
 
+/** The skill the ask hint names; the only one its expansion needs to know. */
+const WIKI_SKILL = "pavilio-wiki";
+
+/**
+ * The one-line hint at the top of the tab: the command to ask this wiki from a
+ * terminal. The copy button writes the composer's own expansion of it, so the
+ * pasted text points at the skill file instead of a slash command.
+ */
+function AskHint({ projectName }: { projectName: string }) {
+  const command = `/${WIKI_SKILL} ${projectName} "…"`;
+  const expanded = useMemo(() => expandCommand(command, new Set([WIKI_SKILL])), [command]);
+  return (
+    <div
+      data-testid="wiki-ask-hint"
+      className="flex items-center gap-1.5 mb-2 text-xs min-w-0"
+      style={{ color: "var(--text-muted)" }}
+    >
+      <span className="truncate">
+        Ask this wiki: <code className="font-mono">{command}</code>
+      </span>
+      <CopyIconButton value={expanded} label="Copy the ask instruction" data-testid="wiki-ask-copy" />
+    </div>
+  );
+}
+
 interface Props {
   projectName: string;
 }
@@ -565,30 +592,33 @@ export default function WikiTab({ projectName }: Props) {
   const filter: WikiFilter = { query, selectedPath, onSelect: openPage };
 
   return (
-    <FileListSidebar
-      testId="wiki-tab"
-      title="Wiki"
-      icon={<BookOpen size={16} style={{ color: "var(--accent)" }} />}
-      sources={treeSources(filtered, filter)}
-      controls={controls.controlsBar}
-      aboveList={filtered.overview ? <PageRow page={filtered.overview} filter={filter} /> : null}
-      onRefresh={refresh}
-      detail={
-        file && selectedPath ? (
-          <WikiPageView
-            key={file}
-            file={file}
-            path={selectedPath}
-            info={pages.get(selectedPath)}
-            pages={pages}
-            onOpen={openPage}
-          />
-        ) : (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Select a page to view.
-          </p>
-        )
-      }
-    />
+    <>
+      <AskHint projectName={projectName} />
+      <FileListSidebar
+        testId="wiki-tab"
+        title="Wiki"
+        icon={<BookOpen size={16} style={{ color: "var(--accent)" }} />}
+        sources={treeSources(filtered, filter)}
+        controls={controls.controlsBar}
+        aboveList={filtered.overview ? <PageRow page={filtered.overview} filter={filter} /> : null}
+        onRefresh={refresh}
+        detail={
+          file && selectedPath ? (
+            <WikiPageView
+              key={file}
+              file={file}
+              path={selectedPath}
+              info={pages.get(selectedPath)}
+              pages={pages}
+              onOpen={openPage}
+            />
+          ) : (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Select a page to view.
+            </p>
+          )
+        }
+      />
+    </>
   );
 }

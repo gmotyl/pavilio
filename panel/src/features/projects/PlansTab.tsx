@@ -34,6 +34,8 @@ import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
 
 interface Props {
   projectName: string;
+  /** The project is archived: read-only, so no change offers a run. */
+  archived?: boolean;
 }
 
 /** Human-readable label for one change artifact row. */
@@ -264,7 +266,7 @@ function artifactMatches(
   return hay.includes(q);
 }
 
-export default function PlansTab({ projectName }: Props) {
+export default function PlansTab({ projectName, archived = false }: Props) {
   const { data, loading, error, refresh } = usePlansTree(projectName);
   // Selection lives in the `?file=` URL param (like notes/memo) so the
   // plans tab link built by useProjectTabs can restore the open plan.
@@ -636,7 +638,7 @@ export default function PlansTab({ projectName }: Props) {
               Loading…
             </p>
           )}
-          {runStatus && (
+          {runStatus && !archived && (
             <RunBanner
               status={runStatus}
               project={projectName}
@@ -644,7 +646,7 @@ export default function PlansTab({ projectName }: Props) {
               onRun={onRun}
             />
           )}
-          {runStatus && runError && (
+          {runStatus && !archived && runError && (
             <p role="alert" className="text-sm" style={{ color: "var(--red)" }}>
               Could not start the run: {runError}
             </p>

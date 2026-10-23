@@ -93,8 +93,11 @@ describe("the hamburger's reserved slot", () => {
   it("is the leading item of the FIRST header row on screen", () => {
     // No stars: Projects is the row at the top, so the slot is Projects'.
     const plain = setup();
+    // Research renders even when it has no rows (its header carries the
+    // new-research button), but it is never the first row.
     expect(headings().map((h) => h.textContent)).toEqual([
       "Projects",
+      "Research",
       "Git",
     ]);
     expect(slots()).toHaveLength(1);
@@ -108,6 +111,7 @@ describe("the hamburger's reserved slot", () => {
     expect(headings().map((h) => h.textContent)).toEqual([
       "Starred",
       "Projects",
+      "Research",
       "Git",
     ]);
     expect(slots()).toHaveLength(1);

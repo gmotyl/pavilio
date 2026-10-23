@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
-import { mkdirSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, utimesSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
@@ -78,6 +78,30 @@ describe("archive routes", () => {
     await request(app).post("/api/archive/alpha");
     const res = await request(app).get("/api/archive");
     expect(new Date(res.body[0].archivedAt).getTime()).toBeGreaterThan(before);
+  });
+
+  it("archive list rows include kind and description", async () => {
+    mkdirSync(join(projects.dir(), "archived", "voices"), { recursive: true });
+    writeFileSync(
+      join(projects.dir(), "archived", "voices", "PROJECT.md"),
+      "---\nkind: research\ntopic: edge tts voices\n---\n# Voices\n",
+    );
+    seedProject("archived/plain");
+    // An active project with the same name must not leak into the archived row.
+    mkdirSync(join(projects.dir(), "plain"), { recursive: true });
+    writeFileSync(
+      join(projects.dir(), "plain", "PROJECT.md"),
+      "---\nkind: research\ntopic: live copy\n---\n# Plain\n",
+    );
+    const older = new Date(Date.now() - 60_000);
+    utimesSync(join(projects.dir(), "archived", "plain"), older, older);
+
+    const res = await request(makeApp(archiveRouter, "/api/archive")).get("/api/archive");
+    expect(res.status).toBe(200);
+    expect(res.body.map((p: { name: string }) => p.name)).toEqual(["voices", "plain"]);
+    expect(res.body[0]).toMatchObject({ kind: "research", description: "edge tts voices" });
+    expect(res.body[1]).toMatchObject({ kind: "project", description: null });
+    expect(typeof res.body[1].archivedAt).toBe("string");
   });
 
   it("returns [] when archived/ does not exist", async () => {

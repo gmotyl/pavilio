@@ -1,13 +1,11 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
 
 import { isProjectDir } from "../project-dir";
+import { splitFrontmatter } from "./frontmatter";
 
 export const PROJECT_KINDS = ["project", "research", "knowledge"] as const;
 export type ProjectKind = (typeof PROJECT_KINDS)[number];
-
-const FENCE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
 /**
  * The dir holding the project's `PROJECT.md`: `<projectsDir>/<project>` when active, else
@@ -29,19 +27,7 @@ export function projectKind(projectsDir: string, project: string): ProjectKind {
   if (!dir) return "project";
   const card = join(dir, "PROJECT.md");
   if (!existsSync(card)) return "project";
-  let text = readFileSync(card, "utf8");
-  // Editors on Windows may save a UTF-8 BOM, which would hide the opening fence.
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  const match = FENCE.exec(text);
-  if (!match) return "project";
-  let data: unknown;
-  try {
-    data = parseYaml(match[1] ?? "", { uniqueKeys: false });
-  } catch {
-    return "project";
-  }
-  if (!data || typeof data !== "object" || Array.isArray(data)) return "project";
-  const kind = (data as Record<string, unknown>).kind;
+  const kind = splitFrontmatter(readFileSync(card, "utf8")).data.kind;
   return typeof kind === "string" && (PROJECT_KINDS as readonly string[]).includes(kind)
     ? (kind as ProjectKind)
     : "project";
