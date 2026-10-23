@@ -225,6 +225,19 @@ describe("LeftSidebar Research section", () => {
     expect(screen.queryByTestId("sidebar-project-age-vector")).toBeNull();
   });
 
+  it("dims strictly past 30 days: 30d stays, 31d dims", () => {
+    shell.projects = () => [
+      ...ROWS,
+      { name: "day-30", repos: [], kind: "research", lastActivity: "2026-09-23" },
+      { name: "day-31", repos: [], kind: "research", lastActivity: "2026-09-22" },
+    ];
+    setup();
+    expect(screen.getByTestId("sidebar-project-age-day-30").textContent).toBe("30d");
+    expect(screen.getByTestId("sidebar-project-age-day-31").textContent).toBe("31d");
+    expect(row("day-30").getAttribute("data-dimmed")).toBe("false");
+    expect(row("day-31").getAttribute("data-dimmed")).toBe("true");
+  });
+
   it("running terminal suppresses dimming", () => {
     shell.sessions = () => [session("v1", "voice-cloning")];
     setup();
