@@ -116,9 +116,12 @@ that wiki's ingest lock), so the parent runs it once per project after the commi
    project's new note paths that `scripts/wiki pending <project> --only notes/<file>.md` still lists.
 2. One ingest per project, all of that project's notes in one run — `/pavilio-wiki <project> ingest
    projects/<project>/notes/<a>.md projects/<project>/notes/<b>.md …` per [[pavilio-wiki]] § Ingest
-   (it locks, writes and commits only `wiki/`). Different projects → parallel background subagents
-   (one wiki lock each); the same project never twice at once.
-3. Report one line per project (the ingest's checkpoint report). A failed or skipped ingest leaves
+   (it locks, writes and commits only `wiki/`). **One project at a time:** the wiki lock is per
+   project, but every ingest commits through the workspace's one git index — two at once race
+   `.git/index.lock`, and one's commit can sweep in the other's staged `wiki/` files.
+3. `git push` once after the last ingest has reported — each ingest commits but none pushes, and
+   step 9's push ran before them.
+4. Report one line per project (the ingest's checkpoint report). A failed or skipped ingest leaves
    the notes pending for the next catch-up (session-start or `/pavilio-wiki <project> ingest`) —
    it never fails the batch.
 
