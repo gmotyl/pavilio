@@ -72,6 +72,7 @@ export default function ProjectView() {
   const {
     detail: currentDetail,
     loading: detailLoading,
+    failed: detailFailed,
     refetch: refetchDetail,
   } = useProjectDetail(name, isListed);
 
@@ -401,6 +402,11 @@ export default function ProjectView() {
       )}
 
       {/* iTerm tab */}
+      {onItermTab && !showTerminals && detailFailed && (
+        <div data-testid="project-detail-error" className="p-4 text-sm" style={{ color: "var(--text-muted)" }}>
+          Couldn't check whether this project is archived — retrying…
+        </div>
+      )}
       {showTerminals && (
         <ProjectTerminalsSurface projectName={name || ""} active />
       )}

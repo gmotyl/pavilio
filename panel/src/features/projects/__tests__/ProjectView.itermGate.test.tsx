@@ -31,13 +31,14 @@ vi.mock("../../terminal/ProjectTerminalsSurface", () => ({
 
 import ProjectView from "../ProjectView";
 import { refreshProjects } from "../useProjects";
+import { DETAIL_RETRY_MS } from "../useProjectDetail";
 
 interface Deferred {
   resolve: (r: Response) => void;
 }
 
-/** Per-name answer of `GET /api/projects/:name`: archived flag, 404, or held open. */
-let details: Record<string, { archived: boolean } | "404" | "hold">;
+/** Per-name answer of `GET /api/projects/:name`: archived flag, 404, 500, network error, or held open. */
+let details: Record<string, { archived: boolean } | "404" | "500" | "network" | "hold">;
 /** Names `GET /api/projects` lists. */
 let listed: string[];
 /** Detail requests held open by "hold", oldest first, with their name. */
@@ -80,6 +81,8 @@ beforeEach(() => {
         const name = decodeURIComponent(m[1]);
         const answer = details[name] ?? "404";
         if (answer === "404") return json({ error: "not found" }, 404);
+        if (answer === "500") return json({ error: "boom" }, 500);
+        if (answer === "network") throw new TypeError("Failed to fetch");
         if (answer === "hold") {
           return new Promise<Response>((resolve) => held.push({ name, deferred: { resolve } }));
         }
@@ -177,6 +180,50 @@ describe("ProjectView — iterm surface gate", () => {
     renderAt("/project/session-label/iterm");
     await screen.findByTestId("terminals-surface");
     expect(surface.mounts).toEqual(["session-label"]);
+  });
+
+  for (const failure of ["500", "network"] as const) {
+    it(`a failed detail lookup (${failure}) holds the surface and retries instead of reading "not archived"`, async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        details.old = failure;
+        renderAt("/project/old/iterm");
+        await screen.findByTestId("project-detail-error");
+        await flush();
+        expect(surface.mounts).toEqual([]);
+
+        // The retry finds it archived: still never mounted.
+        details.old = { archived: true };
+        await act(async () => {
+          vi.advanceTimersByTime(DETAIL_RETRY_MS);
+        });
+        await screen.findByTestId("archived-banner");
+        await flush();
+        expect(surface.mounts).toEqual([]);
+        expect(screen.queryByTestId("project-detail-error")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it("a failed detail lookup followed by a 404 mounts the surface", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      details["session-label"] = "500";
+      renderAt("/project/session-label/iterm");
+      await screen.findByTestId("project-detail-error");
+      expect(surface.mounts).toEqual([]);
+
+      details["session-label"] = "404";
+      await act(async () => {
+        vi.advanceTimersByTime(DETAIL_RETRY_MS);
+      });
+      await screen.findByTestId("terminals-surface");
+      expect(surface.mounts).toEqual(["session-label"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a project restored elsewhere does not reuse its cached archived answer on a transient drop", async () => {
