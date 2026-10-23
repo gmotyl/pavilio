@@ -4,7 +4,7 @@ import AlertHost from "../AlertHost";
 import { __resetAlertsForTests, alerts } from "../store";
 import { preferences } from "../../../preferences/declarations";
 import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
-import { derivedProjectColor } from "../../projects/projectMark";
+import { derivedProjectColor } from "../../projects/projectIdentity";
 import { __resetProjectColorsForTests } from "../../terminal/useProjectColors";
 
 afterEach(() => {

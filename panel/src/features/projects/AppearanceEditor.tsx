@@ -6,7 +6,7 @@ import { alerts } from "../alerts/store";
 import { ProjectColorPicker } from "../terminal/ProjectColorPicker";
 import { useProjectColors } from "../terminal/useProjectColors";
 import { PROJECT_MARK_COMPONENTS, ProjectMark } from "./ProjectMark";
-import { PROJECT_MARK_ICONS, isSingleEmoji } from "./projectMark";
+import { PROJECT_MARK_ICONS, isSingleEmoji } from "./projectIdentity";
 
 const EMOJI_HINT = "Enter exactly one emoji, e.g. 🚀";
 

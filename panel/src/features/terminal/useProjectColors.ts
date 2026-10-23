@@ -5,7 +5,7 @@ import { readPreference, subscribePreference, writePreference } from "../../pref
 import {
   PROJECT_COLOR_HEX_RE,
   derivedProjectColor,
-} from "../projects/projectMark";
+} from "../projects/projectIdentity";
 
 const KEY_PREFIX = `${preferences.projectColor.key}@`;
 /** Null-prototype so a project named `constructor` or `__proto__` is just a key. */

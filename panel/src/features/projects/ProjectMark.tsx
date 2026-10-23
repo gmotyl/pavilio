@@ -9,7 +9,7 @@ import { useSyncExternalStore } from "react";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, subscribePreference } from "../../preferences/store";
 import { useProjectColors } from "../terminal/useProjectColors";
-import { parseProjectMark } from "./projectMark";
+import { parseProjectMark } from "./projectIdentity";
 
 /** Registered short name (see PROJECT_MARK_ICONS) -> Lucide component. */
 export const PROJECT_MARK_COMPONENTS: Record<string, LucideIcon> = {
