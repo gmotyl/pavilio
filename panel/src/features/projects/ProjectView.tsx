@@ -39,12 +39,19 @@ import { useReposTabMemory } from "../shell/useReposTabMemory";
 import { useWideMode } from "../shell/useWideMode";
 import WideToggle from "../shell/WideToggle";
 import { openInVSCode } from "../shell/vscode";
-import { useProjects } from "./useProjects";
+import { useProjects, type Project } from "./useProjects";
+import ArchivedBanner from "./ArchivedBanner";
 import { useTabScrollMemory } from "./useTabScrollMemory";
 import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
 
+
+/** `GET /api/projects/:name`: a live project, or an archived one with its date. */
+type ProjectDetail = Project & { archived: boolean; archivedAt?: string };
+
+/** Tabs an archived project hides; their URLs fall back to the overview. */
+const ARCHIVED_HIDDEN_SECTIONS = new Set(["iterm", "repos"]);
 
 /** Sidebar headings read like the sibling tabs ("Plans", "Context"). */
 const sectionTitle = (section: string) =>
@@ -61,7 +68,48 @@ export default function ProjectView() {
   const projects = useProjects();
 
   const navTo = useNavigate();
-  const project = projects.find((p) => p.name === name);
+  const liveProject = projects.find((p) => p.name === name);
+  const isListed = Boolean(liveProject);
+
+  // The live list never carries an archived project, so a project missing from
+  // it is looked up on its own. Bumping `detailVersion` refetches (after Restore).
+  const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [detailVersion, setDetailVersion] = useState(0);
+  useEffect(() => {
+    setDetail(null);
+  }, [name]);
+  useEffect(() => {
+    if (!name || isListed) return;
+    let cancelled = false;
+    fetch(`/api/projects/${encodeURIComponent(name)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: ProjectDetail | null) => {
+        // Only an answer for this very project counts (a list or a 404 does not).
+        if (!cancelled) setDetail(data?.name === name ? data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [name, isListed, detailVersion]);
+  const refetchDetail = useCallback(() => setDetailVersion((v) => v + 1), []);
+  // The render right after a project switch still holds the previous detail.
+  const currentDetail = detail?.name === name ? detail : null;
+
+  const project: Project | undefined = liveProject ?? currentDetail ?? undefined;
+  const archived = !liveProject && currentDetail?.archived === true;
+  // Terminals start only for a project known to be live — never while an
+  // unlisted project's detail is still in flight.
+  const knownLive = Boolean(liveProject) || currentDetail?.archived === false;
+
+  // Hidden tabs have no page: their URLs land on the overview instead.
+  useEffect(() => {
+    if (archived && name && section && ARCHIVED_HIDDEN_SECTIONS.has(section)) {
+      navTo(`/project/${name}`, { replace: true });
+    }
+  }, [archived, name, section, navTo]);
   const hasRepos = (project?.repos?.length ?? 0) > 0;
   const hasWiki = project?.hasWiki ?? false;
 
@@ -212,11 +260,12 @@ export default function ProjectView() {
     section,
     hasRepos,
     hasWiki,
+    archived,
   });
 
   useBreadcrumbActions(
     <ProjectTabsMenu tabs={tabs} activeTab={activeTab} />,
-    [name, section, hasRepos, hasWiki],
+    [name, section, hasRepos, hasWiki, archived],
   );
 
   // Same predicate the detail pane already branches on, guarded by the same
@@ -248,6 +297,15 @@ export default function ProjectView() {
           to={`/project/${name}/time`}
         />
       </div>
+
+      {archived && name && (
+        <ArchivedBanner
+          key={name}
+          project={name}
+          archivedAt={currentDetail?.archivedAt}
+          onRestored={refetchDetail}
+        />
+      )}
 
       <ProjectTabsBar
         tabs={tabs}
@@ -287,7 +345,7 @@ export default function ProjectView() {
       )}
 
       {/* Repos tab */}
-      {section === "repos" && project?.repos && (
+      {section === "repos" && !archived && project?.repos && (
         <div className="space-y-6">
           {project.repos.map((repo) => (
             <RepoBlock
@@ -352,7 +410,7 @@ export default function ProjectView() {
       )}
 
       {/* iTerm tab */}
-      {section === "iterm" && (
+      {section === "iterm" && knownLive && (
         <ProjectTerminalsSurface projectName={name || ""} active />
       )}
 
@@ -362,7 +420,7 @@ export default function ProjectView() {
       )}
 
       {/* Plans tab — legacy plan files plus coordinated OpenSpec changes */}
-      {section === "plans" && <PlansTab projectName={name || ""} />}
+      {section === "plans" && <PlansTab projectName={name || ""} archived={archived} />}
 
       {/* Wiki tab — the project's LLM wiki, read-only (only listed with wiki/) */}
       {section === "wiki" && <WikiTab projectName={name || ""} />}

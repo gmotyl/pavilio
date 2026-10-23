@@ -16,6 +16,11 @@ interface Options {
   hasRepos: boolean;
   /** The project has `wiki/` — adds the `wiki` tab right after `context`. */
   hasWiki?: boolean;
+  /**
+   * The project lives under `archived/`: the read-only view hides `iterm` and
+   * `repos` outright (hidden, not disabled — dead tabs only confuse).
+   */
+  archived?: boolean;
 }
 
 const SECTIONS = [
@@ -34,19 +39,24 @@ export function useProjectTabs({
   section,
   hasRepos,
   hasWiki = false,
+  archived = false,
 }: Options): { tabs: ProjectTab[]; activeTab: ProjectTab } {
   const sections = [...SECTIONS];
   if (hasWiki) sections.splice(sections.indexOf("context") + 1, 0, "wiki");
-  if (hasRepos) sections.push("repos");
+  if (hasRepos && !archived) sections.push("repos");
   const nonIterm = sections.filter((s) => s !== "iterm");
   const name = projectName ?? "";
 
   const tabs: ProjectTab[] = [
-    {
-      label: "iterm",
-      to: `/project/${name}/iterm`,
-      active: section === "iterm",
-    },
+    ...(archived
+      ? []
+      : [
+          {
+            label: "iterm",
+            to: `/project/${name}/iterm`,
+            active: section === "iterm",
+          },
+        ]),
     {
       label: "Overview",
       to: `/project/${name}`,

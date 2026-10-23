@@ -120,10 +120,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function open(path: string) {
+function open(path: string, { archived = false }: { archived?: boolean } = {}) {
   return renderWithRouter(
     <Routes>
-      <Route path="/" element={<PlansTab projectName="alokai" />} />
+      <Route path="/" element={<PlansTab projectName="alokai" archived={archived} />} />
       <Route path="/project/:name/iterm" element={<p>terminal view</p>} />
     </Routes>,
     { initialEntries: [`/?file=${encodeURIComponent(path)}`] },
@@ -150,6 +150,13 @@ describe("PlansTab run banner", () => {
     open(ARCHIVED_TASKS);
     await screen.findByText("Step two pending");
     expect(screen.queryByRole("region", { name: "Run this change" })).toBeNull();
+  });
+
+  it("no run banner on an archived project's plans", async () => {
+    open(ACTIVE_TASKS, { archived: true });
+    await screen.findByText("Step two pending");
+    expect(screen.queryByRole("region", { name: "Run this change" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
   });
 
   it("Run starts a task run for the project and opens its terminal", async () => {

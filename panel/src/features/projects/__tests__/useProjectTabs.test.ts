@@ -59,3 +59,30 @@ describe("the wiki tab", () => {
     expect(wiki?.active).toBe(true);
   });
 });
+
+describe("an archived project's tabs", () => {
+  it("archived project tabs omit iterm and repos", () => {
+    const labels = renderHook(() =>
+      useProjectTabs({
+        projectName: PROJECT,
+        section: undefined,
+        hasRepos: true,
+        hasWiki: true,
+        archived: true,
+      }),
+    ).result.current.tabs.map((t) => t.label);
+    // Hidden, not disabled: the labels are simply absent.
+    expect(labels).toEqual([
+      "Overview",
+      "plans",
+      "context",
+      "wiki",
+      "notes",
+      "memo",
+      "progress",
+      "qa",
+      "mockups",
+    ]);
+  });
+});
+

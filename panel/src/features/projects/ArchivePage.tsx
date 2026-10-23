@@ -2,7 +2,7 @@ import { useState, useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Inbox, RotateCcw, Search } from "lucide-react";
 import { useArchivedProjects, type ArchivedProject } from "./useArchivedProjects";
-import { groupArchived } from "./archiveGroups";
+import { formatArchivedDay, groupArchived } from "./archiveGroups";
 import { ProjectMark } from "./ProjectMark";
 
 type KindFilter = "all" | "project" | "research";
@@ -16,14 +16,6 @@ const KIND_OPTIONS: { id: KindFilter; label: string }[] = [
 /** Research and the knowledge project share the Research side of the switch. */
 function isResearch(p: ArchivedProject): boolean {
   return p.kind === "research" || p.kind === "knowledge";
-}
-
-/** `YYYY-MM-DD` in local time, or the raw value when it does not parse. */
-function formatDay(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /** Escapes RegExp metacharacters so a search query matches literally. */
@@ -208,7 +200,7 @@ export function ArchivePage() {
                         className="text-[11px] whitespace-nowrap"
                         style={{ color: "var(--text-muted)" }}
                       >
-                        archived {formatDay(p.archivedAt)}
+                        archived {formatArchivedDay(p.archivedAt)}
                       </span>
                     </div>
                   </Link>
