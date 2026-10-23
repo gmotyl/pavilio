@@ -12,6 +12,13 @@ vi.mock("../../../lib/clipboard", () => ({
   copyToClipboard: vi.fn(async () => true),
 }));
 
+// Spied, calling through: the ask hint's copy must come from the composer's
+// expansion, not a hand-written string that happens to match it today.
+vi.mock("../../terminal/expandCommand", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../terminal/expandCommand")>();
+  return { ...actual, expandCommand: vi.fn(actual.expandCommand) };
+});
+
 import WikiTab from "../WikiTab";
 import { copyToClipboard } from "../../../lib/clipboard";
 import { expandCommand } from "../../terminal/expandCommand";
@@ -453,5 +460,27 @@ describe("WikiTab", () => {
     expect(copy).toHaveBeenCalledWith(expected);
     // The same text the composer's expansion produces for the typed command.
     expect(expected).toBe(expandCommand(`/pavilio-wiki ${PROJECT} "…"`, new Set(["pavilio-wiki"])));
+  });
+
+  it("copy text comes from expandCommand", async () => {
+    const copy = vi.mocked(copyToClipboard);
+    copy.mockClear();
+    const expand = vi.mocked(expandCommand);
+    expand.mockClear();
+    // Whatever the expansion answers is what gets copied — a hard-coded string cannot pass.
+    expand.mockReturnValue("EXPANDED BY expandCommand");
+    try {
+      renderTab();
+      fireEvent.click(await screen.findByTestId("wiki-ask-copy"));
+      await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+      expect(copy).toHaveBeenCalledWith("EXPANDED BY expandCommand");
+      expect(expand).toHaveBeenCalledWith(`/pavilio-wiki ${PROJECT} "…"`, new Set(["pavilio-wiki"]));
+    } finally {
+      expand.mockReset();
+      const actual = await vi.importActual<typeof import("../../terminal/expandCommand")>(
+        "../../terminal/expandCommand",
+      );
+      expand.mockImplementation(actual.expandCommand);
+    }
   });
 });
