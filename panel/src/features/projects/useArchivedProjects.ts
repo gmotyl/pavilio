@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 export interface ArchivedProject {
   name: string;
   archivedAt: string;
+  kind: "project" | "research" | "knowledge";
+  /** One-line summary from PROJECT.md or wiki/overview.md; null when neither has one. */
+  description: string | null;
 }
 
 export function useArchivedProjects() {

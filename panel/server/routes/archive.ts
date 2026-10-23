@@ -11,6 +11,8 @@ import { join } from "path";
 import { getConfig } from "../config.js";
 import { rebuildIndex } from "../lib/file-index.js";
 import { markArchivedInRegistry, markRestoredInRegistry } from "../lib/registry.js";
+import { projectDescription } from "../lib/projects/description.js";
+import { projectKind } from "../lib/projects/kind.js";
 
 const router = Router();
 
@@ -33,8 +35,15 @@ router.get("/", (_req, res) => {
   const list = readdirSync(archivedDir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => {
-      const stat = statSync(join(archivedDir, e.name));
-      return { name: e.name, archivedAt: stat.mtime.toISOString() };
+      const dir = join(archivedDir, e.name);
+      const stat = statSync(dir);
+      return {
+        name: e.name,
+        archivedAt: stat.mtime.toISOString(),
+        // Resolve against archived/ so a live project of the same name never answers.
+        kind: projectKind(archivedDir, e.name),
+        description: projectDescription(dir),
+      };
     })
     .sort((a, b) => b.archivedAt.localeCompare(a.archivedAt));
   res.json(list);
