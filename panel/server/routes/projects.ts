@@ -36,6 +36,19 @@ function isPathUnder(abs: string, root: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+/**
+ * The dir a project-scoped read route serves: a live project, then `archived/<name>` (the
+ * archived view keeps context and plans readable), then any other existing dir under
+ * projectsDir, as before. Null for a traversal-shaped name or a dir that is not there.
+ */
+function projectDirFor(projectsDir: string, name: string): string | null {
+  const direct = resolve(projectsDir, name);
+  if (!isPathUnder(direct, projectsDir) || direct === projectsDir) return null;
+  const found = resolveProjectRoot(projectsDir, name);
+  if (found) return join(found.root, name);
+  return existsSync(direct) ? direct : null;
+}
+
 interface ContextSource {
   id: string;
   label: string;
@@ -547,10 +560,8 @@ router.put("/:name/default-terminal-user", (req, res) => {
 
 router.get("/:name/context", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
 
   const repos = readReposJson(projectDir);
   const sources: ContextSource[] = [
@@ -590,10 +601,8 @@ router.get("/:name/context", (req, res) => {
 
 router.get("/:name/context/read", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";
   if (!pathParam) return res.status(400).json({ error: "Missing 'path' query parameter" });
 
@@ -612,10 +621,8 @@ router.get("/:name/context/read", (req, res) => {
 
 router.get("/:name/plans-tree", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
 
   // OpenSpec sources are collected first: whether any of them actually
   // contributed a change decides if the (often permanently empty) legacy flat
@@ -674,10 +681,8 @@ router.get("/:name/plans-tree", (req, res) => {
 
 router.get("/:name/plans/read", (req, res) => {
   const { projectsDir } = getConfig();
-  const projectDir = resolve(projectsDir, req.params.name);
-  if (!isPathUnder(projectDir, projectsDir) || projectDir === projectsDir || !existsSync(projectDir)) {
-    return res.status(404).json({ error: "Project not found" });
-  }
+  const projectDir = projectDirFor(projectsDir, req.params.name);
+  if (!projectDir) return res.status(404).json({ error: "Project not found" });
   const pathParam = typeof req.query.path === "string" ? req.query.path : "";
   if (!pathParam) return res.status(400).json({ error: "Missing 'path' query parameter" });
 

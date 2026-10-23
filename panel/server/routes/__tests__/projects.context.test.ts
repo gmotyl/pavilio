@@ -221,3 +221,35 @@ describe("buildContextAllowlist", () => {
     expect(out).toContain("/opt/other");
   });
 });
+
+describe("GET /api/projects/:name/context — archived project", () => {
+  it("lists and reads an archived project's CONTEXT.md and ADRs", async () => {
+    seedFile("projects/archived/delta/PROJECT.md");
+    seedFile("projects/archived/delta/CONTEXT.md", "# delta context");
+    seedFile("projects/archived/delta/adr/0001-keep.md", "# adr 1");
+    const app = makeApp(projectsRouter, "/api/projects");
+
+    const list = await request(app).get("/api/projects/delta/context");
+    expect(list.status).toBe(200);
+    expect(list.body.contexts.map((c: { relativeToProjectsDir: string }) => c.relativeToProjectsDir)).toEqual([
+      "archived/delta/CONTEXT.md",
+    ]);
+    expect(list.body.adrs).toHaveLength(1);
+
+    const read = await request(app).get(
+      `/api/projects/delta/context/read?path=${encodeURIComponent(list.body.contexts[0].absolutePath)}`,
+    );
+    expect(read.status).toBe(200);
+    expect(read.body.content).toBe("# delta context");
+  });
+
+  it("an archived project still cannot read outside its allowlist", async () => {
+    seedFile("projects/archived/delta/PROJECT.md");
+    seedFile("projects/alpha/PROJECT.md");
+    seedFile("projects/alpha/CONTEXT.md", "# alpha");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
+      `/api/projects/delta/context/read?path=${encodeURIComponent(join(projects.dir(), "alpha", "CONTEXT.md"))}`,
+    );
+    expect(res.status).toBe(403);
+  });
+});
