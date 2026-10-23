@@ -54,6 +54,13 @@ describe("projectDescription", () => {
     expect(projectDescription(projectDir)).toBeNull();
   });
 
+  it("description stops at the end of an empty Overview section", () => {
+    write("PROJECT.md", "# Delta\n\n## Overview\n\n## Next\n\nFoo.\n");
+    expect(projectDescription(projectDir)).toBeNull();
+    write("wiki/overview.md", "The wiki paragraph.\n");
+    expect(projectDescription(projectDir)).toBe("The wiki paragraph.");
+  });
+
   it("long descriptions are cut with an ellipsis", () => {
     const topic = "word ".repeat(60).trim();
     write("PROJECT.md", `---\ntopic: ${topic}\n---\n# Long\n`);
