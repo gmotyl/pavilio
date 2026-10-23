@@ -15,6 +15,8 @@ export interface Project {
   hasPlans: boolean;
   hasWiki: boolean;
   latestProgressDate: string | null;
+  kind: "project" | "research" | "knowledge";
+  lastActivity: string | null; // YYYY-MM-DD
   repos: RepoEntry[];
 }
 

@@ -3,6 +3,7 @@ import { join } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { isProjectDir } from "./project-dir.js";
+import { projectKind, type ProjectKind } from "./projects/kind.js";
 
 export interface RepoEntry {
   name: string;
@@ -19,7 +20,23 @@ export interface Project {
   hasPlans: boolean;
   hasWiki: boolean; // `<project>/wiki/` is a directory — gates the wiki tab
   latestProgressDate: string | null;
+  kind: ProjectKind; // `kind` from PROJECT.md frontmatter, default `project`
+  lastActivity: string | null; // YYYY-MM-DD — later of newest progress file and newest wiki log entry
   repos: RepoEntry[];
+}
+
+// A wiki log entry heading: `## YYYY-MM-DD HH:MM <op> ...`. Undated `##` headings don't count.
+const LOG_HEADING = /^## (\d{4}-\d{2}-\d{2})\b/gm;
+
+/** The newest dated `##` heading in `<project>/wiki/log.md`, or null when there is none. */
+function latestWikiLogDate(dir: string): string | null {
+  const logPath = join(dir, "wiki", "log.md");
+  if (!existsSync(logPath)) return null;
+  let latest: string | null = null;
+  for (const m of readFileSync(logPath, "utf-8").matchAll(LOG_HEADING)) {
+    if (latest === null || m[1] > latest) latest = m[1];
+  }
+  return latest;
 }
 
 export function discoverProjects(): Project[] {
@@ -40,6 +57,14 @@ export function discoverProjects(): Project[] {
           latestProgressDate = files[files.length - 1].slice(0, 10);
         }
       }
+
+      const wikiLogDate = latestWikiLogDate(dir);
+      const lastActivity =
+        latestProgressDate && wikiLogDate
+          ? latestProgressDate > wikiLogDate
+            ? latestProgressDate
+            : wikiLogDate
+          : (latestProgressDate ?? wikiLogDate);
 
       // Read repos.json if present
       const reposPath = join(dir, "repos.json");
@@ -79,6 +104,8 @@ export function discoverProjects(): Project[] {
         hasPlans: existsSync(join(dir, "plans")),
         hasWiki: statSync(join(dir, "wiki"), { throwIfNoEntry: false })?.isDirectory() ?? false,
         latestProgressDate,
+        kind: projectKind(projectsDir, e.name),
+        lastActivity,
         repos,
       };
     });
