@@ -41,14 +41,12 @@ import WideToggle from "../shell/WideToggle";
 import { openInVSCode } from "../shell/vscode";
 import { useProjects, type Project } from "./useProjects";
 import ArchivedBanner from "./ArchivedBanner";
+import { useProjectDetail } from "./useProjectDetail";
 import { useTabScrollMemory } from "./useTabScrollMemory";
 import ProjectTerminalsSurface from "../terminal/ProjectTerminalsSurface";
 import { TimeTrackingLink } from "../time/TimeTrackingLink";
 import { useProjectTodayMinutes } from "../time/TimeTrackingProvider";
 
-
-/** `GET /api/projects/:name`: a live project, or an archived one with its date. */
-type ProjectDetail = Project & { archived: boolean; archivedAt?: string };
 
 /** Tabs an archived project hides; their URLs fall back to the overview. */
 const ARCHIVED_HIDDEN_SECTIONS = new Set(["iterm", "repos"]);
@@ -71,38 +69,27 @@ export default function ProjectView() {
   const liveProject = projects.find((p) => p.name === name);
   const isListed = Boolean(liveProject);
 
-  // The live list never carries an archived project, so a project missing from
-  // it is looked up on its own. Bumping `detailVersion` refetches (after Restore).
-  const [detail, setDetail] = useState<ProjectDetail | null>(null);
-  const [detailVersion, setDetailVersion] = useState(0);
-  useEffect(() => {
-    setDetail(null);
-  }, [name]);
-  useEffect(() => {
-    if (!name || isListed) return;
-    let cancelled = false;
-    fetch(`/api/projects/${encodeURIComponent(name)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: ProjectDetail | null) => {
-        // Only an answer for this very project counts (a list or a 404 does not).
-        if (!cancelled) setDetail(data?.name === name ? data : null);
-      })
-      .catch(() => {
-        if (!cancelled) setDetail(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [name, isListed, detailVersion]);
-  const refetchDetail = useCallback(() => setDetailVersion((v) => v + 1), []);
-  // The render right after a project switch still holds the previous detail.
-  const currentDetail = detail?.name === name ? detail : null;
+  const {
+    detail: currentDetail,
+    loading: detailLoading,
+    refetch: refetchDetail,
+  } = useProjectDetail(name, isListed);
 
   const project: Project | undefined = liveProject ?? currentDetail ?? undefined;
   const archived = !liveProject && currentDetail?.archived === true;
-  // Terminals start only for a project known to be live — never while an
-  // unlisted project's detail is still in flight.
-  const knownLive = Boolean(liveProject) || currentDetail?.archived === false;
+
+  // Terminals run for anything not known to be archived — a live project, or a
+  // name the panel only knows from a session label. They are held back only
+  // while an unlisted project's detail is in flight, so an archived project
+  // never mounts them, not even briefly. Once mounted they stay through a
+  // transient drop from the list (PROJECT.md missing mid-checkout) and go only
+  // when the project turns out archived (or the tab/project changes).
+  const [terminalsFor, setTerminalsFor] = useState<string | null>(null);
+  const onItermTab = section === "iterm" && Boolean(name);
+  const showTerminals =
+    onItermTab && !archived && (terminalsFor === name || !detailLoading);
+  const nextTerminalsFor = showTerminals ? (name ?? null) : null;
+  if (nextTerminalsFor !== terminalsFor) setTerminalsFor(nextTerminalsFor);
 
   // Hidden tabs have no page: their URLs land on the overview instead.
   useEffect(() => {
@@ -410,7 +397,7 @@ export default function ProjectView() {
       )}
 
       {/* iTerm tab */}
-      {section === "iterm" && knownLive && (
+      {showTerminals && (
         <ProjectTerminalsSurface projectName={name || ""} active />
       )}
 
