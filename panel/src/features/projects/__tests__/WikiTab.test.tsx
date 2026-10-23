@@ -7,7 +7,14 @@ vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
 }));
 
+// The clipboard helper is the seam the copy button writes through.
+vi.mock("../../../lib/clipboard", () => ({
+  copyToClipboard: vi.fn(async () => true),
+}));
+
 import WikiTab from "../WikiTab";
+import { copyToClipboard } from "../../../lib/clipboard";
+import { expandCommand } from "../../terminal/expandCommand";
 import { readLastSectionFile } from "../../shell/lastPath";
 import type { WikiPageInfo, WikiTree } from "../useProjectWiki";
 
@@ -421,11 +428,30 @@ describe("WikiTab", () => {
   it("has no ask box", async () => {
     renderTab(fileParam(FILE));
     await screen.findByTestId("wiki-title");
-    expect(screen.queryByText(/ask this wiki/i)).toBeNull();
+    // The ask hint is static text with a copy button — nothing is sent anywhere.
     expect(screen.queryByText(/send to terminal/i)).toBeNull();
     // The filter is the only text input on the tab.
     expect(screen.getAllByRole("textbox")).toEqual([
       screen.getByTestId("file-list-filter-input"),
     ]);
+  });
+
+  it("wiki tab shows the ask hint with the project name", async () => {
+    renderTab();
+    const hint = await screen.findByTestId("wiki-ask-hint");
+    expect(hint.textContent).toContain(`Ask this wiki: /pavilio-wiki ${PROJECT} "…"`);
+    expect(within(hint).getByTestId("wiki-ask-copy")).toBeTruthy();
+  });
+
+  it("copy writes the expanded skill instruction", async () => {
+    const copy = vi.mocked(copyToClipboard);
+    copy.mockClear();
+    renderTab();
+    fireEvent.click(await screen.findByTestId("wiki-ask-copy"));
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    const expected = `Read and follow the instructions in skills/pavilio-wiki/SKILL.md exactly. ${PROJECT} "…"`;
+    expect(copy).toHaveBeenCalledWith(expected);
+    // The same text the composer's expansion produces for the typed command.
+    expect(expected).toBe(expandCommand(`/pavilio-wiki ${PROJECT} "…"`, new Set(["pavilio-wiki"])));
   });
 });
