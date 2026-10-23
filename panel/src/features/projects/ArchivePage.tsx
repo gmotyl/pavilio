@@ -66,16 +66,16 @@ export function ArchivePage() {
     return { all: archived.length, project: archived.length - research, research };
   }, [archived]);
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const groups = useMemo(() => {
+    // The same case-insensitive match the highlight marks, so every row shown has a hit
+    // (a lower-cased `includes` let "i" match "İ", which /i/iu does not).
+    const hit = new RegExp(escapeRegExp(q), "iu");
     const visible = archived.filter((p) => {
       if (kind === "research" && !isResearch(p)) return false;
       if (kind === "project" && isResearch(p)) return false;
       if (!q) return true;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.description ?? "").toLowerCase().includes(q)
-      );
+      return hit.test(p.name) || hit.test(p.description ?? "");
     });
     return groupArchived(visible, new Date());
   }, [archived, kind, q]);

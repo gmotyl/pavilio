@@ -230,6 +230,25 @@ describe("ArchivePage", () => {
       "İzmir pilot on RAG retrieval",
     );
   });
+  it("search keeps only rows the highlight can mark", async () => {
+    // "İ".toLowerCase() contains "i", but /i/iu does not match "İ": a lower-cased filter
+    // would show this row with nothing marked.
+    fetchMock.mockImplementation(() =>
+      jsonResponse([
+        { name: "harbor", archivedAt: "2026-10-20T10:00:00", kind: "project", description: "İstanbul hub" },
+        { name: "pilot", archivedAt: "2026-10-20T10:00:00", kind: "project", description: null },
+      ]),
+    );
+    renderPage();
+    await screen.findByTestId("archive-row-harbor");
+    fireEvent.change(screen.getByPlaceholderText(/search archived names and descriptions/i), {
+      target: { value: "i" },
+    });
+    expect(screen.queryByTestId("archive-row-harbor")).toBeNull();
+    const pilot = screen.getByTestId("archive-row-pilot");
+    expect(within(pilot).getAllByTestId("archive-hit").map((m) => m.textContent)).toEqual(["i"]);
+  });
+
   it("highlight treats regex metacharacters in the query literally", async () => {
     fetchMock.mockImplementation(() =>
       jsonResponse([
