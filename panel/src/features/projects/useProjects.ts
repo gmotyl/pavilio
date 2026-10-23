@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
+import type { ProjectKind } from "../../../server/lib/projects/kind";
 
 export interface RepoEntry {
   name: string;
@@ -15,7 +16,7 @@ export interface Project {
   hasPlans: boolean;
   hasWiki: boolean;
   latestProgressDate: string | null;
-  kind: "project" | "research" | "knowledge";
+  kind: ProjectKind;
   lastActivity: string | null; // YYYY-MM-DD
   repos: RepoEntry[];
 }

@@ -77,4 +77,15 @@ describe("discoverProjects kind and lastActivity", () => {
     expect(row("undated").lastActivity).toBe("2026-09-01");
     expect(row("undated-only").lastActivity).toBeNull();
   });
+
+  it("non-dated progress files are ignored", () => {
+    makeProject("briefing", {
+      progress: ["2026-09-01-x.md", "BRIEFING.md", "handoff-foo.md"],
+    });
+    makeProject("briefing-only", { progress: ["BRIEFING.md"] });
+    expect(row("briefing").lastActivity).toBe("2026-09-01");
+    expect(row("briefing").latestProgressDate).toBe("2026-09-01");
+    expect(row("briefing-only").lastActivity).toBeNull();
+    expect(row("briefing-only").latestProgressDate).toBeNull();
+  });
 });
