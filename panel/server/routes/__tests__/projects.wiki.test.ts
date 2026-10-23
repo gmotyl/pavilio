@@ -224,6 +224,18 @@ describe("GET /api/projects/:name/wiki", () => {
     ]);
   });
 
+  it("wiki tree is served for an archived project", async () => {
+    seed("archived/delta/PROJECT.md", "# delta");
+    seed("archived/delta/wiki/concepts/caching.md", page({ type: "concept" }, "# Caching\n"));
+    seed("archived/delta/wiki/questions/q1.md", page({ type: "question" }, "# Why?\n[[wiki/concepts/caching]]"));
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/delta/wiki");
+    expect(res.status).toBe(200);
+    const tree = res.body as WikiTree;
+    expect(tree.project).toBe("delta");
+    expect(paths(tree.concepts.pages)).toEqual(["wiki/concepts/caching.md"]);
+    expect(findPage(tree, "wiki/concepts/caching.md")!.backlinks).toEqual(["wiki/questions/q1.md"]);
+  });
+
   it("404s without a wiki", async () => {
     seed("beta/PROJECT.md", "# beta");
     const app = makeApp(projectsRouter, "/api/projects");

@@ -8,7 +8,7 @@ import {
   realpathSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
-import { discoverProjects, type RepoEntry } from "../lib/discovery.js";
+import { discoverProjects, findProject, resolveProjectRoot, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
@@ -515,6 +515,14 @@ router.get("/default-terminal-users", (_req, res) => {
   res.json({ users });
 });
 
+// Live project first, then `archived/<name>` — the project view's fallback when the name is
+// missing from the live list. Registered after the literal `/default-terminal-users`.
+router.get("/:name", (req, res) => {
+  const project = findProject(req.params.name);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  res.json(project);
+});
+
 router.put("/:name/default-terminal-user", (req, res) => {
   // Existence comes from discovery — same source `GET /` uses —
   // so a traversal-shaped name is rejected here instead of reaching the store.
@@ -697,11 +705,14 @@ router.get("/:name/wiki", (req, res) => {
   if (!isPathUnder(projectDir, projectsDir) || dirname(projectDir) !== resolve(projectsDir)) {
     return res.status(404).json({ error: "Project not found" });
   }
-  const wikiDir = join(projectDir, "wiki");
+  // Falls back to `archived/<name>`; page paths stay project-relative either way.
+  const found = resolveProjectRoot(projectsDir, req.params.name);
+  const root = found?.root ?? projectsDir;
+  const wikiDir = join(root, req.params.name, "wiki");
   if (!existsSync(wikiDir) || !statSync(wikiDir).isDirectory()) {
     return res.status(404).json({ error: "Project has no wiki" });
   }
-  res.json(buildWikiTree(projectsDir, req.params.name));
+  res.json(buildWikiTree(root, req.params.name));
 });
 
 router.get("/", (_req, res) => {
