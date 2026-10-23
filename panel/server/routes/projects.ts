@@ -9,7 +9,13 @@ import {
   rmSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
-import { discoverProjects, findProject, resolveProjectRoot, type RepoEntry } from "../lib/discovery.js";
+import {
+  discoverProjects,
+  findProject,
+  resolveProjectRoot,
+  resolvesInsideProjectsDir,
+  type RepoEntry,
+} from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
@@ -39,14 +45,15 @@ function isPathUnder(abs: string, root: string): boolean {
 /**
  * The dir a project-scoped read route serves: a live project, then `archived/<name>` (the
  * archived view keeps context and plans readable), then any other existing dir under
- * projectsDir, as before. Null for a traversal-shaped name or a dir that is not there.
+ * projectsDir, as before. Null for a traversal-shaped name, a dir that is not there, or one
+ * whose realpath leaves projectsDir (the allowlists compare lexical paths).
  */
 function projectDirFor(projectsDir: string, name: string): string | null {
   const direct = resolve(projectsDir, name);
   if (!isPathUnder(direct, projectsDir) || direct === projectsDir) return null;
   const found = resolveProjectRoot(projectsDir, name);
   if (found) return join(found.root, name);
-  return existsSync(direct) ? direct : null;
+  return resolvesInsideProjectsDir(projectsDir, direct) ? direct : null;
 }
 
 interface ContextSource {
@@ -717,6 +724,9 @@ router.get("/:name/wiki", (req, res) => {
   // Falls back to `archived/<name>`; page paths stay project-relative either way.
   const found = resolveProjectRoot(projectsDir, req.params.name);
   const root = found?.root ?? projectsDir;
+  if (!resolvesInsideProjectsDir(projectsDir, join(root, req.params.name))) {
+    return res.status(404).json({ error: "Project not found" });
+  }
   const wikiDir = join(root, req.params.name, "wiki");
   if (!existsSync(wikiDir) || !statSync(wikiDir).isDirectory()) {
     return res.status(404).json({ error: "Project has no wiki" });

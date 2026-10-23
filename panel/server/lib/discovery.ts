@@ -1,5 +1,5 @@
-import { readdirSync, existsSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { readdirSync, existsSync, readFileSync, statSync, realpathSync } from "fs";
+import { join, relative, isAbsolute } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { isProjectDir } from "./project-dir.js";
@@ -141,16 +141,39 @@ function isProjectName(name: string): boolean {
   return name.length > 0 && name !== "." && name !== ".." && !/[/\\]/.test(name) && !name.includes("\0");
 }
 
-/** The project dir for `name` — live first, then `archived/` — or null when it is in neither. */
+/**
+ * True when `dir` exists and its realpath lies under `realpath(projectsDir)`. Callers build their
+ * read allowlists from the lexical dir, so a symlinked project dir pointing elsewhere must not
+ * count as a project at all.
+ */
+export function resolvesInsideProjectsDir(projectsDir: string, dir: string): boolean {
+  try {
+    const realRoot = realpathSync(projectsDir);
+    const rel = relative(realRoot, realpathSync(dir));
+    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The project dir for `name` — live first, then `archived/` — or null when it is in neither, or
+ * when it resolves (through a symlink) outside projectsDir.
+ */
 export function resolveProjectRoot(
   projectsDir: string,
   name: string,
 ): { root: string; archived: boolean } | null {
   if (!isProjectName(name)) return null;
-  if (isProjectDir(projectsDir, name)) return { root: projectsDir, archived: false };
+  if (isProjectDir(projectsDir, name)) {
+    return resolvesInsideProjectsDir(projectsDir, join(projectsDir, name)) ? { root: projectsDir, archived: false } : null;
+  }
   // Same membership rule as the archive list: any directory under archived/.
   const root = archivedRoot(projectsDir);
-  if (statSync(join(root, name), { throwIfNoEntry: false })?.isDirectory()) return { root, archived: true };
+  const dir = join(root, name);
+  if (statSync(dir, { throwIfNoEntry: false })?.isDirectory() && resolvesInsideProjectsDir(projectsDir, dir)) {
+    return { root, archived: true };
+  }
   return null;
 }
 
