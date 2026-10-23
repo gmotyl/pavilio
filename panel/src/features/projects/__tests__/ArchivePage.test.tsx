@@ -230,4 +230,37 @@ describe("ArchivePage", () => {
       "İzmir pilot on RAG retrieval",
     );
   });
+  it("highlight treats regex metacharacters in the query literally", async () => {
+    fetchMock.mockImplementation(() =>
+      jsonResponse([
+        {
+          name: "spec-notes",
+          archivedAt: "2026-10-20T10:00:00",
+          kind: "project",
+          description: "Notes (draft) v1.2 on retrieval",
+        },
+      ]),
+    );
+    renderPage();
+    await screen.findByTestId("archive-row-spec-notes");
+    const search = screen.getByPlaceholderText(/search archived names and descriptions/i);
+    const hits = () =>
+      within(screen.getByTestId("archive-row-spec-notes"))
+        .getAllByTestId("archive-hit")
+        .map((m) => m.textContent);
+
+    // An unbalanced group would throw if it reached RegExp unescaped.
+    fireEvent.change(search, { target: { value: "(" } });
+    expect(hits()).toEqual(["("]);
+
+    // "." marks only the literal dot, not every character.
+    fireEvent.change(search, { target: { value: "." } });
+    expect(hits()).toEqual(["."]);
+
+    fireEvent.change(search, { target: { value: "(draft)" } });
+    expect(hits()).toEqual(["(draft)"]);
+    expect(screen.getByTestId("archive-description").textContent).toBe(
+      "Notes (draft) v1.2 on retrieval",
+    );
+  });
 });
