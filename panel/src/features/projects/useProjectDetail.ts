@@ -17,11 +17,17 @@ interface Resolved {
  *
  * - `detail` — this very project's answer, never the previous project's.
  * - `loading` — an unlisted project whose first answer has not arrived yet.
- * - `refetch` — ask again (after Restore); the last answer stays until then.
+ * - `refetch` — ask again (after Restore); the last answer stays until then,
+ *   or until the project shows up in the live list, which drops it.
  */
 export function useProjectDetail(name: string | undefined, isListed: boolean) {
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [version, setVersion] = useState(0);
+
+  // A listed project's last answer is stale: forget it, so a later unlisted
+  // episode (a transient drop after a restore) starts unsettled instead of
+  // replaying an old "archived". Adjusted during render, like a prop change.
+  if (isListed && resolved !== null) setResolved(null);
 
   useEffect(() => {
     if (!name || isListed) return;

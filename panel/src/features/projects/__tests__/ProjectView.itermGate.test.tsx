@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
 }));
 
-/** Mount/unmount counters per project — a remount means an xterm replay. */
+/**
+ * Mount/unmount counters per project — a remount means an xterm replay. The
+ * effect runs once per mount (no deps), so a prop-only change is not counted.
+ */
 const surface = vi.hoisted(() => ({
   mounts: [] as string[],
   unmounts: [] as string[],
@@ -20,7 +23,8 @@ vi.mock("../../terminal/ProjectTerminalsSurface", () => ({
       return () => {
         surface.unmounts.push(projectName);
       };
-    }, [projectName]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once on purpose
+    }, []);
     return <div data-testid="terminals-surface">{projectName}</div>;
   },
 }));
@@ -97,8 +101,10 @@ afterEach(() => {
 });
 
 let navigate: (to: string) => void = () => {};
+let currentPath = "";
 function NavigateProbe() {
   navigate = useNavigate();
+  currentPath = useLocation().pathname;
   return null;
 }
 
@@ -171,6 +177,32 @@ describe("ProjectView — iterm surface gate", () => {
     renderAt("/project/session-label/iterm");
     await screen.findByTestId("terminals-surface");
     expect(surface.mounts).toEqual(["session-label"]);
+  });
+
+  it("a project restored elsewhere does not reuse its cached archived answer on a transient drop", async () => {
+    details.x = { archived: true };
+    renderAt("/project/x");
+    await screen.findByTestId("archived-banner");
+
+    // Restored elsewhere: the list picks it up; any later lookup is slow.
+    details.x = "hold";
+    listed = ["x"];
+    await act(async () => refreshProjects());
+    await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
+
+    await act(async () => navigate("/project/x/iterm"));
+    await screen.findByTestId("terminals-surface");
+    await flush();
+    expect(surface.mounts).toEqual(["x"]);
+
+    // Transient drop while the detail refetch is in flight.
+    listed = [];
+    await act(async () => refreshProjects());
+    await flush();
+    expect(surface.unmounts).toEqual([]);
+    expect(screen.queryByTestId("archived-banner")).toBeNull();
+    expect(currentPath).toBe("/project/x/iterm");
+    expect(screen.getByTestId("terminals-surface")).toBeTruthy();
   });
 
   it("unmounts the surface when the project turns out archived", async () => {

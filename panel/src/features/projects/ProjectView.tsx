@@ -89,6 +89,7 @@ export default function ProjectView() {
   const showTerminals =
     onItermTab && !archived && (terminalsFor === name || !detailLoading);
   const nextTerminalsFor = showTerminals ? (name ?? null) : null;
+  // "Store previous value during render" pattern: React re-renders at once.
   if (nextTerminalsFor !== terminalsFor) setTerminalsFor(nextTerminalsFor);
 
   // Hidden tabs have no page: their URLs land on the overview instead.
