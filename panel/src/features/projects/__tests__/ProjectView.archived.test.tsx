@@ -16,6 +16,8 @@ let archived: boolean;
 /** Whether the live list (`GET /api/projects`) carries the project. */
 let listed: boolean;
 let fetchMock: ReturnType<typeof vi.fn>;
+/** `GET /api/files/index` rows. */
+let indexRows: Array<{ relativePath: string; project: string; modified: number; archived: boolean }>;
 
 function detail() {
   return {
@@ -53,6 +55,7 @@ const json = (body: unknown, status = 200) =>
 beforeEach(() => {
   archived = true;
   listed = false;
+  indexRows = [];
   fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST") {
@@ -80,7 +83,7 @@ beforeEach(() => {
       return json({ content: "# Graph\n\nDeep-linked page body.", absolutePath: "/p/graph.md" });
     }
     if (url.startsWith("/api/scripts")) return json({ scripts: [] });
-    if (url.startsWith("/api/files/index")) return json([]);
+    if (url.startsWith("/api/files/index")) return json(indexRows);
     return json({}, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -187,5 +190,21 @@ describe("ProjectView — archived project", () => {
     expect(await screen.findByTestId("project-md")).toBeTruthy();
     await waitFor(() => expect(tabLink(`/project/${NAME}/iterm`)).not.toBeNull());
     expect(screen.queryByTestId("archived-banner")).toBeNull();
+  });
+
+  it("section tabs list the archived project's files, not a live namesake's", async () => {
+    indexRows = [
+      { relativePath: `archived/${NAME}/notes/2026-09-01-kickoff.md`, project: NAME, modified: 2, archived: true },
+      { relativePath: `archived/${NAME}/progress/2026-09-02-wrap.md`, project: NAME, modified: 1, archived: true },
+      { relativePath: `${NAME}/notes/2026-10-01-live.md`, project: NAME, modified: 3, archived: false },
+    ];
+    const first = renderAt(`/project/${NAME}/notes`);
+    expect(await screen.findByTestId("archived-banner")).toBeTruthy();
+    expect(await screen.findByText("2026-09-01-kickoff.md")).toBeTruthy();
+    expect(screen.queryByText("2026-10-01-live.md")).toBeNull();
+    first.unmount();
+
+    renderAt(`/project/${NAME}/progress`);
+    expect(await screen.findByText("2026-09-02-wrap.md")).toBeTruthy();
   });
 });

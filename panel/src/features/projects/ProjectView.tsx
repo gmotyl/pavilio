@@ -194,9 +194,12 @@ export default function ProjectView() {
     section && !SPECIAL_SECTIONS.has(section)
       ? files
           .filter((f) => {
+            // An archived project's files sit under `archived/<p>/…`, one segment deeper; each
+            // view lists only its own copy, never a live or archived namesake's.
             if (
               f.project !== name ||
-              f.relativePath.split("/")[1] !== section
+              Boolean(f.archived) !== archived ||
+              f.relativePath.split("/")[archived ? 2 : 1] !== section
             ) {
               return false;
             }
