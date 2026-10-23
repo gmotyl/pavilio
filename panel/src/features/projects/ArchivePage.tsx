@@ -26,17 +26,23 @@ function formatDay(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Wraps every case-insensitive occurrence of `query` (already lower-cased) in a `<mark>`. */
+/** Escapes RegExp metacharacters so a search query matches literally. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Wraps every case-insensitive occurrence of `query` in a `<mark>`. Matches on
+ * the original text with a case-insensitive RegExp: offsets taken from a
+ * lower-cased copy drift wherever lower-casing changes the length (`İ`).
+ */
 function highlight(text: string, query: string): ReactNode {
   if (!query) return text;
-  const lower = text.toLowerCase();
-  const parts: ReactNode[] = [];
-  let from = 0;
-  for (let at = lower.indexOf(query); at !== -1; at = lower.indexOf(query, from)) {
-    if (at > from) parts.push(text.slice(from, at));
-    parts.push(
+  // A capturing split puts every hit at an odd index.
+  return text.split(new RegExp(`(${escapeRegExp(query)})`, "giu")).map((part, i) =>
+    i % 2 === 1 ? (
       <mark
-        key={at}
+        key={i}
         data-testid="archive-hit"
         style={{
           background: "color-mix(in srgb, var(--accent) 28%, transparent)",
@@ -44,13 +50,12 @@ function highlight(text: string, query: string): ReactNode {
           borderRadius: 2,
         }}
       >
-        {text.slice(at, at + query.length)}
-      </mark>,
-    );
-    from = at + query.length;
-  }
-  if (from < text.length) parts.push(text.slice(from));
-  return parts;
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
 }
 
 /** Research and knowledge open on their wiki; a plain project on its overview. */

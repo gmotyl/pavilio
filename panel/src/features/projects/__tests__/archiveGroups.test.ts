@@ -19,6 +19,8 @@ describe("groupArchived", () => {
         row("last-year", "2025-09-30T10:00:00"),
         row("month", "2026-10-05T10:00:00"),
         row("august", "2026-08-14T10:00:00"),
+        // Twelve months back is the oldest month that keeps its own name.
+        row("october", "2025-10-03T10:00:00"),
       ],
       NOW,
     );
@@ -26,6 +28,7 @@ describe("groupArchived", () => {
       "This week",
       "This month",
       "August 2026",
+      "October 2025",
       "2025",
       "2024",
     ]);
@@ -33,6 +36,7 @@ describe("groupArchived", () => {
       ["week"],
       ["month"],
       ["august"],
+      ["october"],
       ["last-year"],
       ["old"],
     ]);
@@ -54,5 +58,20 @@ describe("groupArchived", () => {
     // Newest first inside a group too.
     expect(groups[2].rows.map((r) => r.name)).toEqual(["b", "a"]);
     expect(groupArchived([], NOW)).toEqual([]);
+  });
+
+  it("puts rows with an unparseable archivedAt last, under Unknown date", () => {
+    const groups = groupArchived(
+      [
+        row("broken", "not-a-date"),
+        row("week", "2026-10-20T10:00:00"),
+        row("empty", ""),
+        row("old", "2024-03-02T10:00:00"),
+      ],
+      NOW,
+    );
+    expect(groups.map((g) => g.label)).toEqual(["This week", "2024", "Unknown date"]);
+    expect(groups[2].rows.map((r) => r.name)).toEqual(["broken", "empty"]);
+    expect(groups.some((g) => g.label.includes("NaN"))).toBe(false);
   });
 });

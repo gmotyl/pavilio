@@ -206,4 +206,28 @@ describe("ArchivePage", () => {
     expect((await screen.findByTestId("archive-error")).textContent).toContain("target exists");
     expect(screen.getByTestId("location").textContent).toBe("/archive");
   });
+
+  it("highlight stays aligned when lower-casing changes the text length", async () => {
+    // "İ".toLowerCase() is two code units, which used to shift every later mark.
+    fetchMock.mockImplementation(() =>
+      jsonResponse([
+        {
+          name: "izmir-pilot",
+          archivedAt: "2026-10-20T10:00:00",
+          kind: "project",
+          description: "İzmir pilot on RAG retrieval",
+        },
+      ]),
+    );
+    renderPage();
+    await screen.findByTestId("archive-row-izmir-pilot");
+    fireEvent.change(screen.getByPlaceholderText(/search archived names and descriptions/i), {
+      target: { value: "rag" },
+    });
+    const row = screen.getByTestId("archive-row-izmir-pilot");
+    expect(within(row).getAllByTestId("archive-hit").map((m) => m.textContent)).toEqual(["RAG"]);
+    expect(within(row).getByTestId("archive-description").textContent).toBe(
+      "İzmir pilot on RAG retrieval",
+    );
+  });
 });

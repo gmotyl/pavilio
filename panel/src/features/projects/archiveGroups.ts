@@ -18,25 +18,35 @@ function labelFor(date: Date, now: Date): string {
   return String(date.getFullYear());
 }
 
+/** Label of the trailing group that holds rows whose `archivedAt` does not parse. */
+export const UNKNOWN_DATE = "Unknown date";
+
 /**
  * Buckets archived rows by when they were archived, in local time: This week
  * (Monday start), This month, each of the previous 12 calendar months by name,
  * then one group per year. Groups and the rows inside them run newest first;
- * empty groups are never produced.
+ * empty groups are never produced. Rows whose `archivedAt` does not parse go
+ * last, under "Unknown date", in their input order.
  */
 export function groupArchived<T extends { archivedAt: string }>(
   rows: T[],
   now: Date,
 ): { label: string; rows: T[] }[] {
-  const sorted = [...rows].sort(
-    (a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime(),
-  );
+  const dated: { row: T; time: number }[] = [];
+  const undated: T[] = [];
+  for (const row of rows) {
+    const time = new Date(row.archivedAt).getTime();
+    if (Number.isNaN(time)) undated.push(row);
+    else dated.push({ row, time });
+  }
+  dated.sort((a, b) => b.time - a.time);
   const groups: { label: string; rows: T[] }[] = [];
-  for (const row of sorted) {
-    const label = labelFor(new Date(row.archivedAt), now);
+  for (const { row, time } of dated) {
+    const label = labelFor(new Date(time), now);
     const last = groups[groups.length - 1];
     if (last?.label === label) last.rows.push(row);
     else groups.push({ label, rows: [row] });
   }
+  if (undated.length > 0) groups.push({ label: UNKNOWN_DATE, rows: undated });
   return groups;
 }
