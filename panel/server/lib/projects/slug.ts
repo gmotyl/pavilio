@@ -21,7 +21,13 @@ export function slugifyProjectTitle(title: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** A slug (lowercase letters, digits, `.`, `_`, `-`; starts alphanumeric), not the archive dir itself. */
+/**
+ * Names a project may never take: the archive dir itself, and every literal single-segment
+ * `/api/projects/<segment>` route, which is registered ahead of `GET /:name` and would shadow it.
+ */
+const RESERVED_SLUGS = new Set(["archived", "default-terminal-users"]);
+
+/** A slug (lowercase letters, digits, `.`, `_`, `-`; starts alphanumeric), not a reserved name. */
 export function isValidProjectSlug(slug: string): boolean {
-  return /^[a-z0-9][a-z0-9._-]*$/.test(slug) && slug !== "archived";
+  return /^[a-z0-9][a-z0-9._-]*$/.test(slug) && !RESERVED_SLUGS.has(slug);
 }

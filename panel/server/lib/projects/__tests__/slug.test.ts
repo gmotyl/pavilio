@@ -26,6 +26,8 @@ describe("slugifyProjectTitle", () => {
 describe("isValidProjectSlug", () => {
   it("rejects archived and non-slug names", () => {
     expect(isValidProjectSlug("archived")).toBe(false);
+    // A literal `/api/projects/<segment>` route would shadow `GET /:name` for this project.
+    expect(isValidProjectSlug("default-terminal-users")).toBe(false);
     for (const bad of ["", "Acme", "-acme", ".acme", "_acme", "a b", "a/b", "../x", "zażółć"]) {
       expect(isValidProjectSlug(bad), bad).toBe(false);
     }

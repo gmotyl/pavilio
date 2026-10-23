@@ -170,6 +170,7 @@ describe("POST /api/projects", () => {
     const bad = [
       { title: "!!!", kind: "project" },
       { title: "Archived", kind: "project" },
+      { title: "Default terminal users", kind: "project" },
       { title: "Some research", kind: "research" },
       { title: "Some research", kind: "research", topic: "   " },
       { title: "Shared", kind: "knowledge" },
