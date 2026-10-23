@@ -1,34 +1,15 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
+
+import { splitFrontmatter } from "./frontmatter";
 
 /** Longest description returned, ellipsis included. */
 export const DESCRIPTION_MAX = 140;
 
-const FENCE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 const OVERVIEW_HEADING = /^##\s+.*overview\s*$/i;
 
 function readText(path: string): string | null {
-  if (!existsSync(path)) return null;
-  const text = readFileSync(path, "utf8");
-  // Editors on Windows may save a UTF-8 BOM, which would hide the opening fence.
-  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-}
-
-/** Splits leading `---` frontmatter from the body; broken YAML yields no data. */
-function splitFrontmatter(text: string): { data: Record<string, unknown>; body: string } {
-  const match = FENCE.exec(text);
-  if (!match) return { data: {}, body: text };
-  const body = text.slice(match[0].length);
-  try {
-    const data = parseYaml(match[1] ?? "", { uniqueKeys: false });
-    if (data && typeof data === "object" && !Array.isArray(data)) {
-      return { data: data as Record<string, unknown>, body };
-    }
-  } catch {
-    // fall through: unreadable frontmatter carries no topic
-  }
-  return { data: {}, body };
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
 /** First paragraph (non-heading lines up to a blank line or heading), joined on spaces. */
