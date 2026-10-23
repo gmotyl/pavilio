@@ -12,6 +12,17 @@ Layout, slugs, ledger, write regimes, link syntax and the reading ladder:
 `skills/pavilio-wiki/CONVENTIONS.md` (read it before the first write of a run). Page shapes:
 `skills/pavilio-wiki/PAGES.md`. Writers: `skills/pavilio-wiki/agents/*.md`.
 
+**Reading a `scripts/wiki` failure.** Every command prints one JSON object on stdout; that is how
+a wiki result is told apart from a launcher that never started:
+
+- **Non-zero exit with a JSON `error` on stdout → a wiki error.** Every "exit 1 → stop" in this
+  skill means this case: report the `error`, release the lock, stop.
+- **Non-zero exit with no JSON on stdout → the CLI never ran** — typically the sandbox refusing
+  tsx's IPC pipe (`listen EPERM … tsx-…pipe` on stderr), or a killed or timed-out process. Nothing
+  in the wiki changed. Re-run the *same* command once through another executor (e.g. Bash with
+  the sandbox disabled, or context-mode's `ctx_execute` shell) and carry on with its result. Fails
+  the same way there too → report the stderr line and stop; never work around the CLI by hand.
+
 ## Usage
 
 ```
@@ -199,7 +210,9 @@ Inputs:
 - `index` exit 1 → stop before record and commit (steps 8–9).
 - Stale lock taken over → `lock: taken over from <session>` in the log entry.
 - Fetch warning → no source page, reported.
-- Any `scripts/wiki` exit 1 → report its `error`, release the lock, stop.
+- Any `scripts/wiki` exit 1 with a JSON `error` → report it, release the lock, stop. No JSON on
+  stdout → the launcher failed, not the wiki: retry once through another executor (§ Reading a
+  `scripts/wiki` failure).
 
 ## 5. Knowledge harvest
 
@@ -268,11 +281,13 @@ when no other wiki session is writing.
 
 ## 6. Lint
 
-`scripts/wiki lint <p>` and present the six groups (`broken`, `orphans`, `malformed`, `untyped`,
-`stale`, `codeIdentifiers`) with page paths and one remedy each — malformed frontmatter (the YAML
+`scripts/wiki lint <p>` and present the seven groups (`broken`, `orphans`, `malformed`, `untyped`,
+`stale`, `codeIdentifiers`, `diagrams`) with page paths and one remedy each — malformed frontmatter (the YAML
 error is given) is fixed by re-running that page's writer or quoting the offending value
 (`PAGES.md § Common frontmatter`), stale pages are refreshed by the next ingest, code identifiers
-move to `wiki/repos/<repo>/` on the next page write. Also run `scripts/wiki backlog <p>`: a
+move to `wiki/repos/<repo>/` on the next page write, a diagram that fails to parse is fixed by hand
+or by re-running that page's writer (`CONVENTIONS.md § Diagrams`; `diagramCheck: unavailable` →
+say nothing was checked). Also run `scripts/wiki backlog <p>`: a
 `broken` target listed under `create` gets its page from the next ingest; any other broken target
 is fixed by turning the link into plain text (`CONVENTIONS.md § Links`). A long `update` list means
 page writers fell behind — the next ingest catches up. Lint writes nothing and this skill does not

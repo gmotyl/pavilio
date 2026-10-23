@@ -54,6 +54,8 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 - **Language follows the user.** When the user writes Polish, ask the grill questions in Polish; artifacts, code and commit messages stay English.
 - **The final message of a turn that stops for the user is self-contained.** The answer pane shows only that last message, not earlier commentary in the turn. Restate the full question, the lettered options and your recommendation in it — never end on a bare "waiting for your approval" line.
 - **If the codebase can answer it, go read the code** instead of asking.
+- **If the wiki can answer it, read the wiki** instead of asking — why a past decision was made, what broke last time, how a concept is meant to behave. Walk the reading ladder for that one question (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`; step 7 reaches the shared `knowledge` wiki for tools, libraries and techniques), read-only. Cite the page in your recommendation.
+- **Challenge against the wiki.** A design choice that a wiki page records as tried-and-reverted, or that contradicts a concept page's stated rule → call it out with the page and its date before moving on.
 - **Sharpen fuzzy language.** Vague/overloaded term → propose a precise canonical term. ("You said 'account' — Customer or User? Those differ.")
 - **Challenge against the glossary.** A term that conflicts with `CONTEXT.md` → call it out immediately.
 - **Probe with concrete scenarios.** Invent edge-case scenarios that force precise boundaries.

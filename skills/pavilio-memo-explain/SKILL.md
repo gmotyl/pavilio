@@ -36,7 +36,7 @@ If `projects/<p>/wiki/` exists, gather knowledge from it before reading code or 
 - A wiki page that already has a ```` ```mermaid ```` block is a starting point — adapt it, don't redraw from scratch.
 - Wiki and code disagree → the code is current; say so in the memo in one line, naming the page.
 - End the memo with `## Sources` listing every wiki page used as a panel link (`scripts/wiki panel-link <p>/wiki/<page>.md`), never a bare path.
-- No `wiki/` → skip this step; don't suggest creating one.
+- No `wiki/` → still try ladder step 7, the shared `knowledge` wiki, when the topic is a tool, library or technique; otherwise skip this step and don't suggest creating one.
 
 ### 2. Analyse the topic → pick diagrams by angle
 

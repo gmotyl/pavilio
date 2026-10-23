@@ -39,6 +39,10 @@ One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity p
 - Cite every claim with the source page it came from: `([[wiki/sources/<kind>-<stem>]])`.
 - Link another entity or concept only when the indexes list its page; a name without a page stays
   plain text (`skills/pavilio-wiki/CONVENTIONS.md § Links`).
+- Concepts only: a lifecycle, decision rule or actor ordering that the prose spreads over several
+  paragraphs gets one or two ```` ```mermaid ```` diagrams summarising it (`skills/pavilio-wiki/CONVENTIONS.md § Diagrams`): every node and
+  edge restates a cited claim already in the text, labels quoted (`id["…"]`). An existing diagram
+  is kept and updated, never silently dropped. Entities carry none.
 - Entities: set `kind`. A `repository` entity links `Code: [[wiki/repos/<name>/index]]`.
 - No code identifiers — no file paths, functions, classes, components, flags or env vars
   (`skills/pavilio-wiki/CONVENTIONS.md § No code identifiers outside repos/`). Say where something
