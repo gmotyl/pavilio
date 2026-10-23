@@ -68,6 +68,14 @@ describe("discoverProjects kind and lastActivity", () => {
     expect(row("idle").lastActivity).toBeNull();
   });
 
+  it("bracketed log dates count, like the harvest reader accepts", () => {
+    makeProject("bracketed", {
+      progress: ["2026-09-01-x.md"],
+      wikiLog: "# Log\n\n## 2026-10-01 08:00 ingest\n\n## [2026-10-12] harvest\n\n## [2026-10-13 14:05] query\n",
+    });
+    expect(row("bracketed").lastActivity).toBe("2026-10-13");
+  });
+
   it("undated log headings are ignored", () => {
     makeProject("undated", {
       progress: ["2026-09-01-x.md"],

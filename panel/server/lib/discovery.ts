@@ -25,8 +25,9 @@ export interface Project {
   repos: RepoEntry[];
 }
 
-// A wiki log entry heading: `## YYYY-MM-DD HH:MM <op> ...`. Undated `##` headings don't count.
-const LOG_HEADING = /^## (\d{4}-\d{2}-\d{2})\b/gm;
+// A wiki log entry heading: `## YYYY-MM-DD HH:MM <op> ...`, or with the date bracketed
+// (`## [YYYY-MM-DD] harvest`, which the harvest reader also accepts). Undated `##` headings don't count.
+const LOG_HEADING = /^## \[?(\d{4}-\d{2}-\d{2})\b/gm;
 
 /** The newest dated `##` heading in `<project>/wiki/log.md`, or null when there is none. */
 function latestWikiLogDate(dir: string): string | null {
