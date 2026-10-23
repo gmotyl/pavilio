@@ -216,6 +216,27 @@ describe("NewProjectDialog", () => {
     expect(screen.getByTestId("location").textContent).toBe("/project/old-thing/iterm");
   });
 
+  it("failed Restore instead stays put with the error inline", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ reason: "archived", name: "old-thing" }, 409));
+    const restore = vi.fn(async () => "target exists in projects/");
+    const { onClose } = renderDialog({ restore });
+    typeTitle("Old thing");
+    await clickCreate();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId("new-project-restore"));
+    });
+
+    expect(restore).toHaveBeenCalledWith("old-thing");
+    expect((await screen.findByTestId("new-project-error")).textContent).toBe(
+      "target exists in projects/",
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    expect(refreshProjects).not.toHaveBeenCalled();
+    expect(screen.getByTestId("new-project-dialog")).toBeTruthy();
+    expect(screen.getByTestId("location").textContent).toBe("/");
+  });
+
   it("400 shows the error inline", async () => {
     fetchMock.mockReturnValueOnce(
       jsonResponse({ error: "a topic is required for research projects" }, 400),
