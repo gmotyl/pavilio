@@ -10,6 +10,7 @@ import { fetchYoutube, UvMissingError, type Runner } from "./fetch-youtube";
 import { addBacklink, clearCandidates, harvestStatus, listCandidates } from "./harvest";
 import { buildIndex } from "./index-md";
 import { pendingRecords, recordIngested } from "./ledger";
+import { lintDiagrams } from "./diagrams";
 import { lintWiki } from "./lint";
 import { releaseLock, takeLock } from "./lock";
 import { countMentions } from "./mentions";
@@ -47,7 +48,9 @@ const USAGE = `usage: scripts/wiki <command> [args]
   backlog <p> [--touched a,b]               {create, update, waiting}: what page writers still owe;
                                             create/update map slug → wiki/sources/… paths
   index <p>                                 {written, removed} | exit 1 {error, page}
-  lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers}
+  lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers,
+                                            diagrams[, diagramCheck]}: diagrams = mermaid blocks
+                                            that fail to parse; diagramCheck = why it was skipped
   config                                    {sessionStartIngest, writerModel}
   fetch-article <p> <url>                   {raw, title, warning?}
   fetch-youtube <p> <url>                   {raw, title, track}: transcript via uvx yt-dlp into
@@ -242,7 +245,7 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
     case "lint": {
       const [p] = only(parsed, 1, "lint <p>");
       projectDir(workspaceRoot, p);
-      return ok({ ...lintWiki(workspaceRoot, p) });
+      return ok({ ...lintWiki(workspaceRoot, p), ...(await lintDiagrams(workspaceRoot, p)) });
     }
     case "config": {
       only(parsed, 0, "no arguments");
