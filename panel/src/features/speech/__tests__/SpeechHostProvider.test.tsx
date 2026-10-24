@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "@testing-library/react";
+import { useEffect } from "react";
 import {
   SpeechHostProvider,
   usePageSpeech,
@@ -150,6 +151,53 @@ describe("SpeechHostProvider", () => {
     page!.stopDocument(key);
     expect(seen.host.stopDocument).toHaveBeenCalledWith(key);
     expect(isOpen(key)).toBe(false);
+  });
+
+  it("a child effect speaks through the host of the same commit", () => {
+    const original = seen.host.speakDocument;
+    function Speaker({ text }: { text: string }) {
+      const page = usePageSpeech();
+      useEffect(() => {
+        page.speakDocument({ key: "doc:p/page.md", text });
+      }, [page, text]);
+      return null;
+    }
+    const tree = (text: string) => (
+      <SpeechHostProvider
+        sessionOf={() => undefined}
+        isSessionOpen={() => false}
+        focusedCell={{ read: () => null, readStandalone: () => null, subscribe: () => () => {} }}
+        drawerVisible={false}
+        onArrival={vi.fn()}
+        answerWaiting={{
+          get: () => ({ waiting: false, pending: false }),
+          hold: () => {},
+          release: () => {},
+          noteTransport: () => {},
+          isHeld: () => false,
+        }}
+        voiceFor={() => "a-voice"}
+      >
+        <Speaker text={text} />
+      </SpeechHostProvider>
+    );
+
+    try {
+      const { rerender } = render(tree("One."));
+      expect(original).toHaveBeenCalledWith({ key: "doc:p/page.md", text: "One." });
+
+      // The host's pair moves in the same commit as the child's effect: a
+      // child's passive effect runs before its parent's, so a mirror synced in
+      // one would hand the child last render's host.
+      const next = vi.fn();
+      seen.host.speakDocument = next;
+      rerender(tree("Two."));
+
+      expect(next).toHaveBeenCalledWith({ key: "doc:p/page.md", text: "Two." });
+      expect(original).toHaveBeenCalledTimes(1);
+    } finally {
+      seen.host.speakDocument = original;
+    }
   });
 
   it("usePageSpeech throws without a provider", () => {

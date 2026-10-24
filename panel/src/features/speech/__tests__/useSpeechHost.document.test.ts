@@ -25,10 +25,17 @@ import {
 
 vi.mock("../synth", () => synthMock());
 vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
+// The real vote, counted: a page's language is voted once per utterance, not
+// on every render that asks for its units.
+vi.mock("../language", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../language")>();
+  return { ...actual, voteLanguage: vi.fn(actual.voteLanguage) };
+});
 
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { voiceForSession } from "../../terminal/sessionVoice";
 import { docSpeechKey } from "../docKey";
+import { voteLanguage } from "../language";
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
 import { utteranceUnderCursor } from "../utteranceQueue";
@@ -106,6 +113,38 @@ describe("useSpeechHost — page speech", () => {
 
     expect(host().unitsFor(PAGE).map((unit) => unit.text)).toEqual(polish);
     expect(requestedTexts()[0]).toBe(polish[0]);
+  });
+
+  it("a page's language is voted once per utterance", async () => {
+    const text = response(3, "Page");
+    const host = renderHost();
+    const votes = () =>
+      vi.mocked(voteLanguage).mock.calls.filter(([voted]) => voted === text).length;
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    // The channel's own tally votes on arrival; that is per arrival, not per ask.
+    const landed = votes();
+    expect(host().unitsFor(PAGE).length).toBeGreaterThan(0);
+
+    for (let i = 0; i < 5; i += 1) host().unitsFor(PAGE);
+    await endCurrentUnit();
+    host().unitsFor(PAGE);
+
+    expect(votes()).toBe(landed);
+  });
+
+  it("two pages with the same text land distinct utterances", async () => {
+    const text = response(2, "Same");
+    const other = docSpeechKey("q/wiki/page.md");
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    await settle(() => host().speakDocument({ key: other, text }));
+
+    const first = utteranceUnderCursor(host().queueFor(PAGE))?.id;
+    const second = utteranceUnderCursor(host().queueFor(other))?.id;
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
   });
 
   it("a manual cell speak stops the page run", async () => {

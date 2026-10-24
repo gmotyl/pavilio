@@ -284,14 +284,17 @@ export type SpeechRunEvent =
   | { type: "end" };
 
 /**
- * A page utterance's id: the FNV-1a hash of its text, so pressing Play on an
- * unchanged page lands the same utterance — and finds its preparation and its
- * synthesis — while an edited page lands a new one.
+ * A page utterance's id: the FNV-1a hash of its key and its text, so pressing
+ * Play on an unchanged page lands the same utterance — and finds its
+ * preparation and its synthesis — while an edited page lands a new one, and
+ * two pages that happen to hold the same text never share an id (nor the
+ * abort, warm and heard state keyed on it).
  */
-function pageUtteranceId(text: string): string {
+function pageUtteranceId(key: string, text: string): string {
+  const input = `${key}\u0000${text}`;
   let hash = 0x811c9dc5;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
   return `doc-${(hash >>> 0).toString(16).padStart(8, "0")}`;
@@ -588,6 +591,8 @@ export function useSpeechHost({
     warmableUtterances,
   } = channel;
 
+  /** Each landed page utterance's id → its language, as voted once. */
+  const pageLanguagesRef = useRef<Map<string, "pl" | "en">>(new Map());
   /**
    * The language an utterance is prepared in. A cell's comes from its
    * session's running tally — language is a property of the session. A page is
@@ -597,10 +602,18 @@ export function useSpeechHost({
    * prepared by id.
    */
   const languageOf = useCallback(
-    (utterance: Utterance): "pl" | "en" =>
-      isDocSpeechKey(utterance.sessionId)
-        ? voteLanguage(utterance.text)
-        : languageFor(utterance.sessionId),
+    (utterance: Utterance): "pl" | "en" => {
+      if (!isDocSpeechKey(utterance.sessionId)) return languageFor(utterance.sessionId);
+      // A page's vote reads its whole text, and the bar asks for its units on
+      // every render — so the vote is taken once per utterance and kept by id
+      // (the id is the key and text's hash, so it cannot go stale), until the
+      // page is dropped.
+      const known = pageLanguagesRef.current.get(utterance.id);
+      if (known) return known;
+      const language = voteLanguage(utterance.text);
+      pageLanguagesRef.current.set(utterance.id, language);
+      return language;
+    },
     [languageFor],
   );
   /** Each spoken page's key → the id of the utterance it landed. */
@@ -1090,7 +1103,7 @@ export function useSpeechHost({
   const speakDocument = useCallback(
     ({ key, text }: { key: string; text: string }): void => {
       const utterance: Utterance = {
-        id: pageUtteranceId(text),
+        id: pageUtteranceId(key, text),
         sessionId: key,
         text,
         at: Date.now(),
@@ -1100,6 +1113,7 @@ export function useSpeechHost({
       const previousId = pageUtterancesRef.current.get(key);
       if (previousId !== undefined && previousId !== utterance.id) {
         abortUtterance(previousId);
+        pageLanguagesRef.current.delete(previousId);
         dropKey(key);
       }
       pageUtterancesRef.current.set(key, utterance.id);
@@ -1152,6 +1166,7 @@ export function useSpeechHost({
       pageUtterancesRef.current.delete(key);
       if (id !== undefined) {
         abortUtterance(id);
+        pageLanguagesRef.current.delete(id);
         // Forgotten, so the next Play warms (and shows red) afresh rather than
         // trusting a warm this stop called off.
         warmedRef.current.delete(id);

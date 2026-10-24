@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { makeSpeech, synthMock } from "./speech.harness";
+import { makeSpeech, resetSpeechHarness, selectSynth, synth, synthMock } from "./speech.harness";
 import type { AnswerWaitingPort, SpeechHost } from "../useSpeechHost";
 import type { SpeechUnit } from "../types";
+import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
 
 /**
  * The host is stubbed, NOT `usePanelSpeech`: the bar is required to read the
@@ -70,6 +71,7 @@ function renderBar(overrides: Partial<SpeechHost>) {
 
 afterEach(() => {
   stub.host = null;
+  resetSpeechHarness();
 });
 
 describe("DocumentSpeechBar", () => {
@@ -127,6 +129,24 @@ describe("DocumentSpeechBar", () => {
 
     fireEvent.click(screen.getByTestId(`speech-bar-playpause-${KEY}`));
     expect(stub.host?.onPause).toHaveBeenCalledWith(KEY);
+  });
+
+  it("reads cache state in the page's project voice", async () => {
+    const EMMA = "en-US-EmmaMultilingualNeural";
+    setProjectVoice("pavilio", EMMA);
+    // The stand-in's own cache, keyed on voice + text as the real one is.
+    selectSynth("simple", "peek");
+    const units = unitList(2);
+    await synth.synthesizeSpeech(units[0].text, { voice: EMMA });
+    await synth.synthesizeSpeech(units[1].text, { voice: DEFAULT_SPEECH_VOICE });
+
+    renderBar({ stateFor: () => "ready", unitsFor: () => units });
+
+    const segment = (index: number) =>
+      screen.getByTestId(`speech-bar-segment-${KEY}-${index}`).getAttribute("data-segment");
+    expect(segment(0)).toBe("ready");
+    // In the default voice: not what the page's units were synthesized in.
+    expect(segment(1)).toBe("cold");
   });
 
   it("empty page disables play", () => {

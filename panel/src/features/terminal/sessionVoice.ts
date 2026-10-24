@@ -1,5 +1,5 @@
-import { isDocSpeechKey, projectOfDocKey } from "../speech/docKey";
-import { voiceForProject } from "../speech/voices";
+import { isDocSpeechKey } from "../speech/docKey";
+import { voiceForDocKey, voiceForProject } from "../speech/voices";
 import { projectOfSession } from "./sessionProject";
 
 /**
@@ -14,8 +14,6 @@ import { projectOfSession } from "./sessionProject";
  * `voiceFor` port.
  */
 export function voiceForSession(sessionId: string): string {
-  const project = isDocSpeechKey(sessionId)
-    ? projectOfDocKey(sessionId)
-    : projectOfSession(sessionId);
-  return voiceForProject(project ?? undefined);
+  if (isDocSpeechKey(sessionId)) return voiceForDocKey(sessionId);
+  return voiceForProject(projectOfSession(sessionId) ?? undefined);
 }

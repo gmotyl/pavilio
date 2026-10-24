@@ -1,10 +1,9 @@
 import { useSyncExternalStore } from "react";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { projectOfDocKey } from "./docKey";
 import { SpeechTransport } from "./SpeechTransport";
 import { usePanelSpeech } from "./SpeechHostProvider";
-import { voiceForProject } from "./voices";
+import { voiceForDocKey } from "./voices";
 
 export interface DocumentSpeechBarProps {
   /** The page's speech key, from `docSpeechKey` — `doc:` plus its projects-relative path. */
@@ -39,12 +38,12 @@ export function DocumentSpeechBar({ docKey }: DocumentSpeechBarProps) {
 
   // The voice the page's units were synthesized in — its project's, else the
   // default — or a cached unit reads as cold: the cache keys on voice + text.
-  // Resolved here from the key rather than through the terminal's
-  // `voiceForSession`, which speech may not import; both voice preferences are
-  // subscribed to only so a change re-reads it.
+  // Resolved by the same speech-side rule the terminal's `voiceForSession`
+  // uses for a `doc:` key (speech may not import terminal); both voice
+  // preferences are subscribed to only so a change re-reads it.
   usePreference(preferences.speechVoice);
   usePreference(preferences.speechVoiceByProject);
-  const voice = voiceForProject(projectOfDocKey(docKey) ?? undefined);
+  const voice = voiceForDocKey(docKey);
 
   return (
     <div className="speech-bar" data-testid={`document-speech-bar-${docKey}`}>

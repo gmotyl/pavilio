@@ -22,6 +22,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -235,10 +236,13 @@ export function SpeechHostProvider({
   // drift: every Play and stop a page makes goes through here. Stable for the
   // provider's life — the host's own pair moves with every arrival, and a page
   // that stops on cleanup must not read that as a reason to stop — so the
-  // host's pair is read through a mirror, like the ports above.
+  // host's pair is read through a mirror, like the ports above. Synced in a
+  // LAYOUT effect, not a passive one: a page calls these from its own effects,
+  // and a child's passive effect runs before its parent's, so a passive mirror
+  // would hand it the host of the render before.
   const { speakDocument, stopDocument } = speech;
   const pageHostRef = useRef({ speakDocument, stopDocument });
-  useEffect(() => {
+  useLayoutEffect(() => {
     pageHostRef.current = { speakDocument, stopDocument };
   }, [speakDocument, stopDocument]);
   const [pageSpeech] = useState<PageSpeech>(() => ({
