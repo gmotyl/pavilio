@@ -39,7 +39,8 @@ const USAGE = `usage: scripts/wiki <command> [args]
   project [--name <p>] [--cwd <dir>]        {project, via, kind} | exit 2 {ask, reason}
                                             kind: project | research | knowledge
   panel-link <path>                         {link}: panel route (/project/<p>/wiki?file=… or
-                                            /view/…) for a projects-relative path, no host
+                                            /view/…) for a projects-relative path, no host;
+                                            a leading projects/ is stripped
   pending <p> [--only <path>]               {pending: [{path, hash, status}]}
   record <p> <path> <hash>                  {ok: true}
   lock take|release <p> --session <id>      {held, takenOver[, busy]} (release adds released;
@@ -203,7 +204,9 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
     }
     case "panel-link": {
       const [path] = only(parsed, 1, "panel-link <projects-relative path>");
-      return ok({ link: panelLink(path) });
+      // Agents often hold workspace-relative paths (`projects/<p>/…`); strip that prefix here
+      // only — the shared panelLink also serves the renderer's wikilinks and stays as is.
+      return ok({ link: panelLink(path.replace(/^projects\//, "")) });
     }
     case "pending": {
       const [p] = only(parsed, 1, "pending <p> [--only <path>]", ["only"]);

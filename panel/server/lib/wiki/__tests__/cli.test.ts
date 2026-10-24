@@ -168,6 +168,31 @@ describe("wiki cli", () => {
     expect(missing.stderr).toMatch(/panel-link/);
   });
 
+  it("panel-link strips a leading projects/ for a wiki page", async () => {
+    expect(await cli(["panel-link", "projects/knowledge/wiki/entities/android.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/project/knowledge/wiki?file=knowledge%2Fwiki%2Fentities%2Fandroid.md" },
+    });
+  });
+
+  it("panel-link strips a leading projects/ for a non-wiki file", async () => {
+    expect(await cli(["panel-link", "projects/pavilio/progress/x.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/pavilio/progress/x.md" },
+    });
+  });
+
+  it("panel-link keeps a projectsDir-relative path as is", async () => {
+    expect(await cli(["panel-link", "knowledge/wiki/entities/android.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/project/knowledge/wiki?file=knowledge%2Fwiki%2Fentities%2Fandroid.md" },
+    });
+    expect(await cli(["panel-link", "pavilio/progress/x.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/pavilio/progress/x.md" },
+    });
+  });
+
   it("cli project reports the project kind", async () => {
     expect(await cli(["project", "--name", "demo"])).toMatchObject({
       code: 0,
