@@ -6,9 +6,8 @@ import {
   usePageSpeech,
   usePanelSpeech,
   type FocusedCellPort,
-  type PageSpeech,
 } from "../SpeechHostProvider";
-import type { AnswerWaitingPort } from "../useSpeechHost";
+import type { AnswerWaitingPort, PageSpeech } from "../useSpeechHost";
 import type { GridSpeech } from "../types";
 
 /**

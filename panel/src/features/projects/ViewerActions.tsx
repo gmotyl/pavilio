@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ExternalLink,
   Copy,
@@ -262,14 +262,19 @@ function SpeakingToolbar({
   // the run ends.
   const speakable = useMemo(() => pageHasSpeech(speech.text), [speech.text]);
   const disabled = !open && !speakable;
+  const reasonId = useId();
 
+  // The accessible name stays the visible "Play"/"Stop" (label-in-name); why a
+  // disabled Play is disabled is its description and tooltip. The text flip is
+  // the state, so there is no `aria-pressed` on top of it — "Stop, pressed"
+  // would say it twice. The reason is aria-hidden so it stays out of the
+  // name; `aria-describedby` still reads hidden content.
   const play = (
     <button
       data-testid={`${testIdPrefix}-play`}
       onClick={toggle}
       disabled={disabled}
-      aria-pressed={open}
-      aria-label={disabled ? NOTHING_TO_SPEAK : undefined}
+      aria-describedby={disabled ? reasonId : undefined}
       title={open ? "Stop reading this page" : disabled ? NOTHING_TO_SPEAK : "Read this page aloud"}
       className={BUTTON_CLASS}
       style={{
@@ -279,6 +284,11 @@ function SpeakingToolbar({
     >
       {open ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
       {open ? "Stop" : "Play"}
+      {disabled && (
+        <span id={reasonId} className="sr-only" aria-hidden="true">
+          {NOTHING_TO_SPEAK}
+        </span>
+      )}
     </button>
   );
 

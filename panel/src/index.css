@@ -741,8 +741,8 @@ input[type="checkbox"] {
 }
 
 /* The document speech bar under a viewer's action row. The cell's #17171d
-   ground and xterm seam mean nothing on a page, in either theme, so here the bar
-   is a surface card in the panel's own tokens. `width: 0; min-width: 100%`
+   ground and xterm seam mean nothing on a page, so here the bar is a surface
+   card in the panel's own tokens. `width: 0; min-width: 100%`
    spans the action row without ever widening it. The card rule names the
    bar as the wrapper's child rather than `.speech-bar`, so the cell bar's
    rule stays the only `.speech-bar` block (BootLegend reads it as such). */

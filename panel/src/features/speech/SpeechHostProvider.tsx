@@ -41,8 +41,6 @@ import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpe
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
 
-export type { PageSpeech };
-
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 const PageSpeechContext = createContext<PageSpeech | null>(null);
 

@@ -244,6 +244,23 @@ describe("useSpeechHost — page speech", () => {
     expect(host().speakingSessionId).toBe(PAGE);
   });
 
+  it("a replaced page text coming back warms afresh", async () => {
+    const old = response(3, "Old");
+    const host = renderHost();
+    await settle(() => host().speakDocument({ key: PAGE, text: old }));
+    await settle(() => host().speakDocument({ key: PAGE, text: response(2, "New") }));
+
+    // The replace called the old warm off, so the old text's return must not
+    // trust it: with nothing left in the synth cache, unit 0 is warmed again
+    // and the key is red until it lands.
+    synth.reset();
+    synth.hold(unitsOf(old)[0]);
+    await settle(() => host().speakDocument({ key: PAGE, text: old }));
+
+    expect(synth.requests[0]).toMatchObject({ text: unitsOf(old)[0], tier: "warm" });
+    expect(host().preparingSessionIds.has(PAGE)).toBe(true);
+  });
+
   it("speakDocument with nothing to say while playing stops the old run", async () => {
     const host = renderHost();
     await settle(() => host().speakDocument({ key: PAGE, text: response(3, "Old") }));

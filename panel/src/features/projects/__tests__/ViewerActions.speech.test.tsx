@@ -119,7 +119,8 @@ describe("ViewerActions Play", () => {
     fireEvent.click(play());
 
     expect(bar()).not.toBeNull();
-    expect(play().getAttribute("aria-pressed")).toBe("true");
+    expect(play()).toHaveAccessibleName("Stop");
+    expect(play()).not.toHaveAttribute("aria-pressed");
     expect(speak()).toHaveBeenCalledTimes(1);
     expect(speak()).toHaveBeenCalledWith({ key: KEY, text: "# Page\n\nBody." });
     expect(stop()).not.toHaveBeenCalled();
@@ -132,7 +133,7 @@ describe("ViewerActions Play", () => {
     fireEvent.click(play());
 
     expect(bar()).toBeNull();
-    expect(play().getAttribute("aria-pressed")).toBe("false");
+    expect(play()).toHaveAccessibleName("Play");
     expect(stop()).toHaveBeenCalledTimes(1);
     expect(stop()).toHaveBeenCalledWith(KEY);
     expect(speak()).toHaveBeenCalledTimes(1);
@@ -187,7 +188,9 @@ describe("ViewerActions Play", () => {
     const view = render(toolbar({ key: KEY, text: "```ts\nconst x = 1;\n```" }));
     expect(play()).toBeDisabled();
     expect(play()).toHaveAttribute("title", "Nothing to speak yet");
-    expect(play()).toHaveAttribute("aria-label", "Nothing to speak yet");
+    // The name stays the visible "Play"; the reason is its description.
+    expect(play()).toHaveAccessibleName("Play");
+    expect(play()).toHaveAccessibleDescription("Nothing to speak yet");
     fireEvent.click(play());
     expect(speak()).not.toHaveBeenCalled();
 

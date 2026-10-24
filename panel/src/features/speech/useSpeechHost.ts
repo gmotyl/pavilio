@@ -1102,6 +1102,19 @@ export function useSpeechHost({
     [stopPlayback],
   );
 
+  /**
+   * Drops what the host keeps per page utterance: its language, its warm mark
+   * and its preparation. Only ever called with a page id (`pageUtteranceId`),
+   * which no cell utterance shares, so answers keep their caches. A run still
+   * holding the dropped preparation keeps its own reference; a later ask
+   * simply prepares again, which is pure.
+   */
+  const forgetPageUtterance = useCallback((id: string): void => {
+    pageLanguagesRef.current.delete(id);
+    warmedRef.current.delete(id);
+    preparedRef.current.delete(id);
+  }, []);
+
   const speakDocument = useCallback(
     ({ key, text: source }: { key: string; text: string }): void => {
       // The page's source as its surface loaded it; what is spoken — and
@@ -1118,7 +1131,10 @@ export function useSpeechHost({
       const previousId = pageUtterancesRef.current.get(key);
       if (previousId !== undefined && previousId !== utterance.id) {
         abortUtterance(previousId);
-        pageLanguagesRef.current.delete(previousId);
+        // Everything kept per page utterance goes with it, as `stopDocument`
+        // forgets it: the old text coming back must warm (and show red) afresh,
+        // and an edited page must not leave its old preparation behind.
+        forgetPageUtterance(previousId);
         dropKey(key);
       }
       pageUtterancesRef.current.set(key, utterance.id);
@@ -1149,6 +1165,7 @@ export function useSpeechHost({
       abortUtterance,
       arriveLocal,
       dropKey,
+      forgetPageUtterance,
       languageOf,
       preparedFor,
       speakUtterance,
@@ -1171,16 +1188,15 @@ export function useSpeechHost({
       pageUtterancesRef.current.delete(key);
       if (id !== undefined) {
         abortUtterance(id);
-        pageLanguagesRef.current.delete(id);
         // Forgotten, so the next Play warms (and shows red) afresh rather than
         // trusting a warm this stop called off.
-        warmedRef.current.delete(id);
+        forgetPageUtterance(id);
       }
       warmingRef.current.delete(key);
       setPreparing(key, false);
       dropKey(key);
     },
-    [abortUtterance, dropKey, setPreparing, stopPlayback],
+    [abortUtterance, dropKey, forgetPageUtterance, setPreparing, stopPlayback],
   );
 
   const onPause = useCallback(
