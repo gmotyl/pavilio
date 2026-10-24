@@ -75,6 +75,10 @@ is optional, and only its `## Archived Projects` rows are refused.
    `<p>/progress/<file>.md` gets a `/view/…` link). Never a bare path or a hand-encoded URL. If the
    wiki does not answer, say so — never fill the gap from general knowledge presented as the
    wiki's. The question page keeps D14 links (`PAGES.md § Question`).
+   An answer that describes a lifecycle, a decision rule, an ordering between actors or a map
+   adds one mermaid diagram (`CONVENTIONS.md § Diagrams`); a single fact or a short list gets
+   none. The same diagram goes in the answer shown to the user and in the question page. Sources
+   that disagree are drawn as separate paths, each labelled with its source — never reconciled.
 4. `scripts/wiki lock take <p> --session <id>` (session id as in § Ingest). `held: false` → give
    the answer, say the trace was not written because an ingest is running, stop.
 5. Write (see `PAGES.md` for shapes):

@@ -112,8 +112,9 @@ description: "The question, in one line"
 cited: ["wiki/concepts/utterance.md", "wiki/sources/progress-2026-10-19-tts-relay-node20.md"]
 ```
 
-Body: `# <question>`, the answer as given, `## Cited` with the D14 links, `## Gaps` if the wiki
-fell short. Written once.
+Body: `# <question>`, the answer as given — with its one diagram, if it had one
+(`CONVENTIONS.md § Diagrams`) — `## Cited` with the D14 links, `## Gaps` if the wiki fell short.
+Written once.
 
 ## Note — `wiki/notes/<slug>.md`
 

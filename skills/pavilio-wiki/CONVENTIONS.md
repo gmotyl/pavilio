@@ -141,8 +141,9 @@ fence, but a file path inside it is still a violation (§ Diagrams).
 
 Concept, overview and repo pages may carry one or two ```` ```mermaid ```` diagrams where the
 page describes a lifecycle, a decision rule, an ordering between actors or a map of how parts
-relate — the angles prose spreads over several sections. Source, entity, question and note pages
-carry none (a source page keeps a diagram its record already had).
+relate — the angles prose spreads over several sections. A question page may carry one, for the
+same angles and under the same rules. Source, entity and note pages carry none (a source page
+keeps a diagram its record already had).
 
 - **A diagram summarises cited prose; it never carries a claim of its own.** Every node and edge
   restates something the page's text already says with a citation. Nothing inferred to make the

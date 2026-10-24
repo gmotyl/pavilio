@@ -5,6 +5,7 @@ import { execFileSync } from "child_process";
 import { join, dirname } from "path";
 
 import { lintWiki } from "../lint";
+import { lintDiagrams } from "../diagrams";
 
 let root = "";
 
@@ -216,6 +217,24 @@ describe("lintWiki", () => {
       { page: "wiki/concepts/linked.md", line: 14, rule: "fence", match: "```mermaidjs" },
       { page: "wiki/concepts/linked.md", line: 15, rule: "call", match: "doThing(" },
     ]);
+  });
+
+  it("lint reports a broken diagram on a question page", async () => {
+    // An em dash in a bare subgraph title is a lexical error.
+    const body = [
+      "Answered from [[wiki/concepts/linked]].", // line 7
+      "```mermaid", // line 8
+      "flowchart TD",
+      "  subgraph Login — retry",
+      "    A --> B",
+      "  end",
+      "```",
+    ].join("\n");
+    write(`${W}/questions/q.md`, page("question", `${body}\n`));
+    const report = await lintDiagrams(root, "pavilio");
+    expect(report.diagramCheck).toBeUndefined();
+    expect(report.diagrams).toHaveLength(1);
+    expect(report.diagrams[0]).toMatchObject({ page: "wiki/questions/q.md", line: 8 });
   });
 
   it("does not write", () => {
