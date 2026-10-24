@@ -90,5 +90,7 @@ describe("project voice", () => {
     // Outside projects: no project, so the default.
     expect(voiceForDocKey("doc:../repo/x.md")).toBe(ANDREW);
     expect(voiceForDocKey("doc:AGENTS.md")).toBe(ANDREW);
+    // An archived project's page keeps that project's voice.
+    expect(voiceForDocKey("doc:archived/p/wiki/x.md")).toBe(EMMA);
   });
 });

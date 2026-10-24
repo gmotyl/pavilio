@@ -28,4 +28,14 @@ describe("doc speech key", () => {
     expect(projectOfDocKey("sess-1")).toBeNull();
     expect(projectOfDocKey("pavilio/wiki/x.md")).toBeNull();
   });
+
+  it("projectOfDocKey reads an archived page's project from the segment after archived/", () => {
+    // The server keeps an archived project under `<projectsDir>/archived/<project>/`.
+    expect(projectOfDocKey("doc:archived/pavilio/wiki/x.md")).toBe("pavilio");
+    expect(projectOfDocKey("doc:archived/p/STATUS.md")).toBe("p");
+    // Directly under archived/, or an empty segment: no project.
+    expect(projectOfDocKey("doc:archived/x.md")).toBeNull();
+    expect(projectOfDocKey("doc:archived//x.md")).toBeNull();
+    expect(projectOfDocKey("doc:archived/../x.md")).toBeNull();
+  });
 });
