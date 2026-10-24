@@ -1,6 +1,6 @@
-import { Crosshair, Eye, Pause, Play, Radio, SkipBack, SkipForward, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
+import { Crosshair, Eye, Radio, SkipBack, SkipForward, Volume2 } from "lucide-react";
+import { useEffect, useSyncExternalStore } from "react";
+import { SpeechTransport } from "../speech/SpeechTransport";
 import { LauncherPills } from "./LauncherPills";
 import { noteRetryUtterance } from "./answerRetry";
 import {
@@ -11,13 +11,13 @@ import {
   useAnswerHeld,
   useAnswerWaiting,
 } from "./answerWaiting";
-import { segmentStateFor, type SegmentState } from "./segmentState";
+import type { SegmentState } from "./segmentState";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { speechPulse } from "./CellSpeakButton";
 import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
-import type { CellSpeechState, GridSpeech, SpeechMode, SpeechUnit } from "../speech/types";
+import type { GridSpeech, SpeechMode } from "../speech/types";
 import { voiceForSession } from "./sessionVoice";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
@@ -46,89 +46,6 @@ export interface SpeechControlBarProps {
 }
 
 /**
- * Characters per second to assume before anything has been measured. Only the
- * RATIOS between segments matter, so this is not a claim about the voice — it
- * is the scale that lets a measured unit (seconds) and an unmeasured one
- * (characters) share one axis. Once any unit has reported a real duration the
- * measured rate replaces it, so the bar sharpens rather than jumping.
- */
-const FALLBACK_CHARS_PER_SECOND = 15;
-
-/**
- * A monotonic counter, and the whole of the bar's cache snapshot.
- *
- * Not a count of cache mutations: it is bumped inside the per-subscriber
- * callback, so N mounted bars advance it N times per mutation, and a bar
- * mounting or unmounting changes the step. Monotonic is the only property
- * `useSyncExternalStore` needs — it compares the snapshot with `Object.is` and
- * re-renders when it differs — so the number is deliberately left meaningless
- * beyond "this changed". Do not read it as a statistic.
- *
- * `useSyncExternalStore` compares snapshots by identity and throws "The result
- * of getSnapshot should be cached" — then loops to "Maximum update depth
- * exceeded" — for any snapshot built per call. A collection of segment states
- * is exactly that trap: a fresh array or Map every render. So the store's value
- * is this number, which is referentially stable by construction, and the states
- * themselves are read during render by {@link speechCacheState} — a Map lookup
- * and a property read, once per unit, cheap enough to pay on every pass.
- *
- * Module-level rather than per-bar because the two functions below are handed
- * to `useSyncExternalStore` directly: a hook argument that changed identity on
- * every render would re-subscribe on every render.
- */
-let cacheVersion = 0;
-
-function subscribeCacheVersion(onStoreChange: () => void): () => void {
-  return subscribeSpeechCache(() => {
-    cacheVersion += 1;
-    onStoreChange();
-  });
-}
-
-function readCacheVersion(): number {
-  return cacheVersion;
-}
-
-/** How long a unit is, in seconds — measured where it can be, estimated where not. */
-function segmentWeights(
-  units: readonly SpeechUnit[],
-  durations: ReadonlyMap<number, number>,
-): number[] {
-  let measuredChars = 0;
-  let measuredSeconds = 0;
-  units.forEach((unit, index) => {
-    const duration = durations.get(index);
-    if (duration !== undefined && duration > 0) {
-      measuredChars += unit.chars;
-      measuredSeconds += duration;
-    }
-  });
-
-  const rate = measuredSeconds > 0 ? measuredChars / measuredSeconds : FALLBACK_CHARS_PER_SECOND;
-
-  return units.map((unit, index) => {
-    const duration = durations.get(index);
-    if (duration !== undefined) return duration;
-    return Math.max(unit.chars, 1) / rate;
-  });
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
-}
-
-/** Per state, because two states raising the same intent still differ in why. */
-const PLAY_PAUSE_LABEL: Record<CellSpeechState, string> = {
-  empty: "Nothing to speak yet",
-  preparing: "Preparing the audio…",
-  ready: "Speak the last response",
-  speaking: "Pause speaking",
-  stalled: "Pause — waiting for the voice",
-  paused: "Resume speaking",
-  heard: "Replay the last response",
-};
-
-/**
  * The row's first control, per speech mode: the glyph, and a label that names
  * the mode the cell is in AND what the next click does — the cycle is only
  * learnable from the control itself. Three states are not a switch, so the
@@ -140,14 +57,6 @@ const SPEECH_MODE_CONTROL: Record<SpeechMode, { Icon: typeof Radio; label: strin
   armed: { Icon: Crosshair, label: "Armed — preloading; click for autoplay" },
   autoplay: { Icon: Volume2, label: "Autoplay — click to turn off" },
 };
-
-/** What a click on the play/pause control does, independently of the colour. */
-function transportIntent(state: CellSpeechState): "speak" | "pause" | "resume" | "none" {
-  if (state === "speaking" || state === "stalled") return "pause";
-  if (state === "paused") return "resume";
-  if (state === "empty" || state === "preparing") return "none";
-  return "speak";
-}
 
 /**
  * The cell's speech transport: layout **A** of
@@ -267,15 +176,8 @@ export function SpeechControlBar({
   const durations = useSyncExternalStore(speech.subscribeProgress, () =>
     speech.unitDurationsFor(sessionId),
   );
-  // Told, not asked. The bar reads the cache during render, and progress was
-  // its only other re-render trigger — which bounds staleness to ~250ms while
-  // playing and to nothing at all while paused or stalled, because neither
-  // publishes. `cascadeWarm` checks `run.active`, which a pause does not clear,
-  // so warming continues while the bar is frozen: a user who pauses to read the
-  // screen would watch a bar that has stopped telling the truth, and a stall is
-  // when they are watching it hardest. The value is discarded — subscribing IS
-  // the point, and the states are read below.
-  useSyncExternalStore(subscribeCacheVersion, readCacheVersion);
+  // The cache subscription the segments' states need is the transport's own —
+  // see `features/speech/SpeechTransport.tsx`.
 
   // Ten seconds from the moment this answer became ready — see the play
   // button's `data-pulse` below for why the bar is capped and the header is
@@ -391,9 +293,6 @@ export function SpeechControlBar({
   // `off → armed → autoplay → off`. See {@link SPEECH_MODE_CONTROL}.
   const mode = speech.speechModeOf(sessionId);
   const modeControl = SPEECH_MODE_CONTROL[mode];
-  const intent = transportIntent(state);
-  const weights = segmentWeights(units, durations);
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
 
   // The transport's two ends, asked of the CURSOR rather than of the lists.
   // While history was a single slot the question was "is the slot full, and
@@ -461,72 +360,12 @@ export function SpeechControlBar({
       ? `Answer, unit ${(progress?.unitIndex ?? 0) + 1} of ${units.length}`
       : "Answer, nothing spoken yet";
 
-  /** The segment a drag is in, while a drag is in progress. */
-  const [dragging, setDragging] = useState<{ index: number; element: HTMLElement } | null>(null);
-  // Latest-ref so the document listeners below never close over a stale seek.
-  const seekRef = useRef<(clientX: number, index: number, element: HTMLElement) => void>(() => {});
-
   // The voice the cell's units were synthesized in — its project's — or a
   // cached unit reads as cold: the cache keys on voice + text. Both voice
   // preferences are subscribed to only so a change re-reads it here.
   usePreference(preferences.speechVoice);
   usePreference(preferences.speechVoiceByProject);
   const voice = voiceForSession(sessionId);
-
-  const segmentStateAt = (index: number): SegmentState => {
-    // Read from the cache rather than tracked, because the warming cascade
-    // fills it from two places (the host's arrival warm and the player's
-    // ladder) and neither reports to the bar. The playhead-vs-cache rule itself
-    // is shared with the answer pane's rail — see `segmentStateFor`.
-    const state = segmentStateFor({
-      index,
-      playingIndex: progress?.unitIndex ?? null,
-      cache: speechCacheState(units[index]?.text ?? "", { voice }),
-    });
-    // A measured unit is one whose audio has been in the element: played, this
-    // run, whether or not a run is still going. Only the bar has `durations`,
-    // so this stays here; it never overrides the unit that is playing now.
-    if (state !== "playing" && durations.has(index)) return "played";
-    return state;
-  };
-
-  const seekAt = useCallback(
-    (clientX: number, index: number, element: HTMLElement): void => {
-      const rect = element.getBoundingClientRect();
-      // jsdom — and a bar that has not been laid out yet — reports 0×0. A
-      // fraction of nothing is not a position.
-      if (!rect.width) return;
-
-      const duration = progress?.unitDuration ?? durations.get(index) ?? null;
-      // Nothing has said how long this unit is, so there is no second to seek
-      // to. The click still had an effect: it is a jump, handled by `onClick`.
-      if (duration === null) return;
-
-      const fraction = clamp((clientX - rect.left) / rect.width, 0, 1);
-      speech.onSeekWithinUnit(sessionId, fraction * duration);
-    },
-    [durations, progress, sessionId, speech],
-  );
-  seekRef.current = seekAt;
-
-  useEffect(() => {
-    if (!dragging) return;
-
-    const move = (event: MouseEvent): void => {
-      seekRef.current(event.clientX, dragging.index, dragging.element);
-    };
-    const up = (event: MouseEvent): void => {
-      seekRef.current(event.clientX, dragging.index, dragging.element);
-      setDragging(null);
-    };
-
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", up);
-    return () => {
-      document.removeEventListener("mousemove", move);
-      document.removeEventListener("mouseup", up);
-    };
-  }, [dragging]);
 
   return (
     <div
@@ -581,7 +420,7 @@ export function SpeechControlBar({
           So the eye is LIVE from mount, and the first two reasons are spent as
           what they actually are: the transport is DISABLED until the first
           answer. Disabled says *not yet* where hiding said *never*, and the
-          `empty` row of `PLAY_PAUSE_LABEL` already spells that out —
+          `empty` row of the transport's `PLAY_PAUSE_LABEL` already spells that out —
           "Nothing to speak yet", intent `none` — so nothing parallel had to be
           invented for it. `previous` and `next` need no new rule at all: they
           ask the cursor, and an empty queue answers no.
@@ -589,7 +428,8 @@ export function SpeechControlBar({
           The pills are ADDED to the line rather than swapped for it. They sit
           where the scrubber does and share the rail with it, which costs
           nothing while the cell is silent because the scrubber has no segments
-          to draw and yields its flex share (`data-empty` below).
+          to draw and yields its flex share (`data-empty` on the transport's
+          scrubber).
 
           One direction only. `stateFor` never returns to `empty` once an
           utterance is under the cursor, so the pills go when the first answer
@@ -618,13 +458,18 @@ export function SpeechControlBar({
           <SkipBack size={16} />
         </button>
 
-        <button
-          type="button"
-          title={PLAY_PAUSE_LABEL[state]}
-          aria-label={PLAY_PAUSE_LABEL[state]}
-          data-testid={`speech-bar-playpause-${sessionId}`}
-          data-speech={state}
-          data-icon={intent}
+        <SpeechTransport
+          id={sessionId}
+          state={state}
+          units={units}
+          durations={durations}
+          progress={progress}
+          voice={voice}
+          onPlay={() => speech.onSpeak(sessionId)}
+          onPause={() => speech.onPause(sessionId)}
+          onResume={() => speech.onResume(sessionId)}
+          onJumpToUnit={(index) => speech.onJumpToUnit(sessionId, index)}
+          onSeekWithinUnit={(seconds) => speech.onSeekWithinUnit(sessionId, seconds)}
           // The header speak control's own switch, from the header speak
           // control's own function — not a second rule computed here. The row
           // sits between the header and the terminal, so without this a user
@@ -639,7 +484,7 @@ export function SpeechControlBar({
           // long as the answer goes unheard: it stays the place that says
           // something is still waiting. The cap narrows where the shared
           // derivation is read, never what it means.
-          data-pulse={speechPulse(state) === "1" && withinReadyPulse ? "1" : "0"}
+          pulse={speechPulse(state) === "1" && withinReadyPulse}
           // A reply the cell is still waiting for. The mark is on from the
           // moment the draft goes out until the reply lands, so it outlives
           // both of the things that can take the pane's body away: a
@@ -648,22 +493,8 @@ export function SpeechControlBar({
           // the row exists to cover — the arrival is noticed HERE (see the
           // effect above), so a reply the user walked away from is visibly
           // on its way for exactly as long as it is on its way.
-          data-pending={pending ? "1" : "0"}
-          className="speech-bar-btn speech-bar-primary"
-          // Genuinely `disabled` on a cell that has never spoken, and only
-          // there. `empty` is not "on its way" — there is nothing under the
-          // cursor and no press can put anything there — so the control is
-          // taken out of the tab order too, rather than being offered to a
-          // keyboard user as something to land on and fail to work.
-          //
-          // `preparing` keeps `aria-disabled` alone, as it always did: the
-          // audio IS on its way, so the button is announced as not-yet-live
-          // without being made unreachable while it lands. That is the whole
-          // difference between the two, and it is why this is a `state`
-          // test and not an `intent` one — both raise intent `none`.
-          disabled={silent}
-          aria-disabled={intent === "none" || undefined}
-          onClick={() => {
+          pending={pending}
+          onPress={() => {
             // The press is a transport press whatever it resolves to, and
             // even when it resolves to nothing: the pane's body goes back
             // to the text either way, because the user asked for the
@@ -679,104 +510,35 @@ export function SpeechControlBar({
             // rather than the user arriving, so it must leave the notice
             // standing.
             //
-            // Above the intent branch, so a press of PAUSE dismisses too.
-            // This is one button whose meaning is decided by where the run
-            // is; the rule is keyed on the press.
+            // The transport calls this above its intent branch, so a press
+            // of PAUSE dismisses too. This is one button whose meaning is
+            // decided by where the run is; the rule is keyed on the press.
             dismissAttentionOnArrival(sessionId);
-            if (intent === "pause") speech.onPause(sessionId);
-            else if (intent === "resume") speech.onResume(sessionId);
-            else if (intent === "speak") speech.onSpeak(sessionId);
           }}
-        >
-          {intent === "pause" ? <Pause size={16} /> : <Play size={16} />}
-        </button>
+          // `next` sits between play/pause and the scrubber, so it rides in
+          // the transport's slot and the row's DOM order is what it was.
+          between={
+            <>
+            <button
+              type="button"
+              title="Next answer"
+              aria-label="Next answer"
+              data-testid={`speech-bar-next-${sessionId}`}
+              className="speech-bar-btn"
+              disabled={!hasNext}
+              onClick={() => {
+                // One call, like the backward control beside it: the release onto
+                // the wave is `onNext`'s, in the host.
+                speech.onNext(sessionId);
+              }}
+            >
+              <SkipForward size={16} />
+            </button>
 
-        <button
-          type="button"
-          title="Next answer"
-          aria-label="Next answer"
-          data-testid={`speech-bar-next-${sessionId}`}
-          className="speech-bar-btn"
-          disabled={!hasNext}
-          onClick={() => {
-            // One call, like the backward control beside it: the release onto
-            // the wave is `onNext`'s, in the host.
-            speech.onNext(sessionId);
-          }}
-        >
-          <SkipForward size={16} />
-        </button>
-
-        <span className="speech-bar-sep" />
-
-        <div
-          className="speech-bar-scrub"
-          data-testid={`speech-bar-scrubber-${sessionId}`}
-          // Nothing to draw, so nothing to keep the rail for. The strip is
-          // `flex: 1` and carries a `min-width` wide enough to be a
-          // scrubber; on a silent cell it has no segments, and holding that
-          // width would be a blank gap taking the space the launcher pills
-          // beside it are for. The stylesheet collapses it on this
-          // attribute — see `.speech-bar-scrub[data-empty="1"]`, and
-          // `SpeechControlBar.alwaysTransport.test.tsx`, which measures
-          // what the line can be squeezed to in both states.
-          data-empty={silent ? "1" : undefined}
-          // A pointer affordance, hidden from assistive tech — see the note on
-          // the component. Announcing it would mean announcing one item per
-          // unit, and an answer runs to fifteen of them. The eye beside it
-          // carries the position in its name instead, and that is what a
-          // screen reader is given.
-          aria-hidden="true"
-        >
-          {units.map((_unit, index) => {
-            const segment = segmentStateAt(index);
-            const width = total > 0 ? (weights[index] / total) * 100 : 100 / units.length;
-            const fill =
-              segment === "playing" && progress?.unitDuration
-                ? clamp(progress.unitTime / progress.unitDuration, 0, 1) * 100
-                : 0;
-
-            return (
-              <div
-                // Index is the identity here: the segment IS unit n of this
-                // utterance, and a re-prepare rebuilds the array in place.
-                key={index}
-                // No `role`, no `tabIndex`, no `aria-label`: this is a
-                // graphic a mouse can act on, not a control. `title` stays —
-                // it is a hover tooltip for the pointer user, and an
-                // `aria-hidden` subtree never announces it.
-                title={`Unit ${index + 1} of ${units.length}`}
-                data-testid={`speech-bar-segment-${sessionId}-${index}`}
-                data-segment={segment}
-                className="speech-bar-seg"
-                style={{ width: `${width}%` }}
-                onMouseDown={(e) => {
-                  // A drag belongs to the unit already in the element: it moves
-                  // `currentTime` and re-synthesizes nothing. Every other
-                  // segment is a jump, which `onClick` raises.
-                  if (segment !== "playing") return;
-                  e.preventDefault();
-                  const element = e.currentTarget;
-                  setDragging({ index, element });
-                  seekAt(e.clientX, index, element);
-                }}
-                onClick={() => {
-                  if (segment === "playing") return;
-                  // Cold included, deliberately: the run reports the existing
-                  // `stalled` red until the unit lands, and then plays it.
-                  speech.onJumpToUnit(sessionId, index);
-                }}
-              >
-                {segment === "playing" ? (
-                  <>
-                    <span className="speech-bar-fill" style={{ width: `${fill}%` }} />
-                    <span className="speech-bar-head" style={{ left: `${fill}%` }} />
-                  </>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+            <span className="speech-bar-sep" />
+            </>
+          }
+        />
 
         {/*
           The launchers, in the rail the collapsed scrubber just handed
