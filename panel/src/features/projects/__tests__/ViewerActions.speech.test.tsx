@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from "react-router-dom";
 import { useContext, type ReactNode } from "react";
 import { makeSpeech, synthMock } from "../../speech/__tests__/speech.harness";
 import type { AnswerWaitingPort, SpeechHost } from "../../speech/useSpeechHost";
@@ -400,5 +400,70 @@ describe("markdown surfaces", () => {
     expect(screen.queryByTestId("mockup-viewer-play")).toBeNull();
     expect(screen.queryByTestId("file-viewer-play")).toBeNull();
     mockup.unmount();
+  });
+
+  // Leaving a page stops its run as soon as the next file is asked for, not
+  // when that file has loaded: until then the viewer still holds the previous
+  // page's path, and a key built from it would keep the old run going.
+  it("navigating the /view/* viewer stops the old page before the next one loads", async () => {
+    const OTHER = `${PROJECTS}/pavilio/wiki/y.md`;
+    const served = vi.mocked(fetch);
+    const serve = served.getMockImplementation()!;
+    let release: () => void = () => {};
+    served.mockImplementation(async (input) => {
+      if (!String(input).startsWith("/api/files/read/pavilio/wiki/y.md")) return serve(input);
+      await new Promise<void>((r) => (release = r));
+      return json({ content: "# Other", absolutePath: OTHER });
+    });
+
+    let navigate: NavigateFunction = () => {};
+    function Navigator() {
+      navigate = useNavigate();
+      return null;
+    }
+    render(
+      <Host>
+        <BreadcrumbActionsProvider>
+          <MemoryRouter initialEntries={["/view/pavilio/wiki/x.md"]}>
+            <Navigator />
+            <BreadcrumbSlot />
+            <Routes>
+              <Route path="/view/*" element={<MarkdownViewer />} />
+            </Routes>
+          </MemoryRouter>
+        </BreadcrumbActionsProvider>
+      </Host>,
+    );
+    const button = await screen.findByTestId("markdown-viewer-play");
+    await waitFor(() => expect(button).not.toBeDisabled());
+    fireEvent.click(button);
+    expect(stop()).not.toHaveBeenCalled();
+
+    act(() => navigate("/view/pavilio/wiki/y.md"));
+
+    await waitFor(() => expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md"));
+    expect(bar("doc:pavilio/wiki/x.md")).toBeNull();
+    // ...all while the next file's read is still pending; let it land now.
+    await act(async () => release());
+  });
+
+  it("switching the section file viewer stops the old page before the next one loads", async () => {
+    const viewer = (filePath: string, absolutePath: string, loading: boolean) => (
+      <Host>
+        <FileViewer filePath={filePath} content="# Note" absolutePath={absolutePath} loading={loading} />
+      </Host>
+    );
+    const view = render(viewer("pavilio/wiki/x.md", NOTE, false));
+    const button = await screen.findByTestId("file-viewer-play");
+    await waitFor(() => expect(button).not.toBeDisabled());
+    fireEvent.click(button);
+    expect(stop()).not.toHaveBeenCalled();
+
+    // `useFileViewer` keeps the previous file's absolute path until the read
+    // resolves; only `filePath` and `loading` move on the switch.
+    view.rerender(viewer("pavilio/wiki/y.md", NOTE, true));
+
+    expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md");
+    expect(bar("doc:pavilio/wiki/x.md")).toBeNull();
   });
 });

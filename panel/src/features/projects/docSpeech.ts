@@ -23,7 +23,9 @@ export function docSpeechKeyFor(absolutePath: string, projectsDir: string): stri
 
 /**
  * The `speech` prop every markdown surface passes its toolbar. Undefined — no
- * Play — for a file that is not markdown, before the file's path is known, and
+ * Play — for a file that is not markdown, before the file's path is known (a
+ * surface switching files passes null until the new read resolves, so the
+ * previous page's key — and its run — does not outlive the switch), and
  * until the server has reported the projects directory (a key built without it
  * would name the wrong project). `text` is the markdown source as loaded, or
  * empty while it is loading, which leaves Play disabled.

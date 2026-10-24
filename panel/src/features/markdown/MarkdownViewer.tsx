@@ -115,7 +115,15 @@ export default function MarkdownViewer() {
   // A mockup is the exception: `MockupFrame` brings its own toolbar above the
   // frame (the width picker belongs next to it), so the breadcrumb slot stays
   // empty rather than mounting a second copy of the same buttons.
-  const speech = useDocSpeech(absolutePath, loading ? null : content, isMarkdown);
+  // The page's speech is withheld the same way, key and all: `absolutePath` is
+  // still the previous file's until the read resolves, and a key built from it
+  // would keep the old page's run going (and its bar open) while this one loads.
+  // Without `speech` the toolbar drops its speaking half, which stops that run.
+  const speech = useDocSpeech(
+    loading ? null : absolutePath,
+    loading ? null : content,
+    isMarkdown,
+  );
   useBreadcrumbActions(
     absolutePath && !isMockup ? (
       <ViewerActions

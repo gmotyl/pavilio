@@ -24,8 +24,14 @@ export function FileViewer({
 }: Props) {
   const peekTrigger = usePeekTriggerProps();
   const workspaceRoot = useWorkspaceRoot();
-  // Withheld while loading for the same reason `content` is below.
-  const speech = useDocSpeech(absolutePath, loading ? null : content, isMarkdown(filePath));
+  // Withheld while loading for the same reason `content` is below — the key
+  // too: `absolutePath` is still the previous file's until the read resolves,
+  // and keeping its key would leave the old page speaking while this one loads.
+  const speech = useDocSpeech(
+    loading ? null : absolutePath,
+    loading ? null : content,
+    isMarkdown(filePath),
+  );
   return (
     <div>
       <div
