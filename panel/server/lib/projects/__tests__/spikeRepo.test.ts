@@ -1,6 +1,17 @@
 import { execFileSync } from "child_process";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -117,6 +128,20 @@ describe("ensureSpikeRepo", () => {
     expect(res.ok ? "" : res.error).toContain("lab/repos.json");
     expect(readFileSync(outside, "utf8")).toBe(bytes);
     expect(existsSync(join(home, "spikes"))).toBe(false);
+  });
+
+  it("a hard-linked repos.json never modifies the linked file", () => {
+    makeProject("lab", "research");
+    const outside = join(tmp, "victim.json");
+    writeFileSync(outside, "[]\n");
+    const reposPath = join(projectsDir, "lab/repos.json");
+    linkSync(outside, reposPath);
+    const res = ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "~/spikes", home });
+    expect(res).toMatchObject({ ok: true, registered: true });
+    expect(readFileSync(outside, "utf8")).toBe("[]\n");
+    expect(reposJson("lab")).toEqual([{ name: "lab-spikes", path: "~/spikes/lab" }]);
+    expect(statSync(reposPath).ino).not.toBe(statSync(outside).ino);
+    expect(readdirSync(join(projectsDir, "lab")).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 
   it("refuses a symlinked project dir", () => {

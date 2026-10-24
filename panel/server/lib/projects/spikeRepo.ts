@@ -1,5 +1,6 @@
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { randomBytes } from "crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
 import { isAbsolute, join, resolve } from "path";
 
 import { isProjectDir } from "../project-dir";
@@ -49,6 +50,26 @@ function readEntries(reposPath: string): RepoEntry[] | string {
   return Array.isArray(raw) ? (raw as RepoEntry[]) : `${reposPath}: not a JSON array`;
 }
 
+/**
+ * Temp file in the same dir + rename: `rename` replaces the directory entry, so a hard-linked
+ * `repos.json` is never written through (the shared inode outside the project stays as it was),
+ * and a crash never leaves a half-written file. The temp file is removed on failure.
+ */
+function writeFileAtomic(file: string, content: string): void {
+  const tmp = `${file}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, content, { flag: "wx" });
+    renameSync(tmp, file);
+  } catch (err) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Best effort — the original failure is the one worth reporting.
+    }
+    throw err;
+  }
+}
+
 export function ensureSpikeRepo(options: SpikeRepoOptions): SpikeRepoResult {
   const { projectsDir, project, home } = options;
   if (!isProjectDir(projectsDir, project)) {
@@ -66,7 +87,7 @@ export function ensureSpikeRepo(options: SpikeRepoOptions): SpikeRepoResult {
   }
   const path = resolve(expanded);
 
-  // `writeFileSync` follows symlinks: refuse a project dir or repos.json that is one (or resolves
+  // A write follows symlinks: refuse a project dir or repos.json that is one (or resolves
   // outside projectsDir) before reading it, so a planted link can never redirect the write.
   try {
     assertContainedDir(projectsDir, [project]);
@@ -112,7 +133,7 @@ export function ensureSpikeRepo(options: SpikeRepoOptions): SpikeRepoResult {
   });
   if (!listed) {
     entries.push({ name: `${project}-spikes`, path: recorded });
-    writeFileSync(reposPath, JSON.stringify(entries, null, 2) + "\n");
+    writeFileAtomic(reposPath, JSON.stringify(entries, null, 2) + "\n");
   }
 
   return { ok: true, path, repo: isRepo ? "existing" : "created", registered: !listed };
