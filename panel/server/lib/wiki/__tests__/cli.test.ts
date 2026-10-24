@@ -241,6 +241,26 @@ describe("wiki cli", () => {
     expect(status).toMatchObject({ code: 0, json: { lastRun: null, daysAgo: null, waiting: 1 } });
   });
 
+  it("pending takes --only more than once", async () => {
+    write("notes/2026-10-02_1000_retro.md", "# retro\n");
+    const res = await cli([
+      "pending", "demo",
+      "--only", "notes/2026-10-01_1000_kickoff.md",
+      "--only=notes/2026-10-02_1000_retro.md",
+    ]);
+    expect(res.code).toBe(0);
+    expect(res.json.pending.map((p: { path: string }) => p.path)).toEqual([
+      "notes/2026-10-01_1000_kickoff.md",
+      "notes/2026-10-02_1000_retro.md",
+    ]);
+  });
+
+  it("rejects a repeated single-value flag instead of keeping the last", async () => {
+    const res = await cli(["project", "--name", "demo", "--name", "other"]);
+    expect(res.code).toBe(1);
+    expect(res.json.error).toMatch(/--name given more than once/);
+  });
+
   it("fails on an unknown command", async () => {
     const res = await cli(["frobnicate"]);
     expect(res.code).toBe(1);

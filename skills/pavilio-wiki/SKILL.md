@@ -155,6 +155,11 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    target `wiki/<slug>` — strip the `- `, the brackets, the `knowledge:` prefix and any `|alias`,
    as harvest step 6 passes it (idempotent — a link the writer kept is left alone). A failed
    writer left the old page in place; re-append anyway.
+   **Glossary check** — for each record with a `## Glossary` section (an archived `design.md`),
+   once its writer has returned: every term there must be among the receipt's `slugs` as
+   `concepts/<slug>`, `<slug>` taken from the term's `CONTEXT.md` line (`See [[wiki/concepts/<slug>]]`).
+   A missing one → add the bare slug to that source page's `concepts:` and to the receipt's slugs
+   before step 6; the writer missing it would leave the glossary link dead.
 6. **Backlog** — `scripts/wiki backlog <p> --touched <slug>,<slug>,…` — every namespaced slug
    from the receipts, comma-separated. Run it only after every source writer has returned. A
    catch-up (no inputs) drops `--touched`, so it also pays what earlier runs left owed.

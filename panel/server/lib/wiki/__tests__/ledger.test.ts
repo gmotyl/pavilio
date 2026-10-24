@@ -130,6 +130,15 @@ describe("ledger", () => {
     expect(adr).toEqual({ path: "adr/0001-first.md", hash: hashRecord("# adr\n"), status: "changed" });
   });
 
+  it("only takes a list of paths", () => {
+    expect(
+      pendingRecords(projectDir, {
+        today: TODAY,
+        only: ["memo/2026-10-03_1200_idea.md", "notes/missing.md", "CONTEXT.md"],
+      }).map((p) => p.path),
+    ).toEqual(["memo/2026-10-03_1200_idea.md", "CONTEXT.md"]);
+  });
+
   it("only restricts to one path", () => {
     expect(pendingRecords(projectDir, { today: TODAY, only: "memo/2026-10-03_1200_idea.md" })).toEqual([
       { path: "memo/2026-10-03_1200_idea.md", hash: hashRecord("# idea\n"), status: "new" },
