@@ -41,7 +41,7 @@ const USAGE = `usage: scripts/wiki <command> [args]
   panel-link <path>                         {link}: panel route (/project/<p>/wiki?file=… or
                                             /view/…) for a projects-relative path, no host;
                                             a leading projects/ is stripped
-  pending <p> [--only <path>]               {pending: [{path, hash, status}]}
+  pending <p> [--only <path>]...            {pending: [{path, hash, status}]}; --only repeats
   record <p> <path> <hash>                  {ok: true}
   lock take|release <p> --session <id>      {held, takenOver[, busy]} (release adds released;
                                             busy: guard still busy, nothing decided — retry)
@@ -95,12 +95,13 @@ const DEFAULT_WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), 
 class CliError extends Error {}
 class UnknownCommand extends Error {}
 
-type Parsed = { positional: string[]; flags: Map<string, string> };
+type Parsed = { positional: string[]; flags: Map<string, string[]> };
 
-/** `--flag value` and `--flag=value`; a flag without a value is an error. */
+/** `--flag value` and `--flag=value`; a flag without a value is an error. Repeats are kept in order. */
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
-  const flags = new Map<string, string>();
+  const flags = new Map<string, string[]>();
+  const add = (key: string, value: string) => flags.set(key, [...(flags.get(key) ?? []), value]);
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (!arg.startsWith("--")) {
@@ -109,12 +110,12 @@ function parseArgs(args: string[]): Parsed {
     }
     const eq = arg.indexOf("=");
     if (eq !== -1) {
-      flags.set(arg.slice(2, eq), arg.slice(eq + 1));
+      add(arg.slice(2, eq), arg.slice(eq + 1));
       continue;
     }
     const value = args[i + 1];
     if (value === undefined) throw new CliError(`${arg} needs a value`);
-    flags.set(arg.slice(2), value);
+    add(arg.slice(2), value);
     i++;
   }
   return { positional, flags };
@@ -184,7 +185,12 @@ async function readConfig(workspaceRoot: string): Promise<WikiConfig> {
 
 async function dispatch(command: string, args: string[], deps: CliDeps, workspaceRoot: string): Promise<Outcome> {
   const parsed = parseArgs(args);
-  const flag = (name: string) => parsed.flags.get(name);
+  // A single-value flag given twice is an error, never a silent "last one wins".
+  const flag = (name: string) => {
+    const values = parsed.flags.get(name);
+    if (values && values.length > 1) throw new CliError(`--${name} given more than once`);
+    return values?.[0];
+  };
   switch (command) {
     case "project": {
       only(parsed, 0, "no positional arguments", ["name", "cwd"]);
@@ -209,10 +215,10 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       return ok({ link: panelLink(path.replace(/^projects\//, "")) });
     }
     case "pending": {
-      const [p] = only(parsed, 1, "pending <p> [--only <path>]", ["only"]);
+      const [p] = only(parsed, 1, "pending <p> [--only <path>]...", ["only"]);
       const dir = projectDir(workspaceRoot, p);
-      const onlyPath = flag("only");
-      return ok({ pending: pendingRecords(dir, onlyPath === undefined ? {} : { only: onlyPath }) });
+      const onlyPaths = parsed.flags.get("only");
+      return ok({ pending: pendingRecords(dir, onlyPaths === undefined ? {} : { only: onlyPaths }) });
     }
     case "record": {
       const [p, path, hash] = only(parsed, 3, "record <p> <path> <hash>");
