@@ -143,8 +143,10 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
    For external material, hand the writer its original `url` (`PAGES.md § Common frontmatter`):
    an article/YouTube raw file's `source_url` frontmatter, a clone's `git -C <clonePath> remote
-   get-url origin` normalised to `https://github.com/<owner>/<repo>` (no `.git`). None → pass no
-   `url`; never guess one.
+   get-url origin` normalised by its form — a GitHub origin → `https://github.com/<owner>/<repo>`
+   (no `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
+   `https://host/<owner>/<repo>`; a local path or `file://` origin → no `url`. None → pass no
+   `url`; never guess one (never fabricate a GitHub URL for a non-GitHub or local clone).
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
    `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each
    with `scripts/wiki backlink <p> <source page> <target>`, where `<target>` is the link's bare
@@ -295,7 +297,8 @@ when no other wiki session is writing.
 error is given) is fixed by re-running that page's writer or quoting the offending value
 (`PAGES.md § Common frontmatter`), stale pages are refreshed by the next ingest, code identifiers
 move to `wiki/repos/<repo>/` on the next page write, a page in `missingUrl` gets its `url` and
-`Original:` link on the next rewrite of that page, a diagram that fails to parse is fixed by hand
+`Original:` link on the next rewrite of that page (a repo page from a local clone has no remote
+URL, so it stays in `missingUrl` — expected, leave it), a diagram that fails to parse is fixed by hand
 or by re-running that page's writer (`CONVENTIONS.md § Diagrams`; `diagramCheck: unavailable` →
 say nothing was checked). Also run `scripts/wiki backlog <p>`: a
 `broken` target listed under `create` gets its page from the next ingest; any other broken target

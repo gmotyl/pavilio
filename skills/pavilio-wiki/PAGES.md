@@ -28,9 +28,12 @@ paths (`wiki/sources/….md`). Links in bodies use the D14 form without `.md`.
 whose `raw` is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`) or a
 clone (`raw/repos/…`); absent on record-backed sources and other raw snapshots (outside files,
 snippets, `context-snapshot-*`). Never guessed — taken from the raw file's `source_url`
-frontmatter, or for a clone from `git -C wiki/raw/repos/<owner>-<repo> remote get-url origin`
-normalised to `https://github.com/<owner>/<repo>` (no `.git`, as `clone-repo` parses it). Lint
-lists a page that needs one and lacks it as `missingUrl`.
+frontmatter, or for a clone from `git -C wiki/raw/repos/<owner>-<repo> remote get-url origin`,
+normalised by the origin's form: a GitHub origin → `https://github.com/<owner>/<repo>` (no
+`.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
+`https://host/<owner>/<repo>`; a local path or `file://` origin (`clone-repo` accepts those too)
+→ no `url` — there is no original to link. Lint lists a page that needs one and lacks it as
+`missingUrl`; a repo page from a local clone stays there, which is expected.
 
 ## Source page — `wiki/sources/<kind>-<stem>.md`
 
@@ -99,16 +102,17 @@ summarising the prose (CONVENTIONS.md § Diagrams). Implementation lives behind 
 type: repo
 description: "One line"
 raw: "wiki/raw/repos/<owner>-<repo>"             # the clone directory
-url: "https://github.com/<owner>/<repo>"         # the clone's origin, normalised
+url: "https://github.com/<owner>/<repo>"         # the clone's origin, normalised; none for a local clone
 commit: 1a2b3c4                                  # clone commit the page was written from
 entities: ["<repo>", …]
 concepts: […]
 ```
 
-- `ARCHITECTURE.md` — an `Original: <url>` line under the title, then purpose, top-level layout,
+- `ARCHITECTURE.md` — an `Original: <url>` line under the title (when it has a `url`), then purpose, top-level layout,
   main modules and how they talk, entry points, build/test commands, where each domain concept is
   implemented.
-- `<topic>.md` — a code-level note answering one code question (repo_writer question mode).
+- `<topic>.md` — a code-level note answering one code question (repo_writer question mode), with
+  the same `Original: <url>` line under the title when it has a `url`.
 
 Repo pages count as sources for the ≥2 threshold.
 

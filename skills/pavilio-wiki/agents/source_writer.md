@@ -10,7 +10,8 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `project` — e.g. `pavilio`; workspace paths below are under `projects/<project>/`
 - `input` — project-relative path of the record or raw file
 - `page` — target path `wiki/sources/<kind>-<stem>.md` (exists → rewrite it, keep `created`)
-- `url` — external material only (an article, a YouTube transcript, a clone): the original's URL
+- `url` — external material only (an article, a YouTube transcript, a clone): the original's URL,
+  as the orchestrator gives it (a local-path or `file://` clone has none)
 
 The orchestrator passes these in the prompt; there is no input file to read.
 
