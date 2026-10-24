@@ -11,7 +11,8 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `input` — project-relative path of the record or raw file
 - `page` — target path `wiki/sources/<kind>-<stem>.md` (exists → rewrite it, keep `created`)
 - `url` — external material only (an article, a YouTube transcript, a clone): the original's URL,
-  as the orchestrator gives it (a local-path or `file://` clone has none)
+  as the orchestrator gives it, already normalised and with any userinfo (`user:token@`) stripped
+  (a local-path or `file://` clone has none); never write credentials onto a page
 
 The orchestrator passes these in the prompt; there is no input file to read.
 

@@ -67,7 +67,7 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 A mockup named in a grill becomes binding: it is turned into a **mockup check** that [[pavilio-writing-plans]] carries into `tasks.md` as acceptance criteria. Use the glossary's terms exactly — **mockup check**, **agreed deviation**, **visual verification** — never "known diff", "exception" or "screenshot test".
 
 - **Trigger (a) — a mockup appears.** When a path or panel link to a file under `*/mockups/` appears in the conversation — or the user names another image/HTML file as the design — enter mockup mode for that file.
-- **Trigger (b) — a rendered surface with no mockup.** When the change touches a rendered surface (a panel, page, component — anything a user sees) and no mockup has appeared, ask once, lettered (A–C, plus D) as a markdown list, your recommendation marked *(recommended)*:
+- **Trigger (b) — a rendered surface with no mockup.** When the change touches a rendered surface (a panel, page, component — anything a user sees) and no mockup has appeared, ask once, lettered (A–C, plus D) as a markdown list. These options keep the fixed order below, because the text after them references the letters — an exception to recommendation-as-A; mark whichever one you recommend with *(recommended)*:
 
   - **A)** I have a mockup — import it in the Mockups tab and paste its **Copy link**
   - **B)** make one — `pavilio-mockup`

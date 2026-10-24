@@ -48,7 +48,8 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  *   `type: repo` page, and every `type: source` page whose `raw` (wiki-relative, `wiki/…`
  *   accepted) is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`) or a
  *   clone (`raw/repos/…`). Record-backed sources and the other raw snapshots (outside files,
- *   snippets, `context-snapshot-*`) have no original to link and are never listed.
+ *   snippets, `context-snapshot-*`) have no original to link and are never listed. A repo page
+ *   from a local-path or `file://` clone has no `url` either and stays listed, by design.
  *
  * Mermaid blocks are parse-checked separately, by `lintDiagrams` (./diagrams), which the CLI merges
  * into the same report as `diagrams`.

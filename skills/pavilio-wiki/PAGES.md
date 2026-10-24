@@ -31,8 +31,10 @@ snippets, `context-snapshot-*`). Never guessed — taken from the raw file's `so
 frontmatter, or for a clone from `git -C wiki/raw/repos/<owner>-<repo> remote get-url origin`,
 normalised by the origin's form: a GitHub origin → `https://github.com/<owner>/<repo>` (no
 `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
-`https://host/<owner>/<repo>`; a local path or `file://` origin (`clone-repo` accepts those too)
-→ no `url` — there is no original to link. Lint lists a page that needs one and lacks it as
+`https://host/<owner>/<repo>`; any other `scheme://host/<owner>/<repo>` (`ssh://`, `http://`,
+`git://`) → `https://host/<owner>/<repo>`; a local path or `file://` origin (`clone-repo` accepts
+those too) → no `url` — there is no original to link. Strip any userinfo (`user:token@`) from the
+origin first — never write credentials onto a page. Lint lists a page that needs one and lacks it as
 `missingUrl`; a repo page from a local clone stays there, which is expected.
 
 ## Source page — `wiki/sources/<kind>-<stem>.md`

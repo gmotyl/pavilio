@@ -145,7 +145,9 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    an article/YouTube raw file's `source_url` frontmatter, a clone's `git -C <clonePath> remote
    get-url origin` normalised by its form — a GitHub origin → `https://github.com/<owner>/<repo>`
    (no `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
-   `https://host/<owner>/<repo>`; a local path or `file://` origin → no `url`. None → pass no
+   `https://host/<owner>/<repo>`; any other `scheme://host/<owner>/<repo>` (`ssh://`, `http://`,
+   `git://`) → `https://host/<owner>/<repo>`; a local path or `file://` origin → no `url`. Strip any
+   userinfo (`user:token@`) from the origin — never write credentials onto a page. None → pass no
    `url`; never guess one (never fabricate a GitHub URL for a non-GitHub or local clone).
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
    `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each

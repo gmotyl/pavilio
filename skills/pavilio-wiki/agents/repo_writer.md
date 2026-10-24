@@ -15,8 +15,10 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `question` — question mode only
 - `url` — optional: the clone's origin as the orchestrator normalised it (a GitHub origin →
   `https://github.com/<owner>/<repo>`, another https origin as-is minus `.git`, scp-like
-  `user@host:<owner>/<repo>` → `https://host/<owner>/<repo>`); absent for a local-path or
-  `file://` clone. Use it verbatim — never derive or guess one yourself.
+  `user@host:<owner>/<repo>` → `https://host/<owner>/<repo>`, any other
+  `scheme://host/<owner>/<repo>` (`ssh://`, `http://`, `git://`) → `https://host/<owner>/<repo>`,
+  userinfo such as `user:token@` stripped — never credentials on a page); absent for a local-path
+  or `file://` clone. Use it verbatim — never derive or guess one yourself.
 
 The orchestrator passes these in the prompt; there is no input file to read.
 
