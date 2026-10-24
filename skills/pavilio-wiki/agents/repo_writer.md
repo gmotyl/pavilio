@@ -13,6 +13,7 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `clonePath`, `commitSha` — from the `scripts/wiki clone-repo` receipt
 - `mode` — `architecture` or `question`
 - `question` — question mode only
+- `url` — the clone's origin, normalised to `https://github.com/<owner>/<repo>` (no `.git`)
 
 The orchestrator passes these in the prompt; there is no input file to read.
 
@@ -28,8 +29,11 @@ Nothing outside `clonePath` and `wiki/repos/<repo>/`; no web, no other wiki page
 
 ## Write
 
-Shaped per `skills/pavilio-wiki/PAGES.md § Repo pages`, with `commit: <commitSha>`.
-- Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
+Shaped per `skills/pavilio-wiki/PAGES.md § Repo pages`, with `commit: <commitSha>` and
+`url: "<url>"` on every page (question mode without a `url` input: copy `ARCHITECTURE.md`'s; none
+there either → omit it, never invent one).
+- Architecture mode: an `Original: <url>` line directly under the `# <repo>` title.
+- Frontmatter strings — `title`, `description`, `record`, `raw`, `url` and every list item — are
   double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `
   breaks the YAML (lint reports the page as `malformed`).
 - Architecture mode: one file, `wiki/repos/<repo>/ARCHITECTURE.md` (rewrite; keep `created`).

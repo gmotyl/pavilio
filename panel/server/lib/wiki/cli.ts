@@ -50,7 +50,7 @@ const USAGE = `usage: scripts/wiki <command> [args]
                                             create/update map slug → wiki/sources/… paths
   index <p>                                 {written, removed} | exit 1 {error, page}
   lint <p>                                  {broken, orphans, malformed, untyped, stale, codeIdentifiers,
-                                            diagrams[, diagramCheck]}: diagrams = mermaid blocks
+                                            missingUrl, diagrams[, diagramCheck]}: diagrams = mermaid blocks
                                             that fail to parse; diagramCheck = why it was skipped
   config                                    {sessionStartIngest, writerModel}
   fetch-article <p> <url>                   {raw, title, warning?}

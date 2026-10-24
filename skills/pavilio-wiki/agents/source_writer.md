@@ -10,6 +10,7 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `project` — e.g. `pavilio`; workspace paths below are under `projects/<project>/`
 - `input` — project-relative path of the record or raw file
 - `page` — target path `wiki/sources/<kind>-<stem>.md` (exists → rewrite it, keep `created`)
+- `url` — external material only (an article, a YouTube transcript, a clone): the original's URL
 
 The orchestrator passes these in the prompt; there is no input file to read.
 
@@ -27,7 +28,9 @@ Nothing else: no other records, wiki pages, code or web.
 
 One file, `page`, shaped per `skills/pavilio-wiki/PAGES.md § Source page`; links per
 `skills/pavilio-wiki/CONVENTIONS.md § Links`.
-- Frontmatter strings — `title`, `description`, `record`, `raw` and every list item — are
+- Given a `url`: write it as `url: "<url>"` and make the provenance line
+  `From [[wiki/raw/…]] · Original: <url>`. No `url` given → no `url` field; never invent one.
+- Frontmatter strings — `title`, `description`, `record`, `raw`, `url` and every list item — are
   double-quoted JSON strings: `description: "Tailscale HTTPS: needs MagicDNS"`. An unquoted `: `
   breaks the YAML (lint reports the page as `malformed`).
 - Keep mechanisms, decisions and their reasons, gotchas, what broke and why, people and their roles.

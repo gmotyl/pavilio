@@ -16,6 +16,7 @@ export type WikiFrontmatter = {
   concepts?: string[];
   record?: string; // workspace path of the source record
   raw?: string; // raw-layer path
+  url?: string; // the original of external material (article, video, repo)
   created?: string; // YYYY-MM-DD
   updated?: string; // YYYY-MM-DD
   kind?: EntityKind; // entity pages only
@@ -31,7 +32,7 @@ export type WikiPage = ParsedPage & {
   path: string; // relative to the wiki dir, always "/"-separated
 };
 
-const STRING_FIELDS = ["type", "description", "record", "raw", "title"] as const;
+const STRING_FIELDS = ["type", "description", "record", "raw", "url", "title"] as const;
 const LIST_FIELDS = ["entities", "concepts", "aliases", "sources"] as const;
 const DATE_FIELDS = ["created", "updated"] as const;
 

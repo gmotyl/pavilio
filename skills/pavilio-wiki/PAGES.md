@@ -12,16 +12,25 @@ title: "Human title"          # optional; else the first "# " heading
 description: "One line the indexes show"
 created: 2026-10-20           # set once, never changed
 updated: 2026-10-20           # bumped on every rewrite
+url: "https://…"              # external material only — see below
 ```
 
-**Quote every string scalar** — `title`, `description`, `record`, `raw` and every list item — as
-a double-quoted JSON string (`description: "Tailscale HTTPS: needs MagicDNS"`, `\"` and `\\`
-escaped). An unquoted `: ` or a leading `[`, `{`, `#`, `*` or `&` breaks the YAML; the page then
+**Quote every string scalar** — `title`, `description`, `record`, `raw`, `url` and every list
+item — as a double-quoted JSON string (`description: "Tailscale HTTPS: needs MagicDNS"`, `\"` and
+`\\` escaped). An unquoted `: ` or a leading `[`, `{`, `#`, `*` or `&` breaks the YAML; the page then
 reads as having no frontmatter, `scripts/wiki index` stops, and lint lists it as `malformed`.
 
 A page without `type` stops `scripts/wiki index` and the ingest with it. Path fields hold real
 paths with `.md`: `record` and `raw` relative to the project, `sources` and `cited` as project-root
 paths (`wiki/sources/….md`). Links in bodies use the D14 form without `.md`.
+
+**`url` — the original of external material.** Required on every repo page and on a source page
+whose `raw` is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`) or a
+clone (`raw/repos/…`); absent on record-backed sources and other raw snapshots (outside files,
+snippets, `context-snapshot-*`). Never guessed — taken from the raw file's `source_url`
+frontmatter, or for a clone from `git -C wiki/raw/repos/<owner>-<repo> remote get-url origin`
+normalised to `https://github.com/<owner>/<repo>` (no `.git`, as `clone-repo` parses it). Lint
+lists a page that needs one and lacks it as `missingUrl`.
 
 ## Source page — `wiki/sources/<kind>-<stem>.md`
 
@@ -31,11 +40,13 @@ description: "What this record adds to the project's knowledge"
 record: "progress/2026-10-19-tts-relay-node20.md"  # workspace record
 # or
 raw: "wiki/raw/article-edge-tts-limits.md"       # raw-layer file
+url: "https://example.com/edge-tts-limits"       # with an article/YouTube/clone raw: its source_url
 entities: ["jane-doe", "edge-tts"]               # bare names
 concepts: ["utterance", "speech-relay"]
 ```
 
-Body: `# <title>`, a one-line provenance line linking the record (`From [[progress/…]]`), then
+Body: `# <title>`, a one-line provenance line linking the record (`From [[progress/…]]`; with a
+`url`, `From [[wiki/raw/…]] · Original: <url>`), then
 short sections of durable knowledge — mechanisms, decisions with their reasons, gotchas, people
 and their roles. No status lines: PR numbers, test counts, branch names, "pending restart",
 checklists. Code detail is allowed here; it is cited from `repos/` pages, not concept pages.
@@ -88,13 +99,15 @@ summarising the prose (CONVENTIONS.md § Diagrams). Implementation lives behind 
 type: repo
 description: "One line"
 raw: "wiki/raw/repos/<owner>-<repo>"             # the clone directory
+url: "https://github.com/<owner>/<repo>"         # the clone's origin, normalised
 commit: 1a2b3c4                                  # clone commit the page was written from
 entities: ["<repo>", …]
 concepts: […]
 ```
 
-- `ARCHITECTURE.md` — purpose, top-level layout, main modules and how they talk, entry points,
-  build/test commands, where each domain concept is implemented.
+- `ARCHITECTURE.md` — an `Original: <url>` line under the title, then purpose, top-level layout,
+  main modules and how they talk, entry points, build/test commands, where each domain concept is
+  implemented.
 - `<topic>.md` — a code-level note answering one code question (repo_writer question mode).
 
 Repo pages count as sources for the ≥2 threshold.

@@ -124,7 +124,7 @@ describe("wiki cli", () => {
 
     const lint = await cli(["lint", "demo"]);
     expect(lint.code).toBe(0);
-    expect(Object.keys(lint.json).sort()).toEqual(["broken", "codeIdentifiers", "diagrams", "malformed", "orphans", "stale", "untyped"]);
+    expect(Object.keys(lint.json).sort()).toEqual(["broken", "codeIdentifiers", "diagrams", "malformed", "missingUrl", "orphans", "stale", "untyped"]);
 
     mkdirSync(join(root, ".pavilio"), { recursive: true });
     writeFileSync(join(root, ".pavilio", "preferences.json"), JSON.stringify({ "wiki.writerModel": "sonnet", "wiki.sessionStartIngest": false }));
