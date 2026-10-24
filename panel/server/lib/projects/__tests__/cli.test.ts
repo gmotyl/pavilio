@@ -35,7 +35,8 @@ describe("scripts/project", () => {
   it("cli new prints created paths and exit 0", async () => {
     const res = await cli(["new", "tmp-x", "--kind", "research", "--topic", "edge tts voices"]);
     expect(res.code).toBe(0);
-    expect(res.json.created).toEqual(expect.arrayContaining(["PROJECT.md", "spikes/.gitkeep", "wiki/raw/.gitkeep", "wiki/index.md"]));
+    expect(res.json.created).toEqual(expect.arrayContaining(["PROJECT.md", "wiki/raw/.gitkeep", "wiki/index.md"]));
+    expect(res.json.created).not.toContain("spikes/.gitkeep");
     const card = readFileSync(join(root, "projects/tmp-x/PROJECT.md"), "utf8");
     expect(card).toContain('topic: "edge tts voices"');
     expect(card).toContain("created: 2026-10-22");

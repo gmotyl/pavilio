@@ -15,11 +15,13 @@ import { isValidProjectSlug } from "./slug";
  * | kind      | creates                                                                  |
  * | --------- | ------------------------------------------------------------------------ |
  * | project   | `PROJECT.md`, `STATUS.md`, `progress/`, `wiki/` skeleton, registry row   |
- * | research  | the same, plus `topic`/`created` frontmatter, `spikes/`, `wiki/raw/`     |
+ * | research  | the same, plus `topic`/`created` frontmatter and `wiki/raw/`             |
  * | knowledge | `PROJECT.md`, `wiki/` skeleton, registry row                             |
  *
  * A folder that exists without `PROJECT.md` (notes waiting for a card) only gets the parts it
- * lacks: an existing file is never rewritten, and an existing dir gets no `.gitkeep`.
+ * lacks: an existing file is never rewritten, and an existing dir gets no `.gitkeep`. Research code
+ * lives in the spikes repo (`scripts/project spike-repo`), not in the project folder; a legacy
+ * `spikes/` dir is left as it is.
  */
 
 export type ScaffoldInput = { projectsDir: string; name: string; kind: ProjectKind; topic?: string; today: string };
@@ -36,7 +38,7 @@ function projectCard(input: ScaffoldInput): string {
   }
   const overview =
     kind === "research"
-      ? `Research project: ${topic ?? "[topic]"}. External material lives in \`wiki/raw/\`, throwaway code in \`spikes/<slug>/\`.`
+      ? `Research project: ${topic ?? "[topic]"}. External material lives in \`wiki/raw/\`, code in the spikes repo (\`scripts/project spike-repo ${name}\`).`
       : kind === "knowledge"
         ? "Workspace-wide knowledge: generic findings promoted from project wikis."
         : "[2-3 sentences: what the project is, for whom, where Greg fits.]";
@@ -127,7 +129,6 @@ function skeleton(input: ScaffoldInput): { files: [string, string][]; keptDirs: 
     files.push(["STATUS.md", statusCard(input)]);
     keptDirs.push("progress");
   }
-  if (input.kind === "research") keptDirs.push("spikes");
   files.push(
     ["wiki/index.md", emptyIndex()],
     ["wiki/overview.md", wikiOverview(input)],

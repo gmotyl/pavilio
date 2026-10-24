@@ -69,7 +69,7 @@ describe("scaffoldProject", () => {
     expect(projectKind(projectsDir, "acme")).toBe("project");
   });
 
-  it("scaffolds a research project with topic, spikes and raw", () => {
+  it("scaffolds a research project with topic and raw", () => {
     const result = scaffoldProject({
       projectsDir,
       name: "tts-voices",
@@ -79,7 +79,7 @@ describe("scaffoldProject", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    for (const rel of ["PROJECT.md", "STATUS.md", "progress/.gitkeep", "spikes/.gitkeep", "wiki/raw/.gitkeep", ...WIKI_SKELETON]) {
+    for (const rel of ["PROJECT.md", "STATUS.md", "progress/.gitkeep", "wiki/raw/.gitkeep", ...WIKI_SKELETON]) {
       expect(result.created).toContain(rel);
     }
     const card = read("tts-voices/PROJECT.md");
@@ -87,6 +87,34 @@ describe("scaffoldProject", () => {
     expect(card).toContain('topic: "edge tts voices"\n');
     expect(card).toContain("created: 2026-10-22\n");
     expect(projectKind(projectsDir, "tts-voices")).toBe("research");
+  });
+
+  it("research scaffold writes no spikes dir", () => {
+    const result = scaffoldProject({ projectsDir, name: "x", kind: "research", topic: "t", today: "2026-10-24" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.created).not.toContain("spikes/.gitkeep");
+    expect(existsSync(join(projectsDir, "x/spikes"))).toBe(false);
+    expect(existsSync(join(projectsDir, "x/wiki/raw"))).toBe(true);
+  });
+
+  it("research overview points at spike-repo", () => {
+    scaffoldProject({ projectsDir, name: "x", kind: "research", topic: "t", today: "2026-10-24" });
+    const card = read("x/PROJECT.md");
+    expect(card).toContain(
+      "External material lives in `wiki/raw/`, code in the spikes repo (`scripts/project spike-repo x`).",
+    );
+    expect(card).not.toContain("spikes/<slug>/");
+  });
+
+  it("existing spikes dir is left alone", () => {
+    write("lab/spikes/probe/main.ts", "probe\n");
+    const result = scaffoldProject({ projectsDir, name: "lab", kind: "research", topic: "t", today: "2026-10-24" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.created).not.toContain("spikes/.gitkeep");
+    expect(readdirSync(join(projectsDir, "lab/spikes"))).toEqual(["probe"]);
+    expect(read("lab/spikes/probe/main.ts")).toBe("probe\n");
   });
 
   it("scaffolds the knowledge project with wiki only", () => {
