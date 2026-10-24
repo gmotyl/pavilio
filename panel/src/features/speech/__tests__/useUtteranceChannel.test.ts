@@ -1519,3 +1519,64 @@ describe("useUtteranceChannel — answers handed on", () => {
     expect(onAnswer).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("useUtteranceChannel — local arrivals", () => {
+  /** A page utterance: keyed by the document, built in the browser. */
+  const page = (id: string, at = 5_000) => utterance("doc:pavilio/notes.md", id, at);
+
+  it("arriveLocal puts the utterance under the cursor of its key", async () => {
+    const { result } = await renderChannel();
+
+    act(() => result.current.arriveLocal(page("p1")));
+
+    expect(result.current.utteranceFor("doc:pavilio/notes.md")).toEqual(page("p1"));
+    expect(result.current.stateFor("doc:pavilio/notes.md")).toBe("ready");
+  });
+
+  it("arriveLocal never reaches onAnswer", async () => {
+    const fetchMock = serveLatest([]);
+    const { result } = await renderChannel();
+    const calls = fetchMock.mock.calls.length;
+
+    act(() => result.current.arriveLocal(page("p1")));
+
+    expect(onAnswer).not.toHaveBeenCalled();
+    // Nothing goes to the server: the only request is the mount hydration.
+    expect(fetchMock.mock.calls.length).toBe(calls);
+  });
+
+  it("arriveLocal is not warmed", async () => {
+    const { result } = await renderChannel();
+
+    act(() => result.current.arriveLocal(page("p1")));
+
+    expect(result.current.utteranceFor("doc:pavilio/notes.md")).not.toBeNull();
+    expect(result.current.warmableUtterances).toEqual([]);
+  });
+
+  it("arriveLocal with the same id does not duplicate", async () => {
+    const { result } = await renderChannel();
+
+    act(() => result.current.arriveLocal(page("p1")));
+    act(() => result.current.arriveLocal(page("p1")));
+
+    const queue = result.current.queueFor("doc:pavilio/notes.md");
+    expect(queue.current).toEqual(page("p1"));
+    expect(queue.previous).toEqual([]);
+    expect(queue.pending).toEqual([]);
+  });
+
+  it("drop forgets the key", async () => {
+    const { result } = await renderChannel();
+
+    act(() => result.current.arriveLocal(page("p1")));
+    act(() => result.current.markHeard("doc:pavilio/notes.md"));
+    expect(result.current.heardFor("doc:pavilio/notes.md").size).toBe(1);
+
+    act(() => result.current.drop("doc:pavilio/notes.md"));
+
+    expect(result.current.utteranceFor("doc:pavilio/notes.md")).toBeNull();
+    expect(result.current.heardFor("doc:pavilio/notes.md").size).toBe(0);
+    expect(result.current.stateFor("doc:pavilio/notes.md")).toBe("empty");
+  });
+});
