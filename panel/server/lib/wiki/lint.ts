@@ -44,6 +44,12 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  *   belong on knowledge pages, and their node ids are routinely PascalCase, so it is neither a
  *   `fence` nor scanned for `call` / `component` — only for `path`. A name that is part of a
  *   reported path on the same line is reported once, as the path.
+ * - **missingUrl** — pages from external material without a `url` frontmatter field: every
+ *   `type: repo` page, and every `type: source` page whose `raw` (wiki-relative, `wiki/…`
+ *   accepted) is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`) or a
+ *   clone (`raw/repos/…`). Record-backed sources and the other raw snapshots (outside files,
+ *   snippets, `context-snapshot-*`) have no original to link and are never listed. A repo page
+ *   from a local-path or `file://` clone has no `url` either and stays listed, by design.
  *
  * Mermaid blocks are parse-checked separately, by `lintDiagrams` (./diagrams), which the CLI merges
  * into the same report as `diagrams`.
@@ -63,6 +69,7 @@ export type LintReport = {
   untyped: string[];
   stale: StalePage[];
   codeIdentifiers: CodeIdentifier[];
+  missingUrl: string[];
 };
 
 const byString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -223,6 +230,20 @@ export function bodyFirstLine(absPath: string, body: string): number {
   }
 }
 
+// --- original URL -----------------------------------------------------------------------------
+
+/** A raw path (wiki-relative, `wiki/…` accepted) that snapshots material with an original URL. */
+function isExternalRaw(raw: string): boolean {
+  const rel = raw.trim().replace(/^\/+/, "").replace(/^wiki\//, "");
+  return /^raw\/(?:article-[^/]+\.md|youtube-[^/]+\.md|repos\/.+)$/.test(rel);
+}
+
+/** A page that must carry `url`: a repo page, or a source page written from external material. */
+function needsUrl(fm: { type?: string; raw?: string }): boolean {
+  if (fm.type === "repo") return true;
+  return fm.type === "source" && !!fm.raw && isExternalRaw(fm.raw);
+}
+
 // --- lint ---------------------------------------------------------------------------------------
 
 /** Lint `projects/<project>/wiki` under `workspaceRoot` (the dir containing `projects/`). */
@@ -237,6 +258,7 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
   const malformed: MalformedPage[] = [];
   const stale: StalePage[] = [];
   const codeIdentifiers: CodeIdentifier[] = [];
+  const missingUrl: string[] = [];
   const inbound = new Map<string, Set<string>>(); // target key → linking page keys
 
   const addInbound = (link: WikiLink, from: string) => {
@@ -277,6 +299,7 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
     else if (!page.frontmatter.type) untyped.push(path);
 
     const { record, raw, updated } = page.frontmatter;
+    if (needsUrl(page.frontmatter) && !page.frontmatter.url?.trim()) missingUrl.push(path);
     if (record) {
       const rel = record.replace(/^\/+/, "");
       sourceFiles.push({ source: record, absPath: join(projectDir, rel), isPage: false });
@@ -320,5 +343,6 @@ export function lintWiki(workspaceRoot: string, project: string): LintReport {
     codeIdentifiers: codeIdentifiers.sort(
       (a, b) => byString(a.page, b.page) || a.line - b.line || byString(a.rule, b.rule) || byString(a.match, b.match),
     ),
+    missingUrl: missingUrl.sort(byString),
   };
 }

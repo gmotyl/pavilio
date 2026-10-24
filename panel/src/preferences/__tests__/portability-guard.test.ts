@@ -174,6 +174,9 @@ const FIXTURES: Record<string, Fixture> = {
   // ── Wiki ─────────────────────────────────────────────────────────────────
   "wiki.sessionStartIngest": { value: false },
   "wiki.writerModel": { value: "sonnet" },
+
+  // ── Research ─────────────────────────────────────────────────────────────
+  "research.spikesRoot": { value: "~/code/spikes" },
 };
 
 /**
@@ -256,8 +259,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(55);
-    expect(portable.length).toBe(42);
+    expect(ALL_PREFERENCES.length).toBe(56);
+    expect(portable.length).toBe(43);
     expect(machineLocal.length).toBe(13);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

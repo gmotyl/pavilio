@@ -5,6 +5,7 @@ import { execFileSync } from "child_process";
 import { join, dirname } from "path";
 
 import { lintWiki } from "../lint";
+import { lintDiagrams } from "../diagrams";
 
 let root = "";
 
@@ -216,6 +217,67 @@ describe("lintWiki", () => {
       { page: "wiki/concepts/linked.md", line: 14, rule: "fence", match: "```mermaidjs" },
       { page: "wiki/concepts/linked.md", line: 15, rule: "call", match: "doThing(" },
     ]);
+  });
+
+  it("missingUrl lists a repo page without url", () => {
+    write(`${W}/repos/zdrofit-booker/ARCHITECTURE.md`, page("repo", "# zdrofit-booker\n"));
+    write(`${W}/repos/zdrofit-booker/booking.md`, page("repo", "Booking flow.\n"));
+    expect(lintWiki(root, "pavilio").missingUrl).toEqual([
+      "wiki/repos/zdrofit-booker/ARCHITECTURE.md",
+      "wiki/repos/zdrofit-booker/booking.md",
+    ]);
+  });
+
+  it("missingUrl lists an article source page without url", () => {
+    write(`${W}/sources/youtube-abc.md`, page("source", "Video.\n", "raw: wiki/raw/youtube-abc.md\n"));
+    write(`${W}/sources/article-edge.md`, page("source", "Article.\n", "raw: raw/article-edge.md\n"));
+    write(`${W}/sources/clone.md`, page("source", "Clone.\n", "raw: raw/repos/jan-booker\n"));
+    expect(lintWiki(root, "pavilio").missingUrl).toEqual([
+      "wiki/sources/article-edge.md",
+      "wiki/sources/clone.md",
+      "wiki/sources/youtube-abc.md",
+    ]);
+  });
+
+  it("missingUrl skips record-backed and context-snapshot sources", () => {
+    write(`${W}/sources/note-x.md`, page("source", "Note.\n", "record: notes/2026-10-01-x.md\n"));
+    write(
+      `${W}/sources/context-snapshot-2026-10-01-glossary.md`,
+      page("source", "Snapshot.\n", "raw: raw/context-snapshot-2026-10-01/01-glossary.md\n"),
+    );
+    write(`${W}/sources/snapshot.md`, page("source", "Snapshot.\n", "raw: raw/context-snapshot-2026-10-01.md\n"));
+    write(`${W}/concepts/relay.md`, page("concept", "No url needed.\n"));
+    expect(lintWiki(root, "pavilio").missingUrl).toEqual([]);
+  });
+
+  it("missingUrl is empty when url is set", () => {
+    write(
+      `${W}/repos/zdrofit-booker/ARCHITECTURE.md`,
+      page("repo", "# zdrofit-booker\n", 'url: "https://github.com/jan-kaczorowski/zdrofit_booker"\n'),
+    );
+    write(
+      `${W}/sources/article-edge.md`,
+      page("source", "Article.\n", 'raw: raw/article-edge.md\nurl: "https://example.com/edge"\n'),
+    );
+    expect(lintWiki(root, "pavilio").missingUrl).toEqual([]);
+  });
+
+  it("lint reports a broken diagram on a question page", async () => {
+    // An em dash in a bare subgraph title is a lexical error.
+    const body = [
+      "Answered from [[wiki/concepts/linked]].", // line 7
+      "```mermaid", // line 8
+      "flowchart TD",
+      "  subgraph Login — retry",
+      "    A --> B",
+      "  end",
+      "```",
+    ].join("\n");
+    write(`${W}/questions/q.md`, page("question", `${body}\n`));
+    const report = await lintDiagrams(root, "pavilio");
+    expect(report.diagramCheck).toBeUndefined();
+    expect(report.diagrams).toHaveLength(1);
+    expect(report.diagrams[0]).toMatchObject({ page: "wiki/questions/q.md", line: 8 });
   });
 
   it("does not write", () => {

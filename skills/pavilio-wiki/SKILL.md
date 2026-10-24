@@ -75,6 +75,10 @@ is optional, and only its `## Archived Projects` rows are refused.
    `<p>/progress/<file>.md` gets a `/view/…` link). Never a bare path or a hand-encoded URL. If the
    wiki does not answer, say so — never fill the gap from general knowledge presented as the
    wiki's. The question page keeps D14 links (`PAGES.md § Question`).
+   An answer that describes a lifecycle, a decision rule, an ordering between actors or a map
+   adds one mermaid diagram (`CONVENTIONS.md § Diagrams`); a single fact or a short list gets
+   none. The same diagram goes in the answer shown to the user and in the question page. Sources
+   that disagree are drawn as separate paths, each labelled with its source — never reconciled.
 4. `scripts/wiki lock take <p> --session <id>` (session id as in § Ingest). `held: false` → give
    the answer, say the trace was not written because an ingest is running, stop.
 5. Write (see `PAGES.md` for shapes):
@@ -85,7 +89,8 @@ is optional, and only its `## Archived Projects` rows are refused.
      `wiki/open-questions.md`;
    - one query entry in `wiki/log.md`.
 6. Code question the repo pages do not answer, with the clone present in `wiki/raw/repos/` →
-   run `repo_writer` in question mode (a new repo note).
+   run `repo_writer` in question mode (a new repo note), passing the clone's `url` as ingest
+   step 5 derives it.
 7. Never edit any existing page under `entities/`, `concepts/`, `repos/`, `sources/`, or
    `overview.md` from a query; the only repo write is the new question-mode note.
 8. `scripts/wiki index <p>`. Exit 1 → no commit; report `error` and `page`, release, stop.
@@ -136,6 +141,14 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 5. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
+   For external material, hand the writer its original `url` (`PAGES.md § Common frontmatter`):
+   an article/YouTube raw file's `source_url` frontmatter, a clone's `git -C <clonePath> remote
+   get-url origin` normalised by its form — a GitHub origin → `https://github.com/<owner>/<repo>`
+   (no `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
+   `https://host/<owner>/<repo>`; any other `scheme://host/<owner>/<repo>` (`ssh://`, `http://`,
+   `git://`) → `https://host/<owner>/<repo>`; a local path or `file://` origin → no `url`. Strip any
+   userinfo (`user:token@`) from the origin — never write credentials onto a page. None → pass no
+   `url`; never guess one (never fabricate a GitHub URL for a non-GitHub or local clone).
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
    `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each
    with `scripts/wiki backlink <p> <source page> <target>`, where `<target>` is the link's bare
@@ -281,11 +294,13 @@ when no other wiki session is writing.
 
 ## 6. Lint
 
-`scripts/wiki lint <p>` and present the seven groups (`broken`, `orphans`, `malformed`, `untyped`,
-`stale`, `codeIdentifiers`, `diagrams`) with page paths and one remedy each — malformed frontmatter (the YAML
+`scripts/wiki lint <p>` and present the eight groups (`broken`, `orphans`, `malformed`, `untyped`,
+`stale`, `codeIdentifiers`, `missingUrl`, `diagrams`) with page paths and one remedy each — malformed frontmatter (the YAML
 error is given) is fixed by re-running that page's writer or quoting the offending value
 (`PAGES.md § Common frontmatter`), stale pages are refreshed by the next ingest, code identifiers
-move to `wiki/repos/<repo>/` on the next page write, a diagram that fails to parse is fixed by hand
+move to `wiki/repos/<repo>/` on the next page write, a page in `missingUrl` gets its `url` and
+`Original:` link on the next rewrite of that page (a repo page from a local clone has no remote
+URL, so it stays in `missingUrl` — expected, leave it), a diagram that fails to parse is fixed by hand
 or by re-running that page's writer (`CONVENTIONS.md § Diagrams`; `diagramCheck: unavailable` →
 say nothing was checked). Also run `scripts/wiki backlog <p>`: a
 `broken` target listed under `create` gets its page from the next ingest; any other broken target

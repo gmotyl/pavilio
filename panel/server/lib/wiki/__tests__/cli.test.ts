@@ -124,7 +124,7 @@ describe("wiki cli", () => {
 
     const lint = await cli(["lint", "demo"]);
     expect(lint.code).toBe(0);
-    expect(Object.keys(lint.json).sort()).toEqual(["broken", "codeIdentifiers", "diagrams", "malformed", "orphans", "stale", "untyped"]);
+    expect(Object.keys(lint.json).sort()).toEqual(["broken", "codeIdentifiers", "diagrams", "malformed", "missingUrl", "orphans", "stale", "untyped"]);
 
     mkdirSync(join(root, ".pavilio"), { recursive: true });
     writeFileSync(join(root, ".pavilio", "preferences.json"), JSON.stringify({ "wiki.writerModel": "sonnet", "wiki.sessionStartIngest": false }));
@@ -166,6 +166,38 @@ describe("wiki cli", () => {
     const missing = await cli(["panel-link"]);
     expect(missing.code).toBe(1);
     expect(missing.stderr).toMatch(/panel-link/);
+  });
+
+  it("panel-link strips a leading projects/ for a wiki page", async () => {
+    expect(await cli(["panel-link", "projects/knowledge/wiki/entities/android.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/project/knowledge/wiki?file=knowledge%2Fwiki%2Fentities%2Fandroid.md" },
+    });
+  });
+
+  it("panel-link strips a leading projects/ for a non-wiki file", async () => {
+    expect(await cli(["panel-link", "projects/pavilio/progress/x.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/pavilio/progress/x.md" },
+    });
+  });
+
+  it("panel-link leaves projects/ mid-path untouched", async () => {
+    expect(await cli(["panel-link", "pavilio/notes/projects/x.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/pavilio/notes/projects/x.md" },
+    });
+  });
+
+  it("panel-link keeps a projectsDir-relative path as is", async () => {
+    expect(await cli(["panel-link", "knowledge/wiki/entities/android.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/project/knowledge/wiki?file=knowledge%2Fwiki%2Fentities%2Fandroid.md" },
+    });
+    expect(await cli(["panel-link", "pavilio/progress/x.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/pavilio/progress/x.md" },
+    });
   });
 
   it("cli project reports the project kind", async () => {

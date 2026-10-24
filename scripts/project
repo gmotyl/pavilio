@@ -2,6 +2,7 @@
 # Pavilio project CLI — deterministic project scaffold, for skills and agents.
 #
 #   scripts/project new <name> [--kind project|research|knowledge] [--topic "…"]
+#   scripts/project spike-repo <name>
 #
 # Every command prints one JSON object on stdout; exit 0 ok, 1 error, 2 "ask the user".
 # The implementation is panel/server/lib/projects/cli.ts, run with the panel's own tsx.

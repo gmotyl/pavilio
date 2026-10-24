@@ -111,6 +111,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 
   // ── wiki ────────────────────────────────────────────────────────────────
   "wiki.writerModel": ["haiku", "sonnet", "claude-haiku-4-5", "true", "240"],
+  "research.spikesRoot": ["~/git/prv/spikes", "", "/srv/spikes", "true", "240"],
   "project.mark": ["", "lucide:rocket", "emoji:🚀", "emoji:🇵🇱"],
 
   // ── json whose payload can be a BARE STRING — the shape that breaks a
@@ -125,7 +126,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 55;
+const DECLARATION_COUNT = 56;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

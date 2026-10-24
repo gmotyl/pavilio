@@ -923,6 +923,18 @@ export const preferences = {
     codec: str,
     portable: true,
   }),
+  /**
+   * The directory under which `scripts/project spike-repo` creates each research
+   * project's spikes repo. Kept as written (`~` unexpanded); a blank value reads
+   * as the default. Portable: the CLI reads it off `.pavilio/preferences.json`.
+   */
+  researchSpikesRoot: definePreference({
+    key: "research.spikesRoot", // was: nothing — new with spikes repos
+    scope: "global",
+    default: "~/git/prv/spikes",
+    codec: str,
+    portable: true,
+  }),
 };
 
 /** The whole table, for the registry's own invariants and the store's lookups. */
