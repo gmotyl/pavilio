@@ -29,6 +29,7 @@ import { startTaskRun } from "./startTaskRun";
 import { taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
 import { relativeToWorkspace } from "./relativeToWorkspace";
+import { useDocSpeech } from "./docSpeech";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
 
@@ -197,6 +198,7 @@ function PlanDetailHeader({
   content: string | null;
 }) {
   const peek = usePeekTriggerProps();
+  const speech = useDocSpeech(path, content, path.endsWith(".md"));
   return (
     <div
       className="flex items-center gap-2 mb-4 pb-3"
@@ -210,7 +212,12 @@ function PlanDetailHeader({
       >
         {path.split("/").pop()}
       </span>
-      <ViewerActions absolutePath={path} relativePath={relativePath} content={content} />
+      <ViewerActions
+        absolutePath={path}
+        relativePath={relativePath}
+        content={content}
+        speech={speech}
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   getStoredVoice,
   setProjectVoice,
   setStoredVoice,
+  voiceForDocKey,
   voiceForProject,
 } from "../voices";
 
@@ -78,5 +79,18 @@ describe("project voice", () => {
 
     expect(voiceForProject("q")).toBe(ANDREW);
     expect(voiceForProject("p")).toBe(EMMA);
+  });
+
+  it("a page's doc key speaks with its project's voice, else the default", () => {
+    globals.__PAVILIO_PREFS__![VOICE_KEY] = ANDREW;
+    setProjectVoice("p", EMMA);
+
+    expect(voiceForDocKey("doc:p/wiki/x.md")).toBe(EMMA);
+    expect(voiceForDocKey("doc:q/wiki/x.md")).toBe(ANDREW);
+    // Outside projects: no project, so the default.
+    expect(voiceForDocKey("doc:../repo/x.md")).toBe(ANDREW);
+    expect(voiceForDocKey("doc:AGENTS.md")).toBe(ANDREW);
+    // An archived project's page keeps that project's voice.
+    expect(voiceForDocKey("doc:archived/p/wiki/x.md")).toBe(EMMA);
   });
 });

@@ -84,6 +84,18 @@ interface SessionSpeech {
    * arrives, and `languageFor` is what preparation reads.
    */
   language: LanguageState;
+  /**
+   * Whether the record was landed by {@link Channel.arriveLocal} — a page the
+   * browser built itself, not an answer the server broadcast. A local record is
+   * never warmed: it only exists once Play is pressed, and the host speaks it
+   * straight away.
+   *
+   * Per record and sticky: a server arrival on a local key would keep the flag.
+   * That is safe only because the two key spaces never meet — local keys are
+   * pages' `doc:` keys (`docSpeechKey`, `isDocSpeechKey`) and no terminal
+   * session id starts with that prefix.
+   */
+  local: boolean;
 }
 
 /** Folds one arriving utterance's vote into a session's tally. */
@@ -116,6 +128,7 @@ const emptySession = (language: LanguageState): SessionSpeech => ({
   queue: emptyUtteranceQueue,
   heard: NOTHING_HEARD,
   language,
+  local: false,
 });
 
 /**
@@ -372,6 +385,14 @@ export interface Channel {
    */
   autoplaySessionIds: readonly string[];
   markHeard(sessionId: string): void;
+  /**
+   * Lands a locally built utterance as an arrival on its key's queue. Never
+   * calls onAnswer: a page is not an answer, so it raises no alert, and nothing
+   * about it goes to the server.
+   */
+  arriveLocal(utterance: Utterance): void;
+  /** Forgets a key's queue, heard set and language entirely. */
+  drop(sessionId: string): void;
 }
 
 const LATEST_URL = "/api/speech/latest";
@@ -784,6 +805,9 @@ export function useUtteranceChannel({
   const warmableRef = useRef<WarmableUtterance[]>([]);
   const warmableUtterances = useMemo(() => {
     const next = [...sessions.entries()].flatMap(([sessionId, record]) => {
+      // A local record is spoken the moment it lands, so there is nothing to
+      // warm ahead of a click.
+      if (record.local) return [];
       const mode = speechModes[sessionId] ?? "off";
       return warmableOf(record.queue).map((utterance) => ({ utterance, mode }));
     });
@@ -863,6 +887,42 @@ export function useUtteranceChannel({
     });
   }, []);
 
+  // The live-frame path without the server's half: the same dedupe and the same
+  // nothing-to-say gate, but no `onAnswer` — a page the user just pressed Play
+  // on is not news to announce.
+  const arriveLocal = useCallback((utterance: Utterance) => {
+    setSessions((current) => {
+      const existing = current.get(utterance.sessionId);
+      if (existing && queueHolds(existing.queue, utterance.id)) return current;
+
+      const next = new Map(current);
+      const language = advanceLanguage(existing?.language, utterance.text);
+      if (!hasSomethingToSay(utterance.text, language.lang)) {
+        next.set(utterance.sessionId, { ...languageOnly(existing, language), local: true });
+        return next;
+      }
+
+      // Never behind a run: the host speaks a local arrival the moment it lands,
+      // so it is the key's current utterance even while the player still
+      // reports the key's previous run — which a re-speak with new text has
+      // just dropped, in the same batch as this arrival.
+      const record = withArrival(existing, utterance, language, false);
+      next.set(utterance.sessionId, { ...record, local: true });
+      return next;
+    });
+  }, []);
+
+  // The whole record goes, tally included: a page closed and reopened starts
+  // from nothing, as a reload would.
+  const drop = useCallback((sessionId: string) => {
+    setSessions((current) => {
+      if (!current.has(sessionId)) return current;
+      const next = new Map(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
+
   const speechModeOf = useCallback(
     (sessionId: string): SpeechMode => speechModes[sessionId] ?? "off",
     [speechModes],
@@ -904,5 +964,7 @@ export function useUtteranceChannel({
     cycleSpeechMode,
     autoplaySessionIds,
     markHeard,
+    arriveLocal,
+    drop,
   };
 }

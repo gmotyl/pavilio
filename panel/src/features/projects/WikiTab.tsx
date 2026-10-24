@@ -8,11 +8,13 @@ import ViewerActions from "./ViewerActions";
 import { useFileListControls } from "./fileListControls";
 import { usePeekTriggerProps } from "./peekTrigger";
 import { relativeToWorkspace } from "./relativeToWorkspace";
+import { useDocSpeech } from "./docSpeech";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useProjectWiki, useWikiPage, type WikiPageInfo, type WikiTree } from "./useProjectWiki";
 import { clearLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
 import CopyIconButton from "../shell/CopyIconButton";
 import { expandCommand } from "../terminal/expandCommand";
+import { stripFrontmatter } from "../../lib/frontmatter";
 
 /** Rows a page list shows before folding the rest behind "+ N more". */
 const LIST_LIMIT = 5;
@@ -27,14 +29,12 @@ const ENTITY_KIND_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-const FRONTMATTER = /^﻿?---\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
-
 /**
  * The page body under the tab's own header: frontmatter is shown as chips, and
  * a leading H1 repeating the title would print it twice.
  */
 function pageBody(content: string, title: string): string {
-  const body = content.replace(FRONTMATTER, "");
+  const body = stripFrontmatter(content);
   const h1 = /^\s*#[ \t]+(.+?)[ \t]*#*[ \t]*(?:\r?\n|$)/.exec(body);
   return h1 && h1[1].trim() === title ? body.slice(h1[0].length) : body;
 }
@@ -424,6 +424,10 @@ function WikiPageView({
   const peekTrigger = usePeekTriggerProps();
   const workspaceRoot = useWorkspaceRoot();
   const { content, absolutePath, error } = useWikiPage(file);
+  // The page's source as loaded — frontmatter and all, not `body`: the host's
+  // `speakDocument` drops the frontmatter (`pageSpeechText`), and the repeated
+  // title H1 `pageBody` hides is still the page's opening heading to a listener.
+  const speech = useDocSpeech(absolutePath, content, absolutePath.endsWith(".md"));
   const title = info?.title ?? stem(path);
   const body = useMemo(() => (content === null ? null : pageBody(content, title)), [content, title]);
 
@@ -443,6 +447,7 @@ function WikiPageView({
             absolutePath={absolutePath}
             relativePath={workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null}
             content={content}
+            speech={speech}
           />
         )}
       </div>

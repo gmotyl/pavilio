@@ -65,3 +65,38 @@ describe("MarkdownViewer cross-root fetch", () => {
     );
   });
 });
+
+describe("MarkdownViewer failed read", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        onopen = null;
+        onmessage = null;
+        onclose = null;
+        onerror = null;
+        close() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["the fetch rejects", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["the read answers non-ok", async () => new Response("nope", { status: 404 })],
+  ])("leaves Loading... when %s", async (_label, fail) => {
+    vi.stubGlobal("fetch", vi.fn(fail));
+    const view = render(
+      <MemoryRouter initialEntries={["/view/pavilio/notes/gone.md"]}>
+        <Routes>
+          <Route path="/view/*" element={<MarkdownViewer />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(view.queryByText("Loading...")).toBeNull());
+  });
+});

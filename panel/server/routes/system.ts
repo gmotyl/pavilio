@@ -16,14 +16,21 @@ import { getConfig } from "../config.js";
  * directory, with forward slashes: every viewer's copy-path is relative to it
  * (see src/features/projects/relativeToWorkspace.ts), so the client never has to
  * guess the projects directory's name.
+ *
+ * And `projectsDir` itself, also with forward slashes: a page's speech key is
+ * its path relative to the projects directory (`doc:<project>/…`), so the
+ * project — and with it the project's voice — is the key's first segment.
  */
 const systemRouter = Router();
 
 systemRouter.get("/", (_req, res) => {
-  const workspaceRoot = resolve(getConfig().projectsDir, "..");
+  const projectsDir = resolve(getConfig().projectsDir);
+  const workspaceRoot = resolve(projectsDir, "..");
+  const posix = (p: string) => (sep === "/" ? p : p.split(sep).join("/"));
   res.json({
     wslDistro: process.env.WSL_DISTRO_NAME ?? null,
-    workspaceRoot: sep === "/" ? workspaceRoot : workspaceRoot.split(sep).join("/"),
+    workspaceRoot: posix(workspaceRoot),
+    projectsDir: posix(projectsDir),
   });
 });
 

@@ -6,6 +6,7 @@ import { isMockupFile, MOCKUP_MAX_SOURCE_BYTES, viewerReadUrl } from "../project
 import ViewerActions from "../projects/ViewerActions";
 import { relativeToWorkspace } from "../projects/relativeToWorkspace";
 import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
+import { useDocSpeech } from "../projects/docSpeech";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useFloatingAction } from "../shell/Layout";
@@ -45,7 +46,12 @@ export default function MarkdownViewer() {
   const [absolutePath, setAbsolutePath] = useState("");
   const [tooLarge, setTooLarge] = useState(false);
   const workspaceRoot = useWorkspaceRoot();
-  const [loading, setLoading] = useState(true);
+  // The requested path the read in hand answered. Loading is derived from it
+  // during render, so the first render after a switch already knows that
+  // `content` and `absolutePath` are the previous file's — an effect setting a
+  // flag would only catch up one render later.
+  const [loadedPath, setLoadedPath] = useState<string | null>(null);
+  const loading = loadedPath !== filePath;
   const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
 
@@ -54,29 +60,42 @@ export default function MarkdownViewer() {
   const currentPath = useRef(filePath);
   currentPath.current = filePath;
 
-  const fetchContent = async () => {
+  // `reload`: a live reload of the file already shown — a failed one keeps the
+  // page as it is rather than blanking it.
+  const fetchContent = async (reload = false) => {
     const path = filePath;
     // A raster image only needs its absolute path — the frame loads it from
     // the raw route — so its bytes are never read as text. An HTML/SVG file is
     // text and is read for Copy content, up to a size cap. Cross-root, where it
     // is shown as source text, the same cap applies: above it the server
     // answers `tooLarge` and the pane says so instead of reading the file.
-    const res = await fetch(viewerReadUrl(path, buildReadUrl(path)));
+    let data: { content: string; tooLarge?: boolean; absolutePath: string } | null = null;
+    try {
+      const res = await fetch(viewerReadUrl(path, buildReadUrl(path)));
+      if (res.ok) data = await res.json();
+    } catch {
+      // A rejected fetch or an unparsable body is a failed read like a non-ok one.
+    }
     if (currentPath.current !== path) return;
-    if (res.ok) {
-      const data = await res.json();
-      if (currentPath.current !== path) return;
+    if (!data && reload) return;
+    if (data) {
       setContent(data.content);
       setTooLarge(data.tooLarge === true);
       setAbsolutePath(data.absolutePath);
+    } else {
+      // A failed read still answers this path, with nothing: loading ends, and
+      // no path is left behind for speech or the toolbar to point at the
+      // previous file.
+      setContent("");
+      setTooLarge(false);
+      setAbsolutePath("");
     }
-    setLoading(false);
+    setLoadedPath(path);
   };
 
   useEffect(() => {
     // A switch drops the previous file's text first, so neither the mockup
     // frame's Copy content nor the breadcrumb toolbar can copy it meanwhile.
-    setLoading(true);
     setContent("");
     setTooLarge(false);
     fetchContent();
@@ -85,7 +104,7 @@ export default function MarkdownViewer() {
   useEffect(() => {
     if (lastMessage?.type === "file-change") {
       const changedPath = lastMessage.path as string;
-      if (changedPath?.includes(filePath)) fetchContent();
+      if (changedPath?.includes(filePath)) fetchContent(true);
     }
   }, [lastMessage]);
 
@@ -114,6 +133,17 @@ export default function MarkdownViewer() {
   // A mockup is the exception: `MockupFrame` brings its own toolbar above the
   // frame (the width picker belongs next to it), so the breadcrumb slot stays
   // empty rather than mounting a second copy of the same buttons.
+  // The page's speech is withheld the same way, key and all: `absolutePath` is
+  // still the previous file's until the read resolves, and a key built from it
+  // would keep the old page's run going (and its bar open) while this one loads.
+  // `loading` is derived from the requested path, so this holds from the very
+  // first render after the switch.
+  // Without `speech` the toolbar drops its speaking half, which stops that run.
+  const speech = useDocSpeech(
+    loading ? null : absolutePath,
+    loading ? null : content,
+    isMarkdown,
+  );
   useBreadcrumbActions(
     absolutePath && !isMockup ? (
       <ViewerActions
@@ -123,9 +153,10 @@ export default function MarkdownViewer() {
         }
         content={loading ? null : content}
         testIdPrefix="markdown-viewer"
+        speech={speech}
       />
     ) : null,
-    [absolutePath, workspaceRoot, content, loading, isMockup],
+    [absolutePath, workspaceRoot, content, loading, isMockup, speech?.key, speech?.text],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [
@@ -170,7 +201,14 @@ export default function MarkdownViewer() {
               color: "var(--text-primary)",
             }}
           >
-            {JSON.stringify(JSON.parse(content), null, 2)}
+            {(() => {
+              // A failed read leaves "" behind, which is no JSON.
+              try {
+                return JSON.stringify(JSON.parse(content), null, 2);
+              } catch {
+                return content;
+              }
+            })()}
           </pre>
         ) : tooLarge ? (
           <p

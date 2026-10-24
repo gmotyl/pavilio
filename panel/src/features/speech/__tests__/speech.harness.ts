@@ -394,6 +394,8 @@ export function makeSpeech(overrides: Partial<SpeechHost> = {}): SpeechHost {
     lastSpokenSessionId: null,
     onSeekBackward: vi.fn(),
     preparingSessionIds: new Set<string>(),
+    speakDocument: vi.fn(),
+    stopDocument: vi.fn(),
   };
   return { ...host, ...overrides } satisfies GridSpeech;
 }

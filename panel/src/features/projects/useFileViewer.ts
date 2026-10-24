@@ -35,7 +35,12 @@ export function useFileViewer({ project, section }: Options) {
   const selectedFile = ownsFileParam ? searchParams.get("file") : null;
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
-  const [loading, setLoading] = useState(false);
+  // The selection the read in hand answered. Loading is derived from it during
+  // render, so the first render after a switch already knows `content` and
+  // `absolutePath` are the previous file's — an effect setting a flag would
+  // only catch up one render later.
+  const [loadedFile, setLoadedFile] = useState<string | null>(null);
+  const loading = !!selectedFile && loadedFile !== selectedFile;
 
   const setSelectedFile = useCallback(
     (path: string | null) => {
@@ -56,18 +61,37 @@ export function useFileViewer({ project, section }: Options) {
   // Load file when selection changes
   useEffect(() => {
     if (!selectedFile) return;
-    setLoading(true);
+    // A slower read of the previous selection must not land on this one.
+    let current = true;
+    // A failed read still answers this selection, with nothing: loading ends,
+    // and no path is left behind for speech or the toolbar to point at the
+    // previous file.
+    const fail = () => {
+      setContent("");
+      setAbsolutePath("");
+      setLoadedFile(selectedFile);
+    };
     fetch(readUrl(selectedFile))
       .then(async (res) => {
+        if (!current) return;
         if (res.ok) {
           const data = await res.json();
+          if (!current) return;
           setContent(data.content);
           setAbsolutePath(data.absolutePath || "");
+          setLoadedFile(selectedFile);
         } else {
+          fail();
           setSelectedFile(null);
         }
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // A rejected fetch or an unparsable body.
+        if (current) fail();
+      });
+    return () => {
+      current = false;
+    };
   }, [selectedFile, setSelectedFile]);
 
   // Persist last-open file per section so tab links can restore it
@@ -86,9 +110,12 @@ export function useFileViewer({ project, section }: Options) {
     if (!selectedFile || lastMessage?.type !== "file-change") return;
     const changedPath = lastMessage.path as string;
     if (changedPath?.includes(selectedFile)) {
-      fetch(readUrl(selectedFile)).then(async (res) => {
-        if (res.ok) setContent((await res.json()).content);
-      });
+      fetch(readUrl(selectedFile))
+        .then(async (res) => {
+          if (res.ok) setContent((await res.json()).content);
+        })
+        // A failed live reload keeps the page as it is.
+        .catch(() => {});
     }
   }, [lastMessage, selectedFile]);
 

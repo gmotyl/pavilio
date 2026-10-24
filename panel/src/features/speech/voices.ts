@@ -17,6 +17,7 @@ import { listVoices } from "anytts";
 // feature would be the direction that closes a cycle.
 import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
+import { projectOfDocKey } from "./docKey";
 import { speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
@@ -145,6 +146,16 @@ function defaultVoice(): string {
  */
 export function voiceForProject(project: string | undefined): string {
   return (project ? getProjectVoice(project) : null) ?? defaultVoice();
+}
+
+/**
+ * The voice a page speaks with: the voice of the project its `doc:` key's path
+ * lives in, else the default — a file outside projects has no project. The one
+ * rule both the host's `voiceFor` port and the document bar read, so the bar
+ * peeks the cache in the voice the host synthesized in.
+ */
+export function voiceForDocKey(key: string): string {
+  return voiceForProject(projectOfDocKey(key) ?? undefined);
 }
 
 /** One click on a cell's speech control: `off → armed → autoplay → off`. */

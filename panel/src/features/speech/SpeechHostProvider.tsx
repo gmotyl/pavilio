@@ -22,6 +22,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -33,13 +34,15 @@ import {
   isLookedAt,
   type AnswerAlertDeps,
 } from "./answerAlert";
+import { isDocSpeechKey } from "./docKey";
 import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessionTransport";
-import { useSpeechHost, type AnswerWaitingPort } from "./useSpeechHost";
+import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
+const PageSpeechContext = createContext<PageSpeech | null>(null);
 
 /**
  * Where the focused cell is read from. The provider combines it with the route
@@ -186,9 +189,21 @@ export function SpeechHostProvider({
     };
   }, [subscribeFocus, recheckSpeakingAlert]);
 
+  // The pages being spoken right now, by key. A page's key is open from its
+  // Play until its stop — which is what the idle transport asks, and the
+  // terminal's port, which knows only sessions, cannot answer for a page.
+  const openPagesRef = useRef<Set<string>>(new Set());
+  const isKeyOpen = useCallback(
+    (sessionId: string): boolean =>
+      isDocSpeechKey(sessionId)
+        ? openPagesRef.current.has(sessionId)
+        : isSessionOpen(sessionId),
+    [isSessionOpen],
+  );
+
   const speech = useSpeechHost({
     onAnswer,
-    isSessionOpen,
+    isSessionOpen: isKeyOpen,
     onRunChange: speakingAlert.onRunChange,
     voiceFor,
     answerWaiting,
@@ -215,10 +230,36 @@ export function SpeechHostProvider({
   // — pause, then resume — and read as a key that does nothing at all.
   useSpeechKeys(speech, onArrival);
 
+  // Page speech, with the open-page record kept beside it so the two cannot
+  // drift: every Play and stop a page makes goes through here. Stable for the
+  // provider's life — the host's own pair moves with every arrival, and a page
+  // that stops on cleanup must not read that as a reason to stop — so the
+  // host's pair is read through a mirror, like the ports above. Synced in a
+  // LAYOUT effect, not a passive one: a page calls these from its own effects,
+  // and a child's passive effect runs before its parent's, so a passive mirror
+  // would hand it the host of the render before.
+  const { speakDocument, stopDocument } = speech;
+  const pageHostRef = useRef({ speakDocument, stopDocument });
+  useLayoutEffect(() => {
+    pageHostRef.current = { speakDocument, stopDocument };
+  }, [speakDocument, stopDocument]);
+  const [pageSpeech] = useState<PageSpeech>(() => ({
+    speakDocument: (input) => {
+      openPagesRef.current.add(input.key);
+      pageHostRef.current.speakDocument(input);
+    },
+    stopDocument: (key) => {
+      pageHostRef.current.stopDocument(key);
+      openPagesRef.current.delete(key);
+    },
+  }));
+
   return (
     <SpeechHostContext.Provider value={speech}>
-      {inRouter && <RouterBridge view={routerView} onRouteChange={recheckSpeakingAlert} />}
-      {children}
+      <PageSpeechContext.Provider value={pageSpeech}>
+        {inRouter && <RouterBridge view={routerView} onRouteChange={recheckSpeakingAlert} />}
+        {children}
+      </PageSpeechContext.Provider>
     </SpeechHostContext.Provider>
   );
 }
@@ -240,6 +281,24 @@ export function usePanelSpeech(): GridSpeech {
   }
 
   return speech;
+}
+
+/**
+ * Page speech from the panel's one host. Throws without a provider, for the
+ * same reason {@link usePanelSpeech} does.
+ */
+export function usePageSpeech(): PageSpeech {
+  const pageSpeech = useContext(PageSpeechContext);
+
+  if (!pageSpeech) {
+    throw new Error(
+      "usePageSpeech: no <SpeechHostProvider> above this page. The panel has " +
+        "exactly one speech host; a page speaks through it rather than hosting " +
+        "a second one here.",
+    );
+  }
+
+  return pageSpeech;
 }
 
 export default SpeechHostProvider;
