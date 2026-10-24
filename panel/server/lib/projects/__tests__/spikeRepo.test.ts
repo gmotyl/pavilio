@@ -1,9 +1,11 @@
+import { execFileSync } from "child_process";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 import { readProject } from "../../discovery";
+import { gitEnv } from "../../wiki/clone-repo";
 import { ensureSpikeRepo } from "../spikeRepo";
 
 let tmp = "";
@@ -117,6 +119,49 @@ describe("ensureSpikeRepo", () => {
     const res2 = ensureSpikeRepo({ projectsDir, project: "lab2", spikesRoot: abs, home });
     expect(res2).toMatchObject({ ok: true, path: join(abs, "lab2"), repo: "created" });
     expect(reposJson("lab2")).toEqual([{ name: "lab2-spikes", path: `${abs}/lab2` }]);
+  });
+
+  it("git init ignores an exported GIT_DIR", () => {
+    makeProject("lab", "research");
+    const decoy = join(tmp, "decoy");
+    mkdirSync(decoy, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: decoy, env: gitEnv(), stdio: "pipe" });
+    const snapshot = (dir: string): string =>
+      readdirSync(dir, { recursive: true, encoding: "utf8" }).sort().join("\n");
+    const before = snapshot(decoy);
+
+    const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
+    process.env.GIT_DIR = join(decoy, ".git");
+    process.env.GIT_WORK_TREE = decoy;
+    try {
+      const res = ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "~/spikes", home });
+      expect(res).toMatchObject({ ok: true, repo: "created" });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(existsSync(join(home, "spikes/lab/.git"))).toBe(true);
+    expect(snapshot(decoy)).toBe(before);
+  });
+
+  it("an expanded path in repos.json counts as registered for a ~ root", () => {
+    makeProject("lab", "research");
+    const text = JSON.stringify([{ name: "lab-spikes", path: join(home, "spikes/lab") }]);
+    writeFileSync(join(projectsDir, "lab/repos.json"), text);
+    const res = ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "~/spikes", home });
+    expect(res).toMatchObject({ ok: true, registered: false });
+    expect(readFileSync(join(projectsDir, "lab/repos.json"), "utf8")).toBe(text);
+  });
+
+  it("a relative spikes root is refused", () => {
+    makeProject("lab", "research");
+    const before = readdirSync(tmp, { recursive: true, encoding: "utf8" }).sort();
+    const res = ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "spikes", home });
+    expect(res).toMatchObject({ ok: false, code: 1 });
+    expect(readdirSync(tmp, { recursive: true, encoding: "utf8" }).sort()).toEqual(before);
+    expect(existsSync(join(process.cwd(), "spikes/lab"))).toBe(false);
   });
 
   it("discovery lists the registered spikes repo", () => {
