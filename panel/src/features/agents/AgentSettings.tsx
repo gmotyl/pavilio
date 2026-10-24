@@ -124,6 +124,67 @@ function AlertsSettings() {
   );
 }
 
+/**
+ * The spikes root — where `scripts/project spike-repo` creates research projects'
+ * spikes repos. Edited as text and committed on blur, trimmed; a blank field
+ * stores the default, since a blank root names nothing. `~` is kept as typed.
+ */
+function ResearchSettings() {
+  const [root, setRoot] = usePreference(preferences.researchSpikesRoot);
+  const [draft, setDraft] = useState(root);
+  const [base, setBase] = useState(root);
+  const [focused, setFocused] = useState(false);
+
+  // Follow the stored value (another tab) unless the user is mid-edit.
+  if (root !== base && !focused) {
+    setBase(root);
+    setDraft(root);
+  }
+
+  const commit = () => {
+    const next = draft.trim() === "" ? preferences.researchSpikesRoot.default : draft.trim();
+    setRoot(next);
+    setBase(next);
+    setDraft(next);
+  };
+
+  return (
+    <div
+      className="rounded p-4"
+      style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", maxWidth: 640 }}
+    >
+      <div className="flex items-center gap-3 flex-wrap text-sm" style={{ color: "var(--text-primary)" }}>
+        <label htmlFor="research-spikes-root">Spikes root</label>
+        <input
+          id="research-spikes-root"
+          data-testid="research-spikes-root"
+          type="text"
+          spellCheck={false}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            // An untouched draft must not overwrite a value synced meanwhile.
+            if (draft !== base) commit();
+          }}
+          className="text-sm px-2 py-1 rounded font-mono flex-1"
+          style={{
+            minWidth: 200,
+            background: "var(--bg-base, var(--bg-surface))",
+            color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        />
+      </div>
+      <p data-testid="research-spikes-root-help" className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+        Each research project&apos;s spikes repo is created here as <code>&lt;root&gt;/&lt;project&gt;</code>. A blank
+        field restores the default.
+      </p>
+    </div>
+  );
+}
+
 /** The script the server will run, shown so the user sees it before saying yes. */
 function commandFor(action: WorkspaceAction): string {
   return `pm_in . ${action.script}`;
@@ -579,6 +640,12 @@ export default function AgentSettings() {
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Alerts</h2>
         <AlertsSettings />
+      </section>
+
+      {/* Research */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Research</h2>
+        <ResearchSettings />
       </section>
 
       {/* Workspace actions — whatever this workspace's package.json defines */}

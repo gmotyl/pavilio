@@ -27,6 +27,7 @@ const PORTABLE = [
   "projects.favorites",
   "repos.searchScope",
   "repos.tree.paneWidth",
+  "research.spikesRoot",
   "search.includeArchived",
   "shell.leftSidebar.expanded",
   "shell.leftSidebar.width",
@@ -157,6 +158,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   // The two fixed sidebar widths the stylesheet used to carry, as numbers.
   ["shell.leftSidebar.width", 240, "global"],
   ["shell.project.expanded", false, "project"],
+  ["research.spikesRoot", "~/git/prv/spikes", "global"],
   // Expanded until the Research header's chevron is pressed.
   ["shell.research.collapsed", false, "global"],
   ["shell.rightSidebar.expanded", true, "global"],
@@ -557,6 +559,17 @@ describe("the wiki's preferences", () => {
     expect(model.default).toBe("haiku");
     expect(preferences.wikiSessionStartIngest).toBe(ingest);
     expect(preferences.wikiWriterModel).toBe(model);
+  });
+});
+
+describe("the spikes root", () => {
+  it("research.spikesRoot is declared global and portable with its default", () => {
+    // `scripts/project spike-repo` reads it straight off `.pavilio/preferences.json`.
+    const root = keyOf("research.spikesRoot");
+    expect(root).toBe(preferences.researchSpikesRoot);
+    expect(root.scope).toBe("global");
+    expect(root.portable).toBe(true);
+    expect(root.default).toBe("~/git/prv/spikes");
   });
 });
 
