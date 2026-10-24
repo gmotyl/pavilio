@@ -1109,8 +1109,17 @@ export function useSpeechHost({
       // `utteranceFor` of this render has not seen the arrival yet.
       unlock();
       const { units } = preparedFor(utterance, languageOf(utterance));
-      // Nothing to say: the key stays `empty`, as the channel left it.
-      if (units.length === 0) return;
+      if (units.length === 0) {
+        // Nothing to say: the key stays `empty`, as the channel left it — and
+        // the page's previous text, if it is still playing, stops with it
+        // rather than speaking on under a key that no longer holds it.
+        const run = runRef.current;
+        if (run?.sessionId === key) {
+          run.outcome = "stopped";
+          stopPlayback();
+        }
+        return;
+      }
       // A local utterance is never warmed on arrival, so its unit 0 is warmed
       // here — the same warm the click then finds in flight, and the same red
       // until it lands.
@@ -1124,6 +1133,7 @@ export function useSpeechHost({
       languageOf,
       preparedFor,
       speakUtterance,
+      stopPlayback,
       unlock,
       warmFirstUnit,
     ],

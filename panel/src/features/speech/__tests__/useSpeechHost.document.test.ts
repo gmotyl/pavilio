@@ -156,6 +156,49 @@ describe("useSpeechHost — page speech", () => {
     expect(host().speakingSessionId).toBe("cell-a");
   });
 
+  it("speakDocument with new text while playing replaces the run", async () => {
+    const host = renderHost();
+    await settle(() => host().speakDocument({ key: PAGE, text: response(3, "Old") }));
+    expect(host().speakingSessionId).toBe(PAGE);
+
+    const text = response(2, "New");
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+
+    // The new text is the key's one utterance, under the cursor — not queued
+    // behind a run the drop already forgot.
+    const queue = host().queueFor(PAGE);
+    expect(queue.current?.text).toBe(text);
+    expect(queue.pending).toEqual([]);
+    expect(host().unitsFor(PAGE).map((unit) => unit.text)).toEqual(unitsOf(text));
+    expect(host().stateFor(PAGE)).toBe("speaking");
+    expect(host().speakingSessionId).toBe(PAGE);
+  });
+
+  it("speakDocument with nothing to say while playing stops the old run", async () => {
+    const host = renderHost();
+    await settle(() => host().speakDocument({ key: PAGE, text: response(3, "Old") }));
+    expect(host().speakingSessionId).toBe(PAGE);
+
+    await settle(() => host().speakDocument({ key: PAGE, text: "```\ncode only\n```" }));
+
+    expect(host().speakingSessionId).toBeNull();
+    expect(host().queueFor(PAGE).current).toBeNull();
+    expect(host().stateFor(PAGE)).toBe("empty");
+  });
+
+  it("stopDocument while unit 0 is warming clears preparing", async () => {
+    const text = response(2, "Page");
+    synth.hold(unitsOf(text)[0]);
+    const host = renderHost();
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    expect(host().preparingSessionIds.has(PAGE)).toBe(true);
+
+    await settle(() => host().stopDocument(PAGE));
+
+    expect(host().preparingSessionIds.has(PAGE)).toBe(false);
+    expect(host().stateFor(PAGE)).toBe("empty");
+  });
+
   it("a page utterance raises no answer alert", async () => {
     const onAnswer = vi.fn();
     const host = renderHost(onAnswer);

@@ -902,9 +902,11 @@ export function useUtteranceChannel({
         return next;
       }
 
-      const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
-      const speaking = live === utterance.sessionId && held !== utterance.sessionId;
-      const record = withArrival(existing, utterance, language, speaking);
+      // Never behind a run: the host speaks a local arrival the moment it lands,
+      // so it is the key's current utterance even while the player still
+      // reports the key's previous run — which a re-speak with new text has
+      // just dropped, in the same batch as this arrival.
+      const record = withArrival(existing, utterance, language, false);
       next.set(utterance.sessionId, { ...record, local: true });
       return next;
     });
