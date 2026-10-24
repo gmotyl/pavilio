@@ -89,6 +89,11 @@ interface SessionSpeech {
    * browser built itself, not an answer the server broadcast. A local record is
    * never warmed: it only exists once Play is pressed, and the host speaks it
    * straight away.
+   *
+   * Per record and sticky: a server arrival on a local key would keep the flag.
+   * That is safe only because the two key spaces never meet — local keys are
+   * pages' `doc:` keys (`docSpeechKey`, `isDocSpeechKey`) and no terminal
+   * session id starts with that prefix.
    */
   local: boolean;
 }

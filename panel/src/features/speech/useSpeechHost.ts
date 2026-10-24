@@ -59,7 +59,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { alerts } from "../alerts/store";
 import { createAutoplayQueue, type AutoplayQueue } from "./autoplayQueue";
+import { isDocSpeechKey } from "./docKey";
 import { speechFailureAlert } from "./failureAlert";
+import { voteLanguage } from "./language";
 import { prepare } from "./prepare";
 import { isSpeechSynthesized, synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
@@ -152,7 +154,24 @@ type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
  * no cell surface may act on another cell's run, and only the one document-wide
  * transport has any business asking which cell that is.
  */
-export interface SpeechHost extends GridSpeech, MediaSessionTransportTarget {
+/**
+ * Page speech: an open markdown page spoken through this host, keyed by its
+ * `doc:` key (`docKey.ts`). The page's utterance is built here, in the
+ * browser, and landed locally — no answer alert, no notification, nothing to
+ * the server — then spoken exactly as a click on a cell would speak it.
+ */
+export interface PageSpeech {
+  /**
+   * Lands the page's text as its key's one utterance (id = the text's hash)
+   * and starts it: unit 0 is asked for at once, the key is preparing until it
+   * is in hand, and whatever else was speaking is barged in on.
+   */
+  speakDocument(input: { key: string; text: string }): void;
+  /** Stops the page's run, if it holds the element, and forgets the page. */
+  stopDocument(key: string): void;
+}
+
+export interface SpeechHost extends GridSpeech, MediaSessionTransportTarget, PageSpeech {
   /**
    * Sessions whose current utterance's first unit is still being synthesized.
    * A cell in here is **preparing** — the red "blocked on synthesis" — and one
@@ -263,6 +282,20 @@ export type SpeechRunEvent =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "end" };
+
+/**
+ * A page utterance's id: the FNV-1a hash of its text, so pressing Play on an
+ * unchanged page lands the same utterance — and finds its preparation and its
+ * synthesis — while an edited page lands a new one.
+ */
+function pageUtteranceId(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `doc-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
 
 /** Every session counts as open when the panel says nothing about it. */
 const ALWAYS_OPEN = (): boolean => true;
@@ -539,9 +572,11 @@ export function useSpeechHost({
     onAnswer,
   });
   const {
+    arriveLocal,
     autoplaySessionIds,
     cycleSpeechMode: cycleChannelSpeechMode,
     dispatchQueue,
+    drop: dropKey,
     finishUtterance,
     heardFor,
     languageFor,
@@ -552,6 +587,24 @@ export function useSpeechHost({
     utteranceFor,
     warmableUtterances,
   } = channel;
+
+  /**
+   * The language an utterance is prepared in. A cell's comes from its
+   * session's running tally — language is a property of the session. A page is
+   * not a session: it is one text, read once, so its own vote decides, and the
+   * tally (which needs two Polish votes to switch) would read every Polish page
+   * as English. Asked once per utterance in effect: `preparedFor` keeps what it
+   * prepared by id.
+   */
+  const languageOf = useCallback(
+    (utterance: Utterance): "pl" | "en" =>
+      isDocSpeechKey(utterance.sessionId)
+        ? voteLanguage(utterance.text)
+        : languageFor(utterance.sessionId),
+    [languageFor],
+  );
+  /** Each spoken page's key → the id of the utterance it landed. */
+  const pageUtterancesRef = useRef<Map<string, string>>(new Map());
 
   /**
    * What a preload asks before it is requested — is the cell still armed, is the
@@ -831,7 +884,7 @@ export function useSpeechHost({
     // failure no longer leaves an armed cell cold until its mode is cycled.
     preloadFailedRef.current.clear();
     for (const { utterance, mode } of warmableUtterances) {
-      const { units } = preparedFor(utterance, languageFor(utterance.sessionId));
+      const { units } = preparedFor(utterance, languageOf(utterance));
       warmFirstUnit(utterance, units);
       if (mode !== "off") preloadRemainder(utterance, units);
     }
@@ -840,7 +893,7 @@ export function useSpeechHost({
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-  }, [languageFor, preparedFor, preloadRemainder, warmFirstUnit, warmableUtterances]);
+  }, [languageOf, preparedFor, preloadRemainder, warmFirstUnit, warmableUtterances]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,
@@ -927,7 +980,7 @@ export function useSpeechHost({
    */
   const speakUtterance = useCallback(
     (sessionId: string, utterance: Utterance, fromUnit = 0): void => {
-      const prepared = preparedFor(utterance, languageFor(sessionId));
+      const prepared = preparedFor(utterance, languageOf(utterance));
       if (prepared.units.length === 0) {
         // Defence in depth. `useUtteranceChannel` never announces a response
         // that prepares to nothing, so nothing speakable-looking should reach
@@ -994,7 +1047,7 @@ export function useSpeechHost({
         .then(() => finish(run))
         .catch(() => finish(run));
     },
-    [finishUtterance, languageFor, markHeard, playUnits, preparedFor],
+    [finishUtterance, languageOf, markHeard, playUnits, preparedFor],
   );
 
   const speak = useCallback(
@@ -1032,6 +1085,72 @@ export function useSpeechHost({
       stopPlayback();
     },
     [stopPlayback],
+  );
+
+  const speakDocument = useCallback(
+    ({ key, text }: { key: string; text: string }): void => {
+      const utterance: Utterance = {
+        id: pageUtteranceId(text),
+        sessionId: key,
+        text,
+        at: Date.now(),
+      };
+      // A page holds one utterance: an edited page's new text replaces the
+      // old one rather than queueing behind it.
+      const previousId = pageUtterancesRef.current.get(key);
+      if (previousId !== undefined && previousId !== utterance.id) {
+        abortUtterance(previousId);
+        dropKey(key);
+      }
+      pageUtterancesRef.current.set(key, utterance.id);
+      arriveLocal(utterance);
+
+      // What `onSpeak` does, on the utterance named here: the channel's
+      // `utteranceFor` of this render has not seen the arrival yet.
+      unlock();
+      const { units } = preparedFor(utterance, languageOf(utterance));
+      // Nothing to say: the key stays `empty`, as the channel left it.
+      if (units.length === 0) return;
+      // A local utterance is never warmed on arrival, so its unit 0 is warmed
+      // here — the same warm the click then finds in flight, and the same red
+      // until it lands.
+      warmFirstUnit(utterance, units);
+      speakUtterance(key, utterance);
+    },
+    [
+      abortUtterance,
+      arriveLocal,
+      dropKey,
+      languageOf,
+      preparedFor,
+      speakUtterance,
+      unlock,
+      warmFirstUnit,
+    ],
+  );
+
+  const stopDocument = useCallback(
+    (key: string): void => {
+      // Stopped, as the cell's stop is — but only the page's own run: a page
+      // left behind by a cell that barged in must not silence that cell.
+      const run = runRef.current;
+      if (run?.sessionId === key) {
+        run.outcome = "stopped";
+        stopPlayback();
+      }
+      const id = pageUtterancesRef.current.get(key);
+      pageUtterancesRef.current.delete(key);
+      if (id !== undefined) {
+        abortUtterance(id);
+        // Forgotten, so the next Play warms (and shows red) afresh rather than
+        // trusting a warm this stop called off.
+        warmedRef.current.delete(id);
+      }
+      warmingRef.current.delete(key);
+      setPreparing(key, false);
+      dropKey(key);
+    },
+    [abortUtterance, dropKey, setPreparing, stopPlayback],
   );
 
   const onPause = useCallback(
@@ -1290,9 +1409,9 @@ export function useSpeechHost({
     (sessionId: string): readonly SpeechUnit[] => {
       const utterance = utteranceUnderCursor(queueFor(sessionId));
       if (!utterance) return NO_UNITS;
-      return preparedFor(utterance, languageFor(sessionId)).units;
+      return preparedFor(utterance, languageOf(utterance)).units;
     },
-    [languageFor, preparedFor, queueFor],
+    [languageOf, preparedFor, queueFor],
   );
 
   /**
@@ -1663,6 +1782,8 @@ export function useSpeechHost({
       lastSpokenSessionId,
       steppedSessionId,
       isSessionOpen,
+      speakDocument,
+      stopDocument,
     }),
     [
       autoplaySessionIds,
@@ -1685,10 +1806,12 @@ export function useSpeechHost({
       preparingSessionIds,
       progressFor,
       queueFor,
+      speakDocument,
       speakingSessionId,
       speechModeOf,
       stateFor,
       steppedSessionId,
+      stopDocument,
       subscribeProgress,
       unitDurationsFor,
       unitsFor,

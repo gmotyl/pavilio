@@ -65,6 +65,14 @@ describe("session voice", () => {
     expect(voiceForSession("doc:AGENTS.md")).toBe(VIVIENNE);
   });
 
+  it("a doc key outside projects falls back to the default", () => {
+    // `..` is a path step, not a project: an override filed under it must not
+    // reach a file that lives beside the projects directory.
+    setProjectVoice("..", EMMA);
+
+    expect(voiceForSession("doc:../repo/x.md")).toBe(VIVIENNE);
+  });
+
   it("terminal session voice is unchanged", async () => {
     setProjectVoice("t", EMMA);
     await seedSessions([session("sess-t", "t")]);

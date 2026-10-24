@@ -66,4 +66,6 @@ export const INERT_SPEECH_HOST: SpeechHost = {
   lastSpokenSessionId: null,
   onSeekBackward: () => {},
   preparingSessionIds: new Set<string>(),
+  speakDocument: () => {},
+  stopDocument: () => {},
 };
