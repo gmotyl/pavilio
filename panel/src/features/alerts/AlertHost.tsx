@@ -297,7 +297,11 @@ function AlertCard({ entry, paused, onPausedChange, clockOf }: AlertCardProps) {
         )}
       </span>
       {entry.detail && (
-        <span className="mt-0.5 block break-words text-xs" style={{ color: "var(--text-muted)" }}>
+        <span
+          data-testid="alert-detail"
+          className="mt-0.5 block break-words"
+          style={{ color: "var(--text-secondary)", fontSize: 13 }}
+        >
           {entry.detail}
         </span>
       )}
@@ -357,7 +361,7 @@ function AlertCard({ entry, paused, onPausedChange, clockOf }: AlertCardProps) {
         onClick={() => userDismissAlert(entry.id)}
         aria-label="Dismiss"
         className="ml-2 rounded p-1 transition-colors"
-        style={{ color: "var(--text-muted)" }}
+        style={{ color: "var(--text-tertiary)" }}
         onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
