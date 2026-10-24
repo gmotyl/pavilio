@@ -63,18 +63,32 @@ export function useFileViewer({ project, section }: Options) {
     if (!selectedFile) return;
     // A slower read of the previous selection must not land on this one.
     let current = true;
-    fetch(readUrl(selectedFile)).then(async (res) => {
-      if (!current) return;
-      if (res.ok) {
-        const data = await res.json();
+    // A failed read still answers this selection, with nothing: loading ends,
+    // and no path is left behind for speech or the toolbar to point at the
+    // previous file.
+    const fail = () => {
+      setContent("");
+      setAbsolutePath("");
+      setLoadedFile(selectedFile);
+    };
+    fetch(readUrl(selectedFile))
+      .then(async (res) => {
         if (!current) return;
-        setContent(data.content);
-        setAbsolutePath(data.absolutePath || "");
-        setLoadedFile(selectedFile);
-      } else {
-        setSelectedFile(null);
-      }
-    });
+        if (res.ok) {
+          const data = await res.json();
+          if (!current) return;
+          setContent(data.content);
+          setAbsolutePath(data.absolutePath || "");
+          setLoadedFile(selectedFile);
+        } else {
+          fail();
+          setSelectedFile(null);
+        }
+      })
+      .catch(() => {
+        // A rejected fetch or an unparsable body.
+        if (current) fail();
+      });
     return () => {
       current = false;
     };
@@ -96,9 +110,12 @@ export function useFileViewer({ project, section }: Options) {
     if (!selectedFile || lastMessage?.type !== "file-change") return;
     const changedPath = lastMessage.path as string;
     if (changedPath?.includes(selectedFile)) {
-      fetch(readUrl(selectedFile)).then(async (res) => {
-        if (res.ok) setContent((await res.json()).content);
-      });
+      fetch(readUrl(selectedFile))
+        .then(async (res) => {
+          if (res.ok) setContent((await res.json()).content);
+        })
+        // A failed live reload keeps the page as it is.
+        .catch(() => {});
     }
   }, [lastMessage, selectedFile]);
 

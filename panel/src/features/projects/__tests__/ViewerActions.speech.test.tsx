@@ -517,4 +517,92 @@ describe("markdown surfaces", () => {
     await act(async () => release());
     await waitFor(() => expect(spoken.paths.at(-1)).toBe(OTHER));
   });
+
+  // A read that fails must still end the switch: the viewer leaves Loading...
+  // and offers no speech at all — least of all the previous page's.
+  const failures: Array<[string, () => Promise<Response>]> = [
+    ["the fetch rejects", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["the body is no JSON", async () => new Response("<html>", { status: 200 })],
+    ["the read answers non-ok", async () => new Response("nope", { status: 500 })],
+  ];
+  const failY = (fail: () => Promise<Response>) => {
+    const served = vi.mocked(fetch);
+    const serve = served.getMockImplementation()!;
+    served.mockImplementation(async (input) =>
+      String(input).startsWith("/api/files/read/pavilio/wiki/y.md") ? fail() : serve(input),
+    );
+  };
+
+  it.each(failures)("a failed read ends the /view/* viewer's loading when %s", async (_, fail) => {
+    failY(fail);
+    let navigate: NavigateFunction = () => {};
+    function Navigator() {
+      navigate = useNavigate();
+      return null;
+    }
+    render(
+      <Host>
+        <BreadcrumbActionsProvider>
+          <MemoryRouter initialEntries={["/view/pavilio/wiki/x.md"]}>
+            <Navigator />
+            <BreadcrumbSlot />
+            <Routes>
+              <Route path="/view/*" element={<MarkdownViewer />} />
+            </Routes>
+          </MemoryRouter>
+        </BreadcrumbActionsProvider>
+      </Host>,
+    );
+    const button = await screen.findByTestId("markdown-viewer-play");
+    await waitFor(() => expect(button).not.toBeDisabled());
+    fireEvent.click(button);
+
+    const mark = spoken.paths.length;
+    act(() => navigate("/view/pavilio/wiki/y.md"));
+
+    await waitFor(() => expect(screen.queryByText("Loading...")).toBeNull());
+    expect(screen.queryByTestId("markdown-viewer-play")).toBeNull();
+    expect(spoken.paths.slice(mark)).not.toContain(NOTE);
+    expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md");
+    expect(bar("doc:pavilio/wiki/x.md")).toBeNull();
+  });
+
+  it.each(failures)("a failed read ends the section file viewer's loading when %s", async (_, fail) => {
+    failY(fail);
+    let select: (path: string | null) => void = () => {};
+    let state = { loading: true, selectedFile: null as string | null };
+    function Section() {
+      const fv = useFileViewer({ project: "pavilio", section: "notes" });
+      select = fv.setSelectedFile;
+      state = { loading: fv.loading, selectedFile: fv.selectedFile };
+      return fv.selectedFile ? (
+        <FileViewer
+          filePath={fv.selectedFile}
+          content={fv.content}
+          absolutePath={fv.absolutePath}
+          loading={fv.loading}
+        />
+      ) : null;
+    }
+    render(
+      <Host>
+        <MemoryRouter initialEntries={[`/?file=${encodeURIComponent("pavilio/wiki/x.md")}`]}>
+          <Section />
+        </MemoryRouter>
+      </Host>,
+    );
+    const button = await screen.findByTestId("file-viewer-play");
+    await waitFor(() => expect(button).not.toBeDisabled());
+    fireEvent.click(button);
+
+    const mark = spoken.paths.length;
+    act(() => select("pavilio/wiki/y.md"));
+
+    await waitFor(() => expect(state.loading).toBe(false));
+    expect(screen.queryByText("Loading...")).toBeNull();
+    expect(screen.queryByTestId("file-viewer-play")).toBeNull();
+    expect(spoken.paths.slice(mark)).not.toContain(NOTE);
+    expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md");
+    expect(bar("doc:pavilio/wiki/x.md")).toBeNull();
+  });
 });

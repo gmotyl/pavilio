@@ -60,21 +60,35 @@ export default function MarkdownViewer() {
   const currentPath = useRef(filePath);
   currentPath.current = filePath;
 
-  const fetchContent = async () => {
+  // `reload`: a live reload of the file already shown — a failed one keeps the
+  // page as it is rather than blanking it.
+  const fetchContent = async (reload = false) => {
     const path = filePath;
     // A raster image only needs its absolute path — the frame loads it from
     // the raw route — so its bytes are never read as text. An HTML/SVG file is
     // text and is read for Copy content, up to a size cap. Cross-root, where it
     // is shown as source text, the same cap applies: above it the server
     // answers `tooLarge` and the pane says so instead of reading the file.
-    const res = await fetch(viewerReadUrl(path, buildReadUrl(path)));
+    let data: { content: string; tooLarge?: boolean; absolutePath: string } | null = null;
+    try {
+      const res = await fetch(viewerReadUrl(path, buildReadUrl(path)));
+      if (res.ok) data = await res.json();
+    } catch {
+      // A rejected fetch or an unparsable body is a failed read like a non-ok one.
+    }
     if (currentPath.current !== path) return;
-    if (res.ok) {
-      const data = await res.json();
-      if (currentPath.current !== path) return;
+    if (!data && reload) return;
+    if (data) {
       setContent(data.content);
       setTooLarge(data.tooLarge === true);
       setAbsolutePath(data.absolutePath);
+    } else {
+      // A failed read still answers this path, with nothing: loading ends, and
+      // no path is left behind for speech or the toolbar to point at the
+      // previous file.
+      setContent("");
+      setTooLarge(false);
+      setAbsolutePath("");
     }
     setLoadedPath(path);
   };
@@ -90,7 +104,7 @@ export default function MarkdownViewer() {
   useEffect(() => {
     if (lastMessage?.type === "file-change") {
       const changedPath = lastMessage.path as string;
-      if (changedPath?.includes(filePath)) fetchContent();
+      if (changedPath?.includes(filePath)) fetchContent(true);
     }
   }, [lastMessage]);
 
@@ -187,7 +201,14 @@ export default function MarkdownViewer() {
               color: "var(--text-primary)",
             }}
           >
-            {JSON.stringify(JSON.parse(content), null, 2)}
+            {(() => {
+              // A failed read leaves "" behind, which is no JSON.
+              try {
+                return JSON.stringify(JSON.parse(content), null, 2);
+              } catch {
+                return content;
+              }
+            })()}
           </pre>
         ) : tooLarge ? (
           <p
