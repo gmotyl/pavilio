@@ -27,6 +27,8 @@ export function FileViewer({
   // Withheld while loading for the same reason `content` is below — the key
   // too: `absolutePath` is still the previous file's until the read resolves,
   // and keeping its key would leave the old page speaking while this one loads.
+  // `useFileViewer` derives `loading` from the selection during render, so it
+  // is already true on the first render after a switch.
   const speech = useDocSpeech(
     loading ? null : absolutePath,
     loading ? null : content,

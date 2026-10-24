@@ -46,7 +46,12 @@ export default function MarkdownViewer() {
   const [absolutePath, setAbsolutePath] = useState("");
   const [tooLarge, setTooLarge] = useState(false);
   const workspaceRoot = useWorkspaceRoot();
-  const [loading, setLoading] = useState(true);
+  // The requested path the read in hand answered. Loading is derived from it
+  // during render, so the first render after a switch already knows that
+  // `content` and `absolutePath` are the previous file's — an effect setting a
+  // flag would only catch up one render later.
+  const [loadedPath, setLoadedPath] = useState<string | null>(null);
+  const loading = loadedPath !== filePath;
   const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
 
@@ -71,13 +76,12 @@ export default function MarkdownViewer() {
       setTooLarge(data.tooLarge === true);
       setAbsolutePath(data.absolutePath);
     }
-    setLoading(false);
+    setLoadedPath(path);
   };
 
   useEffect(() => {
     // A switch drops the previous file's text first, so neither the mockup
     // frame's Copy content nor the breadcrumb toolbar can copy it meanwhile.
-    setLoading(true);
     setContent("");
     setTooLarge(false);
     fetchContent();
@@ -118,6 +122,8 @@ export default function MarkdownViewer() {
   // The page's speech is withheld the same way, key and all: `absolutePath` is
   // still the previous file's until the read resolves, and a key built from it
   // would keep the old page's run going (and its bar open) while this one loads.
+  // `loading` is derived from the requested path, so this holds from the very
+  // first render after the switch.
   // Without `speech` the toolbar drops its speaking half, which stops that run.
   const speech = useDocSpeech(
     loading ? null : absolutePath,

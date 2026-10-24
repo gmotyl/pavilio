@@ -35,7 +35,12 @@ export function useFileViewer({ project, section }: Options) {
   const selectedFile = ownsFileParam ? searchParams.get("file") : null;
   const [content, setContent] = useState("");
   const [absolutePath, setAbsolutePath] = useState("");
-  const [loading, setLoading] = useState(false);
+  // The selection the read in hand answered. Loading is derived from it during
+  // render, so the first render after a switch already knows `content` and
+  // `absolutePath` are the previous file's — an effect setting a flag would
+  // only catch up one render later.
+  const [loadedFile, setLoadedFile] = useState<string | null>(null);
+  const loading = !!selectedFile && loadedFile !== selectedFile;
 
   const setSelectedFile = useCallback(
     (path: string | null) => {
@@ -56,18 +61,23 @@ export function useFileViewer({ project, section }: Options) {
   // Load file when selection changes
   useEffect(() => {
     if (!selectedFile) return;
-    setLoading(true);
-    fetch(readUrl(selectedFile))
-      .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          setContent(data.content);
-          setAbsolutePath(data.absolutePath || "");
-        } else {
-          setSelectedFile(null);
-        }
-      })
-      .finally(() => setLoading(false));
+    // A slower read of the previous selection must not land on this one.
+    let current = true;
+    fetch(readUrl(selectedFile)).then(async (res) => {
+      if (!current) return;
+      if (res.ok) {
+        const data = await res.json();
+        if (!current) return;
+        setContent(data.content);
+        setAbsolutePath(data.absolutePath || "");
+        setLoadedFile(selectedFile);
+      } else {
+        setSelectedFile(null);
+      }
+    });
+    return () => {
+      current = false;
+    };
   }, [selectedFile, setSelectedFile]);
 
   // Persist last-open file per section so tab links can restore it

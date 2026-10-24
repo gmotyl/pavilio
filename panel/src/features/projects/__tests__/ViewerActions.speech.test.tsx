@@ -26,6 +26,20 @@ vi.mock("../../shell/vscode", () => ({ openInVSCode: vi.fn() }));
 vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
 }));
+// Passthrough spy: records the path each render asks speech for, so a test can
+// see what the very first render after a switch offered — before any
+// effect-driven re-render could repair it.
+const spoken = vi.hoisted(() => ({ paths: [] as Array<string | null | undefined> }));
+vi.mock("../docSpeech", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../docSpeech")>();
+  return {
+    ...real,
+    useDocSpeech: (...args: Parameters<typeof real.useDocSpeech>) => {
+      spoken.paths.push(args[0]);
+      return real.useDocSpeech(...args);
+    },
+  };
+});
 vi.mock("../../markdown/MarkdownRenderer", () => ({
   default: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
 }));
@@ -43,6 +57,7 @@ import {
 } from "../../shell/Breadcrumbs/BreadcrumbActionsProvider";
 import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
 import { docSpeechKeyFor } from "../docSpeech";
+import { useFileViewer } from "../useFileViewer";
 
 const KEY = "doc:pavilio/wiki/page.md";
 const OTHER_KEY = "doc:pavilio/wiki/other.md";
@@ -439,31 +454,67 @@ describe("markdown surfaces", () => {
     fireEvent.click(button);
     expect(stop()).not.toHaveBeenCalled();
 
+    const mark = spoken.paths.length;
     act(() => navigate("/view/pavilio/wiki/y.md"));
 
-    await waitFor(() => expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md"));
+    // Not one render for y.md offered x.md's speech — not even the first one,
+    // before the switch effect had run — and x.md's run is already stopped.
+    expect(spoken.paths.length).toBeGreaterThan(mark);
+    expect(spoken.paths.slice(mark)).not.toContain(NOTE);
+    expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md");
     expect(bar("doc:pavilio/wiki/x.md")).toBeNull();
     // ...all while the next file's read is still pending; let it land now.
     await act(async () => release());
   });
 
   it("switching the section file viewer stops the old page before the next one loads", async () => {
-    const viewer = (filePath: string, absolutePath: string, loading: boolean) => (
+    const OTHER = `${PROJECTS}/pavilio/wiki/y.md`;
+    const served = vi.mocked(fetch);
+    const serve = served.getMockImplementation()!;
+    let release: () => void = () => {};
+    served.mockImplementation(async (input) => {
+      if (!String(input).startsWith("/api/files/read/pavilio/wiki/y.md")) return serve(input);
+      await new Promise<void>((r) => (release = r));
+      return json({ content: "# Other", absolutePath: OTHER });
+    });
+
+    // The section viewer as `ProjectView` wires it: the real `useFileViewer`
+    // driving `FileViewer` from the `?file=` param.
+    let select: (path: string | null) => void = () => {};
+    function Section() {
+      const fv = useFileViewer({ project: "pavilio", section: "notes" });
+      select = fv.setSelectedFile;
+      return fv.selectedFile ? (
+        <FileViewer
+          filePath={fv.selectedFile}
+          content={fv.content}
+          absolutePath={fv.absolutePath}
+          loading={fv.loading}
+        />
+      ) : null;
+    }
+    render(
       <Host>
-        <FileViewer filePath={filePath} content="# Note" absolutePath={absolutePath} loading={loading} />
-      </Host>
+        <MemoryRouter initialEntries={[`/?file=${encodeURIComponent("pavilio/wiki/x.md")}`]}>
+          <Section />
+        </MemoryRouter>
+      </Host>,
     );
-    const view = render(viewer("pavilio/wiki/x.md", NOTE, false));
     const button = await screen.findByTestId("file-viewer-play");
     await waitFor(() => expect(button).not.toBeDisabled());
     fireEvent.click(button);
     expect(stop()).not.toHaveBeenCalled();
 
-    // `useFileViewer` keeps the previous file's absolute path until the read
-    // resolves; only `filePath` and `loading` move on the switch.
-    view.rerender(viewer("pavilio/wiki/y.md", NOTE, true));
+    const mark = spoken.paths.length;
+    act(() => select("pavilio/wiki/y.md"));
 
+    expect(spoken.paths.length).toBeGreaterThan(mark);
+    expect(spoken.paths.slice(mark)).not.toContain(NOTE);
     expect(stop()).toHaveBeenCalledWith("doc:pavilio/wiki/x.md");
     expect(bar("doc:pavilio/wiki/x.md")).toBeNull();
+
+    // The next file's speech arrives with its content.
+    await act(async () => release());
+    await waitFor(() => expect(spoken.paths.at(-1)).toBe(OTHER));
   });
 });
