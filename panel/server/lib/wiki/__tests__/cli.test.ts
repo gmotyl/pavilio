@@ -182,6 +182,13 @@ describe("wiki cli", () => {
     });
   });
 
+  it("panel-link leaves projects/ mid-path untouched", async () => {
+    expect(await cli(["panel-link", "pavilio/notes/projects/x.md"])).toMatchObject({
+      code: 0,
+      json: { link: "/view/pavilio/notes/projects/x.md" },
+    });
+  });
+
   it("panel-link keeps a projectsDir-relative path as is", async () => {
     expect(await cli(["panel-link", "knowledge/wiki/entities/android.md"])).toMatchObject({
       code: 0,
