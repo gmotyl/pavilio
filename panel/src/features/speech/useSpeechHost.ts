@@ -63,6 +63,7 @@ import { isDocSpeechKey } from "./docKey";
 import { speechFailureAlert } from "./failureAlert";
 import { voteLanguage } from "./language";
 import { prepare } from "./prepare";
+import { pageSpeechText } from "./pageText";
 import { isSpeechSynthesized, synthesizeSpeech } from "./synth";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
@@ -162,7 +163,8 @@ type RunOutcome = "pending" | "superseded" | "stopped" | "refused" | "failed";
  */
 export interface PageSpeech {
   /**
-   * Lands the page's text as its key's one utterance (id = the text's hash)
+   * Lands the page's text — its markdown source minus any leading frontmatter
+   * (`pageSpeechText`) — as its key's one utterance (id = that text's hash)
    * and starts it: unit 0 is asked for at once, the key is preparing until it
    * is in hand, and whatever else was speaking is barged in on.
    */
@@ -1101,7 +1103,10 @@ export function useSpeechHost({
   );
 
   const speakDocument = useCallback(
-    ({ key, text }: { key: string; text: string }): void => {
+    ({ key, text: source }: { key: string; text: string }): void => {
+      // The page's source as its surface loaded it; what is spoken — and
+      // hashed into the id — is that source without its frontmatter.
+      const text = pageSpeechText(source);
       const utterance: Utterance = {
         id: pageUtteranceId(key, text),
         sessionId: key,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ExternalLink,
   Copy,
@@ -12,6 +12,7 @@ import {
 import { copyToClipboard } from "../../lib/clipboard";
 import { DocumentSpeechBar } from "../speech/DocumentSpeechBar";
 import { usePageSpeech } from "../speech/SpeechHostProvider";
+import { pageHasSpeech } from "../speech/pageText";
 import { openInVSCode } from "../shell/vscode";
 import type { DocSpeech } from "./docSpeech";
 
@@ -20,6 +21,9 @@ const BUTTON_CLASS =
 
 /** Which button, if any, is currently showing its "Copied" confirmation. */
 type Feedback = "path" | "link" | "absolute" | "content" | null;
+
+/** Play's label on a page with nothing to say — the cell button's words. */
+const NOTHING_TO_SPEAK = "Nothing to speak yet";
 
 /** Viewer toolbar actions: the buttons above an open file that operate on it. */
 export function ViewerActions({
@@ -252,7 +256,12 @@ function SpeakingToolbar({
     pageSpeech.speakDocument({ key: speech.key, text: speech.text });
   };
 
-  const disabled = !open && speech.text === "";
+  // A page that prepares to nothing — still loading, code blocks only,
+  // frontmatter only — offers no Play. Prepared once per text, not per render.
+  // An unfolded bar keeps its Stop whatever the text became: folding is how
+  // the run ends.
+  const speakable = useMemo(() => pageHasSpeech(speech.text), [speech.text]);
+  const disabled = !open && !speakable;
 
   const play = (
     <button
@@ -260,7 +269,8 @@ function SpeakingToolbar({
       onClick={toggle}
       disabled={disabled}
       aria-pressed={open}
-      title={open ? "Stop reading this page" : "Read this page aloud"}
+      aria-label={disabled ? NOTHING_TO_SPEAK : undefined}
+      title={open ? "Stop reading this page" : disabled ? NOTHING_TO_SPEAK : "Read this page aloud"}
       className={BUTTON_CLASS}
       style={{
         color: open ? "var(--green)" : "var(--text-secondary)",

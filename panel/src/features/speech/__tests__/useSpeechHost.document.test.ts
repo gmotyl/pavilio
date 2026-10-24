@@ -132,6 +132,37 @@ describe("useSpeechHost — page speech", () => {
     expect(votes()).toBe(landed);
   });
 
+  it("a page's frontmatter is not spoken", async () => {
+    const body = response(2, "Hello");
+    const host = renderHost();
+
+    await settle(() =>
+      host().speakDocument({ key: PAGE, text: `---\ntitle: X\ntags: [a]\n---\n${body}` }),
+    );
+
+    // Spoken exactly as the body alone would be, and landed as the body: an
+    // edit to the frontmatter alone is not a new utterance.
+    expect(host().unitsFor(PAGE).map((unit) => unit.text)).toEqual(unitsOf(body));
+    expect(requestedTexts()[0]).toBe(unitsOf(body)[0]);
+    const landed = utteranceUnderCursor(host().queueFor(PAGE));
+    expect(landed?.text).toBe(body);
+
+    await settle(() => host().stopDocument(PAGE));
+    await settle(() =>
+      host().speakDocument({ key: PAGE, text: `---\ntitle: Y\n...\n${body}` }),
+    );
+    expect(utteranceUnderCursor(host().queueFor(PAGE))?.id).toBe(landed?.id);
+  });
+
+  it("a page that is only frontmatter has nothing to say", async () => {
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text: "---\ntitle: X\n---\n" }));
+
+    expect(host().stateFor(PAGE)).toBe("empty");
+    expect(requestedTexts()).toEqual([]);
+  });
+
   it("two pages with the same text land distinct utterances", async () => {
     const text = response(2, "Same");
     const other = docSpeechKey("q/wiki/page.md");

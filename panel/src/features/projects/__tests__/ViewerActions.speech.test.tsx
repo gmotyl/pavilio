@@ -182,6 +182,38 @@ describe("ViewerActions Play", () => {
     expect(speak()).toHaveBeenCalledTimes(2);
     expect(speak()).toHaveBeenLastCalledWith({ key: KEY, text: "# New" });
   });
+
+  it("a page with nothing to speak disables Play", () => {
+    const view = render(toolbar({ key: KEY, text: "```ts\nconst x = 1;\n```" }));
+    expect(play()).toBeDisabled();
+    expect(play()).toHaveAttribute("title", "Nothing to speak yet");
+    expect(play()).toHaveAttribute("aria-label", "Nothing to speak yet");
+    fireEvent.click(play());
+    expect(speak()).not.toHaveBeenCalled();
+
+    // Frontmatter alone is nothing to speak either.
+    view.rerender(toolbar({ key: KEY, text: "---\ntitle: X\n---\n" }));
+    expect(play()).toBeDisabled();
+
+    // A page with words is playable again.
+    view.rerender(toolbar({ key: KEY, text: "# Hello" }));
+    expect(play()).not.toBeDisabled();
+    expect(play()).toHaveAttribute("title", "Read this page aloud");
+  });
+
+  it("an unfolded bar can still be folded when the page empties", () => {
+    const view = render(toolbar({ key: KEY, text: "# Hello" }));
+    fireEvent.click(play());
+    expect(bar()).not.toBeNull();
+
+    view.rerender(toolbar({ key: KEY, text: "```\ncode only\n```" }));
+
+    expect(play()).not.toBeDisabled();
+    expect(play()).toHaveAttribute("title", "Stop reading this page");
+    fireEvent.click(play());
+    expect(bar()).toBeNull();
+    expect(stop()).toHaveBeenCalledWith(KEY);
+  });
 });
 
 const ROOT = "/h/git/prv/projects";
@@ -195,7 +227,7 @@ const json = (body: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 
-function stubServer() {
+function stubServer(note = "# Note") {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string) => {
@@ -238,7 +270,7 @@ function stubServer() {
         });
       }
       if (url.startsWith("/api/files/exists")) return json({ exists: {} });
-      if (url.startsWith("/api/files/read/")) return json({ content: "# Note", absolutePath: NOTE });
+      if (url.startsWith("/api/files/read/")) return json({ content: note, absolutePath: NOTE });
       return new Response("not found", { status: 404 });
     }),
   );
@@ -336,7 +368,10 @@ describe("markdown surfaces", () => {
     );
     plans.unmount();
 
-    // Wiki tab: the page source as loaded.
+    // Wiki tab: the page source as loaded, frontmatter and all — the host's
+    // `speakDocument` is what leaves the frontmatter unspoken.
+    const wikiPage = "---\ntitle: X\ntags: [a]\n---\n# Note";
+    stubServer(wikiPage);
     const wiki = render(
       <Host>
         <MemoryRouter
@@ -346,7 +381,7 @@ describe("markdown surfaces", () => {
         </MemoryRouter>
       </Host>,
     );
-    await pressAndExpect("file-viewer-play", "doc:pavilio/wiki/x.md", "# Note");
+    await pressAndExpect("file-viewer-play", "doc:pavilio/wiki/x.md", wikiPage);
     wiki.unmount();
 
     // Mockup frame: never.
