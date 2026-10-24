@@ -1,6 +1,8 @@
 /**
  * `voiceForSession` resolves a cell's voice through the project its session
  * belongs to; a session the tab cannot place speaks with the default voice.
+ * A page's `doc:<projects-relative path>` key resolves through the project its
+ * path starts with.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -50,5 +52,24 @@ describe("session voice", () => {
 
     expect(voiceForSession("sess-p")).toBe(EMMA);
     expect(voiceForSession("sess-unknown")).toBe(VIVIENNE);
+  });
+
+  it("doc key uses its project's voice", () => {
+    setProjectVoice("pavilio", EMMA);
+
+    expect(voiceForSession("doc:pavilio/wiki/index.md")).toBe(EMMA);
+  });
+
+  it("doc key without override or project falls back to the default", () => {
+    expect(voiceForSession("doc:quiet/wiki/index.md")).toBe(VIVIENNE);
+    expect(voiceForSession("doc:AGENTS.md")).toBe(VIVIENNE);
+  });
+
+  it("terminal session voice is unchanged", async () => {
+    setProjectVoice("t", EMMA);
+    await seedSessions([session("sess-t", "t")]);
+
+    expect(voiceForSession("sess-t")).toBe(EMMA);
+    expect(voiceForSession("doc-sess")).toBe(VIVIENNE);
   });
 });
