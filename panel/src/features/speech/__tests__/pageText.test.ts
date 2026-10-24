@@ -6,8 +6,13 @@ describe("pageSpeechText", () => {
     expect(pageSpeechText("---\ntitle: X\ntags: [a]\n---\n# Hello\n\nBody.")).toBe(
       "# Hello\n\nBody.",
     );
-    expect(pageSpeechText("﻿---\r\ntitle: X\r\n...\r\nBody.")).toBe("Body.");
+    expect(pageSpeechText("﻿---\r\ntitle: X\r\n---\r\nBody.")).toBe("Body.");
     expect(pageSpeechText("---\n---\nBody.")).toBe("Body.");
+  });
+
+  it("leaves a YAML `...`-closed block alone, as the server does", () => {
+    const page = "---\ntitle: X\n...\nBody.";
+    expect(pageSpeechText(page)).toBe(page);
   });
 
   it("leaves a thematic break further down alone", () => {

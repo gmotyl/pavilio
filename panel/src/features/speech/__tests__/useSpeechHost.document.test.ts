@@ -149,7 +149,7 @@ describe("useSpeechHost — page speech", () => {
 
     await settle(() => host().stopDocument(PAGE));
     await settle(() =>
-      host().speakDocument({ key: PAGE, text: `---\ntitle: Y\n...\n${body}` }),
+      host().speakDocument({ key: PAGE, text: `---\ntitle: Y\nauthor: Z\n---\n${body}` }),
     );
     expect(utteranceUnderCursor(host().queueFor(PAGE))?.id).toBe(landed?.id);
   });
