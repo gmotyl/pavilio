@@ -740,6 +740,27 @@ input[type="checkbox"] {
   border-bottom-color: transparent;
 }
 
+/* The document speech bar under a viewer's action row. The cell's #17171d
+   ground and xterm seam mean nothing on a page, in either theme, so here the bar
+   is a surface card in the panel's own tokens. `width: 0; min-width: 100%`
+   spans the action row without ever widening it. The card rule names the
+   bar as the wrapper's child rather than `.speech-bar`, so the cell bar's
+   rule stays the only `.speech-bar` block (BootLegend reads it as such). */
+.viewer-speech-bar {
+  width: 0;
+  min-width: 100%;
+}
+
+.viewer-speech-bar > * {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.viewer-speech-bar .speech-bar-btn:hover:not([disabled]) {
+  background: var(--bg-hover);
+}
+
 .speech-bar-row {
   display: flex;
   align-items: center;

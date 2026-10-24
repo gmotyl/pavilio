@@ -34,4 +34,10 @@ describe("system route", () => {
     expect(res.status).toBe(200);
     expect(res.body.workspaceRoot).toBe("/h/git/prv");
   });
+
+  it("reports the projects directory itself", async () => {
+    const res = await request(makeApp(systemRouter, "/api/system")).get("/api/system");
+    expect(res.status).toBe(200);
+    expect(res.body.projectsDir).toBe("/h/git/prv/notes");
+  });
 });

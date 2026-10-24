@@ -6,6 +6,7 @@ import { isMockupFile, MOCKUP_MAX_SOURCE_BYTES, viewerReadUrl } from "../project
 import ViewerActions from "../projects/ViewerActions";
 import { relativeToWorkspace } from "../projects/relativeToWorkspace";
 import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
+import { useDocSpeech } from "../projects/docSpeech";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useFloatingAction } from "../shell/Layout";
@@ -114,6 +115,7 @@ export default function MarkdownViewer() {
   // A mockup is the exception: `MockupFrame` brings its own toolbar above the
   // frame (the width picker belongs next to it), so the breadcrumb slot stays
   // empty rather than mounting a second copy of the same buttons.
+  const speech = useDocSpeech(absolutePath, loading ? null : content, isMarkdown);
   useBreadcrumbActions(
     absolutePath && !isMockup ? (
       <ViewerActions
@@ -123,9 +125,10 @@ export default function MarkdownViewer() {
         }
         content={loading ? null : content}
         testIdPrefix="markdown-viewer"
+        speech={speech}
       />
     ) : null,
-    [absolutePath, workspaceRoot, content, loading, isMockup],
+    [absolutePath, workspaceRoot, content, loading, isMockup, speech?.key, speech?.text],
   );
 
   useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [

@@ -3,6 +3,7 @@ import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
+import { useDocSpeech } from "./docSpeech";
 import { usePeekTriggerProps } from "./peekTrigger";
 
 interface Props {
@@ -23,6 +24,8 @@ export function FileViewer({
 }: Props) {
   const peekTrigger = usePeekTriggerProps();
   const workspaceRoot = useWorkspaceRoot();
+  // Withheld while loading for the same reason `content` is below.
+  const speech = useDocSpeech(absolutePath, loading ? null : content, isMarkdown(filePath));
   return (
     <div>
       <div
@@ -46,6 +49,7 @@ export function FileViewer({
               workspaceRoot ? relativeToWorkspace(absolutePath, workspaceRoot) : null
             }
             content={loading ? null : content}
+            speech={speech}
           />
         )}
       </div>
