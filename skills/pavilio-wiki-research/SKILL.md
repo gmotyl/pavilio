@@ -24,9 +24,12 @@ toward the 10. It does not skip the interview.
 Every `scripts/wiki` and `scripts/project` command runs from the workspace root and prints one
 JSON object; exit 0 ok, 1 error, 2 ask the user.
 
-Every page or file named to the user — step 3's knowledge summary, candidate and source lists,
-the ingest report, answers, gaps, spike memos — is the link `scripts/wiki panel-link <path>`
-prints (a `projects/`-prefixed path is accepted); never a bare or workspace path.
+Every workspace page or file named to the user — step 3's knowledge summary, wiki pages, the
+ingest report, answers, gaps — is the link `scripts/wiki panel-link <path>` prints (a
+`projects/`-prefixed path is accepted); never a bare or workspace path. A spike memo is the
+`/project/<p>/memo?file=…` link [[pavilio-memo-explain]] returns, which opens it in the Memo tab
+(`panel-link` gives a `/view/…` link for a memo). Web candidates and fetched sources are shown
+with their original URL.
 
 ## Steps
 
@@ -69,17 +72,20 @@ prints (a `projects/`-prefixed path is accepted); never a bare or workspace path
    `path` (created and registered in `repos.json` on first use; exit 2 → ask). Write the code in
    `<path>/<spike-slug>/` and commit it in that repo, never in the workspace. Write the findings
    with [[pavilio-memo-explain]] to `projects/<p>/memo/`, then give `<spike-slug>/` a one-line
-   `README.md` linking the memo's panel link — never a `FINDINGS.md`. Spike memos are wiki
-   records, so the next ingest picks them up.
+   `README.md` linking the memo's `/project/<p>/memo?file=…` link that pavilio-memo-explain
+   returns — never a `FINDINGS.md`, never a `panel-link` one. Spike memos are wiki records, so
+   the next ingest picks them up — this round's answers do not include them; note them in step
+   8's gaps / next-round line.
 8. **Commit + next round** — commit `projects/<p>/PROJECT.md` (plus `repos.json` and the spike
    memos after a spike) as `<p>: research round <topic>` (the wiki commits are pavilio-wiki's).
    On a new project's first round commit the whole `projects/<p>/` instead (the scaffold's
    `STATUS.md` and `progress/` with it), never `.projects.local.md` — the registry row is local
-   and gitignored. End with the gaps as the next round's search, and the one-line hint
+   and gitignored. End with the gaps as the next round's search (plus any spike memo awaiting
+   ingest), and the one-line hint
    `/pavilio-wiki-research <topic>` to run it.
 
 Report: project (new or continued), questions settled, sources fetched / dropped (with
-reasons), pages written, questions answered, gaps left, spike memos (as panel links).
+reasons), pages written, questions answered, gaps left, spike memos (as their Memo-tab links).
 
 ## Non-goals
 
