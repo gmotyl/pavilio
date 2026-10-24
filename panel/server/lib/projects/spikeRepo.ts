@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "path";
 
 import { isProjectDir } from "../project-dir";
 import { gitEnv } from "../wiki/clone-repo";
+import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
 import { projectKind } from "./kind";
 
 /**
@@ -65,7 +66,17 @@ export function ensureSpikeRepo(options: SpikeRepoOptions): SpikeRepoResult {
   }
   const path = resolve(expanded);
 
+  // `writeFileSync` follows symlinks: refuse a project dir or repos.json that is one (or resolves
+  // outside projectsDir) before reading it, so a planted link can never redirect the write.
+  try {
+    assertContainedDir(projectsDir, [project]);
+  } catch (err) {
+    return { ok: false, code: 1, error: (err as Error).message };
+  }
   const reposPath = join(projectsDir, project, "repos.json");
+  if (isDanglingLink(reposPath)) {
+    return { ok: false, code: 1, error: `refusing a symlinked ${project}/repos.json` };
+  }
   const entries = readEntries(reposPath);
   if (typeof entries === "string") return { ok: false, code: 1, error: entries };
 

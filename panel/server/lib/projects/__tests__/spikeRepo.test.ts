@@ -1,6 +1,6 @@
 import { execFileSync } from "child_process";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -103,6 +103,31 @@ describe("ensureSpikeRepo", () => {
       expect(res, text).toMatchObject({ ok: false, code: 1 });
       expect(readFileSync(join(projectsDir, "lab/repos.json"), "utf8")).toBe(text);
     }
+    expect(existsSync(join(home, "spikes"))).toBe(false);
+  });
+
+  it("refuses a symlinked repos.json", () => {
+    makeProject("lab", "research");
+    const outside = join(tmp, "victim.json");
+    const bytes = '[{"name":"keep","path":"/x"}]\n';
+    writeFileSync(outside, bytes);
+    symlinkSync(outside, join(projectsDir, "lab/repos.json"));
+    const res = ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "~/spikes", home });
+    expect(res).toMatchObject({ ok: false, code: 1 });
+    expect(res.ok ? "" : res.error).toContain("lab/repos.json");
+    expect(readFileSync(outside, "utf8")).toBe(bytes);
+    expect(existsSync(join(home, "spikes"))).toBe(false);
+  });
+
+  it("refuses a symlinked project dir", () => {
+    const outsideDir = join(tmp, "elsewhere");
+    mkdirSync(outsideDir);
+    writeFileSync(join(outsideDir, "PROJECT.md"), "---\nkind: research\n---\n# lab\n");
+    symlinkSync(outsideDir, join(projectsDir, "lab"));
+    const res = ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "~/spikes", home });
+    expect(res).toMatchObject({ ok: false, code: 1 });
+    expect(res.ok ? "" : res.error).toContain("lab");
+    expect(existsSync(join(outsideDir, "repos.json"))).toBe(false);
     expect(existsSync(join(home, "spikes"))).toBe(false);
   });
 
