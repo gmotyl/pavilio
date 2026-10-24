@@ -5,6 +5,7 @@ import AlertHost from "../AlertHost";
 import { __resetAlertsForTests, alerts } from "../store";
 import { preferences } from "../../../preferences/declarations";
 import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import { __resetProjectColorsForTests } from "../../terminal/useProjectColors";
 
 function cards(): HTMLElement[] {
   return screen.queryAllByTestId("alert");
@@ -442,5 +443,129 @@ describe("AlertHost display time", () => {
     expect(screen.getByTestId("alert-countdown").style.animationDuration).toBe("10000ms");
     advance(9999);
     expect(titles()).toEqual(["i"]);
+  });
+});
+
+describe("AlertHost detail line", () => {
+  afterEach(() => {
+    __resetProjectColorsForTests();
+  });
+
+  function detailOf(card: HTMLElement): HTMLElement {
+    return within(card).getByTestId("alert-detail");
+  }
+
+  it("detail line uses secondary ink at 13px", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("saved", { detail: "All changes written" });
+    });
+    const detail = detailOf(cards()[0]);
+    expect(detail.textContent).toBe("All changes written");
+    expect(detail.style.color).toBe("var(--text-secondary)");
+    expect(detail.style.color).not.toBe("var(--text-muted)");
+    expect(detail.style.fontSize).toBe("13px");
+    expect(getComputedStyle(detail).fontSize).toBe("13px");
+  });
+
+  it("detail line carries no text-xs class", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("saved", { detail: "All changes written" });
+    });
+    const detail = detailOf(cards()[0]);
+    expect(detail).not.toHaveClass("text-xs");
+    // Its line-height comes from the card, not from a utility of its own.
+    expect([...detail.classList].some((c) => c.startsWith("leading-") || c.startsWith("text-"))).toBe(false);
+    expect(detail.style.lineHeight).toBe("");
+  });
+
+  it("dismiss control uses tertiary ink and keeps its hover background", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("plain");
+    });
+    const dismiss = within(cards()[0]).getByTestId("alert-dismiss");
+    expect(dismiss.style.color).toBe("var(--text-tertiary)");
+    fireEvent.mouseEnter(dismiss);
+    expect(dismiss.style.background).toBe("var(--bg-hover)");
+    fireEvent.mouseLeave(dismiss);
+    expect(dismiss.style.background).toBe("transparent");
+  });
+
+  it("project alert keeps its title, project name colour, mark, border and countdown", () => {
+    writePreference(preferences.projectColor, "#61afef", "metro");
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("metro · claude 2", { project: "metro", detail: "Answer ready" });
+    });
+    const card = cards()[0];
+    expect(titleOf(card)).toBe("metro · claude 2");
+    const name = within(card).getByTestId("alert-project-name");
+    expect(name.textContent).toBe("metro");
+    expect(name.style.color).toBe("rgb(97, 175, 239)");
+    expect(within(card).getByTestId("project-mark").getAttribute("data-color")).toBe("#61afef");
+    expect(card.style.borderLeft).toContain("4px");
+    expect(card.style.borderLeft).toContain("rgb(97, 175, 239)");
+    expect(card.style.background).toContain("color-mix");
+    expect(card.style.background).toContain("#61afef");
+    const bar = within(card).getByTestId("alert-countdown");
+    expect(bar.style.background).toContain("rgb(97, 175, 239)");
+    const detail = detailOf(card);
+    expect(detail.style.color).toBe("var(--text-secondary)");
+    expect(detail.style.fontSize).toBe("13px");
+  });
+
+  it("every alert kind renders the same detail style", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.error("e", { detail: "d" });
+      alerts.warning("w", { detail: "d" });
+      alerts.info("i", { detail: "d" });
+      alerts.success("s", { detail: "d" });
+      alerts.info("metro · claude 2", { project: "metro", detail: "d" });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+2 more" }));
+    expect(cards()).toHaveLength(5);
+    const styles = cards().map((c) => {
+      const d = detailOf(c);
+      return { className: d.className, color: d.style.color, fontSize: d.style.fontSize };
+    });
+    for (const s of styles) {
+      expect(s).toEqual({
+        className: "mt-0.5 block break-words",
+        color: "var(--text-secondary)",
+        fontSize: "13px",
+      });
+    }
+  });
+
+  it("long detail is not clamped", () => {
+    const long = "A long answer preview that keeps going. ".repeat(20).trim();
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("answer", { detail: long });
+    });
+    const detail = detailOf(cards()[0]);
+    expect(detail.textContent).toBe(long);
+    expect([...detail.classList].some((c) => c.startsWith("line-clamp") || c === "truncate")).toBe(false);
+    const cs = getComputedStyle(detail);
+    expect(cs.webkitLineClamp === "" || cs.webkitLineClamp === "none").toBe(true);
+    expect(cs.overflowY).toBe("visible");
+    expect(cs.overflowX).toBe("visible");
+    // It wraps instead of being cut to one line or a fixed height.
+    expect(cs.whiteSpace).not.toBe("nowrap");
+    expect(cs.textOverflow).not.toBe("ellipsis");
+    expect(detail.style.maxHeight).toBe("");
+    expect(detail.style.overflow).toBe("");
+  });
+
+  it("alert without detail renders no detail line", () => {
+    render(<AlertHost />);
+    act(() => {
+      alerts.info("plain");
+      alerts.info("answer", { onClick: vi.fn() });
+    });
+    for (const c of cards()) expect(within(c).queryByTestId("alert-detail")).toBeNull();
   });
 });
