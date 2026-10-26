@@ -16,18 +16,62 @@ describe("TerminalShortcutBar", () => {
     ]);
   });
 
+  /** A completed tap: down and up in place. */
+  const tap = (el: HTMLElement) => {
+    fireEvent.pointerDown(el, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(el, { pointerId: 1, clientX: 10, clientY: 10 });
+  };
+
   test("⏎ sends \\r", () => {
     const onSend = vi.fn();
     render(<TerminalShortcutBar onSend={onSend} />);
-    fireEvent.pointerDown(screen.getByText("⏎"));
+    tap(screen.getByText("⏎"));
     expect(onSend).toHaveBeenCalledWith("\r");
   });
 
   test("↑ sends ESC[A", () => {
     const onSend = vi.fn();
     render(<TerminalShortcutBar onSend={onSend} />);
-    fireEvent.pointerDown(screen.getByText("↑"));
+    tap(screen.getByText("↑"));
     expect(onSend).toHaveBeenCalledWith("\x1b[A");
+  });
+
+  // The row scrolls sideways, so a swipe often starts on a button. Sending on
+  // pointerdown fired that button's key (Ctrl+C, ⏎) at the start of every swipe.
+  test("a tap sends once, on release", () => {
+    const onSend = vi.fn();
+    render(<TerminalShortcutBar onSend={onSend} />);
+    const ctrlC = screen.getByText("Ctrl+C");
+
+    fireEvent.pointerDown(ctrlC, { pointerId: 1, clientX: 10, clientY: 10 });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.pointerUp(ctrlC, { pointerId: 1, clientX: 12, clientY: 11 });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("\x03");
+  });
+
+  test("a swipe that starts on a button sends nothing", () => {
+    const onSend = vi.fn();
+    render(<TerminalShortcutBar onSend={onSend} />);
+    const ctrlC = screen.getByText("Ctrl+C");
+
+    // The browser takes the pan over: it cancels the pointer.
+    fireEvent.pointerDown(ctrlC, { pointerId: 1, clientX: 100, clientY: 10 });
+    fireEvent.pointerMove(ctrlC, { pointerId: 1, clientX: 60, clientY: 10 });
+    fireEvent.pointerCancel(ctrlC, { pointerId: 1 });
+    // Or it does not, and the finger lifts somewhere else.
+    fireEvent.pointerDown(ctrlC, { pointerId: 2, clientX: 100, clientY: 10 });
+    fireEvent.pointerMove(ctrlC, { pointerId: 2, clientX: 60, clientY: 10 });
+    fireEvent.pointerUp(ctrlC, { pointerId: 2, clientX: 60, clientY: 10 });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  test("pressing a button keeps focus where it is (the terminal's)", () => {
+    render(<TerminalShortcutBar onSend={() => {}} />);
+    const down = fireEvent.pointerDown(screen.getByText("⏎"), { pointerId: 1 });
+    // fireEvent returns false when the handler called preventDefault.
+    expect(down).toBe(false);
   });
 
   test("shortcut bar keeps its buttons on one scrollable line", () => {

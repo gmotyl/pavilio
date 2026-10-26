@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 interface TerminalShortcutBarProps {
   onSend: (data: string) => void;
   onToggleKeyboard?: () => void;
@@ -24,10 +26,42 @@ const BUTTONS: ShortcutButton[] = [
   { key: "enter", label: "⏎", data: "\r", confirm: true },
 ];
 
+/** Further than this between press and release is a swipe, not a tap. */
+const TAP_SLOP_PX = 10;
+
+/**
+ * Fires `run` on a completed tap only. The row scrolls sideways, so a swipe
+ * often starts on a button: acting on pointerdown sent that button's key at the
+ * start of every swipe. A pan the browser takes over ends in pointercancel, and
+ * one it does not ends in a pointerup too far from the press — neither fires.
+ * Pointerdown still calls `preventDefault`, which keeps focus (and the
+ * on-screen keyboard) on the terminal.
+ */
+function useTap() {
+  const press = useRef<{ id: number; x: number; y: number } | null>(null);
+  return (run: () => void) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault();
+      press.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      const p = press.current;
+      press.current = null;
+      if (!p || p.id !== e.pointerId) return;
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > TAP_SLOP_PX) return;
+      run();
+    },
+    onPointerCancel: () => {
+      press.current = null;
+    },
+  });
+}
+
 export function TerminalShortcutBar({
   onSend,
   onToggleKeyboard,
 }: TerminalShortcutBarProps) {
+  const tap = useTap();
   return (
     // One line that scrolls sideways: wrapping grew the bar a line at a time on
     // a phone and took the height from the terminal above it.
@@ -45,10 +79,7 @@ export function TerminalShortcutBar({
           data-testid={`terminal-shortcut-${btn.key}`}
           tabIndex={-1}
           onMouseDown={(e) => e.preventDefault()}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            onSend(btn.data);
-          }}
+          {...tap(() => onSend(btn.data))}
           className={`shrink-0 rounded active:scale-95 transition-transform select-none${btn.mono ? " font-mono" : ""} ${
             btn.confirm
               ? "px-3.5 py-0.5 text-[14px] font-semibold"
@@ -83,10 +114,7 @@ export function TerminalShortcutBar({
           data-testid="terminal-shortcut-toggle-keyboard"
           tabIndex={-1}
           onMouseDown={(e) => e.preventDefault()}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            onToggleKeyboard();
-          }}
+          {...tap(onToggleKeyboard)}
           className="shrink-0 px-2 py-0.5 rounded text-[12.5px] active:scale-95 transition-transform select-none"
           style={{
             background: "var(--bg-base)",
