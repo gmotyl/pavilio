@@ -27,11 +27,11 @@ export type PendingRecord = { path: string; hash: string; status: PendingStatus 
 
 export type PendingOptions = {
   /**
-   * Restrict to this one path (project-relative or absolute). It is considered whenever it
-   * exists inside the project, even outside the record kinds — callers like the note skill
-   * pass the file they just wrote. A missing file yields nothing.
+   * Restrict to these paths (project-relative or absolute), in the order given. Each is
+   * considered whenever it exists inside the project, even outside the record kinds — callers
+   * like the note skill pass the file they just wrote. A missing file yields nothing.
    */
-  only?: string;
+  only?: string | string[];
   /** Local date `YYYY-MM-DD`, or a Date read in local time; defaults to now. */
   today?: string | Date;
 };
@@ -119,8 +119,12 @@ function listRawSnapshots(projectDir: string): string[] {
 export function pendingRecords(projectDir: string, opts: PendingOptions = {}): PendingRecord[] {
   let candidates: string[];
   if (opts.only !== undefined) {
-    const only = toProjectPath(projectDir, opts.only);
-    candidates = only && isFile(join(projectDir, only)) ? [only] : [];
+    const paths = Array.isArray(opts.only) ? opts.only : [opts.only];
+    candidates = [];
+    for (const path of paths) {
+      const rel = toProjectPath(projectDir, path);
+      if (rel && isFile(join(projectDir, rel)) && !candidates.includes(rel)) candidates.push(rel);
+    }
   } else {
     candidates = [...listRecords(projectDir, opts.today), ...listRawSnapshots(projectDir)].sort();
   }

@@ -40,6 +40,10 @@ One file, `page`, shaped per `skills/pavilio-wiki/PAGES.md § Source page`; link
   restart", "done/in progress", checklists, timings of the session itself.
 - List in `entities:` / `concepts:` (bare names) every entity or concept the page says something
   durable about, not every word that appears. Reuse existing slugs and glossary names.
+- An input with a `## Glossary` section (an archived change's `design.md`): every term it defines
+  goes into `concepts:`, under the slug its `CONTEXT.md` line links (`See [[wiki/concepts/<slug>]]`),
+  else the term in kebab-case. Archive-plan has already linked those slugs from `CONTEXT.md`; a
+  term left untagged is a dead glossary link, because this page is what qualifies its concept page.
 - Body wikilinks only to pages the indexes list (and to records); a name without a page stays plain
   text in the body — its frontmatter entry is what counts it toward a page.
 - A finding that is true outside this project (a library's behaviour, a platform limit, a general
