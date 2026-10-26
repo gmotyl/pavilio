@@ -158,8 +158,8 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    **Glossary check** — for each record with a `## Glossary` section (an archived `design.md`),
    once its writer has returned: every term there must be among the receipt's `slugs` as
    `concepts/<slug>`, `<slug>` taken from the term's `CONTEXT.md` line (`See [[wiki/concepts/<slug>]]`).
-   A missing one → add the bare slug to that source page's `concepts:` and to the receipt's slugs
-   before step 6; the writer missing it would leave the glossary link dead.
+   A missing one → add the bare slug to that source page's `concepts:` and `concepts/<slug>` to the
+   receipt's slugs before step 6; the writer missing it would leave the glossary link dead.
 6. **Backlog** — `scripts/wiki backlog <p> --touched <slug>,<slug>,…` — every namespaced slug
    from the receipts, comma-separated. Run it only after every source writer has returned. A
    catch-up (no inputs) drops `--touched`, so it also pays what earlier runs left owed.
