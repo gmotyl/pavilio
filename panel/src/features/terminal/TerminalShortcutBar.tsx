@@ -29,8 +29,10 @@ export function TerminalShortcutBar({
   onToggleKeyboard,
 }: TerminalShortcutBarProps) {
   return (
+    // One line that scrolls sideways: wrapping grew the bar a line at a time on
+    // a phone and took the height from the terminal above it.
     <div
-      className="md:hidden flex flex-wrap items-center gap-x-1 gap-y-0.5 px-1.5 py-1 shrink-0"
+      className="md:hidden flex flex-nowrap items-center gap-x-1 overflow-x-auto px-1.5 py-1 shrink-0"
       style={{
         background: "var(--bg-surface)",
         borderTop: "1px solid var(--border-subtle)",
