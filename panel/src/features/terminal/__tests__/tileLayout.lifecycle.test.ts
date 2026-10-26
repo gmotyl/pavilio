@@ -97,7 +97,10 @@ describe("appendSession", () => {
 
 describe("removeSession", () => {
   it("absorbs a closed session's rectangle into its longest-edge neighbour", () => {
-    const layout = defaultFor(["a", "b", "c"]); // a left, b over c on the right
+    const layout = expandPreset(
+      ["a", "b", "c"],
+      getLayoutPresets(3).find((p) => p.label === "1 left, 2 stacked right")!,
+    ); // a left, b over c on the right
     const next = removeSession(layout, "c");
 
     expect(isValidLayout(next)).toBe(true);
