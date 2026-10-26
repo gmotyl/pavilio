@@ -23,9 +23,13 @@ const PILL_MAX_WIDTH = 150;
  * natural width does not fit in it, the tray folds into a "▁ N" counter whose
  * dropdown lists the same sessions. The natural width comes from an invisible,
  * absolutely positioned copy of the pills, so the measurement never depends on
- * whether the tray is folded — the fold cannot oscillate. An unmeasured slot
- * (jsdom, the first frame) counts as roomy: folding there would hide the pills
- * everywhere rather than only where they do not fit.
+ * whether the tray is folded — the fold cannot oscillate. A slot of 0 is the
+ * fullest strip, not an unmeasured one: once the chips take every pixel the slot
+ * measures exactly 0, and that must fold. Only when the pills measure 0 too
+ * (jsdom, before layout) is nothing known, and the tray stays unfolded.
+ *
+ * Folded, the slot's min-width returns to `auto`, so it keeps the counter's own
+ * width and the chips — `min-width: 0`, scrolling sideways — give way instead.
  */
 export function MinimisedTray({ sessions, onRestore }: Props) {
   const slotRef = useRef<HTMLDivElement>(null);
@@ -43,7 +47,7 @@ export function MinimisedTray({ sessions, onRestore }: Props) {
     }
     const available = slot.getBoundingClientRect().width;
     const needed = pills.getBoundingClientRect().width;
-    setFolded(available > 0 && needed > available);
+    setFolded(needed > available);
   }, []);
 
   useLayoutEffect(() => {
@@ -82,7 +86,11 @@ export function MinimisedTray({ sessions, onRestore }: Props) {
               variant="tray"
             />
           ) : (
-            <div data-testid="minimised-tray" className="flex items-center gap-1 shrink-0 px-2" style={TRAY_STYLE}>
+            <div
+              data-testid="minimised-tray"
+              role="group"
+              aria-label="Minimised terminals"
+              className="flex items-center gap-1 shrink-0 px-2" style={TRAY_STYLE}>
               <TrayLabel testId="minimised-tray-label" />
               {sessions.map((s) => (
                 <button

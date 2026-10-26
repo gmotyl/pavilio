@@ -335,6 +335,19 @@ describe("TerminalToolbar — maximize", () => {
     expect(onToggleMaximize).toHaveBeenCalledTimes(1);
   });
 
+  it("follows the visible sessions, not all of them", () => {
+    // Every session minimised: nothing to maximise, though sessions exist.
+    const sessions = [makeSession({ id: "s1" }), makeSession({ id: "s2" })];
+    renderToolbar({ sessions, minimisedIds: ["s1", "s2"] });
+    expect(screen.getByTestId("terminal-toolbar-maximize")).toBeDisabled();
+  });
+
+  it("stays enabled with all sessions but one minimised", () => {
+    const sessions = [makeSession({ id: "s1" }), makeSession({ id: "s2" })];
+    renderToolbar({ sessions, minimisedIds: ["s2"] });
+    expect(screen.getByTestId("terminal-toolbar-maximize")).not.toBeDisabled();
+  });
+
   it("is inert with no sessions", () => {
     const { onToggleMaximize } = renderToolbar({ sessions: [] });
     const button = screen.getByTestId("terminal-toolbar-maximize");

@@ -44,7 +44,7 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
         onMouseLeave={(e) =>
           (e.currentTarget.style.background = "transparent")
         }
-        title="Grid layout presets"
+        title="Layout presets"
         aria-haspopup="menu"
         aria-expanded={open}
       >

@@ -72,6 +72,22 @@ describe("MinimisedCounter — menu", () => {
     expect(onRestore).not.toHaveBeenCalled();
   });
 
+  it("opening moves focus to the first item; arrows move between items and wrap", () => {
+    renderOpen();
+    const first = screen.getByTestId("counter-item-m1");
+    const second = screen.getByTestId("counter-item-m2");
+    expect(document.activeElement).toBe(first);
+
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(document, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(document, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(first);
+  });
+
   it("a pointerdown outside closes the menu; one inside does not", () => {
     const { onRestore } = renderOpen();
 

@@ -147,6 +147,29 @@ describe("MinimisedTray", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("a full strip (slot squeezed to 0) folds the tray into a counter", () => {
+    // In the panel the chips take every pixel once the strip is full, so the
+    // slot measures exactly 0 — that is the narrowest strip, not an unmeasured one.
+    stageWidths(0, 420);
+    render(<MinimisedTray sessions={SESSIONS} onRestore={vi.fn()} />);
+
+    expect(screen.queryByTestId("minimised-tray")).toBeNull();
+    expect(screen.getByTestId("minimised-tray-counter")).toHaveTextContent("▁ 3");
+    // Folded, the slot keeps the counter's own width instead of shrinking to 0.
+    const slot = screen.getByTestId("minimised-tray-slot");
+    expect(slot.style.minWidth).toBe("auto");
+    expect(slot.style.overflow).toBe("visible");
+  });
+
+  it("unfolded pills sit in a group named for screen readers", () => {
+    render(<MinimisedTray sessions={SESSIONS} onRestore={vi.fn()} />);
+
+    const group = screen.getByRole("group", { name: "Minimised terminals" });
+    expect(group).toBe(screen.getByTestId("minimised-tray"));
+    // Unmeasured (both boxes 0) stays unfolded and lets the slot shrink.
+    expect(screen.getByTestId("minimised-tray-slot").style.minWidth).toBe("0px");
+  });
+
   it("counter dot shows the loudest minimised state", () => {
     stageWidths(60, 420);
     activityOf.set("m1", "busy");

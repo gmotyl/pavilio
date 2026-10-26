@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionMeta } from "./useTerminalSessions";
 import { sessionLabel } from "./useTerminalSessions";
@@ -50,7 +50,8 @@ const TRIGGER: Record<Props["variant"], { className: string; style: React.CSSPro
  * Both hosts clip what overflows them (the strip's slot, the rail's sideways
  * scroller), so the menu is portalled and pinned under the trigger. The pin is
  * measured once on open, so a window resize closes the menu rather than leave it
- * floating where the trigger used to be.
+ * floating where the trigger used to be. Opening focuses the first row,
+ * ArrowUp/ArrowDown move between rows (wrapping), Escape returns to the trigger.
  */
 export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props) {
   const ids = sessions.map((s) => s.id);
@@ -65,10 +66,20 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
   const trigger = TRIGGER[variant];
 
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return;
+    if (!open || !triggerRef.current) {
+      setPos(null);
+      return;
+    }
     const r = triggerRef.current.getBoundingClientRect();
     setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
   }, [open]);
+
+  // Focus lands on the first row once the menu is pinned (and so visible — a
+  // `visibility: hidden` element cannot take focus).
+  useEffect(() => {
+    if (!open || !pos) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open, pos]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -79,9 +90,22 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
       close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      close();
-      triggerRef.current?.focus();
+      if (e.key === "Escape") {
+        close();
+        triggerRef.current?.focus();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+      );
+      if (items.length === 0) return;
+      e.preventDefault();
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      // From outside the menu, Down enters at the top and Up at the bottom.
+      const next = at < 0 ? (step > 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
+      items[next].focus();
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
