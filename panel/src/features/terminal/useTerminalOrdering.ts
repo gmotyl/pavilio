@@ -141,6 +141,13 @@ function readScope(scopeKey: string): OrderingState {
 export function useTerminalOrdering(
   scopeKey: string,
   sessions: SessionMeta[],
+  /**
+   * `false` for a consumer that only reads the ordered list. Its reducer still
+   * tracks the scope in memory but never writes the stored keys: every write is
+   * the state it read at mount plus syncs, so it would put back a grid the
+   * surface has since changed (see `useAllTerminalSessions`).
+   */
+  { persist = true }: { persist?: boolean } = {},
 ): TerminalOrdering {
   const [{ order: sessionOrder, layout: storedTiles, minimised }, dispatch] = useReducer(
     orderingReducer,
@@ -168,25 +175,25 @@ export function useTerminalOrdering(
   // write whose stored representation is unchanged, so a mount that re-asserts
   // what is already there does not even notify.
   useEffect(() => {
-    if (!isPreferenceScope(scopeKey)) return;
+    if (!persist || !isPreferenceScope(scopeKey)) return;
     writePreference(preferences.terminalOrder, sessionOrder, scopeKey);
-  }, [scopeKey, sessionOrder]);
+  }, [persist, scopeKey, sessionOrder]);
 
   useEffect(() => {
-    if (!isPreferenceScope(scopeKey)) return;
+    if (!persist || !isPreferenceScope(scopeKey)) return;
     // Empty is CLEARED rather than stored as `[]`, mirroring the `removeItem`
     // this replaces: an empty tiling means "nothing stored for this scope", and
     // the caller falls back to the default preset either way.
     if (storedTiles.length === 0) clearPreference(preferences.terminalGrid, scopeKey);
     else writePreference(preferences.terminalGrid, storedTiles, scopeKey);
-  }, [scopeKey, storedTiles]);
+  }, [persist, scopeKey, storedTiles]);
 
   useEffect(() => {
-    if (!isPreferenceScope(scopeKey)) return;
+    if (!persist || !isPreferenceScope(scopeKey)) return;
     // Cleared when empty, like the grid: nothing minimised is the default.
     if (minimised.length === 0) clearPreference(preferences.terminalMinimised, scopeKey);
     else writePreference(preferences.terminalMinimised, minimised, scopeKey);
-  }, [scopeKey, minimised]);
+  }, [persist, scopeKey, minimised]);
 
   const orderIndex = useMemo(
     () => new Map(sessionOrder.map((id, i) => [id, i])),

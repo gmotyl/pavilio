@@ -19,7 +19,7 @@ export function TerminalsPage() {
     minimisedIds,
     minimise,
     restore,
-  } = useAllTerminalSessions();
+  } = useAllTerminalSessions({ persist: true });
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   // Told to the speech alerts, whose "looked at" rule reads this page's focus.
