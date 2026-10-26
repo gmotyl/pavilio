@@ -82,7 +82,9 @@ function namesExactly(order: string[], layout: TileLayout): boolean {
 /** Both halves of one scope's stored ordering model, read together. */
 function readScope(scopeKey: string): OrderingState {
   const layout = readTiles(scopeKey);
-  if (layout.length === 0) return { order: readOrder(scopeKey), layout };
+  // Minimised state is not persisted yet, so every scope reads back
+  // with nothing minimised.
+  if (layout.length === 0) return { order: readOrder(scopeKey), layout, minimised: [] };
 
   // The order and the tiling are one model, so a stored order read back blind could let
   // the two disagree — which is why this used to re-derive from the tiling and ignore
@@ -97,7 +99,7 @@ function readScope(scopeKey: string): OrderingState {
   const order = namesExactly(stored, layout)
     ? stored
     : readingOrder(layout).map((tile) => tile.sessionId);
-  return { order, layout };
+  return { order, layout, minimised: [] };
 }
 
 /**
