@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Menu, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { mobileShortName } from "./useTerminalSessions";
@@ -5,6 +7,8 @@ import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useAggregateActivity } from "../favicon/useAggregateActivity";
+import { useAggregateActivityFlags } from "./useTerminalActivityChannel";
+import { ProjectMark } from "../projects/ProjectMark";
 
 interface Props {
   sessions: SessionMeta[];
@@ -33,32 +37,27 @@ export function TerminalMobileRail({
   onCreate,
   onOpenDrawer,
   onReconnect,
+  minimisedIds = NONE,
+  onRestore,
 }: Props) {
   const activity = useAggregateActivity();
   const { colorFor } = useProjectColors();
+  // Dots are for visible sessions only; minimised ones live in the aggregate.
+  const visible =
+    minimisedIds.length === 0
+      ? sessions
+      : sessions.filter((s) => !minimisedIds.includes(s.id));
+  const minimised = sessions.filter((s) => minimisedIds.includes(s.id));
   return (
     <div
+      data-testid="terminal-mobile-rail"
       className="flex items-center gap-2 px-2.5 py-2 shrink-0 overflow-x-auto scrollbar-none"
       style={{
         background: "var(--bg-surface)",
         borderBottom: "1px solid var(--border-subtle)",
       }}
     >
-      <button
-        type="button"
-        data-testid="terminal-mobile-rail-new"
-        onClick={() => onCreate()}
-        className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-95 transition-transform"
-        style={{
-          border: "1.5px dashed var(--text-muted)",
-          color: "var(--text-muted)",
-        }}
-        title={`New terminal in ${currentProject}`}
-      >
-        <Plus size={14} />
-      </button>
-
-      {sessions.map((s) => {
+      {visible.map((s) => {
         const active = s.id === focusedId;
         const accent = colorFor(s.project);
         const label = mobileShortName(s, sessions);
@@ -107,7 +106,28 @@ export function TerminalMobileRail({
         );
       })}
 
+      <button
+        type="button"
+        data-testid="terminal-mobile-rail-new"
+        onClick={() => onCreate()}
+        className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+        style={{
+          border: "1.5px dashed var(--text-muted)",
+          color: "var(--text-muted)",
+        }}
+        title={`New terminal in ${currentProject}`}
+      >
+        <Plus size={14} />
+      </button>
+
       <div className="flex-1" />
+
+      {minimised.length > 0 && (
+        <MinimisedAggregate
+          sessions={minimised}
+          onRestore={(id) => onRestore?.(id)}
+        />
+      )}
 
       {focusedId && onReconnect && (
         <button
@@ -153,6 +173,124 @@ export function TerminalMobileRail({
         )}
       </div>
     </div>
+  );
+}
+
+const NONE: string[] = [];
+
+/**
+ * The rail's "▁ N" aggregate: every minimised session behind one trigger whose
+ * dot shows the loudest state (attention > busy > idle), from the same flags
+ * `ProjectActivityLed` reads. Its menu lists mark, LED and label per session;
+ * choosing one restores it.
+ */
+function MinimisedAggregate({
+  sessions,
+  onRestore,
+}: {
+  sessions: SessionMeta[];
+  onRestore: (id: string) => void;
+}) {
+  const ids = sessions.map((s) => s.id);
+  const { hasAttention, hasBusy } = useAggregateActivityFlags(ids);
+  const loudest = hasAttention ? "attention" : hasBusy ? "busy" : "idle";
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const count = sessions.length;
+  const name = `${count} minimised terminal${count === 1 ? "" : "s"}`;
+
+  // The rail scrolls sideways, which clips anything absolutely positioned
+  // inside it, so the menu is portalled and pinned under the trigger.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid="terminal-mobile-rail-minimised"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={name}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={name}
+        className="shrink-0 h-7 px-2 rounded-md flex items-center gap-1.5 text-[11px] font-mono active:scale-95 transition-transform"
+        style={{
+          background: "var(--bg-base)",
+          border: "1px solid var(--border-subtle)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        <span>▁ {count}</span>
+        <span
+          data-testid="terminal-mobile-rail-minimised-led"
+          className="terminal-led"
+          data-state={loudest}
+          aria-hidden
+        />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Minimised terminals"
+            className="fixed z-50 min-w-[180px] max-w-[calc(100vw-16px)] py-1 rounded-md shadow-lg"
+            style={{
+              top: pos?.top ?? 0,
+              right: pos?.right ?? 8,
+              visibility: pos ? "visible" : "hidden",
+              background: "var(--bg-elevated, var(--bg-surface))",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            {sessions.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="menuitem"
+                data-testid={`terminal-mobile-rail-minimised-item-${s.id}`}
+                onClick={() => {
+                  setOpen(false);
+                  onRestore(s.id);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[12px] font-mono"
+                style={{ color: "var(--text-primary)" }}
+                title={s.name}
+              >
+                <ProjectMark project={s.project} size={16} />
+                <TerminalActivityLed sessionId={s.id} />
+                <span className="truncate">{s.name}</span>
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
