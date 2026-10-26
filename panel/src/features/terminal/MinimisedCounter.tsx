@@ -23,7 +23,7 @@ interface Props {
 const TRIGGER: Record<Props["variant"], { className: string; style: React.CSSProperties }> = {
   tray: {
     className:
-      "shrink-0 mx-1.5 px-2 py-0.5 rounded-full flex items-center gap-1.5 text-[11px] font-mono",
+      "shrink-0 mx-1.5 px-2 py-0.5 rounded-full flex items-center gap-1.5 whitespace-nowrap text-[11px] font-mono",
     style: {
       background: "var(--bg-elevated, var(--bg-active))",
       border: "1px solid var(--border-subtle)",
@@ -32,7 +32,7 @@ const TRIGGER: Record<Props["variant"], { className: string; style: React.CSSPro
   },
   rail: {
     className:
-      "shrink-0 h-7 px-2 rounded-md flex items-center gap-1.5 text-[11px] font-mono active:scale-95 transition-transform",
+      "shrink-0 h-7 px-2 rounded-md flex items-center gap-1.5 whitespace-nowrap text-[11px] font-mono active:scale-95 transition-transform",
     style: {
       background: "var(--bg-base)",
       border: "1px solid var(--border-subtle)",

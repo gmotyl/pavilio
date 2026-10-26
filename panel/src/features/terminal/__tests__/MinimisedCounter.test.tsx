@@ -109,3 +109,17 @@ describe("MinimisedCounter — menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });
+
+describe("MinimisedCounter — trigger", () => {
+  it.each(["tray", "rail"] as const)(
+    "the %s trigger never wraps, so its min-content is its full width",
+    (variant) => {
+      render(
+        <MinimisedCounter sessions={SESSIONS} onRestore={vi.fn()} testId="counter" variant={variant} />,
+      );
+      // "▁ 2" breaking at its space would let a folded slot shrink below the
+      // counter, and the shrink-0 trigger would overlap whatever sits next to it.
+      expect(screen.getByTestId("counter")).toHaveClass("whitespace-nowrap");
+    },
+  );
+});

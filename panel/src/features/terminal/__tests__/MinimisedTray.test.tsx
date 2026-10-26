@@ -157,8 +157,26 @@ describe("MinimisedTray", () => {
     expect(screen.getByTestId("minimised-tray-counter")).toHaveTextContent("▁ 3");
     // Folded, the slot keeps the counter's own width instead of shrinking to 0.
     const slot = screen.getByTestId("minimised-tray-slot");
-    expect(slot.style.minWidth).toBe("auto");
+    expect(slot.style.minWidth).toBe("max-content");
     expect(slot.style.overflow).toBe("visible");
+  });
+
+  it("the measuring copy sits inside a clipping wrapper, folded or not", () => {
+    // Folded, the slot stops clipping (the counter must not be cut off), so the
+    // max-content copy of the pills needs its own clip or it widens the strip.
+    stageWidths(0, 420);
+    render(<MinimisedTray sessions={SESSIONS} onRestore={vi.fn()} />);
+    expect(screen.getByTestId("minimised-tray-counter")).toBeInTheDocument();
+
+    const measure = screen.getByTestId("minimised-tray-measure");
+    const clip = measure.parentElement!;
+    expect(clip).toBe(screen.getByTestId("minimised-tray-measure-clip"));
+    expect(clip).toHaveClass("absolute", "inset-0", "overflow-hidden", "pointer-events-none");
+    expect(clip).toHaveAttribute("aria-hidden", "true");
+    expect(clip.parentElement).toBe(screen.getByTestId("minimised-tray-slot"));
+    // The copy itself still lays out at its natural width, independent of the clip.
+    expect(measure.style.position).toBe("absolute");
+    expect(measure.style.width).toBe("max-content");
   });
 
   it("unfolded pills sit in a group named for screen readers", () => {
