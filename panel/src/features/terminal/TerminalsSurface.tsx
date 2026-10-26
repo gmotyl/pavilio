@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 import { TerminalToolbar } from "./TerminalToolbar";
 import { TerminalLayoutGrid } from "./TerminalLayoutGrid";
 import { TerminalShortcutBar } from "./TerminalShortcutBar";
@@ -62,6 +62,12 @@ export interface TerminalsSurfaceProps {
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
 
+  // Minimised sessions on this surface (in session order) and the two
+  // transitions; the surface layers focus and Max handling over them.
+  minimisedIds?: string[];
+  onMinimise?: (id: string) => void;
+  onRestore?: (id: string) => void;
+
   /**
    * The surface's speech host — one channel and one player for every cell it
    * renders. Required, so neither host can forget it; see {@link GridSpeech}.
@@ -75,6 +81,8 @@ export interface TerminalsSurfaceProps {
   // Used when embedded in the Cmd+B drawer.
   fill?: boolean;
 }
+
+const NONE: string[] = [];
 
 export function TerminalsSurface({
   currentProject,
@@ -96,6 +104,9 @@ export function TerminalsSurface({
   tiles,
   onPlace,
   onApplyPreset,
+  minimisedIds = NONE,
+  onMinimise,
+  onRestore,
   speech,
   standalone = false,
   fill = false,
@@ -117,6 +128,51 @@ export function TerminalsSurface({
     onFocus(id);
   };
 
+  // The sessions the grid tiles, in order — everything not minimised here.
+  const visibleSessions =
+    minimisedIds.length === 0
+      ? sessions
+      : sessions.filter((s) => !minimisedIds.includes(s.id));
+
+  // Minimising never leaves focus or Max on a session the grid no longer shows:
+  // focus moves to the next visible session in order (wrapping to the first),
+  // and Max — which shows exactly one session — returns to the grid of the rest.
+  // A minimise the model would refuse (the id is not in the grid, or it is the
+  // last one there) changes nothing here either.
+  //
+  // Focus moves with the plain `onFocus`, not `handleFocus`: the session that
+  // inherits focus was not chosen by the user, so it is not an activation — no
+  // reconnect over its content and no dismissing its "done" LED (ADR 0010).
+  const handleMinimise = (id: string) => {
+    const i = visibleSessions.findIndex((s) => s.id === id);
+    if (i === -1 || visibleSessions.length < 2) return;
+    const shown = maximized ? visibleSessionId(visibleSessions, focusedId) : null;
+    onMinimise?.(id);
+    if (focusedId === id) {
+      const rest = [...visibleSessions.slice(i + 1), ...visibleSessions.slice(0, i)];
+      onFocus(rest[0].id);
+    }
+    if (shown === id) onToggleMaximize();
+  };
+
+  // A session brought back from the tray or the rail's aggregate is the one the
+  // user reached for, so it takes focus.
+  const handleRestore = (id: string) => {
+    onRestore?.(id);
+    handleFocus(id);
+  };
+
+  // Focus that lands on a minimised session was a pick of it — the spine, the
+  // drawer, a sidebar row, a notification tap — so it comes back into the grid.
+  // Left out, it would be focused but unshown: Max and the mobile view would
+  // show another terminal while the focus-driven controls aimed at this one.
+  // A layout effect, so the grid never paints a frame without it. Minimising
+  // the focused session cannot trip this: `handleMinimise` moves focus off it
+  // in the same update.
+  useLayoutEffect(() => {
+    if (focusedId && minimisedIds.includes(focusedId)) onRestore?.(focusedId);
+  }, [focusedId, minimisedIds, onRestore]);
+
   // Sockets die in bursts, so the Reconnect control repairs all of them. With
   // nothing disconnected it keeps its second, deliberate use: repaint the pane
   // being looked at, which is how it is used on a terminal that looks wrong
@@ -131,7 +187,7 @@ export function TerminalsSurface({
   // (a live reply) wins. Only the visible session's pane counts (see
   // `visibleSessionId`): hidden sessions stay mounted and their panes can
   // auto-open, which must not blank the bar under the terminal on screen.
-  const visibleId = visibleSessionId(sessions, focusedId);
+  const visibleId = visibleSessionId(visibleSessions, focusedId);
   const shortcutBarYielded = useAnyAnswerPaneOpen(visibleId ? [visibleId] : []);
 
   return (
@@ -172,6 +228,8 @@ export function TerminalsSurface({
           onReorder={onReorder ?? (() => {})}
           onReconnect={handleReconnect}
           onApplyPreset={onApplyPreset}
+          minimisedIds={minimisedIds}
+          onRestore={handleRestore}
         />
       </div>
 
@@ -187,6 +245,8 @@ export function TerminalsSurface({
           }}
           onOpenDrawer={() => onSetDrawerOpen(!drawerOpen)}
           onReconnect={handleReconnect}
+          minimisedIds={minimisedIds}
+          onRestore={handleRestore}
         />
       </div>
 
@@ -217,6 +277,9 @@ export function TerminalsSurface({
             onRename={(id, n) => onUpdateSession(id, { name: n })}
             tiles={tiles}
             onPlace={onPlace}
+            minimisedIds={minimisedIds}
+            onMinimise={handleMinimise}
+            onToggleMaximize={onToggleMaximize}
             speech={speech}
           />
         </div>

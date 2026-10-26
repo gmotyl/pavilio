@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, LayoutGrid } from "lucide-react";
+import { Columns3 } from "lucide-react";
 import { GRID, getLayoutPresets, type LayoutPreset } from "./tileLayout";
 
 interface Props {
@@ -35,7 +35,8 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
           if (!disabled) setOpen((o) => !o);
         }}
         disabled={disabled}
-        className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"
+        aria-label="Layout"
+        className="flex items-center px-2.5 transition-colors disabled:opacity-40"
         style={{ color: "var(--text-secondary)" }}
         onMouseEnter={(e) => {
           if (!disabled) e.currentTarget.style.background = "var(--bg-hover)";
@@ -43,13 +44,12 @@ export function LayoutPresetMenu({ count, onApply }: Props) {
         onMouseLeave={(e) =>
           (e.currentTarget.style.background = "transparent")
         }
-        title="Grid layout presets"
+        title="Layout presets"
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <LayoutGrid size={12} />
-        <span className="uppercase tracking-widest">Layout</span>
-        <ChevronDown size={12} />
+        {/* Icon only. Not LayoutGrid: four squares is Max's way back to the grid. */}
+        <Columns3 size={13} />
       </button>
       {open && !disabled && (
         <>

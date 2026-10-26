@@ -1,0 +1,223 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { SessionMeta } from "./useTerminalSessions";
+import { sessionLabel } from "./useTerminalSessions";
+import { TerminalActivityLed } from "./TerminalActivityLed";
+import { useAggregateActivityFlags } from "./useTerminalActivityChannel";
+import { ProjectMark } from "../projects/ProjectMark";
+
+interface Props {
+  /** The minimised sessions, in session order. */
+  sessions: SessionMeta[];
+  /** Bring a session back into the grid. */
+  onRestore: (id: string) => void;
+  /**
+   * The trigger's testid. The dot is `${testId}-led` and each menu row
+   * `${testId}-item-${id}`.
+   */
+  testId: string;
+  /** Which surface hosts the trigger: the desktop strip's folded tray or the mobile rail. */
+  variant: "tray" | "rail";
+}
+
+const TRIGGER: Record<Props["variant"], { className: string; style: React.CSSProperties }> = {
+  tray: {
+    className:
+      "shrink-0 mx-1.5 px-2 py-0.5 rounded-full flex items-center gap-1.5 whitespace-nowrap text-[11px] font-mono",
+    style: {
+      background: "var(--bg-elevated, var(--bg-active))",
+      border: "1px solid var(--border-subtle)",
+      color: "var(--text-primary)",
+    },
+  },
+  rail: {
+    className:
+      "shrink-0 h-7 px-2 rounded-md flex items-center gap-1.5 whitespace-nowrap text-[11px] font-mono active:scale-95 transition-transform",
+    style: {
+      background: "var(--bg-base)",
+      border: "1px solid var(--border-subtle)",
+      color: "var(--text-secondary)",
+    },
+  },
+};
+
+/** Gap between the trigger and the menu, and the menu's margin to the window edge. */
+const GAP = 4;
+const EDGE = 8;
+/** Below this much room under the trigger, the menu opens above it if there is more room there. */
+const MIN_BELOW = 160;
+
+interface MenuPos {
+  /** Exactly one of `top` / `bottom` is set: the menu opens below or above the trigger. */
+  top?: number;
+  bottom?: number;
+  right: number;
+  maxHeight: number;
+}
+
+/**
+ * Where the menu pins for a trigger at `r`: below it, capped to the room left
+ * so a long list scrolls instead of running off the screen — or above it when
+ * the trigger sits so low that above has more room.
+ */
+function menuPos(r: DOMRect): MenuPos {
+  const right = Math.max(EDGE, window.innerWidth - r.right);
+  const below = window.innerHeight - r.bottom - GAP - EDGE;
+  const above = r.top - GAP - EDGE;
+  if (below >= MIN_BELOW || below >= above) {
+    return { top: r.bottom + GAP, right, maxHeight: below };
+  }
+  return { bottom: window.innerHeight - r.top + GAP, right, maxHeight: above };
+}
+
+/**
+ * "▁ N": every minimised session behind one trigger whose dot shows the loudest
+ * state (attention > busy > idle), from the same flags `ProjectActivityLed`
+ * reads. Its menu lists mark, LED and full label per session; choosing one
+ * restores it. Shared by the folded desktop tray and the mobile rail.
+ *
+ * Both hosts clip what overflows them (the strip's slot, the rail's sideways
+ * scroller), so the menu is portalled and pinned to the trigger. The pin is
+ * measured once on open, so a window resize closes the menu rather than leave it
+ * floating where the trigger used to be. Opening focuses the first row,
+ * ArrowUp/ArrowDown move between rows (wrapping), Escape returns to the trigger,
+ * and focus leaving menu and trigger (Tab) closes it.
+ */
+export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props) {
+  const ids = sessions.map((s) => s.id);
+  const { hasAttention, hasBusy } = useAggregateActivityFlags(ids);
+  const loudest = hasAttention ? "attention" : hasBusy ? "busy" : "idle";
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<MenuPos | null>(null);
+  const count = sessions.length;
+  const name = `${count} minimised terminal${count === 1 ? "" : "s"}`;
+  const trigger = TRIGGER[variant];
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) {
+      setPos(null);
+      return;
+    }
+    setPos(menuPos(triggerRef.current.getBoundingClientRect()));
+  }, [open]);
+
+  // Focus lands on the first row once the menu is pinned (and so visible — a
+  // `visibility: hidden` element cannot take focus).
+  useEffect(() => {
+    if (!open || !pos) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open, pos]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const inside = (t: EventTarget | null) =>
+      t instanceof Node && (triggerRef.current?.contains(t) || menuRef.current?.contains(t));
+    const onDown = (e: PointerEvent) => {
+      if (!inside(e.target)) close();
+    };
+    // Tab out of the menu closes it, as a click outside does: the arrows below
+    // are heard on the whole document, so a menu left open would pull focus
+    // back from wherever Tab went.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!inside(e.target)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        close();
+        triggerRef.current?.focus();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+      );
+      if (items.length === 0) return;
+      e.preventDefault();
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      // From outside the menu, Down enters at the top and Up at the bottom.
+      const next = at < 0 ? (step > 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
+      items[next].focus();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid={testId}
+        onClick={() => setOpen((o) => !o)}
+        aria-label={name}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={name}
+        className={trigger.className}
+        style={trigger.style}
+      >
+        <span>▁ {count}</span>
+        <span
+          data-testid={`${testId}-led`}
+          className="terminal-led"
+          data-state={loudest}
+          aria-hidden
+        />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Minimised terminals"
+            className="fixed z-50 min-w-[200px] max-w-[calc(100vw-16px)] overflow-y-auto p-1 rounded-md shadow-lg"
+            style={{
+              ...(pos?.bottom !== undefined ? { bottom: pos.bottom } : { top: pos?.top ?? 0 }),
+              right: pos?.right ?? 8,
+              maxHeight: pos?.maxHeight,
+              visibility: pos ? "visible" : "hidden",
+              background: "var(--bg-elevated, var(--bg-surface))",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            {sessions.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="menuitem"
+                data-testid={`${testId}-item-${s.id}`}
+                onClick={() => {
+                  setOpen(false);
+                  onRestore(s.id);
+                }}
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left text-[12px] font-mono"
+                style={{ color: "var(--text-primary)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                title={sessionLabel(s)}
+              >
+                <ProjectMark project={s.project} size={16} />
+                <TerminalActivityLed sessionId={s.id} />
+                <span>{sessionLabel(s)}</span>
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+export default MinimisedCounter;

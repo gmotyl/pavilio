@@ -124,6 +124,7 @@ const FIXTURES: Record<string, Fixture> = {
     value: [{ sessionId: "sess-7f3a91c4", x: 0, y: 0, w: 48, h: 48 }],
     scopeArg: "__all__",
   },
+  "terminal.minimised": { value: ["sess-0b2e55d1"], scopeArg: "__all__" },
 
   // ── Speech ───────────────────────────────────────────────────────────────
   "speech.engine": { value: "edge" },
@@ -259,9 +260,9 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(56);
+    expect(ALL_PREFERENCES.length).toBe(57);
     expect(portable.length).toBe(43);
-    expect(machineLocal.length).toBe(13);
+    expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the
     // shipped table agrees with it, not merely that it type-checked.
@@ -435,6 +436,7 @@ describe("the machine-local guard", () => {
       "terminal.focus",
       "terminal.order",
       "terminal.grid",
+      "terminal.minimised",
       "speech.armedCell",
       "speech.modes",
       "nav.lastPath",

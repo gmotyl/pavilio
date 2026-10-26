@@ -24,8 +24,8 @@ const SHAPES_AT_12: Record<number, { label: string; slots: number[][] }[]> = {
     { label: "2 rows", slots: [[0, 0, 12, 6], [0, 6, 12, 6]] },
   ],
   3: [
-    { label: "1 left, 2 stacked right", slots: [[0, 0, 6, 12], [6, 0, 6, 6], [6, 6, 6, 6]] },
     { label: "3 columns", slots: [[0, 0, 4, 12], [4, 0, 4, 12], [8, 0, 4, 12]] },
+    { label: "1 left, 2 stacked right", slots: [[0, 0, 6, 12], [6, 0, 6, 6], [6, 6, 6, 6]] },
     { label: "3 rows", slots: [[0, 0, 12, 4], [0, 4, 12, 4], [0, 8, 12, 4]] },
     { label: "2 stacked left, 1 right", slots: [[0, 0, 6, 6], [6, 0, 6, 12], [0, 6, 6, 6]] },
     { label: "1 top, 2 below", slots: [[0, 0, 12, 6], [0, 6, 6, 6], [6, 6, 6, 6]] },
@@ -105,8 +105,8 @@ describe("getLayoutPresets", () => {
     expect(leadingLabels(1, 1)).toEqual(["1 terminal"]);
     expect(leadingLabels(2, 2)).toEqual(["2 columns", "2 rows"]);
     expect(leadingLabels(3, 6)).toEqual([
-      "1 left, 2 stacked right",
       "3 columns",
+      "1 left, 2 stacked right",
       "3 rows",
       "2 stacked left, 1 right",
       "1 top, 2 below",
@@ -299,8 +299,34 @@ describe("getLayoutPresets", () => {
     }
   });
 
-  it("counts one to six keep their existing default as the first option", () => {
-    for (let count = 1; count <= 6; count++) {
+  it("three sessions default to three equal columns", () => {
+    const [first] = getLayoutPresets(3);
+    const third = GRID / 3;
+
+    expect(third).toBe(16);
+    expect(first.label).toBe("3 columns");
+    expect(first.slots).toEqual([
+      { x: 0, y: 0, w: third, h: GRID },
+      { x: third, y: 0, w: third, h: GRID },
+      { x: third * 2, y: 0, w: third, h: GRID },
+    ]);
+  });
+
+  it("three sessions still offer one left and two stacked right", () => {
+    const leftAndStacked = getLayoutPresets(3).find(
+      (p) => p.label === "1 left, 2 stacked right",
+    )!;
+
+    expect(leftAndStacked).toBeDefined();
+    expect(leftAndStacked.slots).toEqual([
+      { x: 0, y: 0, w: GRID / 2, h: GRID },
+      { x: GRID / 2, y: 0, w: GRID / 2, h: GRID / 2 },
+      { x: GRID / 2, y: GRID / 2, w: GRID / 2, h: GRID / 2 },
+    ]);
+  });
+
+  it("defaults for 1, 2, 4, 5 and 6 sessions are unchanged", () => {
+    for (const count of [1, 2, 4, 5, 6]) {
       const [first] = getLayoutPresets(count);
       const expected = SHAPES_AT_12[count][0];
 

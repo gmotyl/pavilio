@@ -1,6 +1,7 @@
 import { reorderIds, mergeOrder } from "./sessionOrder";
 import {
   expandPreset,
+  getLayoutPresets,
   isValidLayout,
   readingOrder,
   reconcileTiles,
@@ -22,10 +23,19 @@ import {
  * was. A horizontal seam move can therefore leave the two out of step — the price
  * of the promise, and the reason the exception is a distinct action rather than a
  * flag. See ADR 0008's 2026-09-10 amendment.
+ *
+ * `minimised` is the subset of `order` taken out of the grid on this surface. The
+ * layout tiles the *visible* sessions only, so the invariant above holds for the
+ * visible subsequence of `order`; a minimised session keeps its index in `order`,
+ * which is where `restore` puts it back.
  */
 export interface OrderingState {
+  /** All sessions, minimised included. */
   order: string[];
+  /** Tiles the visible sessions only. */
   layout: TileLayout;
+  /** Subset of `order`. */
+  minimised: string[];
 }
 
 /**
@@ -52,6 +62,8 @@ export type OrderingAction =
   | { type: "place"; layout: TileLayout }
   | { type: "resize"; layout: TileLayout }
   | { type: "preset"; preset: LayoutPreset; order?: string[] }
+  | { type: "minimise"; id: string }
+  | { type: "restore"; id: string }
   | { type: "reset"; state: OrderingState };
 
 function sameLayout(a: TileLayout, b: TileLayout): boolean {
@@ -79,19 +91,78 @@ function sameOrder(a: string[], b: string[]): boolean {
  * the value it already held. That keeps the 8s session poll from re-running the
  * persist effects on every unchanged tick.
  */
-function commit(state: OrderingState, order: string[], layout: TileLayout): OrderingState {
+function commit(
+  state: OrderingState,
+  order: string[],
+  layout: TileLayout,
+  minimised: string[] = state.minimised,
+): OrderingState {
   const layoutUnchanged = sameLayout(layout, state.layout);
   const orderUnchanged = sameOrder(order, state.order);
-  if (layoutUnchanged && orderUnchanged) return state;
+  const minimisedUnchanged = sameOrder(minimised, state.minimised);
+  if (layoutUnchanged && orderUnchanged && minimisedUnchanged) return state;
   return {
     order: orderUnchanged ? state.order : order,
     layout: layoutUnchanged ? state.layout : layout,
+    minimised: minimisedUnchanged ? state.minimised : minimised,
   };
+}
+
+/** The sessions the grid tiles: `order` minus the minimised ones, in order. */
+function visibleOf(order: string[], minimised: string[]): string[] {
+  if (minimised.length === 0) return order;
+  const hidden = new Set(minimised);
+  return order.filter((id) => !hidden.has(id));
+}
+
+/**
+ * Writes a new visible sequence back into `order`, leaving every minimised session at
+ * the index it already held. With nothing minimised the result is `visible` itself.
+ */
+function weave(order: string[], minimised: string[], visible: string[]): string[] {
+  if (minimised.length === 0) return visible;
+  const hidden = new Set(minimised);
+  const queue = [...visible];
+  const woven: string[] = [];
+  for (const id of order) {
+    if (hidden.has(id)) woven.push(id);
+    else if (queue.length > 0) woven.push(queue.shift()!);
+  }
+  return [...woven, ...queue];
 }
 
 /** Commits a tiling and the order it implies — the two always move together. */
 function commitLayout(state: OrderingState, layout: TileLayout): OrderingState {
-  return commit(state, readingOrder(layout).map((tile) => tile.sessionId), layout);
+  const visible = readingOrder(layout).map((tile) => tile.sessionId);
+  return commit(state, weave(state.order, state.minimised, visible), layout);
+}
+
+/**
+ * Minimise and restore re-tile with the default preset for the new visible count:
+ * the visible set changed shape, so the user's custom seams are discarded.
+ */
+function defaultTiling(visible: string[]): TileLayout {
+  const [preset] = getLayoutPresets(visible.length);
+  return preset ? expandPreset(visible, preset) : [];
+}
+
+/**
+ * The grid is never left empty while a session is minimised: when no session is
+ * visible, the first minimised one in `order` order comes back, tiled with the
+ * default preset as `restore` would. Returns the same reference when something is
+ * already visible. Exported so a stored scope can be repaired on hydration too.
+ */
+export function ensureVisible(state: OrderingState): OrderingState {
+  if (state.minimised.length === 0) return state;
+  if (visibleOf(state.order, state.minimised).length > 0) return state;
+  const first = state.order.find((id) => state.minimised.includes(id));
+  if (first === undefined) return state;
+  const minimised = state.minimised.filter((id) => id !== first);
+  return {
+    order: state.order,
+    layout: defaultTiling(visibleOf(state.order, minimised)),
+    minimised,
+  };
 }
 
 /** Re-seats sessions into the layout's slots following `order`. */
@@ -108,7 +179,7 @@ function reconcile(layout: TileLayout, order: string[]): TileLayout {
 }
 
 /**
- * One pure transition over `{order, layout}`. The two halves must always move
+ * One pure transition over `{order, layout, minimised}`. The two halves must always move
  * together, and a reducer is what makes that atomic — the shape this replaced (a
  * layout setter nested inside an order setter) was an impure updater that StrictMode
  * replayed, rendering one session in two cells.
@@ -120,14 +191,24 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
     // below deliberately keep it empty, so opening or closing a terminal re-derives that
     // per-count default instead of pinning the shape the count happened to have.
     case "sync": {
+      // An ended session leaves the minimised set with it; the layout only ever saw
+      // visible sessions, so dropping a minimised one does not touch it. If the last
+      // visible session ended, a minimised one comes back (`ensureVisible`).
       const order = mergeOrder(state.order, action.ids);
-      return commit(state, order, reconcile(state.layout, order));
+      const minimised = state.minimised.filter((id) => order.includes(id));
+      const next = ensureVisible({
+        order,
+        layout: reconcile(state.layout, visibleOf(order, minimised)),
+        minimised,
+      });
+      return commit(state, next.order, next.layout, next.minimised);
     }
 
     case "append": {
+      // A new session always starts visible.
       if (state.order.includes(action.id)) return state;
       const order = [...state.order, action.id];
-      return commit(state, order, reconcile(state.layout, order));
+      return commit(state, order, reconcile(state.layout, visibleOf(order, state.minimised)));
     }
 
     case "remove": {
@@ -137,13 +218,20 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
       // and one the next `append` splits instead of the whole grid.
       if (!state.order.includes(action.id)) return state;
       const order = state.order.filter((id) => id !== action.id);
-      return commit(state, order, reconcile(state.layout, order));
+      const minimised = state.minimised.filter((id) => id !== action.id);
+      // Closing the last visible session brings a minimised one back (`ensureVisible`).
+      const next = ensureVisible({
+        order,
+        layout: reconcile(state.layout, visibleOf(order, minimised)),
+        minimised,
+      });
+      return commit(state, next.order, next.layout, next.minimised);
     }
 
     case "reorder": {
       // A tab drag moves sessions between slots; the shape stays exactly as it was.
       const order = reorderIds(state.order, action.fromId, action.toId);
-      return commit(state, order, assign(state.layout, order));
+      return commit(state, order, assign(state.layout, visibleOf(order, state.minimised)));
     }
 
     case "place":
@@ -166,7 +254,34 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
       // `order` is passed explicitly by the hook: before the first session sync the
       // reducer's own order is still empty, and a preset click would expand to nothing.
       const order = action.order ?? state.order;
-      return commit(state, order, expandPreset(order, action.preset));
+      return commit(
+        state,
+        order,
+        expandPreset(visibleOf(order, state.minimised), action.preset),
+      );
+    }
+
+    case "minimise": {
+      // The grid is never left empty: the last visible session cannot be minimised.
+      if (!state.order.includes(action.id) || state.minimised.includes(action.id)) {
+        return state;
+      }
+      const minimised = [...state.minimised, action.id];
+      const visible = visibleOf(state.order, minimised);
+      if (visible.length === 0) return state;
+      return commit(state, state.order, defaultTiling(visible), minimised);
+    }
+
+    case "restore": {
+      // The session returns at the index it kept in `order`.
+      if (!state.minimised.includes(action.id)) return state;
+      const minimised = state.minimised.filter((id) => id !== action.id);
+      return commit(
+        state,
+        state.order,
+        defaultTiling(visibleOf(state.order, minimised)),
+        minimised,
+      );
     }
 
     case "reset":

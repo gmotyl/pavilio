@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { orderingReducer, type OrderingAction, type OrderingState } from "../orderingReducer";
 import {
+  appendSession,
   expandPreset,
   getLayoutPresets,
   isValidLayout,
   readingOrder,
+  removeSession,
   type TileLayout,
 } from "../tileLayout";
 
@@ -18,6 +20,7 @@ const defaultLayout = (ids: string[]): TileLayout => expandPreset(ids, presetFor
 const state = (ids: string[]): OrderingState => ({
   order: ids,
   layout: defaultLayout(ids),
+  minimised: [],
 });
 
 const idsOf = (layout: TileLayout) => readingOrder(layout).map((t) => t.sessionId);
@@ -29,6 +32,7 @@ const idsOf = (layout: TileLayout) => readingOrder(layout).map((t) => t.sessionI
  */
 function deepFreezeState(input: OrderingState): OrderingState {
   Object.freeze(input.order);
+  Object.freeze(input.minimised);
   for (const tile of input.layout) Object.freeze(tile);
   Object.freeze(input.layout);
   return Object.freeze(input);
@@ -43,6 +47,7 @@ describe("orderingReducer", () => {
         { sessionId: "B", x: 0, y: 20, w: 16, h: 28 },
         { sessionId: "C", x: 16, y: 20, w: 32, h: 28 },
       ],
+      minimised: [],
     });
 
     const next = orderingReducer(base, { type: "remove", id: "B" });
@@ -62,6 +67,7 @@ describe("orderingReducer", () => {
     const base = deepFreezeState({
       order: ["A"],
       layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+      minimised: [],
     });
 
     const next = orderingReducer(base, { type: "remove", id: "A" });
@@ -149,7 +155,7 @@ describe("orderingReducer", () => {
     // An empty layout means "no custom shape stored": the caller resolves it to the
     // default preset for the live count, so pinning a shape here would stop the grid
     // re-defaulting when a terminal is opened or closed.
-    const empty: OrderingState = { order: [], layout: [] };
+    const empty: OrderingState = { order: [], layout: [], minimised: [] };
     const next = orderingReducer(empty, { type: "sync", ids: ["A", "B", "C"] });
 
     expect(next.layout).toEqual([]);
@@ -209,5 +215,233 @@ describe("orderingReducer", () => {
       expect(isValidLayout(current.layout), action.type).toBe(true);
       expect(current.order, action.type).toEqual(idsOf(current.layout));
     }
+  });
+});
+
+describe("orderingReducer — minimised sessions", () => {
+  /** A hand-seamed tiling of A, B, C — deliberately not any preset. */
+  const customThree: TileLayout = [
+    { sessionId: "A", x: 0, y: 0, w: 48, h: 20 },
+    { sessionId: "B", x: 0, y: 20, w: 16, h: 28 },
+    { sessionId: "C", x: 16, y: 20, w: 32, h: 28 },
+  ];
+
+  it("minimise takes a session out of the layout and re-tiles with the default preset", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: [
+        { sessionId: "A", x: 0, y: 0, w: 30, h: 24 },
+        { sessionId: "B", x: 30, y: 0, w: 18, h: 24 },
+        { sessionId: "C", x: 0, y: 24, w: 20, h: 24 },
+        { sessionId: "D", x: 20, y: 24, w: 28, h: 24 },
+      ],
+      minimised: [],
+    });
+
+    const next = orderingReducer(base, { type: "minimise", id: "B" });
+
+    expect(next.minimised).toEqual(["B"]);
+    expect(next.order).toEqual(["A", "B", "C", "D"]);
+    expect(next.layout).toEqual(expandPreset(["A", "C", "D"], getLayoutPresets(3)[0]));
+  });
+
+  it("minimise is a no-op on the last visible session", () => {
+    const base = deepFreezeState({
+      order: ["A", "B"],
+      layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+      minimised: ["B"],
+    });
+
+    expect(orderingReducer(base, { type: "minimise", id: "A" })).toBe(base);
+
+    const single = deepFreezeState(state(["A"]));
+    expect(orderingReducer(single, { type: "minimise", id: "A" })).toBe(single);
+  });
+
+  it("minimise ignores unknown or already-minimised ids", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C"],
+      layout: defaultLayout(["A", "C"]),
+      minimised: ["B"],
+    });
+
+    expect(orderingReducer(base, { type: "minimise", id: "B" })).toBe(base);
+    expect(orderingReducer(base, { type: "minimise", id: "Z" })).toBe(base);
+  });
+
+  it("restore returns the session at its order position with the default preset", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: [
+        { sessionId: "A", x: 0, y: 0, w: 48, h: 10 },
+        { sessionId: "C", x: 0, y: 10, w: 48, h: 38 },
+      ],
+      minimised: ["B", "D"],
+    });
+
+    const next = orderingReducer(base, { type: "restore", id: "B" });
+
+    expect(next.minimised).toEqual(["D"]);
+    expect(next.order).toEqual(["A", "B", "C", "D"]);
+    expect(next.layout).toEqual(expandPreset(["A", "B", "C"], getLayoutPresets(3)[0]));
+    expect(idsOf(next.layout)).toEqual(["A", "B", "C"]);
+  });
+
+  it("sync drops ended sessions from the minimised set", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "sync", ids: ["A", "B", "C"] });
+
+    expect(next.minimised).toEqual([]);
+    expect(next.order).toEqual(["A", "B", "C"]);
+    expect(next.layout).toEqual(customThree);
+  });
+
+  it("a session appended while others are minimised starts visible", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "append", id: "E" });
+
+    expect(next.minimised).toEqual(["D"]);
+    expect(next.order).toContain("E");
+    expect(next.layout).toEqual(appendSession(customThree, "E"));
+    expect(isValidLayout(next.layout)).toBe(true);
+  });
+
+  it("removing a visible session absorbs over visible tiles only", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "B" });
+
+    expect(next.minimised).toEqual(["D"]);
+    expect(next.order).toEqual(["A", "C", "D"]);
+    expect(next.layout).toEqual(removeSession(customThree, "B"));
+  });
+
+  it("presets and placement tile visible sessions only", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: defaultLayout(["A", "C", "D"]),
+      minimised: ["B"],
+    });
+    const visible = ["A", "C", "D"];
+    const rows = getLayoutPresets(3).find((p) => p.label === "3 rows")!;
+
+    const preset = orderingReducer(base, { type: "preset", preset: rows });
+    expect(preset.layout).toEqual(expandPreset(visible, rows));
+    expect(preset.minimised).toEqual(["B"]);
+    expect(preset.order).toEqual(["A", "B", "C", "D"]);
+
+    const placed: TileLayout = [
+      { sessionId: "D", x: 0, y: 0, w: 48, h: 24 },
+      { sessionId: "A", x: 0, y: 24, w: 24, h: 24 },
+      { sessionId: "C", x: 24, y: 24, w: 24, h: 24 },
+    ];
+    const afterPlace = orderingReducer(preset, { type: "place", layout: placed });
+    expect(afterPlace.layout).toEqual(placed);
+    expect(afterPlace.minimised).toEqual(["B"]);
+    // The minimised session keeps its slot in the order; visible ones follow the tiling.
+    expect(afterPlace.order).toEqual(["D", "B", "A", "C"]);
+
+    const resized: TileLayout = [
+      { sessionId: "D", x: 0, y: 0, w: 48, h: 20 },
+      { sessionId: "A", x: 0, y: 20, w: 24, h: 28 },
+      { sessionId: "C", x: 24, y: 20, w: 24, h: 28 },
+    ];
+    const afterResize = orderingReducer(afterPlace, { type: "resize", layout: resized });
+    expect(afterResize.layout).toEqual(resized);
+    expect(afterResize.minimised).toEqual(["B"]);
+    expect(afterResize.order).toEqual(afterPlace.order);
+  });
+
+  it("removing the last visible session restores the first minimised one", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C"],
+      layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+      minimised: ["C", "B"],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "A" });
+
+    // The grid is never empty: B comes back first because it leads in `order`.
+    expect(next.order).toEqual(["B", "C"]);
+    expect(next.minimised).toEqual(["C"]);
+    expect(next.layout).toEqual(defaultLayout(["B"]));
+  });
+
+  it("an ended last visible session restores the first minimised one", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C"],
+      layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+      minimised: ["C", "B"],
+    });
+
+    const next = orderingReducer(base, { type: "sync", ids: ["B", "C"] });
+
+    expect(next.order).toEqual(["B", "C"]);
+    expect(next.minimised).toEqual(["C"]);
+    expect(next.layout).toEqual(defaultLayout(["B"]));
+  });
+
+  it("a steady-state poll with minimised sessions is the same state", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    expect(orderingReducer(base, { type: "sync", ids: ["A", "B", "C", "D"] })).toBe(base);
+  });
+
+  it("removing a minimised session drops it from the set and keeps the layout", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "D" });
+
+    expect(next.minimised).toEqual([]);
+    expect(next.order).toEqual(["A", "B", "C"]);
+    expect(next.layout).toBe(customThree);
+  });
+
+  it("restore of a session that is not minimised keeps the state and its seams", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    expect(orderingReducer(base, { type: "restore", id: "A" })).toBe(base);
+    expect(orderingReducer(base, { type: "restore", id: "Z" })).toBe(base);
+  });
+
+  it("reorder keeps minimised sessions out of the layout", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "reorder", fromId: "D", toId: "A" });
+
+    expect(next.order).toEqual(["D", "A", "B", "C"]);
+    expect(next.minimised).toEqual(["D"]);
+    expect(idsOf(next.layout)).toEqual(["A", "B", "C"]);
+    expect(isValidLayout(next.layout)).toBe(true);
   });
 });

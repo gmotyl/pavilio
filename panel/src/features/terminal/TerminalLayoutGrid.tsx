@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Eye, X } from "lucide-react";
+import { LayoutGrid, Maximize2, Minus, Printer, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
@@ -61,6 +61,16 @@ interface Props {
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
   /** See {@link GridSpeech}. Required: a surface that forgets it is silent. */
   speech: GridSpeech;
+  /**
+   * Sessions minimised on this surface, never tiled. In the grid they are
+   * unmounted and parked in the terminal instance pool — process, socket and
+   * activity LED live on; only Max and mobile keep them mounted, hidden.
+   */
+  minimisedIds?: string[];
+  /** Take a session out of the grid (the cell header's minimise). */
+  onMinimise?: (id: string) => void;
+  /** Flip Max — the same toggle the toolbar's Max/Grid control calls. */
+  onToggleMaximize?: () => void;
 }
 
 export function TerminalLayoutGrid({
@@ -74,6 +84,9 @@ export function TerminalLayoutGrid({
   tiles,
   onPlace,
   speech,
+  minimisedIds,
+  onMinimise,
+  onToggleMaximize,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia(MOBILE_QUERY).matches,
@@ -139,16 +152,20 @@ export function TerminalLayoutGrid({
     [onPlace],
   );
 
-  // The committed tiling, or the default preset for the current count when the caller
+  // The committed tiling, or the default preset for the visible count when the caller
   // has none stored. The real caller always passes `tiles` (as `[]` when no custom
   // shape exists), so treat empty the same as absent rather than rendering nothing.
+  // Minimised sessions are never tiled, so the fallback expands over the rest.
+  const visibleIds = sessions
+    .map((s) => s.id)
+    .filter((id) => !minimisedIds?.includes(id));
   const resolvedTiles: TileLayout =
     seamDraft ??
     (tiles && tiles.length > 0
       ? tiles
       : expandPreset(
-          sessions.map((s) => s.id),
-          getLayoutPresets(count)[0] ?? { label: "", slots: [] },
+          visibleIds,
+          getLayoutPresets(visibleIds.length)[0] ?? { label: "", slots: [] },
         ));
 
   const modal = (
@@ -198,6 +215,20 @@ export function TerminalLayoutGrid({
       onRename={onRename}
       onDragStart={() => overlayRef.current?.begin(session.id)}
       onDragEnd={() => overlayRef.current?.end()}
+      // The last visible session cannot leave the grid: an empty grid with
+      // live sessions behind it would be a dead end.
+      canMinimise={visibleIds.length > 1}
+      onMinimise={onMinimise}
+      // Mobile always shows one terminal, so there is nothing to maximise.
+      showMaximise={!isMobile}
+      maximized={maximized}
+      onMaximise={() => {
+        // In Max the control reads Grid and only turns Max off, keeping focus.
+        // Otherwise the pressed cell is the one Max shows — focus it first so
+        // the toggle does not maximise whichever cell had focus before.
+        if (!maximized) onFocus(session.id);
+        onToggleMaximize?.();
+      }}
       speech={speech}
       style={{ height: "100%", ...style }}
     />
@@ -207,7 +238,11 @@ export function TerminalLayoutGrid({
   // Keep ALL other sessions mounted (hidden) so their terminal state survives.
   let body: React.ReactNode;
   if (isMobile || maximized) {
-    const visibleId = visibleSessionId(sessions, focusedId);
+    // Same pick as the surface's shortcut bar: never a minimised session.
+    const visibleId = visibleSessionId(
+      sessions.filter((s) => visibleIds.includes(s.id)),
+      focusedId,
+    );
     body = (
       <div className="relative w-full h-full">
         {sessions.map((s) => (
@@ -319,6 +354,11 @@ interface CellProps {
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  canMinimise: boolean;
+  onMinimise?: (id: string) => void;
+  showMaximise: boolean;
+  maximized: boolean;
+  onMaximise: () => void;
   speech: GridSpeech;
   style?: React.CSSProperties;
 }
@@ -333,6 +373,11 @@ function TerminalCell({
   onRename,
   onDragStart,
   onDragEnd,
+  canMinimise,
+  onMinimise,
+  showMaximise,
+  maximized,
+  onMaximise,
   speech,
   style,
 }: CellProps) {
@@ -573,7 +618,7 @@ function TerminalCell({
           </span>
         )}
         <div className="flex gap-0.5">
-          {/* Leads the eye · kill group. Renders nothing while the socket is
+          {/* Leads the control group. Renders nothing while the socket is
               healthy, so the group's usual width is unchanged. */}
           <TerminalDisconnectedBadge sessionId={session.id} />
           {/* Speak · speech-controls lead the group: they change per utterance,
@@ -619,16 +664,55 @@ function TerminalCell({
             // `null`, and negating that would say nothing.
             onToggleBar={() => setBarChoice(!speechBarVisible)}
           />
+          {/* The cell reader is a printer: an eye read as the answer pane's. */}
           <CellIconButton
-            testId={`terminal-cell-eye-${session.id}`}
+            testId={`terminal-cell-reader-${session.id}`}
             title={`View viewport text (read aloud / print) — ${navigator.platform.includes("Mac") ? "⌘" : "Ctrl+"}U`}
             onClick={(e) => {
               e.stopPropagation();
               openViewport();
             }}
           >
-            <Eye size={11} />
+            <Printer size={11} />
           </CellIconButton>
+          {/* Desktop only, as in the mockup: sets the window controls apart
+              from the speech and reader ones. Decorative, so hidden from AT. */}
+          {showMaximise && (
+            <span
+              data-testid={`terminal-cell-separator-${session.id}`}
+              aria-hidden="true"
+              className="mx-0.5 shrink-0"
+              style={{ width: 1, height: 14, background: "var(--border-subtle)" }}
+            />
+          )}
+          {/* Minimise and maximise stop the click short of the cell: neither is
+              an arrival at this cell (maximise focuses it on purpose). */}
+          <CellIconButton
+            testId={`terminal-cell-minimise-${session.id}`}
+            title="Minimise"
+            ariaLabel="Minimise"
+            disabled={!canMinimise}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMinimise?.(session.id);
+            }}
+          >
+            <Minus size={11} />
+          </CellIconButton>
+          {showMaximise && (
+            // Same icon pair as the toolbar's Max/Grid control: four squares in Max.
+            <CellIconButton
+              testId={`terminal-cell-maximise-${session.id}`}
+              title={maximized ? "Back to grid" : "Maximise"}
+              ariaLabel={maximized ? "Grid" : "Maximise"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMaximise();
+              }}
+            >
+              {maximized ? <LayoutGrid size={11} /> : <Maximize2 size={11} />}
+            </CellIconButton>
+          )}
           <CellIconButton
             testId={`terminal-cell-kill-${session.id}`}
             title="Kill session"
@@ -688,22 +772,34 @@ function CellIconButton({
   title,
   hoverColor,
   testId,
+  ariaLabel,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
   title: string;
   hoverColor?: string;
   testId?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
+      aria-label={ariaLabel}
+      disabled={disabled}
       onClick={onClick}
       data-testid={testId}
+      // The class is shared with the colour picker's trigger (asserted by the
+      // header tests), so the disabled look is inline rather than a class.
       className="p-1 rounded transition-colors"
-      style={{ color: "var(--text-muted)" }}
+      style={{
+        color: "var(--text-muted)",
+        ...(disabled ? { opacity: 0.4, cursor: "default" } : {}),
+      }}
       onMouseEnter={(e) => {
+        if (disabled) return;
         e.currentTarget.style.color = hoverColor || "var(--text-primary)";
         e.currentTarget.style.background = "rgba(255,255,255,0.06)";
       }}

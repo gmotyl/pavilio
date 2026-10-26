@@ -16,7 +16,10 @@ export function TerminalsPage() {
     tiles,
     placeTiles,
     applyPreset,
-  } = useAllTerminalSessions();
+    minimisedIds,
+    minimise,
+    restore,
+  } = useAllTerminalSessions({ persist: true });
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   // Told to the speech alerts, whose "looked at" rule reads this page's focus.
@@ -103,6 +106,9 @@ export function TerminalsPage() {
       tiles={tiles}
       onPlace={placeTiles}
       onApplyPreset={applyPreset}
+      minimisedIds={minimisedIds}
+      onMinimise={minimise}
+      onRestore={restore}
       speech={speech}
     />
   );

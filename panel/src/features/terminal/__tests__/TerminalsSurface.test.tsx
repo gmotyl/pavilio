@@ -60,6 +60,12 @@ function Harness({
   focusedId = null,
   sessions = [],
   handles,
+  onFocus = () => {},
+  maximized = false,
+  onToggleMaximize = () => {},
+  minimisedIds,
+  onMinimise,
+  onRestore,
 }: {
   tiles?: TileLayout;
   onPlace?: (layout: TileLayout) => void;
@@ -67,6 +73,12 @@ function Harness({
   focusedId?: string | null;
   sessions?: SessionMeta[];
   handles?: Map<string, TerminalHandle>;
+  onFocus?: (id: string | null) => void;
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
+  minimisedIds?: string[];
+  onMinimise?: (id: string) => void;
+  onRestore?: (id: string) => void;
 }) {
   const ref = useRef<Map<string, TerminalHandle>>(handles ?? new Map());
   return (
@@ -75,12 +87,12 @@ function Harness({
       repos={[]}
       sessions={sessions}
       focusedId={focusedId}
-      onFocus={() => {}}
+      onFocus={onFocus}
       onDeleteSession={() => {}}
       onUpdateSession={() => {}}
       allSessions={[]}
-      maximized={false}
-      onToggleMaximize={() => {}}
+      maximized={maximized}
+      onToggleMaximize={onToggleMaximize}
       drawerOpen={false}
       onSetDrawerOpen={() => {}}
       terminalHandlesRef={ref}
@@ -89,6 +101,9 @@ function Harness({
       tiles={tiles}
       onPlace={onPlace}
       onApplyPreset={onApplyPreset}
+      minimisedIds={minimisedIds}
+      onMinimise={onMinimise}
+      onRestore={onRestore}
       speech={INERT_SPEECH}
     />
   );
@@ -109,10 +124,10 @@ describe("TerminalsSurface", () => {
     expect(props.onPlace).toBe(onPlace);
   });
 
-  // The surface used to hand the same `onToggleMaximize` to both children, and
-  // the cell button that used it toggled the toolbar's own surface-wide flag.
-  // The cell button is gone; the toolbar's path must be untouched.
-  it("hands the maximize callback to the toolbar only", () => {
+  // The cell header's maximise is back and flips the same surface-wide Max
+  // flag as the toolbar; the grid focuses the pressed cell before toggling, so
+  // Max shows that cell rather than whichever one had focus.
+  it("hands the same maximize callback to the toolbar and the grid", () => {
     render(<Harness />);
 
     const toolbar = toolbarProps.mock.calls.at(-1)?.[0];
@@ -120,7 +135,7 @@ describe("TerminalsSurface", () => {
     expect(typeof toolbar.onToggleMaximize).toBe("function");
     expect(toolbar.maximized).toBe(false);
     expect(grid.maximized).toBe(false);
-    expect("onToggleMaximize" in grid).toBe(false);
+    expect(grid.onToggleMaximize).toBe(toolbar.onToggleMaximize);
   });
 
   it("wires sessions.length and onApplyPreset into the toolbar's LayoutPresetMenu", () => {
@@ -377,5 +392,203 @@ describe("TerminalsSurface shortcut bar visibility", () => {
     }).not.toThrow();
     expect(gone.send).not.toHaveBeenCalled();
     expect(gone.focus).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalsSurface minimise", () => {
+  const four = () => [session("a"), session("b"), session("c"), session("d")];
+
+  beforeEach(() => {
+    gridProps.mockClear();
+    toolbarProps.mockClear();
+    railProps.mockClear();
+    sendDismiss.mockClear();
+    reconnectOnActivate.mockClear();
+  });
+
+  /** The minimise entry point the grid's cell headers are handed. */
+  const minimise = (id: string) =>
+    (gridProps.mock.calls.at(-1)![0].onMinimise as (id: string) => void)(id);
+
+  it("minimising the focused session focuses the next visible one", () => {
+    const onFocus = vi.fn();
+    const onMinimise = vi.fn();
+
+    const { rerender } = render(
+      <Harness
+        sessions={four()}
+        focusedId="b"
+        minimisedIds={["c"]}
+        onFocus={onFocus}
+        onMinimise={onMinimise}
+      />,
+    );
+    minimise("b");
+
+    // c is minimised, so the next visible session after b is d.
+    expect(onMinimise).toHaveBeenCalledWith("b");
+    expect(onFocus).toHaveBeenLastCalledWith("d");
+
+    // Wraps to the first visible session.
+    onFocus.mockClear();
+    rerender(
+      <Harness
+        sessions={four()}
+        focusedId="d"
+        minimisedIds={["c"]}
+        onFocus={onFocus}
+        onMinimise={onMinimise}
+      />,
+    );
+    minimise("d");
+    expect(onFocus).toHaveBeenLastCalledWith("a");
+
+    // Minimising an unfocused session leaves focus where it is.
+    onFocus.mockClear();
+    minimise("b");
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  // ADR 0010: only a user activation is consent to reconnect. The session that
+  // inherits focus from a minimise was not chosen, so it is neither reconnected
+  // nor has its "done" LED dismissed.
+  it("minimising the focused session moves focus without reconnecting or dismissing the next one", () => {
+    const onFocus = vi.fn();
+
+    render(
+      <Harness
+        sessions={four()}
+        focusedId="b"
+        onFocus={onFocus}
+        onMinimise={() => {}}
+      />,
+    );
+    minimise("b");
+
+    expect(onFocus).toHaveBeenLastCalledWith("c");
+    expect(reconnectOnActivate).not.toHaveBeenCalled();
+    expect(sendDismiss).not.toHaveBeenCalled();
+  });
+
+  it("a refused minimise changes nothing: last visible session or one already minimised", () => {
+    const onFocus = vi.fn();
+    const onMinimise = vi.fn();
+    const onToggleMaximize = vi.fn();
+
+    render(
+      <Harness
+        sessions={[session("a"), session("b")]}
+        focusedId="a"
+        maximized
+        minimisedIds={["b"]}
+        onFocus={onFocus}
+        onMinimise={onMinimise}
+        onToggleMaximize={onToggleMaximize}
+      />,
+    );
+
+    // a is the only visible session: the grid must not empty, Max stays on.
+    minimise("a");
+    // b is already out of the grid.
+    minimise("b");
+
+    expect(onMinimise).not.toHaveBeenCalled();
+    expect(onToggleMaximize).not.toHaveBeenCalled();
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it("the shortcut bar never targets a minimised session", () => {
+    const handle = (id: string) => ({
+      sessionId: id,
+      send: vi.fn(),
+      focus: vi.fn(),
+      getBufferSnapshot: vi.fn(),
+    });
+    const a = handle("a");
+    const b = handle("b");
+    const handles = new Map<string, TerminalHandle>([
+      ["a", a as unknown as TerminalHandle],
+      ["b", b as unknown as TerminalHandle],
+    ]);
+
+    // Focus still names a, but a is minimised: the visible session is b.
+    render(
+      <Harness
+        sessions={[session("a"), session("b")]}
+        focusedId="a"
+        minimisedIds={["a"]}
+        handles={handles}
+      />,
+    );
+    (shortcutBarProps.mock.calls.at(-1)![0] as { onSend: (d: string) => void }).onSend("x");
+
+    expect(b.send).toHaveBeenCalledWith("x");
+    expect(a.send).not.toHaveBeenCalled();
+  });
+
+  it("minimising the maximised session returns to the grid", () => {
+    const onToggleMaximize = vi.fn();
+    const onMinimise = vi.fn();
+
+    render(
+      <Harness
+        sessions={four()}
+        focusedId="a"
+        maximized
+        onToggleMaximize={onToggleMaximize}
+        onMinimise={onMinimise}
+      />,
+    );
+
+    // A session Max is not showing: Max stays on.
+    minimise("c");
+    expect(onToggleMaximize).not.toHaveBeenCalled();
+
+    minimise("a");
+    expect(onMinimise).toHaveBeenLastCalledWith("a");
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("restoring a session focuses it", () => {
+    const onFocus = vi.fn();
+    const onRestore = vi.fn();
+
+    render(
+      <Harness
+        sessions={four()}
+        focusedId="a"
+        minimisedIds={["c"]}
+        onFocus={onFocus}
+        onRestore={onRestore}
+      />,
+    );
+
+    // From the desktop tray…
+    (toolbarProps.mock.calls.at(-1)![0].onRestore as (id: string) => void)("c");
+    expect(onRestore).toHaveBeenCalledWith("c");
+    expect(onFocus).toHaveBeenLastCalledWith("c");
+
+    // …and from the mobile rail's aggregate.
+    onFocus.mockClear();
+    (railProps.mock.calls.at(-1)![0].onRestore as (id: string) => void)("c");
+    expect(onFocus).toHaveBeenLastCalledWith("c");
+  });
+
+  // Picking a minimised session anywhere else — the desktop spine, the drawer, a
+  // sidebar row, a notification — lands as focus on it. Focus on a session the
+  // grid does not show would leave Max, the mobile view and the focus-driven
+  // controls on another terminal, so the pick brings it back.
+  it("focus landing on a minimised session restores it", () => {
+    const onRestore = vi.fn();
+    const { rerender } = render(
+      <Harness sessions={four()} focusedId="a" minimisedIds={["c"]} onRestore={onRestore} />,
+    );
+    expect(onRestore).not.toHaveBeenCalled();
+
+    rerender(
+      <Harness sessions={four()} focusedId="c" minimisedIds={["c"]} onRestore={onRestore} />,
+    );
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(onRestore).toHaveBeenCalledWith("c");
   });
 });

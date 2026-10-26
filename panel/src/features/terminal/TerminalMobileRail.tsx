@@ -5,6 +5,7 @@ import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { useAggregateActivity } from "../favicon/useAggregateActivity";
+import { MinimisedCounter } from "./MinimisedCounter";
 
 interface Props {
   sessions: SessionMeta[];
@@ -14,6 +15,10 @@ interface Props {
   onCreate: (opts?: CreateSessionOpts) => void;
   onOpenDrawer: () => void;
   onReconnect?: () => void;
+  /** Sessions minimised on this surface, in session order — the aggregate's contents. */
+  minimisedIds?: string[];
+  /** Bring a minimised session back into the grid (and focus it). */
+  onRestore?: (id: string) => void;
 }
 
 /**
@@ -29,32 +34,27 @@ export function TerminalMobileRail({
   onCreate,
   onOpenDrawer,
   onReconnect,
+  minimisedIds = NONE,
+  onRestore,
 }: Props) {
   const activity = useAggregateActivity();
   const { colorFor } = useProjectColors();
+  // Dots are for visible sessions only; minimised ones live in the aggregate.
+  const visible =
+    minimisedIds.length === 0
+      ? sessions
+      : sessions.filter((s) => !minimisedIds.includes(s.id));
+  const minimised = sessions.filter((s) => minimisedIds.includes(s.id));
   return (
     <div
+      data-testid="terminal-mobile-rail"
       className="flex items-center gap-2 px-2.5 py-2 shrink-0 overflow-x-auto scrollbar-none"
       style={{
         background: "var(--bg-surface)",
         borderBottom: "1px solid var(--border-subtle)",
       }}
     >
-      <button
-        type="button"
-        data-testid="terminal-mobile-rail-new"
-        onClick={() => onCreate()}
-        className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-95 transition-transform"
-        style={{
-          border: "1.5px dashed var(--text-muted)",
-          color: "var(--text-muted)",
-        }}
-        title={`New terminal in ${currentProject}`}
-      >
-        <Plus size={14} />
-      </button>
-
-      {sessions.map((s) => {
+      {visible.map((s) => {
         const active = s.id === focusedId;
         const accent = colorFor(s.project);
         const label = mobileShortName(s, sessions);
@@ -103,7 +103,30 @@ export function TerminalMobileRail({
         );
       })}
 
+      <button
+        type="button"
+        data-testid="terminal-mobile-rail-new"
+        onClick={() => onCreate()}
+        className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-95 transition-transform"
+        style={{
+          border: "1.5px dashed var(--text-muted)",
+          color: "var(--text-muted)",
+        }}
+        title={`New terminal in ${currentProject}`}
+      >
+        <Plus size={14} />
+      </button>
+
       <div className="flex-1" />
+
+      {minimised.length > 0 && (
+        <MinimisedCounter
+          sessions={minimised}
+          onRestore={(id) => onRestore?.(id)}
+          testId="terminal-mobile-rail-minimised"
+          variant="rail"
+        />
+      )}
 
       {focusedId && onReconnect && (
         <button
@@ -151,5 +174,7 @@ export function TerminalMobileRail({
     </div>
   );
 }
+
+const NONE: string[] = [];
 
 export default TerminalMobileRail;

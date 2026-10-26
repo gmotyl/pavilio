@@ -82,6 +82,7 @@ const MACHINE_LOCAL = [
   "speech.route",
   "terminal.focus",
   "terminal.grid",
+  "terminal.minimised",
   "terminal.order",
 ];
 
@@ -193,6 +194,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
     "global",
   ],
   ["terminal.maximized", false, "project"],
+  ["terminal.minimised", [], "project"],
   ["terminal.order", [], "project"],
   ["time.form.resetAutoOnSave", false, "project"],
   ["time.report", { period: "this-week", format: "text", detail: "detailed" }, "project"],
@@ -242,6 +244,16 @@ describe("the declaration table", () => {
     expect(route.codec.parse("anything")).toBe("anything");
   });
 
+  it("terminal.minimised is a project-scoped machine-local list", () => {
+    const minimised = keyOf("terminal.minimised");
+    expect(minimised).toBe(preferences.terminalMinimised);
+    // Scoped like `terminal.grid`: a project name, or "__all__" for the global view.
+    expect(minimised.scope).toBe("project");
+    // Session ids are machine-local.
+    expect(minimised.portable).toBe(false);
+    expect(minimised.default).toEqual([]);
+  });
+
   it("session-scoped preferences are declared non-portable", () => {
     // Each of these names a live session id — meaningless on another machine,
     // and the one class of value that must never reach the committed file.
@@ -249,6 +261,7 @@ describe("the declaration table", () => {
       "terminal.focus",
       "terminal.order",
       "terminal.grid",
+      "terminal.minimised",
       "speech.armedCell",
       "speech.modes",
       "nav.lastPath",

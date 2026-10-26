@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
+import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
@@ -54,7 +55,7 @@ beforeEach(() => {
 
 // TerminalView pulls in xterm which cannot render in jsdom; stub it.
 // The stub also calls onReady with a fake handle that returns a one-line
-// snapshot, so the Eye button (which depends on getBufferSnapshot) can
+// snapshot, so the reader button (which depends on getBufferSnapshot) can
 // be exercised in tests without xterm.
 vi.mock("../TerminalView", async () => {
   const React = await import("react");
@@ -174,13 +175,13 @@ describe("TerminalLayoutGrid — confirm close flow", () => {
   });
 });
 
-describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () => {
-  it("clicking the Eye button opens the viewport modal", () => {
+describe("TerminalLayoutGrid — viewport reader (printer button + Cmd/Ctrl+U)", () => {
+  it("clicking the reader button opens the viewport modal", () => {
     const session = makeSession({ id: "s-eye-click" });
     renderGrid({ sessions: [session], focusedId: session.id });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId(`terminal-cell-eye-${session.id}`));
+    fireEvent.click(screen.getByTestId(`terminal-cell-reader-${session.id}`));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
@@ -219,7 +220,7 @@ describe("TerminalLayoutGrid — viewport reader (Eye button + Cmd/Ctrl+U)", () 
     const xtermLikeHandler = vi.fn();
     window.addEventListener("keydown", xtermLikeHandler);
 
-    fireEvent.click(screen.getByTestId(`terminal-cell-eye-${session.id}`));
+    fireEvent.click(screen.getByTestId(`terminal-cell-reader-${session.id}`));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -314,6 +315,57 @@ describe("TerminalLayoutGrid — tiling", () => {
     expect(cellsByArea()).toEqual([
       "1 / span 24|1 / span 48",
       "25 / span 24|1 / span 48",
+    ]);
+  });
+
+  it("the fallback tiling leaves minimised sessions out", () => {
+    renderGrid({
+      sessions: [makeSession({ id: "a" }), makeSession({ id: "b" }), makeSession({ id: "c" })],
+      minimisedIds: ["b"],
+      tiles: [],
+    });
+
+    // The two-session default preset over a and c, not the three-session one.
+    expect(cellsByArea()).toEqual([
+      "1 / span 24|1 / span 48",
+      "25 / span 24|1 / span 48",
+    ]);
+    expect(screen.queryByTestId("terminal-view-b")).toBeNull();
+  });
+
+  it("Max shows a visible session even when focus names a minimised one", () => {
+    renderGrid({
+      sessions: [makeSession({ id: "a" }), makeSession({ id: "b" })],
+      maximized: true,
+      focusedId: "a",
+      minimisedIds: ["a"],
+      tiles: tilesFor(["b"]),
+    });
+
+    const shown = (id: string) =>
+      (screen.getByTestId(`terminal-view-${id}`).closest(".absolute.inset-0") as HTMLElement)
+        .style.visibility;
+    expect(shown("b")).toBe("visible");
+    expect(shown("a")).toBe("hidden");
+  });
+
+  it("three visible sessions render as three equal columns", () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "a" }),
+        makeSession({ id: "b" }),
+        makeSession({ id: "c" }),
+        makeSession({ id: "d" }),
+      ],
+      minimisedIds: ["c"],
+      tiles: [],
+    });
+
+    // Three visible of four: one row of three 16-zone columns, full height.
+    expect(cellsByArea()).toEqual([
+      "1 / span 16|1 / span 48",
+      "17 / span 16|1 / span 48",
+      "33 / span 16|1 / span 48",
     ]);
   });
 
@@ -643,22 +695,201 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
    */
   const settleColors = () => act(async () => {});
 
-  it("cell header group holds speak, speech controls, eye and kill, in order", async () => {
-    const session = makeSession({ id: "s-nc", project: "alpha" });
+  it("cell header controls render in order", async () => {
+    const session = makeSession({ id: "s-nc", name: "claude-alpha", project: "alpha" });
     renderGrid({ sessions: [session], focusedId: session.id });
     await settleColors();
 
-    // The whole group, in order: speak · speech-controls · eye · kill. An
-    // exact list, so a control added to it (a colour swatch, a maximize) fails
-    // here. (The disconnected badge leads it but renders nothing while healthy.)
-    const eye = screen.getByTestId("terminal-cell-eye-s-nc");
-    const group = Array.from(eye.parentElement!.children) as HTMLElement[];
-    expect(group.map((el) => el.dataset.testid)).toEqual([
+    // The header row: LED, label, then the control group.
+    const reader = screen.getByTestId("terminal-cell-reader-s-nc");
+    const groupEl = reader.parentElement!;
+    const header = Array.from(groupEl.parentElement!.children) as HTMLElement[];
+    expect(header).toHaveLength(3);
+    expect(header[0].dataset.testid).toBe("activity-led");
+    expect(header[1]).toHaveTextContent("claude-alpha");
+    expect(header[2]).toBe(groupEl);
+
+    // The whole group, in order: speak · speech-controls · printer · minimise ·
+    // maximise · kill. An exact list, so a control added to it (a colour
+    // swatch) fails here. (The disconnected badge leads it but renders nothing
+    // while healthy.)
+    const group = Array.from(groupEl.children) as HTMLElement[];
+    const separator = screen.getByTestId("terminal-cell-separator-s-nc");
+    expect(
+      group.filter((el) => el !== separator).map((el) => el.dataset.testid),
+    ).toEqual([
       "terminal-cell-speak-s-nc",
       "terminal-cell-speech-controls-s-nc",
-      "terminal-cell-eye-s-nc",
+      "terminal-cell-reader-s-nc",
+      "terminal-cell-minimise-s-nc",
+      "terminal-cell-maximise-s-nc",
       "terminal-cell-kill-s-nc",
     ]);
+    // A decorative separator sits between the reader and minimise, as in the
+    // mockup: hidden from assistive tech and not a control.
+    const at = group.indexOf(separator);
+    expect(group[at - 1].dataset.testid).toBe("terminal-cell-reader-s-nc");
+    expect(group[at + 1].dataset.testid).toBe("terminal-cell-minimise-s-nc");
+    expect(separator).toHaveAttribute("aria-hidden", "true");
+    expect(separator.tagName).not.toBe("BUTTON");
+    expect(
+      screen.getByRole("button", { name: "Minimise" }),
+    ).toBe(screen.getByTestId("terminal-cell-minimise-s-nc"));
+    expect(
+      screen.getByRole("button", { name: "Maximise" }),
+    ).toBe(screen.getByTestId("terminal-cell-maximise-s-nc"));
+  });
+
+  it("reader control is a printer, not an eye", async () => {
+    const session = makeSession({ id: "s-pr" });
+    const { container } = renderGrid({ sessions: [session], focusedId: session.id });
+    await settleColors();
+
+    const reader = screen.getByTestId("terminal-cell-reader-s-pr");
+    expect(reader.querySelector("svg.lucide-printer")).not.toBeNull();
+    expect(container.querySelector("svg.lucide-eye")).toBeNull();
+
+    // Its accessible name and shortcut are unchanged.
+    expect(
+      screen.getByRole("button", { name: /^View viewport text \(read aloud \/ print\) — (⌘|Ctrl\+)U$/ }),
+    ).toBe(reader);
+    fireEvent.keyDown(window, { key: "u", ctrlKey: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("minimise button minimises its own session", async () => {
+    const a = makeSession({ id: "m-a" });
+    const b = makeSession({ id: "m-b" });
+    const onMinimise = vi.fn();
+    const { onFocus } = renderGrid({ sessions: [a, b], focusedId: a.id, onMinimise });
+    await settleColors();
+
+    fireEvent.click(screen.getByTestId("terminal-cell-minimise-m-b"));
+
+    expect(onMinimise).toHaveBeenCalledTimes(1);
+    expect(onMinimise).toHaveBeenCalledWith("m-b");
+    // Minimising is not an arrival: the cell click underneath must not focus it.
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it("minimise is disabled on the last visible session", async () => {
+    const a = makeSession({ id: "l-a" });
+    const b = makeSession({ id: "l-b" });
+    const onMinimise = vi.fn();
+    renderGrid({
+      sessions: [a, b],
+      focusedId: a.id,
+      minimisedIds: [b.id],
+      onMinimise,
+    });
+    await settleColors();
+
+    const last = screen.getByTestId("terminal-cell-minimise-l-a");
+    expect(last).toBeDisabled();
+    fireEvent.click(last);
+    expect(onMinimise).not.toHaveBeenCalled();
+  });
+
+  it("maximise on a non-focused cell maximises that cell", async () => {
+    const a = makeSession({ id: "x-a" });
+    const b = makeSession({ id: "x-b" });
+    const onToggleMaximize = vi.fn();
+    const onFocus = vi.fn();
+    renderGrid({
+      sessions: [a, b],
+      focusedId: a.id,
+      onFocus,
+      onToggleMaximize,
+    });
+    await settleColors();
+
+    const max = screen.getByTestId("terminal-cell-maximise-x-b");
+    expect(max.querySelector("svg.lucide-maximize-2")).not.toBeNull();
+    fireEvent.click(max);
+
+    // The pressed cell is the one Max shows, not the previously focused one.
+    expect(onFocus.mock.calls).toEqual([["x-b"]]);
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("in Max the cell control returns to the grid", async () => {
+    const a = makeSession({ id: "g-a" });
+    const b = makeSession({ id: "g-b" });
+    const onToggleMaximize = vi.fn();
+    const { onFocus } = renderGrid({
+      sessions: [a, b],
+      focusedId: b.id,
+      maximized: true,
+      onToggleMaximize,
+    });
+    await settleColors();
+
+    // The shown cell's control reads Grid, with the toolbar's Grid icon.
+    const grid = screen.getByTestId("terminal-cell-maximise-g-b");
+    expect(grid).toHaveAccessibleName("Grid");
+    expect(grid.querySelector("svg.lucide-layout-grid")).not.toBeNull();
+    expect(grid.querySelector("svg.lucide-maximize-2")).toBeNull();
+    expect(grid.querySelector("svg.lucide-minimize-2")).toBeNull();
+
+    fireEvent.click(grid);
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+    // Focus stays where it was.
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it("in Max the cell and the toolbar show the same Grid icon", async () => {
+    const a = makeSession({ id: "gi-a" });
+    const b = makeSession({ id: "gi-b" });
+    renderGrid({ sessions: [a, b], focusedId: b.id, maximized: true });
+    render(
+      <TerminalToolbar
+        sessions={[a, b]}
+        focusedId={b.id}
+        maximized
+        currentProject="ch"
+        onFocus={vi.fn()}
+        onCreate={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onToggleMaximize={vi.fn()}
+        onReorder={vi.fn()}
+      />,
+    );
+    await settleColors();
+
+    const iconOf = (el: HTMLElement) =>
+      Array.from(el.querySelector("svg")!.classList).find(
+        (c) => c.startsWith("lucide-") && c !== "lucide-icon",
+      );
+    const cell = screen.getByTestId("terminal-cell-maximise-gi-b");
+    const toolbar = screen.getByTestId("terminal-toolbar-maximize");
+    expect(iconOf(cell)).toBe("lucide-layout-grid");
+    expect(iconOf(toolbar)).toBe(iconOf(cell));
+  });
+
+  it("mobile cell header has minimise and no maximise", async () => {
+    installMatchMedia({ mobile: true });
+    try {
+      const a = makeSession({ id: "mo-a" });
+      const b = makeSession({ id: "mo-b" });
+      renderGrid({ sessions: [a, b], focusedId: a.id });
+      await settleColors();
+
+      const minimise = screen.getByTestId("terminal-cell-minimise-mo-a");
+      expect(minimise).toBeEnabled();
+      expect(screen.queryByTestId("terminal-cell-maximise-mo-a")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^(Maximise|Grid)$/, hidden: true })).toBeNull();
+      const group = Array.from(minimise.parentElement!.children) as HTMLElement[];
+      expect(group.map((el) => el.dataset.testid)).toEqual([
+        "terminal-cell-speak-mo-a",
+        "terminal-cell-speech-controls-mo-a",
+        "terminal-cell-reader-mo-a",
+        "terminal-cell-minimise-mo-a",
+        "terminal-cell-kill-mo-a",
+      ]);
+    } finally {
+      installMatchMedia();
+    }
   });
 
   it("double-clicking the name opens the rename editor with the colour control", async () => {
@@ -681,10 +912,10 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
 
     // The old picker hung off the 6x6px activity LED. This one is a real
     // control: same padding and icon size as the header buttons beside it.
-    const eye = screen.getByTestId("terminal-cell-eye-s-pick");
-    expect(color.className).toBe(eye.className);
+    const reader = screen.getByTestId("terminal-cell-reader-s-pick");
+    expect(color.className).toBe(reader.className);
     expect(color.querySelector("svg")?.getAttribute("width")).toBe(
-      eye.querySelector("svg")?.getAttribute("width"),
+      reader.querySelector("svg")?.getAttribute("width"),
     );
 
     // It opens a picker that names the project it will change, and reaching it
@@ -964,7 +1195,7 @@ describe("TerminalLayoutGrid — colour picker inside the rename edit", () => {
     [
       "focus moving from the name field to an element outside the edit group",
       async ({ input }) => {
-        fireEvent.blur(input, { relatedTarget: screen.getByTestId("terminal-cell-eye-e1") });
+        fireEvent.blur(input, { relatedTarget: screen.getByTestId("terminal-cell-reader-e1") });
       },
       true,
     ],
@@ -979,12 +1210,12 @@ describe("TerminalLayoutGrid — colour picker inside the rename edit", () => {
       },
       true,
     ],
-    // The eye opens the viewport dialog, so only the picker is checked (by its hex field).
+    // The reader opens the viewport dialog, so only the picker is checked (by its hex field).
     [
       "clicking an outside button while the hex field is focused",
       async (r) => {
         await focusHex(r);
-        await r.user.click(screen.getByTestId("terminal-cell-eye-e1"));
+        await r.user.click(screen.getByTestId("terminal-cell-reader-e1"));
       },
       false,
     ],

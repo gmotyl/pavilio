@@ -19,8 +19,15 @@ const ALL_SCOPE = "__all__";
  * refetch for the whole tab, however many surfaces read it. The ordering stays
  * here rather than in the store: it is reducer-plus-localStorage state, and each
  * mounted consumer keeps its own (see `design.md` §4).
+ *
+ * Only the terminals page, the one consumer that changes the ordering, passes
+ * `persist: true`. The list-only ones (sidebar, notifier, favicon, time
+ * tracking, a project tab's drawer list) all mount for the whole session with
+ * the state they read at mount; writing it back on their next sync would
+ * overwrite the page's grid with a stale one — re-seating a session the page
+ * has minimised, which the next hydration then reads as no longer minimised.
  */
-export function useAllTerminalSessions() {
+export function useAllTerminalSessions({ persist = false }: { persist?: boolean } = {}) {
   const [sessions, setSessions] = useState<SessionMeta[]>(getSessions);
 
   // The store republishes the same array reference while nothing moved, so a
@@ -29,7 +36,7 @@ export function useAllTerminalSessions() {
 
   // Same ordering model as a per-project surface, under the `__all__` scope —
   // so Ctrl+drag merge/join/split and the preset picker commit here too.
-  const ordering = useTerminalOrdering(ALL_SCOPE, sessions);
+  const ordering = useTerminalOrdering(ALL_SCOPE, sessions, { persist });
   const { syncIds } = ordering;
 
   // The sync used to hang off the hook's own fetch; with the fetch gone it hangs
@@ -59,5 +66,10 @@ export function useAllTerminalSessions() {
     tiles: ordering.tiles,
     placeTiles: ordering.placeTiles,
     applyPreset: ordering.applyPreset,
+    // Minimised per `__all__`: the global page hides a session without hiding it
+    // in its project's tab.
+    minimisedIds: ordering.minimisedIds,
+    minimise: ordering.minimise,
+    restore: ordering.restore,
   };
 }

@@ -40,7 +40,7 @@ async function setup() {
     typeof renderHook<ReturnType<typeof useAllTerminalSessions>, unknown>
   >;
   await act(async () => {
-    hook = renderHook(() => useAllTerminalSessions());
+    hook = renderHook(() => useAllTerminalSessions({ persist: true }));
   });
   return hook;
 }
@@ -55,7 +55,7 @@ async function setupStrict() {
     typeof renderHook<ReturnType<typeof useAllTerminalSessions>, unknown>
   >;
   await act(async () => {
-    hook = renderHook(() => useAllTerminalSessions(), { wrapper: StrictMode });
+    hook = renderHook(() => useAllTerminalSessions({ persist: true }), { wrapper: StrictMode });
   });
   return hook;
 }
@@ -220,6 +220,60 @@ describe("useAllTerminalSessions tiling", () => {
     // the tiling — that is what keeps the persist effect from firing on every tick.
     expect(result.current.tiles).toBe(committedTiles);
     expect(idsOf(result.current.tiles)).toEqual(["a", "b", "c"]);
+  });
+});
+
+// Every list-only consumer (sidebar, notifier, favicon, time tracking) mounts
+// this hook too. Each one owns a reducer over the same `__all__` keys, so one
+// that persisted would write back the grid it read at mount — still seating a
+// session the terminals page has since minimised — and the next hydration
+// would throw the minimised entry away as stale.
+describe("useAllTerminalSessions — list-only consumers", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+    __resetSessionStoreForTests();
+  });
+
+  afterEach(() => {
+    __resetSessionStoreForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("a list-only consumer never writes the stored grid, so a minimise survives a remount", async () => {
+    const live = [session("a", "vector"), session("b", "metro"), session("c", "ch")];
+    // A custom shape seating all three is what the list consumer reads at mount.
+    storeTiles([
+      { sessionId: "a", x: 0, y: 0, w: 48, h: 16 },
+      { sessionId: "b", x: 0, y: 16, w: 48, h: 16 },
+      { sessionId: "c", x: 0, y: 32, w: 48, h: 16 },
+    ]);
+    mockFetchSessions(live);
+
+    let both!: ReturnType<
+      typeof renderHook<{ page: ReturnType<typeof useAllTerminalSessions> }, unknown>
+    >;
+    await act(async () => {
+      both = renderHook(() => {
+        const page = useAllTerminalSessions({ persist: true });
+        // Declared second, so its persist effects run after the page's.
+        useAllTerminalSessions({ persist: false });
+        return { page };
+      });
+    });
+
+    act(() => both.result.current.page.minimise("b"));
+    // A new session lands: every consumer syncs and re-reconciles its grid.
+    mockFetchSessions([...live, session("d", "vector")]);
+    await act(async () => {
+      await both.result.current.page.refresh();
+    });
+    expect(both.result.current.page.minimisedIds).toEqual(["b"]);
+    both.unmount();
+
+    const again = await setup();
+    expect(again.result.current.minimisedIds).toEqual(["b"]);
+    expect(idsOf(again.result.current.tiles)).not.toContain("b");
   });
 });
 

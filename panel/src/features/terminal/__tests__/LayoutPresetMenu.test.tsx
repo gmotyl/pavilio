@@ -69,6 +69,11 @@ describe("LayoutPresetMenu", () => {
     expect(screen.queryByTestId("layout-preset-menu")).not.toBeInTheDocument();
   });
 
+  it("the trigger's tooltip reads Layout presets", () => {
+    render(<LayoutPresetMenu count={3} onApply={vi.fn()} />);
+    expect(screen.getByTestId("layout-preset-toggle")).toHaveAttribute("title", "Layout presets");
+  });
+
   it("disables the toggle and never opens when count is 0 (no presets)", () => {
     const onApply = vi.fn();
     render(<LayoutPresetMenu count={0} onApply={onApply} />);

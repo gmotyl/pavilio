@@ -311,8 +311,8 @@ function curatedPresets(count: number): LayoutPreset[] {
 
   if (count === 3) {
     return [
-      preset("1 left, 2 stacked right", [leftHalf, ...strips(rightHalf, 2, "y")]),
       preset("3 columns", strips(whole, 3, "x")),
+      preset("1 left, 2 stacked right", [leftHalf, ...strips(rightHalf, 2, "y")]),
       preset("3 rows", strips(whole, 3, "y")),
       preset("2 stacked left, 1 right", [...strips(leftHalf, 2, "y"), rightHalf]),
       preset("1 top, 2 below", [topHalf, ...strips(bottomHalf, 2, "x")]),
