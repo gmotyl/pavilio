@@ -137,13 +137,20 @@ export function TerminalsSurface({
   // Minimising never leaves focus or Max on a session the grid no longer shows:
   // focus moves to the next visible session in order (wrapping to the first),
   // and Max — which shows exactly one session — returns to the grid of the rest.
+  // A minimise the model would refuse (the id is not in the grid, or it is the
+  // last one there) changes nothing here either.
+  //
+  // Focus moves with the plain `onFocus`, not `handleFocus`: the session that
+  // inherits focus was not chosen by the user, so it is not an activation — no
+  // reconnect over its content and no dismissing its "done" LED (ADR 0010).
   const handleMinimise = (id: string) => {
+    const i = visibleSessions.findIndex((s) => s.id === id);
+    if (i === -1 || visibleSessions.length < 2) return;
     const shown = maximized ? visibleSessionId(visibleSessions, focusedId) : null;
     onMinimise?.(id);
     if (focusedId === id) {
-      const i = visibleSessions.findIndex((s) => s.id === id);
       const rest = [...visibleSessions.slice(i + 1), ...visibleSessions.slice(0, i)];
-      if (rest.length > 0) handleFocus(rest[0].id);
+      onFocus(rest[0].id);
     }
     if (shown === id) onToggleMaximize();
   };

@@ -317,6 +317,37 @@ describe("TerminalLayoutGrid — tiling", () => {
     ]);
   });
 
+  it("the fallback tiling leaves minimised sessions out", () => {
+    renderGrid({
+      sessions: [makeSession({ id: "a" }), makeSession({ id: "b" }), makeSession({ id: "c" })],
+      minimisedIds: ["b"],
+      tiles: [],
+    });
+
+    // The two-session default preset over a and c, not the three-session one.
+    expect(cellsByArea()).toEqual([
+      "1 / span 24|1 / span 48",
+      "25 / span 24|1 / span 48",
+    ]);
+    expect(screen.queryByTestId("terminal-view-b")).toBeNull();
+  });
+
+  it("Max shows a visible session even when focus names a minimised one", () => {
+    renderGrid({
+      sessions: [makeSession({ id: "a" }), makeSession({ id: "b" })],
+      maximized: true,
+      focusedId: "a",
+      minimisedIds: ["a"],
+      tiles: tilesFor(["b"]),
+    });
+
+    const shown = (id: string) =>
+      (screen.getByTestId(`terminal-view-${id}`).closest(".absolute.inset-0") as HTMLElement)
+        .style.visibility;
+    expect(shown("b")).toBe("visible");
+    expect(shown("a")).toBe("hidden");
+  });
+
   it("mobile/maximized rendering is unaffected by the tiling", () => {
     const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
     renderGrid({
