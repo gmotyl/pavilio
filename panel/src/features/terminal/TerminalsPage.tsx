@@ -16,6 +16,9 @@ export function TerminalsPage() {
     tiles,
     placeTiles,
     applyPreset,
+    minimisedIds,
+    minimise,
+    restore,
   } = useAllTerminalSessions();
   const [maximized, toggleMaximized] = useTerminalMaximized("__all__");
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -103,6 +106,9 @@ export function TerminalsPage() {
       tiles={tiles}
       onPlace={placeTiles}
       onApplyPreset={applyPreset}
+      minimisedIds={minimisedIds}
+      onMinimise={minimise}
+      onRestore={restore}
       speech={speech}
     />
   );

@@ -25,6 +25,10 @@ interface Props {
   onReorder: (fromId: string, toId: string) => void;
   onReconnect?: () => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
+  /** Sessions minimised on this surface, in session order — the tray's contents. */
+  minimisedIds?: string[];
+  /** Bring a minimised session back into the grid (and focus it). */
+  onRestore?: (id: string) => void;
 }
 
 export function TerminalToolbar({

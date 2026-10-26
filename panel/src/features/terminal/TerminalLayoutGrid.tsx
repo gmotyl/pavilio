@@ -61,6 +61,10 @@ interface Props {
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
   /** See {@link GridSpeech}. Required: a surface that forgets it is silent. */
   speech: GridSpeech;
+  /** Sessions minimised on this surface: still mounted, never tiled. */
+  minimisedIds?: string[];
+  /** Take a session out of the grid (the cell header's minimise). */
+  onMinimise?: (id: string) => void;
 }
 
 export function TerminalLayoutGrid({
@@ -74,6 +78,7 @@ export function TerminalLayoutGrid({
   tiles,
   onPlace,
   speech,
+  minimisedIds,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia(MOBILE_QUERY).matches,
@@ -139,16 +144,20 @@ export function TerminalLayoutGrid({
     [onPlace],
   );
 
-  // The committed tiling, or the default preset for the current count when the caller
+  // The committed tiling, or the default preset for the visible count when the caller
   // has none stored. The real caller always passes `tiles` (as `[]` when no custom
   // shape exists), so treat empty the same as absent rather than rendering nothing.
+  // Minimised sessions are never tiled, so the fallback expands over the rest.
+  const visibleIds = sessions
+    .map((s) => s.id)
+    .filter((id) => !minimisedIds?.includes(id));
   const resolvedTiles: TileLayout =
     seamDraft ??
     (tiles && tiles.length > 0
       ? tiles
       : expandPreset(
-          sessions.map((s) => s.id),
-          getLayoutPresets(count)[0] ?? { label: "", slots: [] },
+          visibleIds,
+          getLayoutPresets(visibleIds.length)[0] ?? { label: "", slots: [] },
         ));
 
   const modal = (
@@ -207,7 +216,11 @@ export function TerminalLayoutGrid({
   // Keep ALL other sessions mounted (hidden) so their terminal state survives.
   let body: React.ReactNode;
   if (isMobile || maximized) {
-    const visibleId = visibleSessionId(sessions, focusedId);
+    // Same pick as the surface's shortcut bar: never a minimised session.
+    const visibleId = visibleSessionId(
+      sessions.filter((s) => visibleIds.includes(s.id)),
+      focusedId,
+    );
     body = (
       <div className="relative w-full h-full">
         {sessions.map((s) => (

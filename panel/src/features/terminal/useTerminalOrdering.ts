@@ -8,6 +8,7 @@ import {
   type TileLayout,
 } from "./tileLayout";
 import {
+  ensureVisible,
   orderingReducer,
   type LayoutCommitKind,
   type OrderingState,
@@ -36,11 +37,23 @@ export interface TerminalOrdering {
    */
   placeTiles: (layout: TileLayout, kind?: LayoutCommitKind) => void;
   applyPreset: (preset: LayoutPreset) => void;
+  /** Sessions taken out of the grid on this scope, in `sessionOrder` order; live sessions only. */
+  minimisedIds: string[];
+  /** Take a session out of the grid; a no-op on the last visible one. */
+  minimise: (id: string) => void;
+  /** Put a minimised session back at its place in the order. */
+  restore: (id: string) => void;
 }
 
 function readOrder(scopeKey: string): string[] {
   if (!isPreferenceScope(scopeKey)) return preferences.terminalOrder.default;
   return readPreference(preferences.terminalOrder, scopeKey);
+}
+
+function readMinimised(scopeKey: string): string[] {
+  if (!isPreferenceScope(scopeKey)) return preferences.terminalMinimised.default;
+  const parsed: unknown = readPreference(preferences.terminalMinimised, scopeKey);
+  return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
 }
 
 /**
@@ -79,12 +92,21 @@ function namesExactly(order: string[], layout: TileLayout): boolean {
   );
 }
 
-/** Both halves of one scope's stored ordering model, read together. */
+/**
+ * One scope's stored ordering model — order, tiling and minimised set — read
+ * together. `ensureVisible` repairs a stored state that would hydrate an empty
+ * grid (every session minimised) by bringing the first minimised one back.
+ */
 function readScope(scopeKey: string): OrderingState {
   const layout = readTiles(scopeKey);
-  // Minimised state is not persisted yet, so every scope reads back
-  // with nothing minimised.
-  if (layout.length === 0) return { order: readOrder(scopeKey), layout, minimised: [] };
+  const stored = readOrder(scopeKey);
+  // The minimised set is a subset of `order` and never seated in the layout, so a
+  // stored id that breaks either rule is stale and dropped here.
+  const seated = new Set(layout.map((tile) => tile.sessionId));
+  const minimised = readMinimised(scopeKey).filter(
+    (id, i, all) => all.indexOf(id) === i && !seated.has(id) && stored.includes(id),
+  );
+  if (layout.length === 0) return ensureVisible({ order: stored, layout, minimised });
 
   // The order and the tiling are one model, so a stored order read back blind could let
   // the two disagree — which is why this used to re-derive from the tiling and ignore
@@ -95,11 +117,17 @@ function readScope(scopeKey: string): OrderingState {
   // Set equality is what makes trusting the stored order safe: only a permutation of
   // exactly this layout's sessions is honoured, so a stale, partial, or foreign order
   // still loses to the reading order and the two halves can never silently drift.
-  const stored = readOrder(scopeKey);
-  const order = namesExactly(stored, layout)
+  // The layout seats the visible sessions only, so it is the stored order minus the
+  // minimised ones that must name it; a rejected order keeps the minimised sessions
+  // at its end, where `restore` will find them.
+  const hidden = new Set(minimised);
+  const order = namesExactly(
+    stored.filter((id) => !hidden.has(id)),
+    layout,
+  )
     ? stored
-    : readingOrder(layout).map((tile) => tile.sessionId);
-  return { order, layout, minimised: [] };
+    : [...readingOrder(layout).map((tile) => tile.sessionId), ...minimised];
+  return { order, layout, minimised };
 }
 
 /**
@@ -114,7 +142,7 @@ export function useTerminalOrdering(
   scopeKey: string,
   sessions: SessionMeta[],
 ): TerminalOrdering {
-  const [{ order: sessionOrder, layout: storedTiles }, dispatch] = useReducer(
+  const [{ order: sessionOrder, layout: storedTiles, minimised }, dispatch] = useReducer(
     orderingReducer,
     scopeKey,
     readScope,
@@ -134,8 +162,8 @@ export function useTerminalOrdering(
     dispatch({ type: "reset", state: readScope(scopeKey) });
   }
 
-  // Both persist effects are unchanged in shape — they still run on mount — and
-  // that costs nothing on the server: these two are `portable: false`, so the
+  // The persist effects are unchanged in shape — they still run on mount — and
+  // that costs nothing on the server: all three are `portable: false`, so the
   // write lands in `localStorage` and never in a PATCH. The store also skips a
   // write whose stored representation is unchanged, so a mount that re-asserts
   // what is already there does not even notify.
@@ -152,6 +180,13 @@ export function useTerminalOrdering(
     if (storedTiles.length === 0) clearPreference(preferences.terminalGrid, scopeKey);
     else writePreference(preferences.terminalGrid, storedTiles, scopeKey);
   }, [scopeKey, storedTiles]);
+
+  useEffect(() => {
+    if (!isPreferenceScope(scopeKey)) return;
+    // Cleared when empty, like the grid: nothing minimised is the default.
+    if (minimised.length === 0) clearPreference(preferences.terminalMinimised, scopeKey);
+    else writePreference(preferences.terminalMinimised, minimised, scopeKey);
+  }, [scopeKey, minimised]);
 
   const orderIndex = useMemo(
     () => new Map(sessionOrder.map((id, i) => [id, i])),
@@ -173,12 +208,22 @@ export function useTerminalOrdering(
    * failed validation). Resolved here rather than in the grid so the overlay and the
    * commit path both compute against the same value.
    */
+  // What the surfaces see as minimised: the reducer's set in session order, limited
+  // to the live sessions — a stored id can outlive its session until the next sync.
+  const minimisedIds = useMemo(() => {
+    if (minimised.length === 0) return minimised;
+    const hidden = new Set(minimised);
+    return orderedSessions.filter((s) => hidden.has(s.id)).map((s) => s.id);
+  }, [minimised, orderedSessions]);
+
   const tiles = useMemo(() => {
     if (storedTiles.length > 0) return storedTiles;
-    const ids = orderedSessions.map((s) => s.id);
+    // The default preset tiles the visible sessions only.
+    const hidden = new Set(minimised);
+    const ids = orderedSessions.map((s) => s.id).filter((id) => !hidden.has(id));
     const preset = getLayoutPresets(ids.length)[0];
     return preset ? expandPreset(ids, preset) : [];
-  }, [storedTiles, orderedSessions]);
+  }, [storedTiles, orderedSessions, minimised]);
 
   const syncIds = useCallback((ids: string[]) => {
     dispatch({ type: "sync", ids });
@@ -213,6 +258,14 @@ export function useTerminalOrdering(
     [orderedSessions],
   );
 
+  const minimise = useCallback((id: string) => {
+    dispatch({ type: "minimise", id });
+  }, []);
+
+  const restore = useCallback((id: string) => {
+    dispatch({ type: "restore", id });
+  }, []);
+
   return {
     sessionOrder,
     orderedSessions,
@@ -223,5 +276,8 @@ export function useTerminalOrdering(
     reorder,
     placeTiles,
     applyPreset,
+    minimisedIds,
+    minimise,
+    restore,
   };
 }

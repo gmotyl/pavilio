@@ -14,6 +14,10 @@ interface Props {
   onCreate: (opts?: CreateSessionOpts) => void;
   onOpenDrawer: () => void;
   onReconnect?: () => void;
+  /** Sessions minimised on this surface, in session order — the aggregate's contents. */
+  minimisedIds?: string[];
+  /** Bring a minimised session back into the grid (and focus it). */
+  onRestore?: (id: string) => void;
 }
 
 /**

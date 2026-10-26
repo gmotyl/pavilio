@@ -60,6 +60,12 @@ function Harness({
   focusedId = null,
   sessions = [],
   handles,
+  onFocus = () => {},
+  maximized = false,
+  onToggleMaximize = () => {},
+  minimisedIds,
+  onMinimise,
+  onRestore,
 }: {
   tiles?: TileLayout;
   onPlace?: (layout: TileLayout) => void;
@@ -67,6 +73,12 @@ function Harness({
   focusedId?: string | null;
   sessions?: SessionMeta[];
   handles?: Map<string, TerminalHandle>;
+  onFocus?: (id: string | null) => void;
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
+  minimisedIds?: string[];
+  onMinimise?: (id: string) => void;
+  onRestore?: (id: string) => void;
 }) {
   const ref = useRef<Map<string, TerminalHandle>>(handles ?? new Map());
   return (
@@ -75,12 +87,12 @@ function Harness({
       repos={[]}
       sessions={sessions}
       focusedId={focusedId}
-      onFocus={() => {}}
+      onFocus={onFocus}
       onDeleteSession={() => {}}
       onUpdateSession={() => {}}
       allSessions={[]}
-      maximized={false}
-      onToggleMaximize={() => {}}
+      maximized={maximized}
+      onToggleMaximize={onToggleMaximize}
       drawerOpen={false}
       onSetDrawerOpen={() => {}}
       terminalHandlesRef={ref}
@@ -89,6 +101,9 @@ function Harness({
       tiles={tiles}
       onPlace={onPlace}
       onApplyPreset={onApplyPreset}
+      minimisedIds={minimisedIds}
+      onMinimise={onMinimise}
+      onRestore={onRestore}
       speech={INERT_SPEECH}
     />
   );
@@ -377,5 +392,106 @@ describe("TerminalsSurface shortcut bar visibility", () => {
     }).not.toThrow();
     expect(gone.send).not.toHaveBeenCalled();
     expect(gone.focus).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalsSurface minimise", () => {
+  const four = () => [session("a"), session("b"), session("c"), session("d")];
+
+  beforeEach(() => {
+    gridProps.mockClear();
+    toolbarProps.mockClear();
+    railProps.mockClear();
+  });
+
+  /** The minimise entry point the grid's cell headers are handed. */
+  const minimise = (id: string) =>
+    (gridProps.mock.calls.at(-1)![0].onMinimise as (id: string) => void)(id);
+
+  it("minimising the focused session focuses the next visible one", () => {
+    const onFocus = vi.fn();
+    const onMinimise = vi.fn();
+
+    const { rerender } = render(
+      <Harness
+        sessions={four()}
+        focusedId="b"
+        minimisedIds={["c"]}
+        onFocus={onFocus}
+        onMinimise={onMinimise}
+      />,
+    );
+    minimise("b");
+
+    // c is minimised, so the next visible session after b is d.
+    expect(onMinimise).toHaveBeenCalledWith("b");
+    expect(onFocus).toHaveBeenLastCalledWith("d");
+
+    // Wraps to the first visible session.
+    onFocus.mockClear();
+    rerender(
+      <Harness
+        sessions={four()}
+        focusedId="d"
+        minimisedIds={["c"]}
+        onFocus={onFocus}
+        onMinimise={onMinimise}
+      />,
+    );
+    minimise("d");
+    expect(onFocus).toHaveBeenLastCalledWith("a");
+
+    // Minimising an unfocused session leaves focus where it is.
+    onFocus.mockClear();
+    minimise("b");
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it("minimising the maximised session returns to the grid", () => {
+    const onToggleMaximize = vi.fn();
+    const onMinimise = vi.fn();
+
+    render(
+      <Harness
+        sessions={four()}
+        focusedId="a"
+        maximized
+        onToggleMaximize={onToggleMaximize}
+        onMinimise={onMinimise}
+      />,
+    );
+
+    // A session Max is not showing: Max stays on.
+    minimise("c");
+    expect(onToggleMaximize).not.toHaveBeenCalled();
+
+    minimise("a");
+    expect(onMinimise).toHaveBeenLastCalledWith("a");
+    expect(onToggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("restoring a session focuses it", () => {
+    const onFocus = vi.fn();
+    const onRestore = vi.fn();
+
+    render(
+      <Harness
+        sessions={four()}
+        focusedId="a"
+        minimisedIds={["c"]}
+        onFocus={onFocus}
+        onRestore={onRestore}
+      />,
+    );
+
+    // From the desktop tray…
+    (toolbarProps.mock.calls.at(-1)![0].onRestore as (id: string) => void)("c");
+    expect(onRestore).toHaveBeenCalledWith("c");
+    expect(onFocus).toHaveBeenLastCalledWith("c");
+
+    // …and from the mobile rail's aggregate.
+    onFocus.mockClear();
+    (railProps.mock.calls.at(-1)![0].onRestore as (id: string) => void)("c");
+    expect(onFocus).toHaveBeenLastCalledWith("c");
   });
 });

@@ -346,6 +346,9 @@ export function useTerminalSessions(project: string) {
     tiles: ordering.tiles,
     placeTiles: ordering.placeTiles,
     applyPreset: ordering.applyPreset,
+    minimisedIds: ordering.minimisedIds,
+    minimise: ordering.minimise,
+    restore: ordering.restore,
   };
 }
 

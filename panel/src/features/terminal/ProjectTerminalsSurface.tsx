@@ -96,6 +96,9 @@ export default function ProjectTerminalsSurface({
       tiles={terminal.tiles}
       onPlace={terminal.placeTiles}
       onApplyPreset={terminal.applyPreset}
+      minimisedIds={terminal.minimisedIds}
+      onMinimise={terminal.minimise}
+      onRestore={terminal.restore}
       speech={speech}
       fill={fill}
     />

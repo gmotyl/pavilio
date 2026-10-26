@@ -59,5 +59,10 @@ export function useAllTerminalSessions() {
     tiles: ordering.tiles,
     placeTiles: ordering.placeTiles,
     applyPreset: ordering.applyPreset,
+    // Minimised per `__all__`: the global page hides a session without hiding it
+    // in its project's tab.
+    minimisedIds: ordering.minimisedIds,
+    minimise: ordering.minimise,
+    restore: ordering.restore,
   };
 }

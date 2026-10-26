@@ -39,6 +39,13 @@ const storeTiles = (scope: string, layout: TileLayout) =>
   writePreference(preferences.terminalGrid, layout, scope);
 const storeOrder = (scope: string, order: string[]) =>
   writePreference(preferences.terminalOrder, order, scope);
+const storeMinimised = (scope: string, ids: string[]) =>
+  writePreference(preferences.terminalMinimised, ids, scope);
+const MINIMISED_KEY = (scope: string) => storageKey(preferences.terminalMinimised, scope);
+const storedMinimised = (scope: string): unknown => {
+  const raw = localStorage.getItem(MINIMISED_KEY(scope));
+  return raw === null ? null : JSON.parse(raw);
+};
 
 const defaultFor = (ids: string[]): TileLayout =>
   expandPreset(ids, getLayoutPresets(ids.length)[0]);
@@ -265,5 +272,90 @@ describe("useTerminalOrdering", () => {
 
     expect(result.current.tiles).toEqual(defaultFor(["a", "b", "c"]));
     expect(localStorage.getItem(GRID_KEY("vector"))).toBeNull();
+  });
+
+  it("minimised ids persist per scope", () => {
+    const list = [session("a"), session("b"), session("c")];
+    const global = renderHook(() => useTerminalOrdering("__all__", list));
+    const project = renderHook(() => useTerminalOrdering("vector", list));
+    act(() => global.result.current.syncIds(["a", "b", "c"]));
+    act(() => project.result.current.syncIds(["a", "b", "c"]));
+
+    act(() => global.result.current.minimise("b"));
+
+    expect(global.result.current.minimisedIds).toEqual(["b"]);
+    expect(storedMinimised("__all__")).toEqual(["b"]);
+    // Minimising on the global page does not hide the session in its project's tab.
+    expect(project.result.current.minimisedIds).toEqual([]);
+    expect(storedMinimised("vector")).toBeNull();
+    // The layout tiles the visible sessions only.
+    expect(global.result.current.tiles).toEqual(defaultFor(["a", "c"]));
+
+    act(() => global.result.current.restore("b"));
+
+    expect(global.result.current.minimisedIds).toEqual([]);
+    expect(storedMinimised("__all__")).toBeNull();
+    expect(global.result.current.tiles).toEqual(defaultFor(["a", "b", "c"]));
+  });
+
+  it("stored minimised ids are restored and pruned to live sessions", () => {
+    // `z` was minimised in an earlier panel run and has since ended.
+    storeTiles("vector", defaultFor(["b", "c"]));
+    storeOrder("vector", ["a", "b", "c", "z"]);
+    storeMinimised("vector", ["a", "z"]);
+
+    const { result, rerender } = renderHook(
+      ({ list }: { list: SessionMeta[] }) => useTerminalOrdering("vector", list),
+      { initialProps: { list: [session("a"), session("b"), session("c")] } },
+    );
+
+    expect(result.current.minimisedIds).toEqual(["a"]);
+    expect(result.current.tiles).toEqual(defaultFor(["b", "c"]));
+
+    act(() => result.current.syncIds(["a", "b", "c"]));
+    expect(result.current.minimisedIds).toEqual(["a"]);
+    expect(storedMinimised("vector")).toEqual(["a"]);
+
+    // `a` ends while minimised: it leaves the set, and the stored list with it.
+    rerender({ list: [session("b"), session("c")] });
+    act(() => result.current.syncIds(["b", "c"]));
+    expect(result.current.minimisedIds).toEqual([]);
+    expect(storedMinimised("vector")).toBeNull();
+  });
+
+  it("stored minimised ids never hydrate an empty grid", () => {
+    // Every stored session minimised: the first comes back rather than the grid
+    // rendering nothing.
+    storeOrder("vector", ["a", "b"]);
+    storeMinimised("vector", ["a", "b"]);
+
+    const { result } = renderHook(() =>
+      useTerminalOrdering("vector", [session("a"), session("b")]),
+    );
+
+    expect(result.current.minimisedIds).toEqual(["b"]);
+    expect(result.current.tiles).toEqual(defaultFor(["a"]));
+  });
+
+  it("switching scope loads that scope's minimised ids", () => {
+    storeTiles("metro", defaultFor(["b"]));
+    storeOrder("metro", ["a", "b"]);
+    storeMinimised("metro", ["a"]);
+
+    const { result, rerender } = renderHook(
+      ({ scope }: { scope: string }) =>
+        useTerminalOrdering(scope, [session("a"), session("b")]),
+      { initialProps: { scope: "vector" } },
+    );
+
+    expect(result.current.minimisedIds).toEqual([]);
+    rerender({ scope: "metro" });
+
+    expect(result.current.minimisedIds).toEqual(["a"]);
+    expect(result.current.tiles).toEqual(defaultFor(["b"]));
+    // The new scope's list was loaded before any persist ran: neither scope's
+    // stored list was overwritten with the other's.
+    expect(storedMinimised("metro")).toEqual(["a"]);
+    expect(storedMinimised("vector")).toBeNull();
   });
 });
