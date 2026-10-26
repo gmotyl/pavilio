@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 import { TerminalToolbar } from "./TerminalToolbar";
 import { TerminalLayoutGrid } from "./TerminalLayoutGrid";
 import { TerminalShortcutBar } from "./TerminalShortcutBar";
@@ -161,6 +161,17 @@ export function TerminalsSurface({
     onRestore?.(id);
     handleFocus(id);
   };
+
+  // Focus that lands on a minimised session was a pick of it — the spine, the
+  // drawer, a sidebar row, a notification tap — so it comes back into the grid.
+  // Left out, it would be focused but unshown: Max and the mobile view would
+  // show another terminal while the focus-driven controls aimed at this one.
+  // A layout effect, so the grid never paints a frame without it. Minimising
+  // the focused session cannot trip this: `handleMinimise` moves focus off it
+  // in the same update.
+  useLayoutEffect(() => {
+    if (focusedId && minimisedIds.includes(focusedId)) onRestore?.(focusedId);
+  }, [focusedId, minimisedIds, onRestore]);
 
   // Sockets die in bursts, so the Reconnect control repairs all of them. With
   // nothing disconnected it keeps its second, deliberate use: repaint the pane

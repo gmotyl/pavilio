@@ -196,8 +196,12 @@ export function useTerminalSessions(project: string) {
     if (focusedId && open.some((s) => s.id === focusedId)) return;
     // setFocusedId persists and broadcasts, which is how the sidebar and the
     // mobile rail find out — they never read this hook's state directly.
-    setFocusedId(open[0].id);
-  }, [ordering.orderedSessions, focusedId, setFocusedId]);
+    // A visible session: focus on a minimised one restores it, and a fallback
+    // is not the user's pick. Some session is always visible (the grid is
+    // never left empty), so `open[0]` is only a defensive fallback.
+    const visible = open.find((s) => !ordering.minimisedIds.includes(s.id));
+    setFocusedId((visible ?? open[0]).id);
+  }, [ordering.orderedSessions, ordering.minimisedIds, focusedId, setFocusedId]);
 
   // When the project changes (no remount — same component instance reused
   // across route navigations), reset state to the new project's stored values.

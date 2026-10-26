@@ -573,4 +573,22 @@ describe("TerminalsSurface minimise", () => {
     (railProps.mock.calls.at(-1)![0].onRestore as (id: string) => void)("c");
     expect(onFocus).toHaveBeenLastCalledWith("c");
   });
+
+  // Picking a minimised session anywhere else — the desktop spine, the drawer, a
+  // sidebar row, a notification — lands as focus on it. Focus on a session the
+  // grid does not show would leave Max, the mobile view and the focus-driven
+  // controls on another terminal, so the pick brings it back.
+  it("focus landing on a minimised session restores it", () => {
+    const onRestore = vi.fn();
+    const { rerender } = render(
+      <Harness sessions={four()} focusedId="a" minimisedIds={["c"]} onRestore={onRestore} />,
+    );
+    expect(onRestore).not.toHaveBeenCalled();
+
+    rerender(
+      <Harness sessions={four()} focusedId="c" minimisedIds={["c"]} onRestore={onRestore} />,
+    );
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(onRestore).toHaveBeenCalledWith("c");
+  });
 });

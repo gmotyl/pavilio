@@ -7,6 +7,8 @@ import {
   TERMINAL_FOCUS_EVENT,
   type TerminalFocusEventDetail,
 } from "../useTerminalSessions";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
 
 const session = (id: string, name: string, project = "pavilio") => ({
   id,
@@ -78,6 +80,16 @@ describe("useTerminalSessions — focus the session actually on screen", () => {
     } finally {
       window.removeEventListener(TERMINAL_FOCUS_EVENT, onFocus);
     }
+  });
+
+  // Focus on a minimised session restores it (the surface treats it as a pick),
+  // so a fallback the user never chose must not land there.
+  it("adopts the first visible session, not a minimised one", async () => {
+    writePreference(preferences.terminalOrder, ["a1", "b2"], "pavilio");
+    writePreference(preferences.terminalMinimised, ["a1"], "pavilio");
+    const { result } = renderHook(() => useTerminalSessions("pavilio"));
+    await waitFor(() => expect(result.current.focusedId).toBe("b2"));
+    expect(result.current.minimisedIds).toEqual(["a1"]);
   });
 
   it("stays unfocused while the project has no sessions", async () => {
