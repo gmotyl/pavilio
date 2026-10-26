@@ -47,6 +47,8 @@ If `unprocessed` is empty → say so (mention any backfills) and stop, committin
 
 ### 4. Display the list
 
+One markdown list item per meeting, after a blank line — the pick-several shape in [[pavilio-ask]]:
+
 ```
 Unprocessed meetings:
 1. [2026-06-03 09:00] Daily Standup (quill) → ch (high)
@@ -86,14 +88,13 @@ Parse each subagent's JSON result. A subagent that errors or returns `status: er
 
 ### 8. Combined Todoist selection
 
-Show one numbered list of all `todos` from all ok results, grouped by project:
+Show one numbered markdown list of all `todos` from all ok results (pick-several shape in [[pavilio-ask]]), the project as a prefix so numbering stays continuous:
 
-```
+```markdown
 TODOs:
-[ch]
-1. Fix checkout footer — PR needed for footer component
-[metro]
-2. Review API draft — comment on the unified API proposal
+
+1. **[ch] Fix checkout footer** — PR needed for footer component
+2. **[metro] Review API draft** — comment on the unified API proposal
 ```
 
 Ask which numbers to add to Todoist. Add selected via Todoist MCP: content `"[project] Short title"`, description = longer description, due today. Then ask if the user wants any other tasks added.

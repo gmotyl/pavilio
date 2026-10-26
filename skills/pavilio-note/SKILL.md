@@ -21,7 +21,7 @@ The user will provide the transcript. Your process is:
 3. **Select Transcript Source**:
    - Ask user: "How would you like to provide the transcript?"
    - Read the global registry at `projects/.processed_transcripts.json` (create empty `{ "processed": [] }` if missing) — see **Processed Transcripts Registry Rules**
-   - Query **every available notetaker MCP** (see **Notetaker Sources** below — currently Quill and Wispr Flow). For each one: fetch its last 10 meetings, filter out any whose `(source, source_id)` is already in the registry. Merge the survivors from all sources, sort newest first, and present the first 5 as a numbered list tagged with their source (include meeting date and time converted to local timezone Europe/Warsaw), e.g. `1. [2026-10-01 08:39] Proces fabryki (quill)`. Offer manual paste or cancel as additional options.
+   - Query **every available notetaker MCP** (see **Notetaker Sources** below — currently Quill and Wispr Flow). For each one: fetch its last 10 meetings, filter out any whose `(source, source_id)` is already in the registry. Merge the survivors from all sources, sort newest first, and present the first 5 as a numbered markdown list tagged with their source (include meeting date and time converted to local timezone Europe/Warsaw), e.g. `1. [2026-10-01 08:39] Proces fabryki (quill)`, then manual paste and cancel as the last two items. Format per [[pavilio-ask]] — a blank line before the list, one item per line.
    - If a meeting is picked: fetch its transcript from the MCP it came from. **If the source is `wispr`, switch to the Ready-Summary Path** (see below) — skip steps 4–9 entirely.
    - If Manual: Ask user to paste transcript
    - Fall back to Manual if no notetaker MCP is available or none has unprocessed meetings. Having only one notetaker (or none) is a normal setup, not an error — just say which sources were checked.
@@ -55,7 +55,7 @@ The user will provide the transcript. Your process is:
     **Pre-write assertion:** before writing files 1–2, both target paths MUST match `projects/<projectname>/notes/**` (the `.md` directly in `notes/`, the `.txt` in `notes/log/`) and `projects/<projectname>/` MUST already exist. If either check fails, stop and report the offending path — do not create a new directory to make it fit.
     **Post-write check:** after step 10 confirm that the note `.md`, the `log/*.txt`, `STATUS.md`, `_index.json` and (when applicable) the registry entry's `note_ref` all exist on disk and point at `projects/<projectname>/notes/...`, **and** that `STATUS.md` respects the **caps** (see Update Rules — count the rows/bullets, do not eyeball). In `-yolo`/batch mode a failed check is a `status: error` result, not a silent success.
     **Wiki checkpoint:** after the post-write check, run `scripts/wiki pending <projectname> --only notes/<file>.md` (the `--only` path is project-relative). If `projects/<projectname>/wiki/` exists and the note is pending, ingest just that record per [[pavilio-wiki]] § Ingest — `/pavilio-wiki <projectname> ingest projects/<projectname>/notes/<file>.md`, inline or in a background subagent (it locks, writes and commits only `wiki/`); report its one-line result. No `wiki/` → ingest nothing, one hint line: `/pavilio-wiki-migrate <projectname>` builds the wiki. Batch mode skips this step — the [[pavilio-note-batch]] parent ingests each project's notes after its commit.
-11. Display numbered list of tasks for Greg, ask which numbers user wants to add to Todoist.
+11. Display numbered list of tasks for Greg, ask which numbers user wants to add to Todoist. Format per [[pavilio-ask]] (pick-several shape: blank line, one markdown list item per task, the question restated in the turn's final message).
 12. Wait for user input with task numbers.
 13. Add selected tasks to Todoist using MCP. Task should have "[projectname]" prefix followed by short title and a bit longer description and should be for today.
 14. Ask if user wants to add any other tasks to Todoist. Add them to Todoist using MCP.
@@ -147,7 +147,11 @@ If the chosen notetaker MCP fails while fetching:
 
 ```
 Error: <Source> MCP server is unavailable.
-Would you like to pick a meeting from another notetaker, or paste the transcript manually? [other/paste/cancel]
+Would you like to pick a meeting from another notetaker, or paste the transcript manually?
+
+- **A)** Pick from another notetaker *(recommended)*
+- **B)** Paste the transcript manually
+- **D)** Other, tell me how (e.g. cancel)
 ```
 
 ---

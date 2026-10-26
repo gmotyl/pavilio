@@ -42,7 +42,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    ```
    Wait for reply. If confirmed → the task is known: load its scope (below), read that change's `tasks.md` for the next unchecked task, and enter the workflow at **step 3: Execute**. If new task → treat as fast-entry with task description.
 
-   **Multiple active changes** → After the summary, show a numbered list of change names, wait for selection.
+   **Multiple active changes** → After the summary, show the change names as a numbered markdown list per [[pavilio-ask]] (blank line before it, one item per change), wait for selection.
 
 **Once the task is known** (reply to the question above, a selected change, or fast-entry), load context for that scope only, guided by `PROJECT.md`:
 - `CONTEXT.md` (if present) — the project glossary; with `wiki/`, walk on from it per `skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` (the reading ladder: wiki index → ≤2 section indexes → ≤3 pages, no logging) instead of sweeping notes; no `wiki/` → `CONTEXT.md` whole, as before

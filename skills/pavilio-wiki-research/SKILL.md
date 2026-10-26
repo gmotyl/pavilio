@@ -43,11 +43,9 @@ with their original URL.
      `scripts/project new <slug> --kind research --topic "<topic>"`. Exit 2 `exists` → that slug
      is taken: pick another; `archived` → ask. The scaffold writes
      `PROJECT.md` and `wiki/` (with `wiki/raw/`).
-2. **Interview** — one question per message, then stop and wait. Discrete choices are lettered
-   A)–C): a blank line after the question, then one markdown list item per option —
-   `- **A)** … *(recommended)*`, `- **B)** …`, … `- **D)** Other, tell me how` last. Never options
-   on bare consecutive lines: the answer pane renders markdown and joins them into one paragraph.
-   A bare letter is that option. Questions and options follow the user's language. Settle, in
+2. **Interview** — one question per message, then stop and wait. Format every question per
+   [[pavilio-ask]]: discrete choices lettered A)–C) plus D) Other, one markdown list item each
+   after a blank line; a bare letter is that option; questions follow the user's language. Settle, in
    this order: research questions (what the round must answer), scope in, scope out, seed links
    (articles, YouTube videos the user already has). Write each item into the research
    `PROJECT.md` as soon as it settles — `## Research questions` (numbered), `## Scope` (`In:` /
