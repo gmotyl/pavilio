@@ -262,11 +262,24 @@ describe("TerminalMobileRail — minimised aggregate", () => {
     expect(screen.getByTestId("terminal-mobile-rail-minimised")).toHaveTextContent("▁ 1");
   });
 
+  it("visible session's state does not leak into the aggregate", () => {
+    // The loudest state on the visible chip; every minimised session is idle.
+    activityOf.set("s1", "attention");
+    activityOf.set("s2", "idle");
+    activityOf.set("s3", "idle");
+    render(
+      <StatefulRail sessions={three()} initial={["s2", "s3"]} onRestore={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId("terminal-mobile-rail-minimised-led")).toHaveAttribute(
+      "data-state",
+      "idle",
+    );
+  });
+
   it("aggregate dot shows attention from a minimised session", () => {
     activityOf.set("s2", "busy");
     activityOf.set("s3", "attention");
-    // The visible session's state must not leak into the aggregate.
-    activityOf.set("s1", "busy");
     const { unmount } = render(
       <StatefulRail sessions={three()} initial={["s2", "s3"]} onRestore={vi.fn()} />,
     );
