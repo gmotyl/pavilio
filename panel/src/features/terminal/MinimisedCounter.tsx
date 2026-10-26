@@ -80,7 +80,8 @@ function menuPos(r: DOMRect): MenuPos {
  * scroller), so the menu is portalled and pinned to the trigger. The pin is
  * measured once on open, so a window resize closes the menu rather than leave it
  * floating where the trigger used to be. Opening focuses the first row,
- * ArrowUp/ArrowDown move between rows (wrapping), Escape returns to the trigger.
+ * ArrowUp/ArrowDown move between rows (wrapping), Escape returns to the trigger,
+ * and focus leaving menu and trigger (Tab) closes it.
  */
 export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props) {
   const ids = sessions.map((s) => s.id);
@@ -112,10 +113,16 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
   useLayoutEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
+    const inside = (t: EventTarget | null) =>
+      t instanceof Node && (triggerRef.current?.contains(t) || menuRef.current?.contains(t));
     const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      close();
+      if (!inside(e.target)) close();
+    };
+    // Tab out of the menu closes it, as a click outside does: the arrows below
+    // are heard on the whole document, so a menu left open would pull focus
+    // back from wherever Tab went.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!inside(e.target)) close();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -137,10 +144,12 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
     window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
       window.removeEventListener("resize", close);
     };
   }, [open]);

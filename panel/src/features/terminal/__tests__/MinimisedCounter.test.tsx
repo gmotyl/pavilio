@@ -99,6 +99,27 @@ describe("MinimisedCounter — menu", () => {
     expect(onRestore).not.toHaveBeenCalled();
   });
 
+  // Tab is how a keyboard user leaves a menu. The arrows are listened for on the
+  // document, so a menu left open would keep pulling focus back from wherever
+  // Tab went.
+  it("focus moving out of the menu closes it; the arrows then stay put", () => {
+    renderOpen();
+    const elsewhere = screen.getByTestId("elsewhere");
+
+    act(() => elsewhere.focus());
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.keyDown(elsewhere, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("focus moving between the rows or back to the trigger keeps the menu open", () => {
+    const { trigger } = renderOpen();
+    act(() => screen.getByTestId("counter-item-m2").focus());
+    act(() => trigger.focus());
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
   it("a window resize closes the menu", () => {
     renderOpen();
 
