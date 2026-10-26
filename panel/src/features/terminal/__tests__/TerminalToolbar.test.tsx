@@ -345,3 +345,105 @@ describe("TerminalToolbar — maximize", () => {
     expect(onToggleMaximize).not.toHaveBeenCalled();
   });
 });
+
+describe("TerminalToolbar — minimised tray and icon-only buttons", () => {
+  beforeEach(() => installProjectColors());
+
+  const four = () => [
+    makeSession({ id: "s1", name: "alpha·1", project: "alpha" }),
+    makeSession({ id: "s2", name: "alpha·2", project: "alpha" }),
+    makeSession({ id: "s3", name: "beta·1", project: "beta" }),
+    makeSession({ id: "s4", name: "beta·2", project: "beta" }),
+  ];
+
+  /** `a` comes before `b` in document order. */
+  const before = (a: Element, b: Element) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("strip renders chips, spacer, tray, then toolbar buttons in order", () => {
+    renderToolbar({ sessions: four(), minimisedIds: ["s2", "s4"], onRestore: vi.fn() });
+
+    // Minimised sessions leave the chips for the tray.
+    expect(screen.queryByTestId("terminal-toolbar-chip-s2")).toBeNull();
+    expect(screen.queryByTestId("terminal-toolbar-chip-s4")).toBeNull();
+
+    const sequence = [
+      screen.getByTestId("terminal-toolbar-new"),
+      screen.getByTestId("terminal-toolbar-chip-s1"),
+      screen.getByTestId("terminal-toolbar-chip-s3"),
+      screen.getByTestId("terminal-toolbar-spacer"),
+      screen.getByTestId("minimised-tray"),
+      screen.getByTestId("terminal-toolbar-reconnect"),
+      screen.getByTestId("terminal-toolbar-maximize"),
+      screen.getByTestId("layout-preset-toggle"),
+    ];
+    for (let i = 1; i < sequence.length; i++) {
+      expect(
+        before(sequence[i - 1], sequence[i]),
+        `${sequence[i - 1].dataset.testid} before ${sequence[i].dataset.testid}`,
+      ).toBe(true);
+    }
+
+    // The tray holds the minimised sessions in session order.
+    const tray = screen.getByTestId("minimised-tray");
+    expect(within(tray).getByTestId("minimised-tray-label")).toHaveTextContent("minimised");
+    expect(
+      within(tray).getAllByRole("button").map((b) => b.dataset.testid),
+    ).toEqual(["minimised-tray-pill-s2", "minimised-tray-pill-s4"]);
+  });
+
+  it("no tray renders when nothing is minimised", () => {
+    renderToolbar({ sessions: four(), minimisedIds: [], onRestore: vi.fn() });
+
+    expect(screen.queryByTestId("minimised-tray")).toBeNull();
+    expect(screen.queryByTestId("minimised-tray-label")).toBeNull();
+    expect(screen.queryByTestId("minimised-tray-counter")).toBeNull();
+    expect(screen.queryByText(/minimised/i)).toBeNull();
+    // Every session is a chip, and the spacer still pushes the buttons right.
+    for (const id of ["s1", "s2", "s3", "s4"]) {
+      expect(screen.getByTestId(`terminal-toolbar-chip-${id}`)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId("terminal-toolbar-spacer")).toBeInTheDocument();
+  });
+
+  it("toolbar buttons are icon-only with accessible names", () => {
+    renderToolbar({ sessions: four() });
+
+    const check = (testId: string, name: string, icon?: string) => {
+      const button = screen.getByTestId(testId);
+      // An icon and no visible text…
+      expect(button.querySelector("svg")).not.toBeNull();
+      expect(button.textContent?.trim()).toBe("");
+      // …named for assistive tech and explained by a tooltip.
+      expect(button).toHaveAccessibleName(name);
+      expect(button.getAttribute("title")).toBeTruthy();
+      if (icon) expect(button.querySelector(`svg.${icon}`)).not.toBeNull();
+    };
+
+    check("terminal-toolbar-reconnect", "Reconnect", "lucide-rotate-cw");
+    check("terminal-toolbar-maximize", "Maximise", "lucide-maximize-2");
+    check("layout-preset-toggle", "Layout");
+    // Layout must not borrow the Grid icon Max uses.
+    expect(screen.getByTestId("layout-preset-toggle").querySelector("svg.lucide-layout-grid")).toBeNull();
+  });
+
+  it("in Max the toolbar control reads Grid with the four-squares icon", () => {
+    renderToolbar({ sessions: four(), maximized: true });
+
+    const grid = screen.getByTestId("terminal-toolbar-maximize");
+    expect(grid).toHaveAccessibleName("Grid");
+    expect(grid.textContent?.trim()).toBe("");
+    expect(grid.querySelector("svg.lucide-layout-grid")).not.toBeNull();
+    expect(grid.querySelector("svg.lucide-minimize-2")).toBeNull();
+  });
+
+  it("the layout menu offers shapes for the visible sessions only", () => {
+    const onApplyPreset = vi.fn();
+    renderToolbar({ sessions: four(), minimisedIds: ["s4"], onApplyPreset });
+
+    fireEvent.click(screen.getByTestId("layout-preset-toggle"));
+    fireEvent.click(screen.getByTestId("layout-preset-option-0"));
+
+    expect(onApplyPreset).toHaveBeenCalledWith(getLayoutPresets(3)[0]);
+  });
+});

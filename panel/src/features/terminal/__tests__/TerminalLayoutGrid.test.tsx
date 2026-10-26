@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
+import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
@@ -346,6 +347,26 @@ describe("TerminalLayoutGrid — tiling", () => {
         .style.visibility;
     expect(shown("b")).toBe("visible");
     expect(shown("a")).toBe("hidden");
+  });
+
+  it("three visible sessions render as three equal columns", () => {
+    renderGrid({
+      sessions: [
+        makeSession({ id: "a" }),
+        makeSession({ id: "b" }),
+        makeSession({ id: "c" }),
+        makeSession({ id: "d" }),
+      ],
+      minimisedIds: ["c"],
+      tiles: [],
+    });
+
+    // Three visible of four: one row of three 16-zone columns, full height.
+    expect(cellsByArea()).toEqual([
+      "1 / span 16|1 / span 48",
+      "17 / span 16|1 / span 48",
+      "33 / span 16|1 / span 48",
+    ]);
   });
 
   it("mobile/maximized rendering is unaffected by the tiling", () => {
@@ -693,7 +714,10 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     // swatch) fails here. (The disconnected badge leads it but renders nothing
     // while healthy.)
     const group = Array.from(groupEl.children) as HTMLElement[];
-    expect(group.map((el) => el.dataset.testid)).toEqual([
+    const separator = screen.getByTestId("terminal-cell-separator-s-nc");
+    expect(
+      group.filter((el) => el !== separator).map((el) => el.dataset.testid),
+    ).toEqual([
       "terminal-cell-speak-s-nc",
       "terminal-cell-speech-controls-s-nc",
       "terminal-cell-reader-s-nc",
@@ -701,6 +725,13 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
       "terminal-cell-maximise-s-nc",
       "terminal-cell-kill-s-nc",
     ]);
+    // A decorative separator sits between the reader and minimise, as in the
+    // mockup: hidden from assistive tech and not a control.
+    const at = group.indexOf(separator);
+    expect(group[at - 1].dataset.testid).toBe("terminal-cell-reader-s-nc");
+    expect(group[at + 1].dataset.testid).toBe("terminal-cell-minimise-s-nc");
+    expect(separator).toHaveAttribute("aria-hidden", "true");
+    expect(separator.tagName).not.toBe("BUTTON");
     expect(
       screen.getByRole("button", { name: "Minimise" }),
     ).toBe(screen.getByTestId("terminal-cell-minimise-s-nc"));
@@ -796,13 +827,44 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     // The shown cell's control reads Grid, with the toolbar's Grid icon.
     const grid = screen.getByTestId("terminal-cell-maximise-g-b");
     expect(grid).toHaveAccessibleName("Grid");
-    expect(grid.querySelector("svg.lucide-minimize-2")).not.toBeNull();
+    expect(grid.querySelector("svg.lucide-layout-grid")).not.toBeNull();
     expect(grid.querySelector("svg.lucide-maximize-2")).toBeNull();
+    expect(grid.querySelector("svg.lucide-minimize-2")).toBeNull();
 
     fireEvent.click(grid);
     expect(onToggleMaximize).toHaveBeenCalledTimes(1);
     // Focus stays where it was.
     expect(onFocus).not.toHaveBeenCalled();
+  });
+
+  it("in Max the cell and the toolbar show the same Grid icon", async () => {
+    const a = makeSession({ id: "gi-a" });
+    const b = makeSession({ id: "gi-b" });
+    renderGrid({ sessions: [a, b], focusedId: b.id, maximized: true });
+    render(
+      <TerminalToolbar
+        sessions={[a, b]}
+        focusedId={b.id}
+        maximized
+        currentProject="ch"
+        onFocus={vi.fn()}
+        onCreate={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onToggleMaximize={vi.fn()}
+        onReorder={vi.fn()}
+      />,
+    );
+    await settleColors();
+
+    const iconOf = (el: HTMLElement) =>
+      Array.from(el.querySelector("svg")!.classList).find(
+        (c) => c.startsWith("lucide-") && c !== "lucide-icon",
+      );
+    const cell = screen.getByTestId("terminal-cell-maximise-gi-b");
+    const toolbar = screen.getByTestId("terminal-toolbar-maximize");
+    expect(iconOf(cell)).toBe("lucide-layout-grid");
+    expect(iconOf(toolbar)).toBe(iconOf(cell));
   });
 
   it("mobile cell header has minimise and no maximise", async () => {

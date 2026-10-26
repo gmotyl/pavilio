@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Maximize2, Minimize2, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
+import { Plus, Maximize2, LayoutGrid, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName, sessionLabel } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
@@ -9,6 +9,7 @@ import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
+import { MinimisedTray } from "./MinimisedTray";
 import type { LayoutPreset } from "./tileLayout";
 
 interface Props {
@@ -45,6 +46,8 @@ export function TerminalToolbar({
   onReorder,
   onReconnect,
   onApplyPreset,
+  minimisedIds = NONE,
+  onRestore,
 }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
@@ -57,6 +60,12 @@ export function TerminalToolbar({
   const { colorFor } = useProjectColors();
   const { users } = useOsUsers();
   const { defaultUsers, setDefaultUser } = useDefaultTerminalUsers();
+  // Chips are for visible sessions only; minimised ones live in the tray.
+  const visible =
+    minimisedIds.length === 0
+      ? sessions
+      : sessions.filter((s) => !minimisedIds.includes(s.id));
+  const minimised = sessions.filter((s) => minimisedIds.includes(s.id));
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -259,9 +268,13 @@ export function TerminalToolbar({
         )}
       </div>
 
-      {/* Session chips */}
-      <div className="flex-1 flex items-stretch overflow-x-auto min-w-0 scrollbar-none">
-        {sessions.map((s) => {
+      {/* Session chips: their natural width first, scrolling only when the strip
+          is out of room. What they leave goes to the spacer and the tray. */}
+      <div
+        className="flex items-stretch overflow-x-auto min-w-0 scrollbar-none"
+        style={{ flex: "0 1 auto" }}
+      >
+        {visible.map((s) => {
           const focused = s.id === focusedId;
           const editing = editingId === s.id;
           const chipColor = colorFor(s.project);
@@ -371,7 +384,9 @@ export function TerminalToolbar({
         })}
       </div>
 
-      {/* Right actions */}
+      <MinimisedTray sessions={minimised} onRestore={(id) => onRestore?.(id)} />
+
+      {/* Right actions: icon-only, each named and explained by its tooltip. */}
       <div
         className="flex items-stretch shrink-0"
         style={{ borderLeft: "1px solid var(--border-subtle)" }}
@@ -381,7 +396,8 @@ export function TerminalToolbar({
           data-testid="terminal-toolbar-reconnect"
           onClick={() => onReconnect?.()}
           disabled={!focusedId}
-          className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"
+          aria-label="Reconnect"
+          className="flex items-center px-2.5 transition-colors disabled:opacity-40"
           style={{ color: "var(--text-secondary)" }}
           onMouseEnter={(e) => {
             if (focusedId) e.currentTarget.style.background = "var(--bg-hover)";
@@ -393,18 +409,18 @@ export function TerminalToolbar({
           // session, and falls back to repainting the focused one.
           title="Reconnect every disconnected terminal (or repaint the focused one)"
         >
-          <RotateCw size={12} />
-          <span className="uppercase tracking-widest">Reconnect</span>
+          <RotateCw size={13} />
         </button>
         <button
           type="button"
           data-testid="terminal-toolbar-maximize"
           onClick={onToggleMaximize}
-          disabled={sessions.length === 0}
-          className="flex items-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40"
+          disabled={visible.length === 0}
+          aria-label={maximized ? "Grid" : "Maximise"}
+          className="flex items-center px-2.5 transition-colors disabled:opacity-40"
           style={{ color: "var(--text-secondary)" }}
           onMouseEnter={(e) => {
-            if (sessions.length > 0)
+            if (visible.length > 0)
               e.currentTarget.style.background = "var(--bg-hover)";
           }}
           onMouseLeave={(e) =>
@@ -412,17 +428,15 @@ export function TerminalToolbar({
           }
           title={
             maximized
-              ? "Restore grid (Esc or Cmd+Shift+Enter)"
-              : "Maximize focused (Cmd+Shift+Enter)"
+              ? "Back to grid (Esc or Cmd+Shift+Enter)"
+              : "Maximise focused (Cmd+Shift+Enter)"
           }
         >
-          {maximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-          <span className="uppercase tracking-widest">
-            {maximized ? "Grid" : "Max"}
-          </span>
+          {/* Four squares in Max — the same icon the shown cell's control uses. */}
+          {maximized ? <LayoutGrid size={13} /> : <Maximize2 size={13} />}
         </button>
         <LayoutPresetMenu
-          count={sessions.length}
+          count={visible.length}
           onApply={(preset) => onApplyPreset?.(preset)}
         />
       </div>
@@ -438,5 +452,7 @@ export function TerminalToolbar({
     </div>
   );
 }
+
+const NONE: string[] = [];
 
 export default TerminalToolbar;

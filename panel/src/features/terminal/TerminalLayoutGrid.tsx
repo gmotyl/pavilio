@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Maximize2, Minimize2, Minus, Printer, X } from "lucide-react";
+import { LayoutGrid, Maximize2, Minus, Printer, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
@@ -61,7 +61,11 @@ interface Props {
   onPlace?: (layout: TileLayout, kind: LayoutCommitKind) => void;
   /** See {@link GridSpeech}. Required: a surface that forgets it is silent. */
   speech: GridSpeech;
-  /** Sessions minimised on this surface: still mounted, never tiled. */
+  /**
+   * Sessions minimised on this surface, never tiled. In the grid they are
+   * unmounted and parked in the terminal instance pool — process, socket and
+   * activity LED live on; only Max and mobile keep them mounted, hidden.
+   */
   minimisedIds?: string[];
   /** Take a session out of the grid (the cell header's minimise). */
   onMinimise?: (id: string) => void;
@@ -671,6 +675,16 @@ function TerminalCell({
           >
             <Printer size={11} />
           </CellIconButton>
+          {/* Desktop only, as in the mockup: sets the window controls apart
+              from the speech and reader ones. Decorative, so hidden from AT. */}
+          {showMaximise && (
+            <span
+              data-testid={`terminal-cell-separator-${session.id}`}
+              aria-hidden="true"
+              className="mx-0.5 shrink-0"
+              style={{ width: 1, height: 14, background: "var(--border-subtle)" }}
+            />
+          )}
           {/* Minimise and maximise stop the click short of the cell: neither is
               an arrival at this cell (maximise focuses it on purpose). */}
           <CellIconButton
@@ -686,7 +700,7 @@ function TerminalCell({
             <Minus size={11} />
           </CellIconButton>
           {showMaximise && (
-            // Same icon pair as the toolbar's Max/Grid control.
+            // Same icon pair as the toolbar's Max/Grid control: four squares in Max.
             <CellIconButton
               testId={`terminal-cell-maximise-${session.id}`}
               title={maximized ? "Back to grid" : "Maximise"}
@@ -696,7 +710,7 @@ function TerminalCell({
                 onMaximise();
               }}
             >
-              {maximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+              {maximized ? <LayoutGrid size={11} /> : <Maximize2 size={11} />}
             </CellIconButton>
           )}
           <CellIconButton
