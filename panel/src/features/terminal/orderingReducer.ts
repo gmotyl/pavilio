@@ -146,6 +146,25 @@ function defaultTiling(visible: string[]): TileLayout {
   return preset ? expandPreset(visible, preset) : [];
 }
 
+/**
+ * The grid is never left empty while a session is minimised: when no session is
+ * visible, the first minimised one in `order` order comes back, tiled with the
+ * default preset as `restore` would. Returns the same reference when something is
+ * already visible. Exported so a stored scope can be repaired on hydration too.
+ */
+export function ensureVisible(state: OrderingState): OrderingState {
+  if (state.minimised.length === 0) return state;
+  if (visibleOf(state.order, state.minimised).length > 0) return state;
+  const first = state.order.find((id) => state.minimised.includes(id));
+  if (first === undefined) return state;
+  const minimised = state.minimised.filter((id) => id !== first);
+  return {
+    order: state.order,
+    layout: defaultTiling(visibleOf(state.order, minimised)),
+    minimised,
+  };
+}
+
 /** Re-seats sessions into the layout's slots following `order`. */
 function assign(layout: TileLayout, order: string[]): TileLayout {
   return readingOrder(layout).map((slot, i) => ({
@@ -173,15 +192,16 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
     // per-count default instead of pinning the shape the count happened to have.
     case "sync": {
       // An ended session leaves the minimised set with it; the layout only ever saw
-      // visible sessions, so dropping a minimised one does not touch it.
+      // visible sessions, so dropping a minimised one does not touch it. If the last
+      // visible session ended, a minimised one comes back (`ensureVisible`).
       const order = mergeOrder(state.order, action.ids);
       const minimised = state.minimised.filter((id) => order.includes(id));
-      return commit(
-        state,
+      const next = ensureVisible({
         order,
-        reconcile(state.layout, visibleOf(order, minimised)),
+        layout: reconcile(state.layout, visibleOf(order, minimised)),
         minimised,
-      );
+      });
+      return commit(state, next.order, next.layout, next.minimised);
     }
 
     case "append": {
@@ -199,12 +219,13 @@ export function orderingReducer(state: OrderingState, action: OrderingAction): O
       if (!state.order.includes(action.id)) return state;
       const order = state.order.filter((id) => id !== action.id);
       const minimised = state.minimised.filter((id) => id !== action.id);
-      return commit(
-        state,
+      // Closing the last visible session brings a minimised one back (`ensureVisible`).
+      const next = ensureVisible({
         order,
-        reconcile(state.layout, visibleOf(order, minimised)),
+        layout: reconcile(state.layout, visibleOf(order, minimised)),
         minimised,
-      );
+      });
+      return commit(state, next.order, next.layout, next.minimised);
     }
 
     case "reorder": {

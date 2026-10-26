@@ -333,7 +333,7 @@ describe("orderingReducer — minimised sessions", () => {
   it("presets and placement tile visible sessions only", () => {
     const base = deepFreezeState({
       order: ["A", "B", "C", "D"],
-      layout: customThree,
+      layout: defaultLayout(["A", "C", "D"]),
       minimised: ["B"],
     });
     const visible = ["A", "C", "D"];
@@ -364,5 +364,84 @@ describe("orderingReducer — minimised sessions", () => {
     expect(afterResize.layout).toEqual(resized);
     expect(afterResize.minimised).toEqual(["B"]);
     expect(afterResize.order).toEqual(afterPlace.order);
+  });
+
+  it("removing the last visible session restores the first minimised one", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C"],
+      layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+      minimised: ["C", "B"],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "A" });
+
+    // The grid is never empty: B comes back first because it leads in `order`.
+    expect(next.order).toEqual(["B", "C"]);
+    expect(next.minimised).toEqual(["C"]);
+    expect(next.layout).toEqual(defaultLayout(["B"]));
+  });
+
+  it("an ended last visible session restores the first minimised one", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C"],
+      layout: [{ sessionId: "A", x: 0, y: 0, w: 48, h: 48 }],
+      minimised: ["C", "B"],
+    });
+
+    const next = orderingReducer(base, { type: "sync", ids: ["B", "C"] });
+
+    expect(next.order).toEqual(["B", "C"]);
+    expect(next.minimised).toEqual(["C"]);
+    expect(next.layout).toEqual(defaultLayout(["B"]));
+  });
+
+  it("a steady-state poll with minimised sessions is the same state", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    expect(orderingReducer(base, { type: "sync", ids: ["A", "B", "C", "D"] })).toBe(base);
+  });
+
+  it("removing a minimised session drops it from the set and keeps the layout", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "remove", id: "D" });
+
+    expect(next.minimised).toEqual([]);
+    expect(next.order).toEqual(["A", "B", "C"]);
+    expect(next.layout).toBe(customThree);
+  });
+
+  it("restore of a session that is not minimised keeps the state and its seams", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    expect(orderingReducer(base, { type: "restore", id: "A" })).toBe(base);
+    expect(orderingReducer(base, { type: "restore", id: "Z" })).toBe(base);
+  });
+
+  it("reorder keeps minimised sessions out of the layout", () => {
+    const base = deepFreezeState({
+      order: ["A", "B", "C", "D"],
+      layout: customThree,
+      minimised: ["D"],
+    });
+
+    const next = orderingReducer(base, { type: "reorder", fromId: "D", toId: "A" });
+
+    expect(next.order).toEqual(["D", "A", "B", "C"]);
+    expect(next.minimised).toEqual(["D"]);
+    expect(idsOf(next.layout)).toEqual(["A", "B", "C"]);
+    expect(isValidLayout(next.layout)).toBe(true);
   });
 });
