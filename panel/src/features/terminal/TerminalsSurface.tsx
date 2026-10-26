@@ -261,6 +261,7 @@ export function TerminalsSurface({
             onPlace={onPlace}
             minimisedIds={minimisedIds}
             onMinimise={handleMinimise}
+            onToggleMaximize={onToggleMaximize}
             speech={speech}
           />
         </div>

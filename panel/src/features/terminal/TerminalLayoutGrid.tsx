@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Eye, X } from "lucide-react";
+import { Maximize2, Minimize2, Minus, Printer, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
@@ -65,6 +65,8 @@ interface Props {
   minimisedIds?: string[];
   /** Take a session out of the grid (the cell header's minimise). */
   onMinimise?: (id: string) => void;
+  /** Flip Max — the same toggle the toolbar's Max/Grid control calls. */
+  onToggleMaximize?: () => void;
 }
 
 export function TerminalLayoutGrid({
@@ -79,6 +81,8 @@ export function TerminalLayoutGrid({
   onPlace,
   speech,
   minimisedIds,
+  onMinimise,
+  onToggleMaximize,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia(MOBILE_QUERY).matches,
@@ -207,6 +211,20 @@ export function TerminalLayoutGrid({
       onRename={onRename}
       onDragStart={() => overlayRef.current?.begin(session.id)}
       onDragEnd={() => overlayRef.current?.end()}
+      // The last visible session cannot leave the grid: an empty grid with
+      // live sessions behind it would be a dead end.
+      canMinimise={visibleIds.length > 1}
+      onMinimise={onMinimise}
+      // Mobile always shows one terminal, so there is nothing to maximise.
+      showMaximise={!isMobile}
+      maximized={maximized}
+      onMaximise={() => {
+        // In Max the control reads Grid and only turns Max off, keeping focus.
+        // Otherwise the pressed cell is the one Max shows — focus it first so
+        // the toggle does not maximise whichever cell had focus before.
+        if (!maximized) onFocus(session.id);
+        onToggleMaximize?.();
+      }}
       speech={speech}
       style={{ height: "100%", ...style }}
     />
@@ -332,6 +350,11 @@ interface CellProps {
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  canMinimise: boolean;
+  onMinimise?: (id: string) => void;
+  showMaximise: boolean;
+  maximized: boolean;
+  onMaximise: () => void;
   speech: GridSpeech;
   style?: React.CSSProperties;
 }
@@ -346,6 +369,11 @@ function TerminalCell({
   onRename,
   onDragStart,
   onDragEnd,
+  canMinimise,
+  onMinimise,
+  showMaximise,
+  maximized,
+  onMaximise,
   speech,
   style,
 }: CellProps) {
@@ -586,7 +614,7 @@ function TerminalCell({
           </span>
         )}
         <div className="flex gap-0.5">
-          {/* Leads the eye · kill group. Renders nothing while the socket is
+          {/* Leads the control group. Renders nothing while the socket is
               healthy, so the group's usual width is unchanged. */}
           <TerminalDisconnectedBadge sessionId={session.id} />
           {/* Speak · speech-controls lead the group: they change per utterance,
@@ -632,16 +660,45 @@ function TerminalCell({
             // `null`, and negating that would say nothing.
             onToggleBar={() => setBarChoice(!speechBarVisible)}
           />
+          {/* The cell reader is a printer: an eye read as the answer pane's. */}
           <CellIconButton
-            testId={`terminal-cell-eye-${session.id}`}
+            testId={`terminal-cell-reader-${session.id}`}
             title={`View viewport text (read aloud / print) — ${navigator.platform.includes("Mac") ? "⌘" : "Ctrl+"}U`}
             onClick={(e) => {
               e.stopPropagation();
               openViewport();
             }}
           >
-            <Eye size={11} />
+            <Printer size={11} />
           </CellIconButton>
+          {/* Minimise and maximise stop the click short of the cell: neither is
+              an arrival at this cell (maximise focuses it on purpose). */}
+          <CellIconButton
+            testId={`terminal-cell-minimise-${session.id}`}
+            title="Minimise"
+            ariaLabel="Minimise"
+            disabled={!canMinimise}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMinimise?.(session.id);
+            }}
+          >
+            <Minus size={11} />
+          </CellIconButton>
+          {showMaximise && (
+            // Same icon pair as the toolbar's Max/Grid control.
+            <CellIconButton
+              testId={`terminal-cell-maximise-${session.id}`}
+              title={maximized ? "Back to grid" : "Maximise"}
+              ariaLabel={maximized ? "Grid" : "Maximise"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMaximise();
+              }}
+            >
+              {maximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+            </CellIconButton>
+          )}
           <CellIconButton
             testId={`terminal-cell-kill-${session.id}`}
             title="Kill session"
@@ -701,22 +758,34 @@ function CellIconButton({
   title,
   hoverColor,
   testId,
+  ariaLabel,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
   title: string;
   hoverColor?: string;
   testId?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
+      aria-label={ariaLabel}
+      disabled={disabled}
       onClick={onClick}
       data-testid={testId}
+      // The class is shared with the colour picker's trigger (asserted by the
+      // header tests), so the disabled look is inline rather than a class.
       className="p-1 rounded transition-colors"
-      style={{ color: "var(--text-muted)" }}
+      style={{
+        color: "var(--text-muted)",
+        ...(disabled ? { opacity: 0.4, cursor: "default" } : {}),
+      }}
       onMouseEnter={(e) => {
+        if (disabled) return;
         e.currentTarget.style.color = hoverColor || "var(--text-primary)";
         e.currentTarget.style.background = "rgba(255,255,255,0.06)";
       }}
