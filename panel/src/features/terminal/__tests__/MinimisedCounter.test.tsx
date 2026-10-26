@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 
 vi.mock("../TerminalActivityLed", () => ({
@@ -107,6 +107,46 @@ describe("MinimisedCounter — menu", () => {
     });
 
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("MinimisedCounter — menu fits the viewport", () => {
+  const originalHeight = window.innerHeight;
+  afterEach(() => {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+    vi.restoreAllMocks();
+  });
+
+  /** Opens the menu with the trigger pinned at `top`..`top + 20` in a 400px-tall window. */
+  function openAt(top: number) {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 400 });
+    const many = Array.from({ length: 30 }, (_, i) => makeSession({ id: `m${i}`, name: `t·${i}` }));
+    render(<MinimisedCounter sessions={many} onRestore={vi.fn()} testId="counter" variant="rail" />);
+    const trigger = screen.getByTestId("counter");
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 300, y: top, width: 40, height: 20 }),
+    );
+    fireEvent.click(trigger);
+    return screen.getByRole("menu");
+  }
+
+  // Thirty rows are far taller than any phone; without a bound the list ran off
+  // the bottom of the screen with no way to reach the rest.
+  it("below the trigger, the menu is capped to the space left and scrolls", () => {
+    const menu = openAt(10);
+    expect(menu).toHaveClass("overflow-y-auto");
+    expect(menu.style.top).toBe("34px");
+    // 400 − 34 − an 8px margin.
+    expect(menu.style.maxHeight).toBe("358px");
+  });
+
+  it("near the bottom of the window, the menu opens above the trigger instead", () => {
+    const menu = openAt(360);
+    expect(menu.style.top).toBe("");
+    // Its bottom edge sits 4px above the trigger's top.
+    expect(menu.style.bottom).toBe("44px");
+    // 360 − 4 − an 8px margin.
+    expect(menu.style.maxHeight).toBe("348px");
   });
 });
 

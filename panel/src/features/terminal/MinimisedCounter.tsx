@@ -41,6 +41,35 @@ const TRIGGER: Record<Props["variant"], { className: string; style: React.CSSPro
   },
 };
 
+/** Gap between the trigger and the menu, and the menu's margin to the window edge. */
+const GAP = 4;
+const EDGE = 8;
+/** Below this much room under the trigger, the menu opens above it if there is more room there. */
+const MIN_BELOW = 160;
+
+interface MenuPos {
+  /** Exactly one of `top` / `bottom` is set: the menu opens below or above the trigger. */
+  top?: number;
+  bottom?: number;
+  right: number;
+  maxHeight: number;
+}
+
+/**
+ * Where the menu pins for a trigger at `r`: below it, capped to the room left
+ * so a long list scrolls instead of running off the screen — or above it when
+ * the trigger sits so low that above has more room.
+ */
+function menuPos(r: DOMRect): MenuPos {
+  const right = Math.max(EDGE, window.innerWidth - r.right);
+  const below = window.innerHeight - r.bottom - GAP - EDGE;
+  const above = r.top - GAP - EDGE;
+  if (below >= MIN_BELOW || below >= above) {
+    return { top: r.bottom + GAP, right, maxHeight: below };
+  }
+  return { bottom: window.innerHeight - r.top + GAP, right, maxHeight: above };
+}
+
 /**
  * "▁ N": every minimised session behind one trigger whose dot shows the loudest
  * state (attention > busy > idle), from the same flags `ProjectActivityLed`
@@ -48,7 +77,7 @@ const TRIGGER: Record<Props["variant"], { className: string; style: React.CSSPro
  * restores it. Shared by the folded desktop tray and the mobile rail.
  *
  * Both hosts clip what overflows them (the strip's slot, the rail's sideways
- * scroller), so the menu is portalled and pinned under the trigger. The pin is
+ * scroller), so the menu is portalled and pinned to the trigger. The pin is
  * measured once on open, so a window resize closes the menu rather than leave it
  * floating where the trigger used to be. Opening focuses the first row,
  * ArrowUp/ArrowDown move between rows (wrapping), Escape returns to the trigger.
@@ -60,7 +89,7 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const count = sessions.length;
   const name = `${count} minimised terminal${count === 1 ? "" : "s"}`;
   const trigger = TRIGGER[variant];
@@ -70,8 +99,7 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
       setPos(null);
       return;
     }
-    const r = triggerRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    setPos(menuPos(triggerRef.current.getBoundingClientRect()));
   }, [open]);
 
   // Focus lands on the first row once the menu is pinned (and so visible — a
@@ -145,10 +173,11 @@ export function MinimisedCounter({ sessions, onRestore, testId, variant }: Props
             ref={menuRef}
             role="menu"
             aria-label="Minimised terminals"
-            className="fixed z-50 min-w-[200px] max-w-[calc(100vw-16px)] p-1 rounded-md shadow-lg"
+            className="fixed z-50 min-w-[200px] max-w-[calc(100vw-16px)] overflow-y-auto p-1 rounded-md shadow-lg"
             style={{
-              top: pos?.top ?? 0,
+              ...(pos?.bottom !== undefined ? { bottom: pos.bottom } : { top: pos?.top ?? 0 }),
               right: pos?.right ?? 8,
+              maxHeight: pos?.maxHeight,
               visibility: pos ? "visible" : "hidden",
               background: "var(--bg-elevated, var(--bg-surface))",
               border: "1px solid var(--border-subtle)",
