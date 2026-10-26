@@ -34,9 +34,9 @@ prints one JSON object; exit 0 ok (`created` lists the paths written), 1 error, 
    - **Folder with notes, no `PROJECT.md`** → `scripts/project new <name>` (with
      `--kind research --topic "…"` for `--research`, as above) scaffolds only the missing parts.
      Then continue with step 2 to generate the card from the notes.
-   - **`PROJECT.md` exists** → the script exits 2 `exists`. Ask: **A) rebuild from notes**
-     (including the legacy all-in-one split, see **Output: STATUS.md**) or **B) stop**. Write
-     nothing until answered. A) → step 2 without rerunning the script; B) → done.
+   - **`PROJECT.md` exists** → the script exits 2 `exists`. Ask, as a lettered list per
+     [[pavilio-ask]]: **A) rebuild from notes** (including the legacy all-in-one split, see
+     **Output: STATUS.md**), **B) stop**, **D) Other**. Write nothing until answered. A) → step 2 without rerunning the script; B) → done.
    - **Exit 2 `archived`** → the name is taken under `projects/archived/`. Ask whether to pick
      another name or restore the archived project by hand; write nothing until answered.
 2. **Orient on the glossary.** Read `projects/<p>/CONTEXT.md` (the glossary) so names and terms match it; with `projects/<p>/wiki/`, walk the reading ladder (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` — `overview.md` and the repository/person entity pages are the usual stops) for stable facts the notes leave implicit. No `wiki/` → `CONTEXT.md` whole. This skill never writes `CONTEXT.md` or wiki pages (the scaffold's empty `wiki/` skeleton aside).

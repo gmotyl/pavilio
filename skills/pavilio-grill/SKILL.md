@@ -50,9 +50,7 @@ Interview relentlessly until you reach shared understanding. Walk each branch of
 
 - **One question per message.** Ask, then STOP and wait for the answer. Never stack questions.
 - **Always give your recommended answer** with brief reasoning.
-- **Discrete-answer questions are lettered, uppercase.** Options are **A)–C)** with your recommendation as **A)**, and **D) Other, tell me how** always last. With only two options drop C: A), B), D). Format them as a markdown list: a blank line after the question, then one list item per option — `- **A)** … *(recommended)*`, `- **B)** …`, … `- **D)** Other, tell me how` last. Never options on bare consecutive lines: the answer pane renders markdown and joins them into one paragraph. A bare letter reply ("B", "b") *is* that option — do not ask for confirmation. Free-text questions (a name, a description) carry no letters and stay one per message.
-- **Language follows the user.** When the user writes Polish, ask the grill questions in Polish; artifacts, code and commit messages stay English.
-- **The final message of a turn that stops for the user is self-contained.** The answer pane shows only that last message, not earlier commentary in the turn. Restate the full question, the lettered options and your recommendation in it — never end on a bare "waiting for your approval" line.
+- **Ask in the [[pavilio-ask]] format.** Discrete choices are lettered A)–C) with your recommendation as A) and **D) Other, tell me how** last, one markdown list item each after a blank line; a bare letter reply *is* that option; free-text questions carry no letters; questions follow the user's language; the final message of a turn that stops for the user restates the whole question.
 - **If the codebase can answer it, go read the code** instead of asking.
 - **If the wiki can answer it, read the wiki** instead of asking — why a past decision was made, what broke last time, how a concept is meant to behave. Walk the reading ladder for that one question (`skills/pavilio-wiki/CONVENTIONS.md § Reading ladder`; step 7 reaches the shared `knowledge` wiki for tools, libraries and techniques), read-only. Cite the page in your recommendation.
 - **Challenge against the wiki.** A design choice that a wiki page records as tried-and-reverted, or that contradicts a concept page's stated rule → call it out with the page and its date before moving on.
@@ -167,7 +165,7 @@ Not a suggestion and not a handoff to the user — grill performs this step itse
 
 ## Key principles
 
-- One question at a time — with a recommended answer. Discrete choices are lettered A–C (recommended = A) plus D) Other, one markdown list item each after a blank line (`- **A)** … *(recommended)*`), never bare consecutive lines; a bare letter is that option; Polish questions when the user writes Polish.
+- One question at a time — with a recommended answer. Ask in the [[pavilio-ask]] format: lettered A–C (recommended = A) plus D) Other, one markdown list item each after a blank line; a bare letter is that option; questions follow the user's language.
 - Read code before asking what code can tell you.
 - Multiple choice / 2-3 approaches at real forks; don't manufacture them.
 - Domain docs are project-scoped and written inline, not at the end.
