@@ -627,6 +627,13 @@ export const preferences = {
     codec: json<TileLayout>(),
     portable: false,
   }),
+  terminalMinimised: definePreference<string[]>({
+    key: "terminal.minimised",
+    scope: "project", // project name, or "__all__" for the global view
+    default: [],
+    codec: json<string[]>(),
+    portable: false, // session ids are machine-local
+  }),
 
   // ── Speech ───────────────────────────────────────────────────────────────
   /**

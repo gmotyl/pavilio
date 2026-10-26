@@ -88,6 +88,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     { period: "today", format: "markdown", detail: "summary" },
   ],
   "terminal.order": [[], ["sess-1"], ["true", "240"]],
+  "terminal.minimised": [[], ["sess-1"], ["sess-1", "sess-2"], ["true", "240"]],
   "terminal.launchers": [
     [],
     [{ name: "claude", command: "claude" }],
@@ -126,7 +127,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 56;
+const DECLARATION_COUNT = 57;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -173,6 +174,18 @@ describe("every declaration round-trips through the store", () => {
         );
       }
     }
+  });
+
+  it("terminal.minimised round-trips a list of session ids", () => {
+    const def = ALL_PREFERENCES.find((d) => d.key === "terminal.minimised");
+    expect(def).toBeDefined();
+
+    // Two scopes side by side: the global view's list never bleeds into a project's.
+    writePreference(def!, ["sess-1", "sess-2"], "__all__");
+    writePreference(def!, ["sess-3"], PROJECT);
+
+    expect(readPreference(def!, "__all__")).toEqual(["sess-1", "sess-2"]);
+    expect(readPreference(def!, PROJECT)).toEqual(["sess-3"]);
   });
 
   it("a portable write leaves the document hand-readable", () => {
