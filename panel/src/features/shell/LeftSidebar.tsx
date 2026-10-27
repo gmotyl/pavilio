@@ -408,19 +408,26 @@ export default function LeftSidebar() {
   // The same reveal one level up: a project listed under a collapsed Research
   // section is hidden however expanded its own row is, so the menu also opens
   // that section — in memory only, for as long as the menu stays open. The
-  // stored preference is never written; folding the section while it is
-  // revealed just ends the reveal (it was collapsed already in storage).
+  // reveal is set only over a section that is actually collapsed, and is
+  // decided when the menu opens: `researchCollapsed` is read, not a dep, so
+  // a collapse tap with the menu still open does not re-reveal the section.
   const revealIsResearch =
     revealProject !== null &&
     researchProjects.some((p) => p.name === revealProject);
   const [researchRevealed, setResearchRevealed] = useState(false);
   useEffect(() => {
-    setResearchRevealed(mobileMenuOpen && revealIsResearch);
+    setResearchRevealed(mobileMenuOpen && revealIsResearch && researchCollapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobileMenuOpen, revealIsResearch]);
   const researchHidden = researchCollapsed && !researchRevealed;
+  // Any explicit tap ends the reveal and flips what the user sees, in one tap.
+  // The stored preference is written only when it differs from the new state:
+  // folding a revealed section stores nothing, as storage already says
+  // collapsed.
   const toggleResearch = () => {
-    if (researchCollapsed && researchRevealed) setResearchRevealed(false);
-    else setResearchCollapsed((v) => !v);
+    setResearchRevealed(false);
+    if (researchHidden) setResearchCollapsed(false);
+    else if (!researchCollapsed) setResearchCollapsed(true);
   };
 
   const sessionsByProject = useMemo(() => {

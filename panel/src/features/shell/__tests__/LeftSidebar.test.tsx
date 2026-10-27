@@ -903,7 +903,8 @@ describe("LeftSidebar.mobileMenu", () => {
     expect(screen.getByTestId("sidebar-hamburger").getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("opening the sidebar on mobile reveals a current research project in a collapsed Research section, without writing it", () => {
+  // An unstarred research project with one session, listed under Research.
+  const withResearchProject = () => {
     shell.projects = () => [
       { name: "vector", repos: [] },
       { name: "edge-tts", repos: [], kind: "research" } as { name: string; repos: unknown[] },
@@ -919,6 +920,10 @@ describe("LeftSidebar.mobileMenu", () => {
         createdAt: "2026-01-01T00:00:03.000Z",
       },
     ];
+  };
+
+  it("opening the sidebar on mobile reveals a current research project in a collapsed Research section, without writing it", () => {
+    withResearchProject();
     writePreference(preferences.researchSectionCollapsed, true);
     installMatchMedia({ mobile: true });
     setupAt("/project/edge-tts/iterm");
@@ -932,10 +937,38 @@ describe("LeftSidebar.mobileMenu", () => {
     // The stored section preference is untouched.
     expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
 
-    // Folding the revealed section hides it again and still writes nothing.
+    // Folding the revealed section hides it again in one tap and still
+    // writes nothing — the stored value already says collapsed.
     fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
     expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
     expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+
+    // After the reveal ends, each tap flips the section and the preference.
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(false);
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+  });
+
+  it("opening the sidebar on mobile over an expanded Research section, one tap collapses it and stores that", () => {
+    withResearchProject();
+    installMatchMedia({ mobile: true });
+    setupAt("/project/edge-tts/iterm");
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+
+    openMenu();
+    expect(screen.getByTestId("sidebar-session-e1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+
+    // And one more tap brings it back.
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(false);
   });
 
   it("opening the sidebar on mobile expands the project of a file-view route", () => {
