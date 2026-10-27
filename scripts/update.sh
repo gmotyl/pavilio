@@ -11,6 +11,20 @@ set -e
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
   GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
 
+# A pull writes tens of thousands of files — node_modules/, dist/, git objects —
+# and the kernel holds them in the page cache for up to ~30 s before they reach
+# disk. On WSL2 a Windows restart kills the VM without flushing that cache, so a
+# restart right after a pull left every unflushed file zero bytes long: an empty
+# node-pty pty.node (the panel dies on start) and empty git objects (HEAD itself
+# corrupt). Both success paths flush *before* their final message, so the
+# message means "safe to restart"; the trap covers every failure exit.
+flush_to_disk() {
+  echo ""
+  echo "Flushing to disk..."
+  sync
+}
+trap 'sync' EXIT
+
 # Resolve upstream local clone directory
 # Default: sibling directory named pavilio
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -192,6 +206,7 @@ if [ "$CLONE_MODE" = 1 ]; then
   # over to commit on their behalf.
   UPDATED_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
   UPDATED_SUBJECT="$(git -C "$REPO_ROOT" log -1 --pretty=%s)"
+  flush_to_disk
   echo ""
   echo "Updated to $UPDATED_SHA $UPDATED_SUBJECT."
   # The panel process is never touched from here: it may be serving the very
@@ -454,6 +469,7 @@ else
   fi
 fi
 
+flush_to_disk
 echo ""
 echo "Done. panel/, skills/, scripts/ (and commands/ if present) synced from upstream;"
 echo "agent commands regenerated for configured agents, and the sync committed."
