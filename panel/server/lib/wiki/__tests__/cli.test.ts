@@ -272,6 +272,69 @@ describe("wiki cli", () => {
     expect(missing.stderr).toMatch(/usage:/);
   });
 
+  describe("save-atlassian", () => {
+    const PAGE = "https://acme.atlassian.net/wiki/spaces/ENG/pages/123456/Runbook";
+    const body = Array.from({ length: 80 }, (_, i) => `step${i}`).join(" ");
+    const stdin = (text: string): Partial<CliDeps> => ({ readStdin: async () => text });
+
+    it("save-atlassian writes the raw from stdin and prints the receipt", async () => {
+      const res = await cli(["save-atlassian", "demo", PAGE, "--title", "Runbook"], stdin(body));
+      expect(res).toMatchObject({ code: 0, json: { raw: "raw/confluence-123456-runbook.md", title: "Runbook" } });
+      expect(res.json.warning).toBeUndefined();
+      const text = readFileSync(join(project, "wiki", res.json.raw), "utf8");
+      expect(text).toContain("# Runbook");
+      expect(text.endsWith(body)).toBe(true);
+    });
+
+    it("save-atlassian passes repeated --meta pairs", async () => {
+      const res = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug",
+          "--meta", "status=Done", "--meta=assignee=Greg = owner"],
+        stdin(body),
+      );
+      expect(res).toMatchObject({ code: 0, json: { raw: "raw/jira-ENG-7.md" } });
+      const text = readFileSync(join(project, "wiki", res.json.raw), "utf8");
+      expect(text).toContain("- status: Done\n- assignee: Greg = owner\n");
+
+      const bad = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug", "--meta", "status"],
+        stdin(body),
+      );
+      expect(bad.code).toBe(1);
+      expect(bad.json.error).toMatch(/--meta/);
+    });
+
+    it("save-atlassian exits 2 with ask for a URL without an id", async () => {
+      const res = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/wiki/spaces/ENG/overview", "--title", "ENG"],
+        stdin(body),
+      );
+      expect(res.code).toBe(2);
+      expect(res.json).toMatchObject({ ask: true });
+      expect(res.json.reason).toMatch(/page or issue URL/);
+      expect(res.json.reason).toMatch(/Atlassian MCP/);
+      expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
+    });
+
+    it("save-atlassian exits 1 with warning on a login stub", async () => {
+      const res = await cli(
+        ["save-atlassian", "demo", PAGE, "--title", "Runbook"],
+        stdin("Log in to continue with your Atlassian account"),
+      );
+      expect(res.code).toBe(1);
+      expect(res.json).toMatchObject({ raw: "", title: "Runbook" });
+      expect(res.json.warning).toMatch(/login marker/);
+      expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
+    });
+
+    it("save-atlassian requires --title", async () => {
+      const res = await cli(["save-atlassian", "demo", PAGE], stdin(body));
+      expect(res.code).toBe(1);
+      expect(res.json.error).toMatch(/save-atlassian <p> <url> --title <t>/);
+      expect(res.stderr).toMatch(/usage:/);
+    });
+  });
+
   it("runs from an unrelated cwd", async () => {
     const elsewhere = mkdtempSync(join(tmpdir(), "wiki-cli-cwd-"));
     try {

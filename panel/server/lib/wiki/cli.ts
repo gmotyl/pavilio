@@ -17,6 +17,7 @@ import { countMentions } from "./mentions";
 import { projectKind } from "../projects/kind";
 import { panelLink } from "./panel-link";
 import { resolveProject, type FetchLike } from "./project";
+import { parseAtlassianUrl, saveAtlassian } from "./save-atlassian";
 
 /**
  * `scripts/wiki <command>` — the wiki's deterministic half, for skills and agents.
@@ -25,7 +26,7 @@ import { resolveProject, type FetchLike } from "./project";
  * or 2 (ask the user, `{ask: true, reason}`). Diagnostics and usage go to stderr only.
  *
  * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`/`removed`,
- * `fetch-article`/`fetch-youtube` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
+ * `fetch-article`/`fetch-youtube`/`save-atlassian` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
  * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys and
  * `backlog`'s source paths, which are project-root `wiki/…` paths ready for a page writer.
  *
@@ -56,6 +57,11 @@ const USAGE = `usage: scripts/wiki <command> [args]
   fetch-article <p> <url>                   {raw, title, warning?}
   fetch-youtube <p> <url>                   {raw, title, track}: transcript via uvx yt-dlp into
                                             raw/youtube-<id>.md | exit 2 {ask, reason} without uv
+  save-atlassian <p> <url> --title <t> [--meta k=v]
+                                            {raw, title, replaced?}: stdin body →
+                                            raw/confluence-<id>-<slug>.md | raw/jira-<KEY>.md;
+                                            --meta repeats | exit 2 {ask, reason} for a URL without
+                                            an id | exit 1 {raw: "", title, warning} on a stub
   clone-repo <p> <url>                      {clonePath, commitSha, action}
   candidates                                {items: [{id, project, text, details, date, source}]}: the
                                             ## Knowledge candidates of every non-archived wiki
@@ -86,7 +92,16 @@ export type CliDeps = {
   run?: Runner;
   /** Clock for `harvest-status` (tests pin "today"). */
   now?: () => Date;
+  /** Whole stdin as utf8, for `save-atlassian` (tests feed a string). */
+  readStdin?: () => Promise<string>;
 };
+
+/** Read all of `process.stdin` as utf8. */
+async function readProcessStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 /** The dir above `panel/`: `panel/server/lib/wiki/cli.ts` → four levels up. */
 const DEFAULT_WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -274,6 +289,33 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
         if (err instanceof UvMissingError) return { code: 2, body: { ask: true, reason: err.message } };
         throw err;
       }
+    }
+    case "save-atlassian": {
+      const usage = "save-atlassian <p> <url> --title <t> [--meta k=v]";
+      const [p, url] = only(parsed, 2, usage, ["title", "meta"]);
+      const title = flag("title");
+      if (title === undefined) throw new CliError(`save-atlassian needs --title: ${usage}`);
+      // `--meta key=value` repeats; pairs keep their command-line order.
+      const meta: Record<string, string> = {};
+      for (const pair of parsed.flags.get("meta") ?? []) {
+        const eq = pair.indexOf("=");
+        if (eq <= 0) throw new CliError(`--meta needs key=value, got ${JSON.stringify(pair)}`);
+        meta[pair.slice(0, eq)] = pair.slice(eq + 1);
+      }
+      const dir = projectDir(workspaceRoot, p);
+      if (!parseAtlassianUrl(url)) {
+        return {
+          code: 2,
+          body: {
+            ask: true,
+            reason: `not a Confluence page or Jira issue URL: ${url} — pass a page or issue URL resolved through the Atlassian MCP`,
+          },
+        };
+      }
+      const body = await (deps.readStdin ?? readProcessStdin)();
+      const receipt = saveAtlassian(dir, url, { title, body, meta, now: deps.now?.() });
+      // The stub guard wrote nothing: an error, but the receipt still says why.
+      return { code: receipt.warning ? 1 : 0, body: { ...receipt } };
     }
     case "clone-repo": {
       const [p, url] = only(parsed, 2, "clone-repo <p> <url>");
