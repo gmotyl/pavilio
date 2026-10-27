@@ -98,7 +98,7 @@ const upload = multer({
 });
 
 /** 400 for a malformed name, 404 for one that is not a known project — before any upload is read. */
-function requireProject(req: Request, res: Response, next: NextFunction) {
+export function requireProject(req: Request, res: Response, next: NextFunction) {
   const project = req.params.project;
   const invalid = validateProjectName(project);
   if (invalid) return res.status(400).json({ error: invalid });

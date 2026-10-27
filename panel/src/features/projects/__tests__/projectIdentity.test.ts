@@ -87,3 +87,25 @@ describe("emoji presentation", () => {
     }
   });
 });
+
+describe("mark parser accepts the stored mark image by its fixed names only", () => {
+  it("parseProjectMark accepts the three mark image names", () => {
+    for (const mark of ["image:mark.png", "image:mark.svg", "image:mark.webp"]) {
+      expect(parseProjectMark(mark)).toBe(mark);
+    }
+  });
+
+  it("parseProjectMark rejects other image paths", () => {
+    for (const bad of [
+      "image:../x.png",
+      "image:logo.png",
+      "image:mark.gif",
+      "image:",
+      "image:mark.PNG",
+      "image:sub/mark.png",
+      "image:mark.png ",
+    ]) {
+      expect(parseProjectMark(bad)).toBe("");
+    }
+  });
+});

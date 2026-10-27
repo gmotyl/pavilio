@@ -74,8 +74,15 @@ export function isSingleEmoji(text: string): boolean {
 }
 
 /**
- * `"" | "lucide:<registered name>" | "emoji:<one emoji grapheme>"`. Anything
- * else — wrong type, unknown icon, two emoji, plain text — parses to `""`.
+ * The stored mark image, by one of its three fixed file names in the project's
+ * notes folder. Never a path: the server only ever writes `mark.<ext>`.
+ */
+const MARK_IMAGE_RE = /^image:mark\.(?:png|svg|webp)$/;
+
+/**
+ * `"" | "lucide:<registered name>" | "emoji:<one emoji grapheme>" |
+ * "image:mark.<png|svg|webp>"`. Anything else — wrong type, unknown icon, two
+ * emoji, plain text, any other image name or path — parses to `""`.
  */
 export function parseProjectMark(raw: unknown): string {
   if (typeof raw !== "string") return "";
@@ -84,6 +91,9 @@ export function parseProjectMark(raw: unknown): string {
   }
   if (raw.startsWith("emoji:")) {
     return isSingleEmoji(raw.slice(6)) ? raw : "";
+  }
+  if (raw.startsWith("image:")) {
+    return MARK_IMAGE_RE.test(raw) ? raw : "";
   }
   return "";
 }
