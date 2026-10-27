@@ -1,4 +1,4 @@
-import { readdirSync, rmSync, writeFileSync } from "fs";
+import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
 import { ensureContainedDir } from "./contained-dir";
@@ -80,6 +80,38 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** The lowercased host in an existing snapshot's `source_url` frontmatter, or null when it has none parseable. */
+function snapshotHost(file: string): string | null {
+  const frontmatter = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(readFileSync(file, "utf8"))?.[1] ?? "";
+  const quoted = /^source_url: (.*)$/m.exec(frontmatter)?.[1];
+  if (quoted === undefined) return null;
+  try {
+    const url: unknown = JSON.parse(quoted);
+    return typeof url === "string" ? new URL(url).hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why an existing snapshot under the same id is not this page, or null when every one is.
+ * Ids and keys are site-scoped but the file name drops the host, so `CHK-42` on another site
+ * would silently overwrite this one. A snapshot without a parseable `source_url` cannot prove it
+ * is the same page, so it blocks the save too: refusing is recoverable, overwriting is not.
+ */
+function collisionWarning(rawDir: string, files: string[], host: string): string | null {
+  for (const name of files) {
+    const file = join(rawDir, name);
+    // Only regular files carry a source_url; anything else fails the write on its own.
+    if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) continue;
+    const existing = snapshotHost(file);
+    if (existing === host) continue;
+    const from = existing ?? "an unknown site (no parseable source_url)";
+    return `cross-site collision — raw/${name} holds a snapshot from ${from}, not ${host}; nothing written`;
+  }
+  return null;
+}
+
 /** Save the snapshot of `url`; throws when `url` is not a Confluence page or Jira issue URL. */
 export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassianOptions): AtlassianReceipt {
   const ref = parseAtlassianUrl(url);
@@ -93,20 +125,21 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
   const name =
     ref.kind === "jira" ? `jira-${ref.key}.md` : `confluence-${ref.id}-${slugify(title) || "untitled"}.md`;
   const file = join(rawDir, name);
-  // Checked before the old-slug removal, so a refused save deletes nothing.
-  refuseSymlink(file);
-
   // The page id is the identity; a renamed page leaves its old-slug snapshot behind otherwise.
+  const prefix = ref.kind === "confluence" ? `confluence-${ref.id}-` : null;
+  const oldSlugs = prefix
+    ? readdirSync(rawDir).filter((old) => old !== name && old.startsWith(prefix) && old.endsWith(".md"))
+    : [];
+  // Every check runs before the first removal, so a refused save deletes nothing.
+  refuseSymlink(file);
+  for (const old of oldSlugs) refuseSymlink(join(rawDir, old));
+  const collision = collisionWarning(rawDir, [name, ...oldSlugs], ref.host);
+  if (collision) return { raw: "", title, warning: collision };
+
   const replaced: string[] = [];
-  if (ref.kind === "confluence") {
-    const prefix = `confluence-${ref.id}-`;
-    for (const old of readdirSync(rawDir)) {
-      if (old === name || !old.startsWith(prefix) || !old.endsWith(".md")) continue;
-      const oldFile = join(rawDir, old);
-      refuseSymlink(oldFile);
-      rmSync(oldFile);
-      replaced.push(`raw/${old}`);
-    }
+  for (const old of oldSlugs) {
+    rmSync(join(rawDir, old));
+    replaced.push(`raw/${old}`);
   }
 
   const captured = (opts.now ?? new Date()).toISOString().slice(0, 10);

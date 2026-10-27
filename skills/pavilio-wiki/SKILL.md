@@ -150,7 +150,9 @@ Per URL:
 6. **Children** — Confluence only: direct children, one level; more than 20 → show the count and
    confirm first. Each child goes through steps 3–5.
 7. A receipt with `warning` (stub guard: empty or login-page body; nothing written) → no source
-   page, report it.
+   page, report it. A cross-site collision (`raw/` already holds that id or key from another
+   Atlassian site, or a snapshot with no readable `source_url`; nothing written or removed) →
+   report the URL and the warning, don't ingest it.
 
 ### Sequence
 

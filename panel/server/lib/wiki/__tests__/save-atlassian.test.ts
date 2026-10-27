@@ -21,6 +21,9 @@ afterEach(() => {
 
 const rawDir = () => join(projectDir, "wiki", "raw");
 
+/** An existing snapshot as save-atlassian writes it: JSON-quoted `source_url` frontmatter. */
+const snapshot = (url: string) => `---\nsource_url: ${JSON.stringify(url)}\ncaptured: 2026-10-01\n---\n\n# Old\n\nold`;
+
 describe("parseAtlassianUrl", () => {
   it("parses the three Confluence page URL forms", () => {
     const expected = { kind: "confluence", host: HOST, id: "123456" };
@@ -92,7 +95,7 @@ describe("saveAtlassian", () => {
 
   it("replaces an old-slug file for the same page id", () => {
     mkdirSync(rawDir(), { recursive: true });
-    writeFileSync(join(rawDir(), "confluence-123456-old-title.md"), "old");
+    writeFileSync(join(rawDir(), "confluence-123456-old-title.md"), snapshot(`https://${HOST}/wiki/pages/123456`));
     // A different page id sharing the prefix must survive.
     writeFileSync(join(rawDir(), "confluence-1234567-other-page.md"), "other");
     writeFileSync(join(rawDir(), "confluence-12-short-id.md"), "short");
@@ -177,5 +180,61 @@ describe("saveAtlassian", () => {
     const receipt = saveAtlassian(projectDir, url, { title: "SSO cart", body, now: NOW });
     expect(receipt.warning).toBeUndefined();
     expect(existsSync(join(rawDir(), "jira-CHK-7.md"))).toBe(true);
+  });
+
+  describe("cross-site id collisions", () => {
+    const OTHER = "globex.atlassian.net";
+
+    it("refuses to overwrite jira-<KEY>.md captured from another site", () => {
+      mkdirSync(rawDir(), { recursive: true });
+      const existing = snapshot(`https://${OTHER}/browse/CHK-42`);
+      writeFileSync(join(rawDir(), "jira-CHK-42.md"), existing);
+      const receipt = saveAtlassian(projectDir, `https://${HOST}/browse/CHK-42`, { title: "Bug", body: LONG_BODY, now: NOW });
+      expect(receipt.raw).toBe("");
+      expect(receipt.warning).toMatch(/cross-site/);
+      expect(receipt.warning).toContain(OTHER);
+      expect(receipt.warning).toContain(HOST);
+      expect(readFileSync(join(rawDir(), "jira-CHK-42.md"), "utf8")).toBe(existing);
+    });
+
+    it("refuses to overwrite or remove confluence-<id>-*.md captured from another site", () => {
+      mkdirSync(rawDir(), { recursive: true });
+      const sameSlug = snapshot(`https://${OTHER}/wiki/pages/123456`);
+      const oldSlug = snapshot(`https://${OTHER}/wiki/spaces/X/pages/123456/Old`);
+      writeFileSync(join(rawDir(), "confluence-123456-new-title.md"), sameSlug);
+      writeFileSync(join(rawDir(), "confluence-123456-old-title.md"), oldSlug);
+      const url = `https://${HOST}/wiki/pages/123456`;
+      const receipt = saveAtlassian(projectDir, url, { title: "New Title", body: LONG_BODY, now: NOW });
+      expect(receipt).toMatchObject({ raw: "", title: "New Title" });
+      expect(receipt.warning).toContain(OTHER);
+      expect(receipt.warning).toContain(HOST);
+      expect(readFileSync(join(rawDir(), "confluence-123456-new-title.md"), "utf8")).toBe(sameSlug);
+      expect(readFileSync(join(rawDir(), "confluence-123456-old-title.md"), "utf8")).toBe(oldSlug);
+
+      // An old-slug snapshot alone from another site blocks the save too: nothing written, nothing removed.
+      rmSync(join(rawDir(), "confluence-123456-new-title.md"));
+      const again = saveAtlassian(projectDir, url, { title: "New Title", body: LONG_BODY, now: NOW });
+      expect(again.raw).toBe("");
+      expect(readdirSync(rawDir())).toEqual(["confluence-123456-old-title.md"]);
+    });
+
+    it("compares hosts case-insensitively and re-fetches from the same site in place", () => {
+      mkdirSync(rawDir(), { recursive: true });
+      writeFileSync(join(rawDir(), "jira-CHK-42.md"), snapshot("https://ACME.Atlassian.net/browse/CHK-42"));
+      const receipt = saveAtlassian(projectDir, `https://${HOST}/browse/CHK-42`, { title: "Bug", body: LONG_BODY, now: NOW });
+      expect(receipt).toEqual({ raw: "raw/jira-CHK-42.md", title: "Bug" });
+      expect(readFileSync(join(rawDir(), "jira-CHK-42.md"), "utf8").endsWith(LONG_BODY)).toBe(true);
+    });
+
+    it("refuses an existing snapshot without a parseable source_url", () => {
+      mkdirSync(rawDir(), { recursive: true });
+      for (const existing of ["no frontmatter", "---\nsource_url: not-json\n---\n", "---\ncaptured: 2026-10-01\n---\n"]) {
+        writeFileSync(join(rawDir(), "jira-CHK-42.md"), existing);
+        const receipt = saveAtlassian(projectDir, `https://${HOST}/browse/CHK-42`, { title: "Bug", body: LONG_BODY, now: NOW });
+        expect(receipt.raw, existing).toBe("");
+        expect(receipt.warning, existing).toMatch(/no parseable source_url/);
+        expect(readFileSync(join(rawDir(), "jira-CHK-42.md"), "utf8")).toBe(existing);
+      }
+    });
   });
 });

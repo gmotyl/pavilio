@@ -363,6 +363,21 @@ describe("wiki cli", () => {
       expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
     });
 
+    it("save-atlassian exits 1 with warning on a cross-site id collision", async () => {
+      const raw = join(project, "wiki", "raw");
+      mkdirSync(raw, { recursive: true });
+      const existing = `---\nsource_url: ${JSON.stringify("https://globex.atlassian.net/browse/ENG-7")}\n---\n\nold`;
+      writeFileSync(join(raw, "jira-ENG-7.md"), existing);
+      const res = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug"],
+        stdin(body),
+      );
+      expect(res.code).toBe(1);
+      expect(res.json).toMatchObject({ raw: "", title: "Bug" });
+      expect(res.json.warning).toMatch(/cross-site collision.*globex\.atlassian\.net.*acme\.atlassian\.net/);
+      expect(readFileSync(join(raw, "jira-ENG-7.md"), "utf8")).toBe(existing);
+    });
+
     it("save-atlassian requires --title", async () => {
       const res = await cli(["save-atlassian", "demo", PAGE], stdin(body));
       expect(res.code).toBe(1);
