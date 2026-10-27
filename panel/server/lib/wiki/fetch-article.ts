@@ -32,6 +32,7 @@ import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 
 import { ensureContainedDir } from "./contained-dir";
+import { isAtlassianHost } from "./save-atlassian";
 
 /**
  * Fetch a web article into `<projectDir>/wiki/raw/article-<slug>.md` as markdown (a slug
@@ -61,6 +62,9 @@ const PAYWALL_MARKERS = [
   /sign in to (continue|read)/i,
   /you('ve| have) reached your (free )?article limit/i,
 ];
+
+/** Receipt warning for an `*.atlassian.net` URL, which only the Atlassian MCP route can read. */
+export const ATLASSIAN_WARNING = "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)";
 
 const STRIP_TAGS = ["script", "style", "noscript", "nav", "footer", "form", "button", "svg", "iframe"];
 
@@ -179,6 +183,10 @@ export async function fetchArticle(
   url: string,
   options: FetchArticleOptions = {},
 ): Promise<ArticleReceipt> {
+  // Atlassian pages answer an anonymous fetch with a login stub; they go through the agent's MCP.
+  if (isAtlassianHost(url)) {
+    return { raw: "", title: "", warning: ATLASSIAN_WARNING };
+  }
   // Refuse a symlinked or escaping wiki/raw before any network or disk work.
   const rawDir = ensureContainedDir(projectDir, ["wiki", "raw"]);
   const html = await fetchHtml(url, options);
