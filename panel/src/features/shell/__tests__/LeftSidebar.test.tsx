@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   act,
   cleanup,
@@ -370,21 +373,129 @@ describe("LeftSidebar speech indicator", () => {
     expect(within(row).queryByTestId("session-speaker-s1")).toBeNull();
   });
 
-  it("the collapsed row keeps its dots while a session speaks", () => {
+  it("the collapsed row swaps its dot for the speaker while a session speaks", () => {
     setActivity("s1", "busy");
+    setActivity("s2", "attention");
     speech.stateFor = (id) => (id === "s1" ? "speaking" : "empty");
 
     setup();
 
-    // The speaker joins the aggregate group as one more status; the busy dot
-    // (and, for another session, the attention dot) stays put, so the row
-    // never trades a pending signal for the audio it is playing.
+    // One slot, one thing in it: the speaker outranks every LED state, even
+    // the attention of a different session, for as long as the audio plays.
     expect(
       within(projectRow()).getByTestId("session-speaker-s1"),
     ).toBeInTheDocument();
-    expect(
-      projectRow().querySelector('.terminal-led[data-state="busy"]'),
-    ).not.toBeNull();
+    expect(projectRow().querySelector(".terminal-led")).toBeNull();
+  });
+});
+
+/** The stylesheet as text, resolved relative to this file (see SessionIndicator.test.tsx). */
+const indexCss = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../../../index.css"),
+  "utf8",
+);
+
+/** The declarations of one top-level CSS rule in `index.css`. */
+function cssRule(selector: string): Record<string, string> {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, "m").exec(indexCss);
+  if (!match) throw new Error(`no rule for ${selector} in index.css`);
+  return Object.fromEntries(
+    match[1]
+      .split(";")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const at = line.indexOf(":");
+        return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+      }),
+  );
+}
+
+describe("LeftSidebar activity slot", () => {
+  /** The slot inside one project row. */
+  const slotsIn = (project: string) =>
+    Array.from(
+      screen
+        .getByTestId(`sidebar-project-row-${project}`)
+        .querySelectorAll<HTMLElement>('[data-testid="project-activity-slot"]'),
+    );
+
+  it("expanded project row keeps an empty activity slot", () => {
+    setActivity("s1", "busy");
+    setActivity("s2", "attention");
+
+    setup();
+    expand("vector");
+
+    // Present, so the mark tile does not jump left when the row opens, and
+    // empty, because the session rows below now carry each state themselves.
+    const slots = slotsIn("vector");
+    expect(slots).toHaveLength(1);
+    expect(slots[0].childElementCount).toBe(0);
+  });
+
+  it("activity slot has a fixed width on every project row", () => {
+    shell.projects = () =>
+      ["p-att", "p-busy", "p-idle", "p-speak", "p-none"].map((name) => ({
+        name,
+        repos: [],
+      }));
+    const meta = (id: string, project: string): SessionMeta => ({
+      id,
+      project,
+      name: id,
+      cwd: `/repo/${project}`,
+      pid: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    shell.sessions = () => [
+      meta("att", "p-att"),
+      meta("busy", "p-busy"),
+      meta("idle", "p-idle"),
+      meta("speak", "p-speak"),
+    ];
+    setActivity("att", "attention");
+    setActivity("busy", "busy");
+    setActivity("idle", "idle");
+    setActivity("speak", "busy");
+    speech.stateFor = (id) => (id === "speak" ? "speaking" : "empty");
+
+    setup();
+
+    const contents: Record<string, string> = {};
+    for (const project of ["p-att", "p-busy", "p-idle", "p-speak", "p-none"]) {
+      const slots = slotsIn(project);
+      expect(slots).toHaveLength(1);
+      const slot = slots[0];
+      // The width comes from the class alone, never from an inline override
+      // that could differ per row.
+      expect(slot).toHaveClass("project-activity-slot");
+      expect(slot.style.width).toBe("");
+      expect(slot.style.minWidth).toBe("");
+      // The slot sits directly before the mark tile, so a constant slot
+      // width means a constant tile offset.
+      expect(slot.nextElementSibling).toHaveAttribute(
+        "data-testid",
+        "project-mark",
+      );
+      contents[project] = slot.firstElementChild
+        ? (slot.firstElementChild.getAttribute("data-state") ??
+          slot.firstElementChild.getAttribute("data-testid")!)
+        : "";
+    }
+    expect(contents).toEqual({
+      "p-att": "attention",
+      "p-busy": "busy",
+      "p-idle": "idle",
+      "p-speak": "session-speaker-speak",
+      "p-none": "",
+    });
+
+    // 0 or 1 lit dot, same box: fixed width, never shrunk by a long name.
+    const rule = cssRule(".project-activity-slot");
+    expect(rule.width).toBe("10px");
+    expect(rule["flex-shrink"]).toBe("0");
   });
 });
 

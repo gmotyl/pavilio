@@ -438,14 +438,12 @@ export default function LeftSidebar() {
               <ChevronRight size={11} />
             )}
           </button>
-          {!expandedNow && (
-            <span className="flex items-center">
-              {/* The aggregate group shows every status this project has at
-                  once — busy, attention, and the speaker when one of its
-                  sessions is talking. */}
-              <ProjectActivityLed sessionIds={projectSessionIds} />
-            </span>
-          )}
+          {/* The slot is always there so the mark tiles align across rows;
+              expanded, it stays empty because the session rows below carry
+              each state themselves. */}
+          <ProjectActivityLed
+            sessionIds={expandedNow ? [] : projectSessionIds}
+          />
           {/* An unresolved (blank) name is not a preference scope: no tile for it. */}
           {typeof project.name === "string" && project.name.trim() !== "" && (
             <ProjectMark project={project.name} size={18} kind={kind} />

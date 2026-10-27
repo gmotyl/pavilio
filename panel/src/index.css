@@ -496,22 +496,27 @@ input[type="checkbox"] {
   height: 8px;
 }
 
+/* The project row's activity slot (`ProjectActivityLed`): one fixed-width box
+   before the mark tile, holding at most one LED or the speaker, or nothing.
+   Its width never depends on its content, so mark tiles align across rows. */
+.project-activity-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  flex-shrink: 0;
+}
+
 /* The sidebar speaker (`SessionSpeaker`), shown while a session's audio is
-   playing. Two rows draw it, and they place it differently:
-     - the expanded session row (`SessionIndicator`) has one slot, so the
-       speaker REPLACES that session's LED there;
-     - the collapsed project row (`ProjectActivityLed`) shows every state at
-       once, so the speaker sits BESIDE the busy and attention dots. It only
-       takes the idle dot's place, and only when idle is all there would be.
+   playing. Both rows that draw it have one slot, and in both the speaker
+   REPLACES the LED while it plays:
+     - the expanded session row (`SessionIndicator`), for that session;
+     - the project row (`ProjectActivityLed`), for any of its sessions — even
+       over an attention dot belonging to a different session. That trade was
+       accepted on purpose (navigation-polish Q8): it lasts only as long as the
+       audio, and the attention dot returns when speech stops.
 
-   WHY beside and not instead: speaking is a status like busy or attention, not
-   a summary of the project. Collapsing the group down to the speaker would hide
-   an attention signal belonging to a DIFFERENT session for as long as the audio
-   plays — the row would trade a request for your attention for the one thing
-   that needs none. Idle is the single exception: it says nothing the speaker
-   does not already imply.
-
-   Its box is EXACTLY the LED's, because in the single-slot row the two swap in
+   Its box is EXACTLY the LED's, because in a single-slot row the two swap in
    and out of the same place and the row's text must not move when they do. So
    the glyph inside is drawn bigger and centred on that box, overflowing it
    symmetrically: a speaker rendered at 6px is a smudge, and the box, not the

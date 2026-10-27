@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { CellSpeechState } from "../../speech/types";
 
@@ -54,37 +54,49 @@ function leds(container: HTMLElement) {
 }
 
 describe("ProjectActivityLed", () => {
-  it("renders nothing when the project has no open terminals", () => {
+  /** The one fixed-width slot every project row reserves before its mark. */
+  const slotOf = (container: HTMLElement) =>
+    container.querySelector('[data-testid="project-activity-slot"]');
+
+  it("no terminals renders an empty slot", () => {
     const { container } = render(
       <Wrap>
         <ProjectActivityLed sessionIds={[]} />
       </Wrap>,
     );
-    expect(leds(container)).toEqual([]);
+    // Empty, but present: the slot is what keeps the mark tiles aligned.
+    const slot = slotOf(container);
+    expect(slot).not.toBeNull();
+    expect(slot).toHaveClass("project-activity-slot");
+    expect(slot!.childElementCount).toBe(0);
   });
 
-  it("shows an idle dot when a terminal is open but not working", () => {
-    set("a", "idle");
+  it("a project with no open terminals keeps an empty slot even while speaking", () => {
+    stub.stateFor = () => "speaking";
+
+    // No ids at all is what "no open terminals" means to the aggregate; a
+    // speaking host must not conjure a speaker for a project that has none.
     const { container } = render(
       <Wrap>
-        <ProjectActivityLed sessionIds={["a"]} />
+        <ProjectActivityLed sessionIds={[]} />
       </Wrap>,
     );
-    expect(leds(container)).toEqual(["idle"]);
+
+    expect(slotOf(container)!.childElementCount).toBe(0);
   });
 
-  it("shows busy AND attention together when both states are present", () => {
-    set("a", "busy");
-    set("b", "attention");
+  it("idle-only project shows one idle dot", () => {
+    set("a", "idle");
+    set("b", "idle");
     const { container } = render(
       <Wrap>
         <ProjectActivityLed sessionIds={["a", "b"]} />
       </Wrap>,
     );
-    expect(leds(container)).toEqual(["busy", "attention"]);
+    expect(leds(container)).toEqual(["idle"]);
   });
 
-  it("does not show an idle dot alongside busy/attention", () => {
+  it("busy wins over idle in the aggregate dot", () => {
     set("a", "busy");
     set("b", "idle");
     const { container } = render(
@@ -95,29 +107,31 @@ describe("ProjectActivityLed", () => {
     expect(leds(container)).toEqual(["busy"]);
   });
 
-  it("a speaking session adds a speaker beside the busy and attention dots", () => {
+  it("attention wins over busy in the aggregate dot", () => {
     set("a", "busy");
-    set("b", "attention");
-    stub.stateFor = (id) => (id === "b" ? "speaking" : "empty");
-
+    // A fresh attention state, so the pulse is live.
+    _applyEventForTests({
+      sessionId: "b",
+      state: "attention",
+      at: Date.now(),
+      attentionSinceAt: Date.now(),
+    });
+    set("c", "idle");
     const { container } = render(
       <Wrap>
-        <ProjectActivityLed sessionIds={["a", "b"]} />
+        <ProjectActivityLed sessionIds={["a", "b", "c"]} />
       </Wrap>,
     );
-
-    // Speaking is one more status in the group: neither dot may be dropped,
-    // least of all the attention dot, which belongs to a different session.
-    expect(leds(container)).toEqual(["busy", "attention"]);
-    expect(screen.getByTestId("session-speaker-b")).toHaveAttribute(
-      "aria-label",
-      "Speaking",
-    );
+    expect(leds(container)).toEqual(["attention"]);
+    // The attention pulse survives the collapse to one dot.
+    expect(
+      container.querySelector('.terminal-led[data-state="attention"]'),
+    ).toHaveAttribute("data-pulse", "1");
   });
 
-  it("an all-idle project swaps its idle dot for the speaker", () => {
-    set("a", "idle");
-    set("b", "idle");
+  it("speaker replaces the aggregate dot while a session speaks", () => {
+    set("a", "busy");
+    set("b", "attention");
     stub.stateFor = (id) => (id === "a" ? "speaking" : "empty");
 
     const { container } = render(
@@ -126,44 +140,36 @@ describe("ProjectActivityLed", () => {
       </Wrap>,
     );
 
-    // "Idle" says less than "this is the row you are hearing", so the speaker
-    // takes the idle dot's place rather than sitting next to it.
+    // Whatever the other states, the slot holds only the speaker.
     expect(leds(container)).toEqual([]);
-    expect(screen.getByTestId("session-speaker-a")).toBeInTheDocument();
+    const slot = slotOf(container)!;
+    expect(slot.childElementCount).toBe(1);
+    expect(
+      within(slot as HTMLElement).getByTestId("session-speaker-a"),
+    ).toHaveAttribute("aria-label", "Speaking");
   });
 
-  it("a project with no open terminals renders nothing even while speaking", () => {
-    stub.stateFor = () => "speaking";
+  it("dot returns when the speaker stops", () => {
+    set("a", "idle");
+    set("b", "attention");
+    stub.stateFor = (id) => (id === "a" ? "speaking" : "empty");
 
-    // No ids at all is what "no open terminals" means to the aggregate; a
-    // speaking host must not conjure a group for a project that has none.
-    const { container } = render(
+    const { container, rerender } = render(
       <Wrap>
-        <ProjectActivityLed sessionIds={[]} />
+        <ProjectActivityLed sessionIds={["a", "b"]} />
       </Wrap>,
     );
+    expect(leds(container)).toEqual([]);
 
-    expect(container.innerHTML).toBe("");
-  });
-
-  it("renders byte-identical markup to the pre-speech group when nothing speaks", () => {
-    set("a", "busy");
-    set("b", "attention");
-
-    const { container } = render(
+    stub.stateFor = () => "empty";
+    rerender(
       <Wrap>
         <ProjectActivityLed sessionIds={["a", "b"]} />
       </Wrap>,
     );
 
-    // Pinned against the markup at 9e5cce1, before the speaking flag existed:
-    // gaining a status must not move the dots or rewrite their attributes.
-    expect(container.innerHTML).toBe(
-      '<span class="flex items-center gap-1">' +
-        '<span class="terminal-led" data-state="busy" title="Busy"></span>' +
-        '<span class="terminal-led" data-state="attention" data-pulse="0" title="Needs attention" aria-label="Needs attention"></span>' +
-        "</span>",
-    );
+    expect(screen.queryByTestId("session-speaker-a")).toBeNull();
+    expect(leds(container)).toEqual(["attention"]);
   });
 
   it("throws when no SpeechHostProvider is above it", () => {
