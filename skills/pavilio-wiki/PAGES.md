@@ -25,8 +25,8 @@ paths with `.md`: `record` and `raw` relative to the project, `sources` and `cit
 paths (`wiki/sources/….md`). Links in bodies use the D14 form without `.md`.
 
 **`url` — the original of external material.** Required on every repo page and on a source page
-whose `raw` is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`) or a
-clone (`raw/repos/…`); absent on record-backed sources and other raw snapshots (outside files,
+whose `raw` is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`), an
+Atlassian snapshot (`raw/confluence-*.md`, `raw/jira-*.md`) or a clone (`raw/repos/…`); absent on record-backed sources and other raw snapshots (outside files,
 snippets, `context-snapshot-*`). Never guessed — taken from the raw file's `source_url`
 frontmatter, or for a clone from `git -C wiki/raw/repos/<owner>-<repo> remote get-url origin`,
 normalised by the origin's form: a GitHub origin → `https://github.com/<owner>/<repo>` (no
@@ -45,7 +45,7 @@ description: "What this record adds to the project's knowledge"
 record: "progress/2026-10-19-tts-relay-node20.md"  # workspace record
 # or
 raw: "wiki/raw/article-edge-tts-limits.md"       # raw-layer file
-url: "https://example.com/edge-tts-limits"       # with an article/YouTube/clone raw: its source_url
+url: "https://example.com/edge-tts-limits"       # with an article/YouTube/Atlassian/clone raw: its source_url
 entities: ["jane-doe", "edge-tts"]               # bare names
 concepts: ["utterance", "speech-relay"]
 ```

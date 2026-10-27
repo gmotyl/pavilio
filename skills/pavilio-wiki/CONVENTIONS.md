@@ -35,16 +35,21 @@ Never edit one by hand; regenerate it.
   progress. Records are cited in place by their project-relative path, never copied.
 - **Raw file** — anything without a stable workspace home, snapshotted verbatim under `wiki/raw/`:
   `<slug>.md` (outside file), `article-<slug>.md`, `youtube-<id>.md`,
+  `confluence-<id>-<slug>.md`, `jira-<KEY>.md`,
   `snippet-<YYYY-MM-DD>-<slug>.md`, `context-snapshot-<YYYY-MM-DD>.md`, its per-section split
   `context-snapshot-<YYYY-MM-DD>/<nn>-<section-slug>.md` (written by migrate; source page
   `sources/context-snapshot-<YYYY-MM-DD>-<section-slug>.md`), `repos/<owner>-<repo>/`. A raw file
-  is never rewritten (clones are refreshed in place by `clone-repo`).
+  is never rewritten (clones are refreshed in place by `clone-repo`; Atlassian snapshots are
+  overwritten on re-fetch by `save-atlassian`, keyed by page id / issue key).
 - **Source page** — `wiki/sources/<kind>-<stem>.md`, one per record or raw file. `<kind>` is
   `note`, `memo`, `progress`, `adr`, `proposal`, `design`, `file`, `article`, `youtube`,
-  `snippet` or `context`; `<stem>` is the file stem with a leading `<kind>-` stripped (the change
-  id for `proposal`/`design`), so raw `article-edge-tts.md` → `sources/article-edge-tts.md`, never
-  `article-article-…`. On a stem collision append the parent directory name. A changed record
-  rewrites its existing source page.
+  `confluence`, `jira`, `snippet` or `context`; `<stem>` is the file stem with a leading `<kind>-`
+  stripped (the change id for `proposal`/`design`, the page id alone for `confluence`), so raw
+  `article-edge-tts.md` → `sources/article-edge-tts.md`, never `article-article-…`;
+  `confluence-123-team-setup.md` → `sources/confluence-123.md`, so a renamed page rewrites the
+  same source page instead of adding a second source; `jira-ABC-42.md` → `sources/jira-ABC-42.md`.
+  On a stem collision append the parent directory name. A changed record rewrites its existing
+  source page.
 - **Slug** — lowercase kebab-case ASCII; people `first-last`. Frontmatter lists carry bare names
   (`concepts: [utterance]`); receipts, `mentions --touched` and page writers use the namespaced
   form `entities/<name>` / `concepts/<name>`, whose page is `wiki/<slug>.md`. Reuse an existing
@@ -78,7 +83,7 @@ next run picks them up; a page with an empty backlog is up to date.
 
 | Path | Writer | Regime |
 |---|---|---|
-| `raw/` | ingest, `fetch-article`, `fetch-youtube`, `clone-repo` | written once; clones refreshed |
+| `raw/` | ingest, `fetch-article`, `fetch-youtube`, `save-atlassian`, `clone-repo` | written once; clones refreshed; Atlassian snapshots overwritten on re-fetch |
 | `sources/` | `source_writer` | one per record; rewritten when its hash changes |
 | `entities/`, `concepts/` | `page_writer` | incremental rewrite from the existing page + new source pages only |
 | `repos/<repo>/` | `repo_writer` | `ARCHITECTURE.md` rewritten on clone refresh; notes added |

@@ -118,7 +118,7 @@ the reason before any `--only`. A raw snapshot is then a record: `pending <p> --
 gives its hash. A `fetch-article` receipt with `warning` → delete that raw file, write no source
 page, report the warning. `fetch-youtube` exit 2 means `uv` is missing — pass its `reason` (the
 install hint) to the user and skip that URL. An Atlassian URL never goes to `fetch-article` (it
-returns a login stub and now refuses the host with a `warning`). No `wiki/` yet → this ingest creates it; mention
+refuses the host with a `warning`). No `wiki/` yet → this ingest creates it; mention
 `/pavilio-wiki-migrate <p>` for the backfill. More than 10 pending on a user-invoked catch-up →
 show the count and confirm first.
 
@@ -128,7 +128,7 @@ Confluence and Jira come through the agent's Atlassian MCP; the CLI only saves w
 Per URL:
 
 1. **Pick the server.** Tool names differ per agent (Claude Code `mcp__atlassian-infopoly__…` /
-   `mcp__claude_ai_Atlassian__…`, opencode `atlassian-infopoly_…`, codex its own prefix) — match on the
+   `mcp__claude_ai_Atlassian__…`, opencode `atlassian-infopoly_…`, codex: check its tool list for the server name) — match on the
    server part. Order: `atlassian-<project>` → any Atlassian server whose
    `getAccessibleAtlassianResources` lists the URL host → none. A server answering with an auth
    error counts as none.
@@ -142,10 +142,12 @@ Per URL:
 5. **Save** — body on stdin:
    `scripts/wiki save-atlassian <p> <canonical-url> --title "<t>" --meta status=… --meta parent_id=… --meta last_modified=…`
    → `{raw, title, replaced?}`; a re-fetch overwrites (the id is the identity), `replaced` names a
-   removed old-slug file. Exit 2 `{ask, reason}` (no page id / issue key in the URL) → resolve it
-   through the MCP and retry once with the canonical URL; still exit 2 → report the URL, skip it.
+   removed old-slug file — the existing `sources/confluence-<id>.md` is rewritten with the new
+   `raw:`, never a second page (`CONVENTIONS.md § Identity and the ledger`). Exit 2
+   `{ask, reason}` (no page id / issue key in the URL) → resolve it through the MCP and retry
+   once with the canonical URL; still exit 2 → report the URL, skip it.
 6. **Children** — Confluence only: direct children, one level; more than 20 → show the count and
-   confirm first. Each child goes through steps 4–5.
+   confirm first. Each child goes through steps 3–5.
 7. A receipt with `warning` (stub guard: empty or login-page body; nothing written) → no source
    page, report it.
 
