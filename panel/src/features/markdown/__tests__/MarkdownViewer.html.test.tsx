@@ -249,6 +249,7 @@ describe("MarkdownViewer html handling", () => {
     // …and the mockups tab, which mounts `MockupFrame` directly.
     render(
       <MockupFrame filePath={MOCKUP_PATH} absolutePath={MOCKUP_ABSOLUTE} />,
+      { wrapper: MemoryRouter },
     );
     await waitFor(() =>
       expect(screen.getByTestId("mockup-viewer-copy-path")).not.toBeDisabled(),

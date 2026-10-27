@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import type { ReactElement } from "react";
 
 vi.mock("../../shell/vscode", () => ({
   openInVSCode: vi.fn(),
@@ -7,6 +9,9 @@ vi.mock("../../shell/vscode", () => ({
 
 import MockupFrame from "../MockupFrame";
 import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
+
+/** MockupFrame reads its fullscreen state from the router location. */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 // The projects directory is nested one level under the workspace root, so the
 // workspace-relative path keeps that directory's own name ("projects/").

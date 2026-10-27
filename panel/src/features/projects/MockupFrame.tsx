@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Maximize, Minimize } from "lucide-react";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
@@ -84,7 +85,8 @@ const BUTTON_CLASS =
   "text-sm px-2 py-1 rounded-md transition-colors cursor-pointer";
 
 /**
- * The `history.state` key that marks the entry pushed on entering fullscreen.
+ * The router location-state key that marks the entry pushed on entering
+ * fullscreen (react-router keeps it under `history.state.usr`).
  * Its value is the file shown, so the entry means "this mockup, fullscreen"
  * wherever it ends up in the stack.
  */
@@ -137,89 +139,86 @@ export function MockupFrame({
     const changedPath = lastMessage.path as string | undefined;
     if (changedPath?.includes(filePath)) setImageVersion((v) => v + 1);
   }, [lastMessage, filePath, isImage]);
-  // Fullscreen owns one history entry, pushed on enter, so browser Back exits it
-  // and leaves the mockup open. Leaving through the exit button or Escape pops
-  // that entry again; otherwise a duplicate of this page would sit behind it
-  // and the next Back would seem to do nothing.
+  // Fullscreen is a property of the router location, not of this component:
+  // it is on exactly while the current entry's state marks this file. Entering
+  // pushes that entry through the router, so browser Back exits and leaves the
+  // mockup open; the exit button and Escape pop it again (otherwise a duplicate
+  // of this page would sit behind it and the next Back would seem to do
+  // nothing).
   //
-  // A routed navigation away while fullscreen (Quick finder, a link) pushes
-  // its page above the marker before this frame unmounts, so the marker cannot
-  // be popped from under it. Instead the entry is made to mean something: the
-  // state holds the file that was fullscreen, and landing on that entry again
-  // (Back, Forward, a reload) shows that file fullscreen. Every entry is then a
-  // real step — no dead duplicate, and no auto-`back()` that would fight Forward.
-  const [fullscreenFile, setFullscreenFile] = useState<string | null>(() =>
-    fullscreenFileOf(window.history.state),
-  );
-  const fullscreen = fullscreenFile === filePath;
+  // Deriving it means every way the location moves is handled alike: Back,
+  // Forward or a reload onto a marker shows that file fullscreen; a routed
+  // navigation (Quick finder, a link — even to this same file) lands on an
+  // entry without the marker and so leaves it, and Back onto the marker brings
+  // it back. Nothing mirrors the location in local state, so there is no
+  // popstate listener to keep in sync and no unmount cleanup for StrictMode to
+  // replay: a frame unmounted on its marker shows fullscreen again if it
+  // mounts there again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fullscreen = fullscreenFileOf(location.state) === filePath;
+  // The router commits a navigation in a transition, so the location can lag a
+  // click: a second Enter on the toggle (still focusable under the layer) or a
+  // second Escape must not push or pop a second entry. Cleared once the
+  // location moves.
+  const navigating = useRef(false);
+  useEffect(() => {
+    navigating.current = false;
+  }, [location.key]);
   const enterFullscreen = () => {
-    // The toggle stays focusable under the layer: a second Enter must not push
-    // a second entry.
-    if (fullscreen) return;
-    const state: unknown = window.history.state;
-    window.history.pushState(
-      { ...(typeof state === "object" && state !== null ? state : {}), [FULLSCREEN_STATE]: filePath },
-      "",
+    if (fullscreen || navigating.current) return;
+    navigating.current = true;
+    const state: unknown = location.state;
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      {
+        state: {
+          ...(typeof state === "object" && state !== null ? state : {}),
+          [FULLSCREEN_STATE]: filePath,
+        },
+      },
     );
-    setFullscreenFile(filePath);
   };
-  // Pops only while this file's marker is still on top: after Back (or a router
-  // push/replace) it is not, and popping again would leave the page.
+  // Pops only while this file's marker is the current entry — the only time
+  // `fullscreen` is true.
   //
   // Known limit: a navigation inside the sandboxed frame adds a joint-history
-  // entry above the marker without changing this document's `history.state`,
-  // so the check still passes and `back()` steps the frame instead of popping
-  // the marker. The frame is cross-origin (no `allow-same-origin`), so its
-  // history cannot be read to tell; Back still works, it just takes one more.
-  const filePathRef = useRef(filePath);
-  filePathRef.current = filePath;
+  // entry above the marker without moving the router, so `-1` steps the frame
+  // instead of popping the marker. The frame is cross-origin (no
+  // `allow-same-origin`), so its history cannot be read to tell; Back still
+  // works, it just takes one more.
   const exitFullscreen = useCallback(() => {
-    setFullscreenFile(null);
-    if (fullscreenFileOf(window.history.state) === filePathRef.current) window.history.back();
-  }, []);
-  // History decides fullscreen on every traversal: Back off the marker exits,
-  // Back or Forward onto it re-enters. Always listening, since landing on the
-  // marker happens while the mockup is not fullscreen. Reads the event's state
-  // (the entry landed on); the router may re-render a different file in the
-  // same pass, and `fullscreen` compares against whichever file that is.
-  useEffect(() => {
-    const onPopState = (e: PopStateEvent) => setFullscreenFile(fullscreenFileOf(e.state));
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
-  // Leaving the file or the tab leaves fullscreen (design § 4). A new file
-  // exits through the same path as the button, but only if the file it left
-  // was the fullscreen one — a traversal onto another file's marker has just
-  // set that file. An unmount cannot set state, so it only pops the marker,
-  // or Back would land on a duplicate entry.
-  const fullscreenFileRef = useRef(fullscreenFile);
-  fullscreenFileRef.current = fullscreenFile;
+    if (!fullscreen || navigating.current) return;
+    navigating.current = true;
+    navigate(-1);
+  }, [fullscreen, navigate]);
+  // A new file on the same entry (a parent swapping the prop without a
+  // navigation) leaves fullscreen by derivation; the marker it left on top is
+  // popped so Back does not land on a dead duplicate. A file change that came
+  // with a navigation has already moved off the marker. Keyed on the file, so
+  // a StrictMode replay (same file) does nothing.
   const shownPath = useRef(filePath);
   useEffect(() => {
     const left = shownPath.current;
     if (left === filePath) return;
     shownPath.current = filePath;
-    if (fullscreenFileRef.current !== left) return;
-    setFullscreenFile(null);
-    if (fullscreenFileOf(window.history.state) === left) window.history.back();
-  }, [filePath]);
-  useEffect(
-    () => () => {
-      const file = filePathRef.current;
-      if (fullscreenFileRef.current === file && fullscreenFileOf(window.history.state) === file)
-        window.history.back();
-    },
-    [],
-  );
+    if (fullscreenFileOf(location.state) === left && !navigating.current) {
+      navigating.current = true;
+      navigate(-1);
+    }
+  }, [filePath, location.state, navigate]);
   // Lifts the shell's scroll-container isolation while the layer is up, so
   // its z-index competes with the chrome instead of being capped inside it.
   // A layout effect, so the chrome never paints one frame over the layer.
   useLayoutEffect(() => (fullscreen ? holdFullscreenLayer() : undefined), [fullscreen]);
   // Focus follows the layer: onto the exit control on enter (the toolbar is
-  // covered), back to the Fullscreen toggle on leaving it.
+  // covered), back to the Fullscreen toggle on leaving it. Starts from "not
+  // fullscreen", so a frame mounted on its marker (reload, Back/Forward onto
+  // it) takes focus to the exit control too; a StrictMode replay finds the
+  // ref already caught up and does nothing.
   const toggleRef = useRef<HTMLButtonElement>(null);
   const exitRef = useRef<HTMLButtonElement>(null);
-  const wasFullscreen = useRef(fullscreen);
+  const wasFullscreen = useRef(false);
   useEffect(() => {
     if (fullscreen === wasFullscreen.current) return;
     wasFullscreen.current = fullscreen;

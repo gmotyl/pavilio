@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { StrictMode, type ReactNode } from "react";
+import {
+  BrowserRouter,
+  Route,
+  Routes,
+  useNavigate,
+  type NavigateFunction,
+} from "react-router-dom";
 
 vi.mock("../../shell/vscode", () => ({
   openInVSCode: vi.fn(),
@@ -13,16 +20,44 @@ const ABSOLUTE = "/root/git/prv/projects/projects/pavilio/mockups/boot.html";
 const FILE_PATH = "pavilio/mockups/boot.html";
 const PNG_PATH = "pavilio/mockups/hero.png";
 const PNG_ABSOLUTE = "/root/git/prv/projects/projects/pavilio/mockups/hero.png";
+const OTHER = "pavilio/mockups/other.html";
+const OTHER_ABSOLUTE = "/root/git/prv/projects/projects/pavilio/mockups/other.html";
 
-/** The history.back spy. Asserted on so a never-reached spy cannot let a test
- * pass silently; stubbed so jsdom does not traverse the shared history. */
-let back: ReturnType<typeof vi.spyOn>;
+/**
+ * The app mounts under `<StrictMode>` and a `BrowserRouter`, so every test
+ * does: StrictMode replays effects (the round-2 restore bug lived there), and
+ * the router writes jsdom's real session history, which these tests traverse.
+ */
+const Shell = ({ children }: { children: ReactNode }) => (
+  <StrictMode>
+    <BrowserRouter>{children}</BrowserRouter>
+  </StrictMode>
+);
+
+let navigateTo: NavigateFunction = () => {};
+/** Exposes the router's navigate, as Quick finder or a link would use it. */
+function Nav() {
+  navigateTo = useNavigate();
+  return null;
+}
+
+const renderFrame = (filePath = FILE_PATH, absolutePath = ABSOLUTE) =>
+  render(<MockupFrame filePath={filePath} absolutePath={absolutePath} />, { wrapper: Shell });
+
+/** History steps this frame took itself. Spied, not stubbed: jsdom traverses. */
+let go: ReturnType<typeof vi.spyOn>;
+let pushState: ReturnType<typeof vi.spyOn>;
+
+/** The marker on the current entry; react-router keeps user state under `usr`. */
+const marker = () =>
+  (window.history.state as { usr?: { mockupFullscreen?: string } } | null)?.usr
+    ?.mockupFullscreen;
 
 beforeEach(() => {
   __resetWorkspaceRootForTests();
-  // jsdom keeps one history per file: a marker an earlier test pushed would
-  // otherwise reopen the next test's mockup fullscreen.
-  window.history.replaceState(null, "");
+  // jsdom keeps one history per file: a marker an earlier test left on the
+  // current entry would otherwise reopen the next test's mockup fullscreen.
+  window.history.replaceState(null, "", "/mock");
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -33,7 +68,8 @@ beforeEach(() => {
         ),
     ),
   );
-  back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+  go = vi.spyOn(window.history, "go");
+  pushState = vi.spyOn(window.history, "pushState");
 });
 
 afterEach(() => {
@@ -44,17 +80,21 @@ afterEach(() => {
 const frame = () => screen.getByTestId("mockup-viewer-frame") as HTMLIFrameElement;
 const layer = () => screen.queryByTestId("mockup-viewer-fullscreen");
 const exitButton = () => screen.queryByRole("button", { name: "Exit fullscreen" });
-const enter = () => fireEvent.click(screen.getByTestId("mockup-viewer-fullscreen-toggle"));
+const toggle = () => screen.getByTestId("mockup-viewer-fullscreen-toggle");
+const enter = () => fireEvent.click(toggle());
+/** Browser Back / Forward; the router hears the popstate jsdom fires later. */
+const back = () => act(() => window.history.back());
+const forward = () => act(() => window.history.forward());
 
 describe("MockupFrame fullscreen", () => {
   it("toolbar shows Fullscreen after the width buttons", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    renderFrame();
 
     const toolbar = screen.getByTestId("mockup-viewer-toolbar");
     const order = ["full", "tablet", "phone"].map((id) =>
       screen.getByTestId(`mockup-viewer-width-${id}`),
     );
-    const fullscreen = screen.getByTestId("mockup-viewer-fullscreen-toggle");
+    const fullscreen = toggle();
     expect(toolbar).toContainElement(fullscreen);
     expect(fullscreen).toHaveTextContent("Fullscreen");
     // Full, Tablet, Phone, then Fullscreen.
@@ -69,8 +109,7 @@ describe("MockupFrame fullscreen", () => {
   });
 
   it("fullscreen shows the mockup alone with an exit button", () => {
-    const pushState = vi.spyOn(window.history, "pushState");
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    renderFrame();
     expect(layer()).toBeNull();
     expect(exitButton()).toBeNull();
 
@@ -92,57 +131,62 @@ describe("MockupFrame fullscreen", () => {
     expect(Array.from(exit.classList)).toEqual(
       expect.arrayContaining(["fixed", "top-3", "right-3", "rounded-full", "w-10", "h-10"]),
     );
-    // Entering pushes the entry Back pops.
+    // Entering pushes the entry Back pops: same page, marked with the file.
     expect(pushState).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe("/mock");
+    expect(marker()).toBe(FILE_PATH);
   });
 
-  it("fullscreen keeps the same iframe element", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("fullscreen keeps the same iframe element", async () => {
+    renderFrame();
 
     const before = frame();
     enter();
     expect(frame()).toBe(before);
     fireEvent.click(exitButton()!);
+    await waitFor(() => expect(layer()).toBeNull());
     expect(frame()).toBe(before);
   });
 
-  it("exit button leaves fullscreen", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("exit button leaves fullscreen", async () => {
+    renderFrame();
     enter();
 
     fireEvent.click(exitButton()!);
 
-    expect(layer()).toBeNull();
+    await waitFor(() => expect(layer()).toBeNull());
     expect(exitButton()).toBeNull();
     // The same mockup stays open.
     expect(frame()).toHaveAttribute("src", "/api/files/raw/pavilio/mockups/boot.html");
     // The entry pushed on enter is popped, so Back is not needed twice.
-    expect(back).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledWith(-1);
+    expect(window.location.pathname).toBe("/mock");
+    expect(marker()).toBeUndefined();
   });
 
-  it("browser back leaves fullscreen", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("browser back leaves fullscreen", async () => {
+    renderFrame();
     enter();
 
-    act(() => {
-      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
-    });
+    back();
 
-    expect(layer()).toBeNull();
+    await waitFor(() => expect(layer()).toBeNull());
     expect(frame()).toHaveAttribute("src", "/api/files/raw/pavilio/mockups/boot.html");
     // Back already popped the entry; popping again would leave the page.
-    expect(back).not.toHaveBeenCalled();
+    expect(go).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/mock");
   });
 
-  it("escape leaves fullscreen", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("escape leaves fullscreen", async () => {
+    renderFrame();
     enter();
 
     fireEvent.keyDown(window, { key: "Escape" });
 
-    expect(layer()).toBeNull();
+    await waitFor(() => expect(layer()).toBeNull());
     expect(frame()).toHaveAttribute("src", "/api/files/raw/pavilio/mockups/boot.html");
-    expect(back).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledTimes(1);
   });
 
   it("escape with a dialog open does not leave fullscreen", () => {
@@ -151,17 +195,18 @@ describe("MockupFrame fullscreen", () => {
         <MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />
         <div role="dialog" aria-modal="true" aria-label="Quick finder" />
       </>,
+      { wrapper: Shell },
     );
     enter();
 
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(layer()).not.toBeNull();
-    expect(back).not.toHaveBeenCalled();
+    expect(go).not.toHaveBeenCalled();
   });
 
   it("escape already handled by someone else does not leave fullscreen", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    renderFrame();
     enter();
     const handled = (e: KeyboardEvent) => e.preventDefault();
     window.addEventListener("keydown", handled, true);
@@ -173,11 +218,11 @@ describe("MockupFrame fullscreen", () => {
     }
 
     expect(layer()).not.toBeNull();
-    expect(back).not.toHaveBeenCalled();
+    expect(go).not.toHaveBeenCalled();
   });
 
   it("fullscreen keeps the selected width", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    renderFrame();
     fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));
 
     enter();
@@ -188,11 +233,10 @@ describe("MockupFrame fullscreen", () => {
   });
 
   it("image mockups can go fullscreen", () => {
-    render(<MockupFrame filePath={PNG_PATH} absolutePath={PNG_ABSOLUTE} />);
+    renderFrame(PNG_PATH, PNG_ABSOLUTE);
 
-    const toggle = screen.getByTestId("mockup-viewer-fullscreen-toggle");
     expect(
-      screen.getByTestId("mockup-viewer-zoom-actual").compareDocumentPosition(toggle) &
+      screen.getByTestId("mockup-viewer-zoom-actual").compareDocumentPosition(toggle()) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     const image = screen.getByTestId("mockup-viewer-image");
@@ -209,74 +253,65 @@ describe("MockupFrame fullscreen", () => {
 });
 
 describe("MockupFrame fullscreen leaves with the file", () => {
-  it("exit only pops history when the marker entry is on top", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("a routed replace off the marker leaves fullscreen without popping", () => {
+    render(
+      <>
+        <Nav />
+        <MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />
+      </>,
+      { wrapper: Shell },
+    );
     enter();
-    // Something replaced the marker entry (a router replace, say): popping now
-    // would step off a page the user never pushed.
-    window.history.replaceState({}, "");
 
-    fireEvent.click(exitButton()!);
+    // Something replaced the marker entry (a router replace, say): popping
+    // now would step off a page the user never pushed.
+    act(() => navigateTo("/mock", { replace: true }));
 
     expect(layer()).toBeNull();
-    expect(back).not.toHaveBeenCalled();
+    expect(go).not.toHaveBeenCalled();
   });
 
-  it("switching to another file leaves fullscreen and pops the marker", () => {
-    const { rerender } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("switching to another file leaves fullscreen and pops the marker", async () => {
+    const { rerender } = renderFrame();
     enter();
     expect(layer()).not.toBeNull();
 
-    rerender(
-      <MockupFrame
-        filePath="pavilio/mockups/other.html"
-        absolutePath="/root/git/prv/projects/projects/pavilio/mockups/other.html"
-      />,
-    );
+    rerender(<MockupFrame filePath={OTHER} absolutePath={OTHER_ABSOLUTE} />);
 
     expect(layer()).toBeNull();
     expect(exitButton()).toBeNull();
-    expect(back).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(marker()).toBeUndefined());
   });
 
   it("re-rendering the same file keeps fullscreen", () => {
-    const { rerender } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    const { rerender } = renderFrame();
     enter();
 
     rerender(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} content="<p/>" />);
 
     expect(layer()).not.toBeNull();
-    expect(back).not.toHaveBeenCalled();
+    expect(go).not.toHaveBeenCalled();
   });
 
-  it("unmounting in fullscreen pops the marker entry", () => {
-    const { unmount } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("unmounting in fullscreen leaves the entry to mean fullscreen", () => {
+    const { unmount } = renderFrame();
     enter();
 
     unmount();
 
-    expect(back).toHaveBeenCalledTimes(1);
-  });
-
-  it("unmounting after Back already popped the marker does not pop again", () => {
-    const { unmount } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-    enter();
-    // Back: the browser restores the entry below the marker, then fires popstate.
-    window.history.replaceState({}, "");
-    act(() => {
-      window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
-    });
-
-    unmount();
-
-    expect(back).not.toHaveBeenCalled();
+    // No step of its own: the entry stays "this file, fullscreen", and a
+    // frame that mounts on it again (reload, the router coming back) shows it so.
+    expect(go).not.toHaveBeenCalled();
+    expect(marker()).toBe(FILE_PATH);
+    renderFrame();
+    expect(layer()).not.toBeNull();
   });
 });
 
 describe("MockupFrame fullscreen enter is idempotent and moves focus", () => {
   it("entering twice pushes one history entry", () => {
-    const pushState = vi.spyOn(window.history, "pushState");
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    renderFrame();
 
     enter();
     // The toggle is still in the DOM under the layer; Enter on it fires again.
@@ -286,77 +321,77 @@ describe("MockupFrame fullscreen enter is idempotent and moves focus", () => {
     expect(layer()).not.toBeNull();
   });
 
+  it("leaving twice pops one history entry", async () => {
+    renderFrame();
+    enter();
+
+    // The router commits the pop in a transition after jsdom's popstate; a
+    // second Escape before then must not step off the page.
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe("/mock");
+  });
+
   it("entering moves focus to the exit button", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-    screen.getByTestId("mockup-viewer-fullscreen-toggle").focus();
+    renderFrame();
+    toggle().focus();
 
     enter();
 
     expect(document.activeElement).toBe(exitButton());
   });
 
-  it("leaving returns focus to the Fullscreen toggle", () => {
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("leaving returns focus to the Fullscreen toggle", async () => {
+    renderFrame();
     enter();
 
     fireEvent.keyDown(window, { key: "Escape" });
 
-    expect(document.activeElement).toBe(
-      screen.getByTestId("mockup-viewer-fullscreen-toggle"),
-    );
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(document.activeElement).toBe(toggle());
   });
 });
 
 describe("MockupFrame fullscreen marker under a routed navigation", () => {
-  it("a mockup that lands on its own marker entry opens fullscreen", () => {
-    window.history.replaceState({ mockupFullscreen: FILE_PATH }, "");
+  /** Whatever react-router would write for a marked entry at /mock. */
+  const landOn = (file: string) =>
+    window.history.replaceState(
+      { usr: { mockupFullscreen: file }, key: "restored", idx: 0 },
+      "",
+      "/mock",
+    );
 
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+  it("a mockup that mounts on its own marker entry opens fullscreen and stays so", async () => {
+    // A reload onto the marker, under StrictMode: the replayed effects must
+    // not treat the simulated unmount as leaving.
+    landOn(FILE_PATH);
+
+    renderFrame();
 
     expect(layer()).not.toBeNull();
+    // Give any stray traversal a chance to land before asserting it did not.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(layer()).not.toBeNull();
+    expect(go).not.toHaveBeenCalled();
+    expect(marker()).toBe(FILE_PATH);
+    // The toolbar is covered: focus starts on the exit control.
+    expect(document.activeElement).toBe(exitButton());
   });
 
   it("another file's marker entry does not open this mockup fullscreen", () => {
-    window.history.replaceState({ mockupFullscreen: "pavilio/mockups/other.html" }, "");
+    landOn(OTHER);
 
-    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    renderFrame();
 
     expect(layer()).toBeNull();
-  });
-
-  it("Back onto the marker after leaving the file restores fullscreen", () => {
-    const OTHER = "pavilio/mockups/other.html";
-    const OTHER_ABSOLUTE = "/root/git/prv/projects/projects/pavilio/mockups/other.html";
-    const { rerender } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-    enter();
-    // A routed navigation pushes the next file above the marker.
-    window.history.pushState({}, "");
-    rerender(<MockupFrame filePath={OTHER} absolutePath={OTHER_ABSOLUTE} />);
-    expect(layer()).toBeNull();
-    expect(back).not.toHaveBeenCalled();
-
-    // Back: the browser restores the marker entry; the router re-renders the file.
-    act(() => {
-      window.dispatchEvent(
-        new PopStateEvent("popstate", { state: { mockupFullscreen: FILE_PATH } }),
-      );
-      rerender(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
-    });
-
-    expect(layer()).not.toBeNull();
   });
 
   it("Quick finder style navigate away: Back restores fullscreen, Back again exits it", async () => {
-    back.mockRestore();
-    window.history.replaceState(null, "", "/mock");
-    let go: (to: string) => void = () => {};
-    function Nav() {
-      const navigate = useNavigate();
-      go = navigate;
-      return null;
-    }
     render(
-      <BrowserRouter>
+      <>
         <Nav />
         <Routes>
           <Route
@@ -365,24 +400,75 @@ describe("MockupFrame fullscreen marker under a routed navigation", () => {
           />
           <Route path="/view" element={<div data-testid="other-page" />} />
         </Routes>
-      </BrowserRouter>,
+      </>,
+      { wrapper: Shell },
     );
     enter();
     expect(layer()).not.toBeNull();
 
-    act(() => go("/view"));
+    act(() => navigateTo("/view"));
     expect(screen.getByTestId("other-page")).toBeInTheDocument();
 
     // Back from the new page lands on the marker entry: the mockup it was
-    // left in, fullscreen again — not a dead duplicate of the page below.
-    act(() => window.history.back());
+    // left in, fullscreen again — not a dead duplicate of the page below —
+    // with focus on its exit control.
+    back();
     await waitFor(() => expect(layer()).not.toBeNull());
     expect(window.location.pathname).toBe("/mock");
+    expect(document.activeElement).toBe(exitButton());
+    // It stays: StrictMode's replayed cleanup does not pop it again.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(layer()).not.toBeNull();
+    expect(window.location.pathname).toBe("/mock");
+
+    // Forward and Back again land on the same entries, no bounce.
+    forward();
+    await waitFor(() => expect(screen.getByTestId("other-page")).toBeInTheDocument());
+    back();
+    await waitFor(() => expect(layer()).not.toBeNull());
 
     // The next Back exits fullscreen and stays on the mockup.
-    act(() => window.history.back());
+    back();
     await waitFor(() => expect(layer()).toBeNull());
     expect(window.location.pathname).toBe("/mock");
     expect(frame()).toBeInTheDocument();
+    expect(go).not.toHaveBeenCalled();
+  });
+
+  it("Quick finder opening the same file leaves fullscreen; Back restores it, Back again exits", async () => {
+    window.history.replaceState(null, "", "/view/boot");
+    render(
+      <>
+        <Nav />
+        <Routes>
+          <Route
+            path="/view/boot"
+            element={<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />}
+          />
+        </Routes>
+      </>,
+      { wrapper: Shell },
+    );
+    const before = frame();
+    enter();
+    expect(layer()).not.toBeNull();
+
+    // Same route, new entry: the frame stays mounted, the entry is not marked.
+    act(() => navigateTo("/view/boot"));
+    expect(layer()).toBeNull();
+    expect(exitButton()).toBeNull();
+    expect(frame()).toBe(before);
+
+    // Back lands on the marker: visibly fullscreen again, one step.
+    back();
+    await waitFor(() => expect(layer()).not.toBeNull());
+    expect(frame()).toBe(before);
+
+    // The next Back leaves it, still on the same file.
+    back();
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(window.location.pathname).toBe("/view/boot");
+    expect(frame()).toBe(before);
+    expect(go).not.toHaveBeenCalled();
   });
 });

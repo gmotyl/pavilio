@@ -27,7 +27,6 @@ beforeEach(() => {
         ),
     ),
   );
-  vi.spyOn(window.history, "back").mockImplementation(() => {});
 });
 
 afterEach(() => {
