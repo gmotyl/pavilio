@@ -91,6 +91,17 @@ describe("/api/projects/:name/mark", () => {
     expect(readdirSync(projectDir()).filter((f) => f.startsWith(".mark-"))).toEqual([]);
   });
 
+  it("PUT temp names do not collide within one process and millisecond", async () => {
+    // A leftover temp from an earlier write in the same pid + ms must not
+    // make the exclusive temp write fail.
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    writeFileSync(join(projectDir(), `.mark-${process.pid}-1700000000000.tmp`), "stale");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await request(app()).put("/api/projects/p/mark").attach("image", PNG, "logo.png");
+    expect(res.status).toBe(200);
+    expect(markFiles()).toEqual(["mark.png"]);
+  });
+
   it("unknown project is 404", async () => {
     const put = await request(app()).put("/api/projects/nope/mark").attach("image", PNG, "a.png");
     expect(put.status).toBe(404);

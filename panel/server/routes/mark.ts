@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import multer from "multer";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { lstat, rename, unlink, writeFile } from "fs/promises";
 import { resolve } from "path";
 import { getConfig } from "../config.js";
@@ -76,7 +76,7 @@ router.put("/:project/mark", requireProject, receiveImage, async (req, res) => {
   // Write a temp file and rename over the target: a `mark.*` symlink is
   // replaced, never followed out of the project.
   const target = resolve(dir, `mark${ext}`);
-  const tmp = resolve(dir, `.mark-${process.pid}-${Date.now()}.tmp`);
+  const tmp = resolve(dir, `.mark-${randomUUID()}.tmp`);
   try {
     await writeFile(tmp, file.buffer, { flag: "wx" });
     await rename(tmp, target);
