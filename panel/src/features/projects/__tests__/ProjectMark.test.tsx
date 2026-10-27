@@ -1,15 +1,22 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { preferences } from "../../../preferences/declarations";
 import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
 import { PROJECT_MARK_COMPONENTS, ProjectMark } from "../ProjectMark";
-import { PROJECT_MARK_ICONS, derivedProjectColor } from "../projectIdentity";
+import { __resetMarkHashesForTests, rememberMarkHash } from "../markImage";
+import {
+  PROJECT_MARK_EMOJI,
+  PROJECT_MARK_ICONS,
+  derivedProjectColor,
+  isSingleEmoji,
+} from "../projectIdentity";
 
 afterEach(() => {
   cleanup();
   localStorage.clear();
   __resetPreferenceStoreForTests();
+  __resetMarkHashesForTests();
 });
 
 /** The browser normalises hex to rgb() inside serialised styles. */
@@ -75,5 +82,37 @@ describe("ProjectMark", () => {
       "lucide-folder",
     );
     expect(tile.getAttribute("data-color")).toBe(hex);
+  });
+
+  it("ProjectMark renders an image mark", () => {
+    render(<ProjectMark project="my proj" mark="image:mark.png" color="#61afef" />);
+    const tile = screen.getByTestId("project-mark");
+    const img = tile.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("/api/projects/my%20proj/mark");
+    // Fills the tile, cropped square.
+    expect(img?.style.width).toBe("100%");
+    expect(img?.style.height).toBe("100%");
+    expect(img?.style.objectFit).toBe("cover");
+    expect(tile.querySelector("svg")).toBeNull();
+    // A fresh upload's hash busts the browser's copy.
+    act(() => rememberMarkHash("my proj", "abc123"));
+    expect(tile.querySelector("img")?.getAttribute("src")).toBe("/api/projects/my%20proj/mark?v=abc123");
+  });
+
+  it("ProjectMark falls back to the folder glyph when the image fails", () => {
+    render(<ProjectMark project="alpha" mark="image:mark.svg" color="#e06c75" />);
+    const tile = screen.getByTestId("project-mark");
+    fireEvent.error(tile.querySelector("img")!);
+    expect(tile.querySelector("img")).toBeNull();
+    expect(screen.getByTestId("project-mark-icon-folder").getAttribute("class")).toContain("lucide-folder");
+    expect(tile.style.color).toBe(rgb("#e06c75"));
+  });
+
+  it("every curated emoji is a single emoji", () => {
+    expect(Object.keys(PROJECT_MARK_EMOJI)).toEqual(["Tech", "Objects", "Nature", "Food", "Symbols", "Faces"]);
+    const all = Object.values(PROJECT_MARK_EMOJI).flat();
+    expect(all.length).toBeGreaterThanOrEqual(100);
+    expect(new Set(all).size).toBe(all.length);
+    for (const glyph of all) expect([glyph, isSingleEmoji(glyph)]).toEqual([glyph, true]);
   });
 });
