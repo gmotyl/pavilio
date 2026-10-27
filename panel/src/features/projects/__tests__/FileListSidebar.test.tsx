@@ -331,8 +331,36 @@ describe("FileListSidebar", () => {
     renderMobileCollapsed();
     const path = screen.getByTestId("file-list-sidebar-path");
     expect(path.textContent).toBe("plans/some-file.md");
-    expect(path.className).toContain("truncate");
+    expect(path.title).toBe("plans/some-file.md");
+    expect(path.className).toContain("min-w-0");
     expect(screen.getByTestId("file-list-sidebar-row").contains(path)).toBe(true);
+  });
+
+  it("collapsed row keeps the file name of a long path visible", () => {
+    const long =
+      "projects/pavilio/plans/openspec/changes/2026-10-27-navigation-polish/design.md";
+    renderMobileCollapsed(long);
+    const path = screen.getByTestId("file-list-sidebar-path");
+    const dir = screen.getByTestId("file-list-sidebar-path-dir");
+    const name = screen.getByTestId("file-list-sidebar-path-name");
+    expect(path.textContent).toBe(long);
+    // The directories take the ellipsis; the file name never shrinks.
+    expect(dir.textContent).toBe(
+      "projects/pavilio/plans/openspec/changes/2026-10-27-navigation-polish/",
+    );
+    expect(Array.from(dir.classList)).toEqual(
+      expect.arrayContaining(["truncate", "min-w-0"]),
+    );
+    expect(name.textContent).toBe("design.md");
+    expect(name.classList).toContain("shrink-0");
+    // The name comes last, at the visible end of the row.
+    expect(path.lastElementChild).toBe(name);
+  });
+
+  it("collapsed row shows a bare file name without a directory part", () => {
+    renderMobileCollapsed("README.md");
+    expect(screen.queryByTestId("file-list-sidebar-path-dir")).toBeNull();
+    expect(screen.getByTestId("file-list-sidebar-path-name").textContent).toBe("README.md");
   });
 
   it("collapsed row shows only the toggle when no file is open", () => {

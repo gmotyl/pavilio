@@ -39,6 +39,12 @@ const PANE_BOUNDS: PaneBounds = { min: 200, max: 560, step: 16 };
  *  boxes stay identical — the no-reflow guarantee depends on it. */
 const TOGGLE_ICON_SIZE = 14;
 
+/** A path's directories (with the trailing slash) and its file name. */
+const splitPath = (path: string) => {
+  const cut = path.lastIndexOf("/") + 1;
+  return { dir: path.slice(0, cut), name: path.slice(cut) };
+};
+
 export interface FileListSource {
   id: string;
   label: string;
@@ -279,6 +285,7 @@ export default function FileListSidebar({
   // the toggle and the open file's path sit in a thin row above it instead and
   // the document runs full width. No peek on mobile, so no overlay here.
   if (railMode && isMobile) {
+    const openPathParts = openPath ? splitPath(openPath) : null;
     return (
       <div className={`flex flex-col gap-2${fillRow}`}>
         <div
@@ -286,14 +293,31 @@ export default function FileListSidebar({
           className="flex items-center gap-1 h-8 min-w-0"
         >
           {toggleButton}
-          {openPath && (
+          {openPathParts && (
+            // Plain `truncate` cuts the end, which is the file name on a long
+            // path. The directories shrink and take the ellipsis instead; the
+            // file name does not shrink and only truncates once it alone is
+            // wider than the row.
             <span
               data-testid="file-list-sidebar-path"
-              className="truncate text-xs"
+              className="flex min-w-0 text-xs"
               style={{ color: "var(--text-muted)" }}
-              title={openPath}
+              title={openPath ?? undefined}
             >
-              {openPath}
+              {openPathParts.dir && (
+                <span
+                  data-testid="file-list-sidebar-path-dir"
+                  className="truncate min-w-0"
+                >
+                  {openPathParts.dir}
+                </span>
+              )}
+              <span
+                data-testid="file-list-sidebar-path-name"
+                className="shrink-0 max-w-full truncate"
+              >
+                {openPathParts.name}
+              </span>
             </span>
           )}
         </div>
