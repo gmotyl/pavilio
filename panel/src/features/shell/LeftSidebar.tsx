@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
 import { useIsMobile } from "./useIsMobile";
+import { useSidebarState } from "./useSidebarState";
 import { projectHref } from "./projectHref";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
@@ -297,6 +298,19 @@ export default function LeftSidebar() {
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
   }, [projects]);
+  // On a phone the global ☰ is the one menu, and it opens on the project the
+  // user is standing in: that project expands so its sessions — the focused one
+  // highlighted — are one tap away. Transient like the phone's open state
+  // itself: the in-memory expand flips, the stored preference is never written
+  // (only a user's own toggle writes it). A desktop sidebar does none of this.
+  const { expanded: sidebarOpen } = useSidebarState("leftSidebar");
+  const mobileMenuOpen = isMobile && sidebarOpen;
+  useEffect(() => {
+    if (!mobileMenuOpen || currentProject === null) return;
+    setExpandedState((prev) =>
+      prev[currentProject] ? prev : { ...prev, [currentProject]: true },
+    );
+  }, [mobileMenuOpen, currentProject]);
   const isExpanded = useCallback(
     (name: string) => expanded[name] ?? false,
     [expanded],

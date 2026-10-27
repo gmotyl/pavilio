@@ -45,7 +45,13 @@ import {
   _resetForTests,
 } from "../../terminal/useTerminalActivityChannel";
 import { preferences } from "../../../preferences/declarations";
-import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import {
+  __resetPreferenceStoreForTests,
+  readPreference,
+  writePreference,
+} from "../../../preferences/store";
+import { useSidebarState } from "../useSidebarState";
+import SidebarHamburger from "../SidebarHamburger";
 import { __resetProjectColorsForTests } from "../../terminal/useProjectColors";
 import { nameColor } from "../../projects/nameColor";
 import { installMatchMedia } from "../../../test-utils";
@@ -795,5 +801,103 @@ describe("LeftSidebar.unresolvedProject", () => {
 
       expect(expandedKeys()).toEqual([]);
     });
+  });
+});
+
+/**
+ * Mockup S: on a phone the global corner ☰ is the one menu. Opened on a
+ * project's page, the sidebar shows that project already expanded with its
+ * sessions and the focused one highlighted. The expansion is transient like
+ * the phone's open state: the stored per-project expand preference is never
+ * written. A desktop sidebar is the stored preference and nothing else.
+ */
+describe("LeftSidebar.mobileMenu", () => {
+  const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+
+  beforeEach(() => {
+    __resetPreferenceStoreForTests();
+    writeTerminalFocus("vector", "s2");
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (nativeMatchMedia)
+      Object.defineProperty(window, "matchMedia", nativeMatchMedia);
+    else delete (window as { matchMedia?: unknown }).matchMedia;
+    localStorage.clear();
+    __resetPreferenceStoreForTests();
+  });
+
+  /** The global ☰, wired to the left sidebar's state the way `Layout` wires it. */
+  function GlobalHamburger() {
+    const left = useSidebarState("leftSidebar");
+    return <SidebarHamburger expanded={left.expanded} onToggle={left.toggle} />;
+  }
+
+  function setupAt(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <GlobalHamburger />
+        <TerminalSpeechHost>
+          <LeftSidebar />
+        </TerminalSpeechHost>
+      </MemoryRouter>,
+    );
+  }
+
+  const openMenu = () => fireEvent.click(screen.getByTestId("sidebar-hamburger"));
+  const tileOf = (project: string) =>
+    screen
+      .getByTestId(`sidebar-project-row-${project}`)
+      .querySelector("[data-testid='project-mark']") as HTMLElement;
+  const storedExpandKeys = () =>
+    Object.keys(
+      (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+        .__PAVILIO_PREFS__ ?? {},
+    ).filter((k) => k.startsWith("shell.project.expanded"));
+
+  it("opening the sidebar on mobile expands the current project", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+
+    openMenu();
+
+    // The current project's sessions are listed, the focused one highlighted.
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("s1")).toBe(PLAIN);
+    // Only the current project opens; the mobile tile is 24px.
+    expect(screen.queryByTestId("sidebar-session-a1")).not.toBeInTheDocument();
+    expect(tileOf("vector").style.width).toBe("24px");
+  });
+
+  it("mobile auto-expand does not write the expand preference", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+
+    openMenu();
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+
+    expect(readPreference(preferences.projectExpanded, "vector")).toBe(false);
+    expect(storedExpandKeys()).toEqual([]);
+
+    // Control: a user's own toggle is still what writes it.
+    expand("vector");
+    expand("vector");
+    expect(readPreference(preferences.projectExpanded, "vector")).toBe(true);
+  });
+
+  it("desktop sidebar does not auto-expand", () => {
+    installMatchMedia({ mobile: false });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+
+    // Desktop starts open (stored default); close and reopen it.
+    openMenu();
+    openMenu();
+
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+    expect(readPreference(preferences.projectExpanded, "vector")).toBe(false);
   });
 });
