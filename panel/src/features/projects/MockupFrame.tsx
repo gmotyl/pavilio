@@ -99,6 +99,21 @@ const fullscreenFileOf = (state: unknown): string | null => {
   return typeof file === "string" ? file : null;
 };
 
+/** The entry's state with the fullscreen marker dropped (null when nothing else is left). */
+const withoutMarker = (state: unknown): unknown => {
+  if (typeof state !== "object" || state === null) return null;
+  const { [FULLSCREEN_STATE]: _marker, ...rest } = state as Record<string, unknown>;
+  return Object.keys(rest).length > 0 ? rest : null;
+};
+
+/**
+ * How long a pop of the marker may take to reach the router before it is
+ * taken as spent on the frame's own history (see `popMarker`). A same-document
+ * traversal of the panel lands within a task or two; this leaves room for a
+ * busy main thread without making a stuck exit feel broken.
+ */
+const POP_SETTLE_MS = 300;
+
 /**
  * The fixed full-viewport layer fullscreen toggles on the element that already
  * holds the mockup. Above the panel chrome (sidebars, terminal drawer, z-50
@@ -162,9 +177,18 @@ export function MockupFrame({
   // second Escape must not push or pop a second entry. Cleared once the
   // location moves.
   const navigating = useRef(false);
+  // A pending check that the last pop reached this page (see `popMarker`).
+  const popCheck = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     navigating.current = false;
+    clearTimeout(popCheck.current);
   }, [location.key]);
+  useEffect(() => () => clearTimeout(popCheck.current), []);
+  // The committed location, for the pop check that runs after a render.
+  const latest = useRef(location);
+  useEffect(() => {
+    latest.current = location;
+  });
   const enterFullscreen = () => {
     if (fullscreen || navigating.current) return;
     navigating.current = true;
@@ -179,19 +203,42 @@ export function MockupFrame({
       },
     );
   };
+  // Pops the marker entry `file` left on top, so Back is not needed twice.
+  //
+  // A navigation inside the sandboxed frame (a link, an anchor) adds a
+  // joint-history entry above the marker without moving the router, and `-1`
+  // then steps the frame instead: the router never hears a popstate, the
+  // location keeps its key, and fullscreen (and the lock with it) would stay
+  // forever. The frame is cross-origin (no `allow-same-origin`), so its history
+  // cannot be read beforehand to tell. Instead, a pop that has not moved the
+  // router within POP_SETTLE_MS is taken as spent on the frame, and the marker
+  // is dropped from the current entry in place: leaving is then certain, at
+  // the cost of one duplicate entry below it (the next Back lands on the same
+  // page, not fullscreen). A pop that did land changes the key, which cancels
+  // the check; one that lands after it only finds the marker already gone.
+  const popMarker = useCallback(
+    (file: string) => {
+      navigating.current = true;
+      const key = latest.current.key;
+      navigate(-1);
+      clearTimeout(popCheck.current);
+      popCheck.current = setTimeout(() => {
+        const at = latest.current;
+        if (at.key !== key || fullscreenFileOf(at.state) !== file) return;
+        navigate(
+          { pathname: at.pathname, search: at.search, hash: at.hash },
+          { replace: true, state: withoutMarker(at.state) },
+        );
+      }, POP_SETTLE_MS);
+    },
+    [navigate],
+  );
   // Pops only while this file's marker is the current entry — the only time
   // `fullscreen` is true.
-  //
-  // Known limit: a navigation inside the sandboxed frame adds a joint-history
-  // entry above the marker without moving the router, so `-1` steps the frame
-  // instead of popping the marker. The frame is cross-origin (no
-  // `allow-same-origin`), so its history cannot be read to tell; Back still
-  // works, it just takes one more.
   const exitFullscreen = useCallback(() => {
     if (!fullscreen || navigating.current) return;
-    navigating.current = true;
-    navigate(-1);
-  }, [fullscreen, navigate]);
+    popMarker(filePath);
+  }, [fullscreen, filePath, popMarker]);
   // A new file on the same entry (a parent swapping the prop without a
   // navigation) leaves fullscreen by derivation; the marker it left on top is
   // popped so Back does not land on a dead duplicate. A file change that came
@@ -202,11 +249,8 @@ export function MockupFrame({
     const left = shownPath.current;
     if (left === filePath) return;
     shownPath.current = filePath;
-    if (fullscreenFileOf(location.state) === left && !navigating.current) {
-      navigating.current = true;
-      navigate(-1);
-    }
-  }, [filePath, location.state, navigate]);
+    if (fullscreenFileOf(location.state) === left && !navigating.current) popMarker(left);
+  }, [filePath, location.state, popMarker]);
   // Lifts the shell's scroll-container isolation while the layer is up, so
   // its z-index competes with the chrome instead of being capped inside it.
   // A layout effect, so the chrome never paints one frame over the layer.
@@ -227,7 +271,12 @@ export function MockupFrame({
   useEffect(() => {
     if (!fullscreen) return;
     // A key pressed inside the frame stays in the frame's document; Escape
-    // works once focus is on the panel, and the exit button always does.
+    // works once focus is on the panel, and the exit button always does — it
+    // follows the frame in tab order, so Tab out of the mockup reaches it.
+    // No Escape bridge out of the frame on purpose: it would mean rewriting
+    // the user's HTML in the generic raw-file route, a mockup's own CSP meta
+    // can block the injected script, a page the frame navigates to has none,
+    // and the opaque-origin frame's messages cannot be told from the mockup's.
     // A modal above the layer owns Escape: one that handled it (Quick finder
     // marks it) or is still open (the Quick terminal leaves Escape to xterm)
     // closes alone, and the mockup stays fullscreen behind it.

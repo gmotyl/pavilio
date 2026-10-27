@@ -355,6 +355,79 @@ describe("MockupFrame fullscreen enter is idempotent and moves focus", () => {
   });
 });
 
+describe("MockupFrame fullscreen exit after a navigation inside the frame", () => {
+  /**
+   * The frame followed a link, so the joint history has an entry of its own
+   * above the marker: `go(-1)` steps the frame, and the panel's location —
+   * key, state, marker — does not move. jsdom has no cross-origin frame
+   * history, so the step is stubbed to land nowhere the router can hear.
+   */
+  const frameEatsTheStep = () => go.mockImplementation(() => {});
+
+  it("exit still leaves fullscreen when the pop only stepped the frame", async () => {
+    renderFrame();
+    const before = frame();
+    enter();
+    frameEatsTheStep();
+
+    fireEvent.click(exitButton()!);
+
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledWith(-1);
+    // Dropped in place: same page, no marker, no new entry pushed.
+    expect(marker()).toBeUndefined();
+    expect(window.location.pathname).toBe("/mock");
+    expect(pushState).toHaveBeenCalledTimes(1);
+    expect(frame()).toBe(before);
+    expect(document.activeElement).toBe(toggle());
+  });
+
+  it("escape still leaves fullscreen when the pop only stepped the frame", async () => {
+    renderFrame();
+    enter();
+    frameEatsTheStep();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(marker()).toBeUndefined();
+  });
+
+  it("a second exit after a stuck pop is not ignored", async () => {
+    renderFrame();
+    enter();
+    frameEatsTheStep();
+    fireEvent.click(exitButton()!);
+    // A second click while the first pop settles takes no extra step.
+    fireEvent.click(exitButton()!);
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(go).toHaveBeenCalledTimes(1);
+
+    // The lock is released: fullscreen enters and leaves again.
+    enter();
+    expect(layer()).not.toBeNull();
+    expect(pushState).toHaveBeenCalledTimes(2);
+    fireEvent.click(exitButton()!);
+    await waitFor(() => expect(layer()).toBeNull());
+    expect(go).toHaveBeenCalledTimes(2);
+  });
+
+  it("a pop that lands is not followed by the fallback", async () => {
+    renderFrame();
+    enter();
+    // After mount: the router stamps its index on the first entry itself.
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    fireEvent.click(exitButton()!);
+    await waitFor(() => expect(layer()).toBeNull());
+    // Past the settle window: nothing more is written to history.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(replaceState).not.toHaveBeenCalled();
+    expect(layer()).toBeNull();
+  });
+});
+
 describe("MockupFrame fullscreen marker under a routed navigation", () => {
   /** Whatever react-router would write for a marked entry at /mock. */
   const landOn = (file: string) =>
