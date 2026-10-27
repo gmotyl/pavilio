@@ -141,6 +141,37 @@ describe("MockupFrame fullscreen", () => {
     expect(back).toHaveBeenCalledTimes(1);
   });
 
+  it("escape with a dialog open does not leave fullscreen", () => {
+    render(
+      <>
+        <MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />
+        <div role="dialog" aria-modal="true" aria-label="Quick finder" />
+      </>,
+    );
+    enter();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(layer()).not.toBeNull();
+    expect(back).not.toHaveBeenCalled();
+  });
+
+  it("escape already handled by someone else does not leave fullscreen", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    enter();
+    const handled = (e: KeyboardEvent) => e.preventDefault();
+    window.addEventListener("keydown", handled, true);
+
+    try {
+      fireEvent.keyDown(window, { key: "Escape" });
+    } finally {
+      window.removeEventListener("keydown", handled, true);
+    }
+
+    expect(layer()).not.toBeNull();
+    expect(back).not.toHaveBeenCalled();
+  });
+
   it("fullscreen keeps the selected width", () => {
     render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
     fireEvent.click(screen.getByTestId("mockup-viewer-width-phone"));

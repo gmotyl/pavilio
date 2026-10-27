@@ -113,7 +113,9 @@ export default function AlertHost() {
         left: "50%",
         transform: "translateX(-50%)",
         width: "min(520px, calc(100vw - 24px))",
-        zIndex: 60,
+        // Above the modal tier (z-[100]): an alert raised while the Quick
+        // terminal or Quick finder is open still shows over it.
+        zIndex: 110,
         pointerEvents: "none",
       }}
     >

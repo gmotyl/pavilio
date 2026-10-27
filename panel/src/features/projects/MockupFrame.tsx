@@ -91,11 +91,16 @@ const isFullscreenEntry = (state: unknown) =>
 
 /**
  * The fixed full-viewport layer fullscreen toggles on the element that already
- * holds the mockup. Above the panel chrome and alerts (z-60), below modals
- * (z-[100]). The classes change on the same node, never a new parent, so the
- * iframe is not re-mounted and an interactive mockup keeps its state.
+ * holds the mockup. Above the panel chrome (sidebars, terminal drawer, z-50
+ * popovers), below the modal tier (z-[100]: Quick finder, Quick terminal and
+ * the other dialogs) and alerts (110). The classes change on the same node,
+ * never a new parent, so the iframe is not re-mounted and an interactive
+ * mockup keeps its state.
  */
 const LAYER_CLASS = "fixed inset-0 z-[90]";
+
+/** An open modal dialog; while one is up, Escape belongs to it. */
+const MODAL_SELECTOR = '[aria-modal="true"], [role="alertdialog"]';
 
 /**
  * A mockup with its toolbar: an HTML mockup in a sandboxed frame with a width
@@ -177,8 +182,13 @@ export function MockupFrame({
     const onPopState = () => setFullscreen(false);
     // A key pressed inside the frame stays in the frame's document; Escape
     // works once focus is on the panel, and the exit button always does.
+    // A modal above the layer owns Escape: one that handled it (Quick finder
+    // marks it) or is still open (the Quick terminal leaves Escape to xterm)
+    // closes alone, and the mockup stays fullscreen behind it.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") exitFullscreen();
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector(MODAL_SELECTOR)) return;
+      exitFullscreen();
     };
     window.addEventListener("popstate", onPopState);
     window.addEventListener("keydown", onKeyDown);
