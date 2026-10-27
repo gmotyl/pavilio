@@ -42,7 +42,7 @@ const TOGGLE_ICON_SIZE = 14;
 /** A path's directories (with the trailing slash) and its file name. */
 const splitPath = (path: string) => {
   const cut = path.lastIndexOf("/") + 1;
-  return { dir: path.slice(0, cut), name: path.slice(cut) };
+  return { path, dir: path.slice(0, cut), name: path.slice(cut) };
 };
 
 export interface FileListSource {
@@ -302,7 +302,7 @@ export default function FileListSidebar({
               data-testid="file-list-sidebar-path"
               className="flex min-w-0 text-xs"
               style={{ color: "var(--text-muted)" }}
-              title={openPath ?? undefined}
+              title={openPathParts.path}
             >
               {openPathParts.dir && (
                 <span

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Maximize, Minimize } from "lucide-react";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { isMockupImage, isRasterImage } from "./mockupFiles";
+import { holdFullscreenLayer } from "../shell/Layout/fullscreenLayer";
 
 /**
  * The widths the viewer can pin the frame to. `full` fills the pane; the
@@ -136,10 +137,40 @@ export function MockupFrame({
     );
     setFullscreen(true);
   };
+  // Pops only while the marker is still on top: after Back (or a router
+  // replace) it is gone, and popping again would leave the page.
+  //
+  // Known limit: a navigation inside the sandboxed frame adds a joint-history
+  // entry above the marker without changing this document's `history.state`,
+  // so the check still passes and `back()` steps the frame instead of popping
+  // the marker. The frame is cross-origin (no `allow-same-origin`), so its
+  // history cannot be read to tell; Back still works, it just takes one more.
   const exitFullscreen = useCallback(() => {
     setFullscreen(false);
     if (isFullscreenEntry(window.history.state)) window.history.back();
   }, []);
+  // Leaving the file or the tab leaves fullscreen (design § 4). A new file
+  // exits through the same path as the button; an unmount cannot set state,
+  // so it only pops the marker, or Back would land on a duplicate entry.
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
+  const shownPath = useRef(filePath);
+  useEffect(() => {
+    if (shownPath.current === filePath) return;
+    shownPath.current = filePath;
+    if (fullscreenRef.current) exitFullscreen();
+  }, [filePath, exitFullscreen]);
+  useEffect(
+    () => () => {
+      if (fullscreenRef.current && isFullscreenEntry(window.history.state))
+        window.history.back();
+    },
+    [],
+  );
+  // Lifts the shell's scroll-container isolation while the layer is up, so
+  // its z-index competes with the chrome instead of being capped inside it.
+  // A layout effect, so the chrome never paints one frame over the layer.
+  useLayoutEffect(() => (fullscreen ? holdFullscreenLayer() : undefined), [fullscreen]);
   useEffect(() => {
     if (!fullscreen) return;
     // Back has already popped the entry: only the state has to follow.

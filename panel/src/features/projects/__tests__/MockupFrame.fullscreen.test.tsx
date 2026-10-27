@@ -172,3 +172,68 @@ describe("MockupFrame fullscreen", () => {
     expect(exitButton()).not.toBeNull();
   });
 });
+
+describe("MockupFrame fullscreen leaves with the file", () => {
+  it("exit only pops history when the marker entry is on top", () => {
+    render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    enter();
+    // Something replaced the marker entry (a router replace, say): popping now
+    // would step off a page the user never pushed.
+    window.history.replaceState({}, "");
+
+    fireEvent.click(exitButton()!);
+
+    expect(layer()).toBeNull();
+    expect(back).not.toHaveBeenCalled();
+  });
+
+  it("switching to another file leaves fullscreen and pops the marker", () => {
+    const { rerender } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    enter();
+    expect(layer()).not.toBeNull();
+
+    rerender(
+      <MockupFrame
+        filePath="pavilio/mockups/other.html"
+        absolutePath="/root/git/prv/projects/projects/pavilio/mockups/other.html"
+      />,
+    );
+
+    expect(layer()).toBeNull();
+    expect(exitButton()).toBeNull();
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-rendering the same file keeps fullscreen", () => {
+    const { rerender } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    enter();
+
+    rerender(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} content="<p/>" />);
+
+    expect(layer()).not.toBeNull();
+    expect(back).not.toHaveBeenCalled();
+  });
+
+  it("unmounting in fullscreen pops the marker entry", () => {
+    const { unmount } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    enter();
+
+    unmount();
+
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("unmounting after Back already popped the marker does not pop again", () => {
+    const { unmount } = render(<MockupFrame filePath={FILE_PATH} absolutePath={ABSOLUTE} />);
+    enter();
+    // Back: the browser restores the entry below the marker, then fires popstate.
+    window.history.replaceState({}, "");
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+    });
+
+    unmount();
+
+    expect(back).not.toHaveBeenCalled();
+  });
+});

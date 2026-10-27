@@ -14,6 +14,7 @@ import {
   FloatingActionProvider,
 } from "./FloatingActionProvider";
 import { ScrollContainerContext } from "./ScrollContainer";
+import { useFullscreenLayerActive } from "./fullscreenLayer";
 import { LAYOUT_ORDER } from "./order";
 import TerminalDrawer from "../../terminal/TerminalDrawer";
 import {
@@ -88,6 +89,10 @@ export function Layout({ children }: LayoutProps) {
   const leftPane = useResizablePane(preferences.leftSidebarWidth, LEFT_BOUNDS);
   const rightPane = useResizablePane(preferences.rightSidebarWidth, RIGHT_BOUNDS);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // `isolate` scopes the sticky breadcrumb below the sidebar toggles, but it
+  // would also cap a fullscreen mockup's z-index inside this container — see
+  // `fullscreenLayer.ts`.
+  const fullscreenLayer = useFullscreenLayerActive();
   const drawer = useTerminalDrawer();
 
   /**
@@ -188,7 +193,10 @@ export function Layout({ children }: LayoutProps) {
         style={{ order: LAYOUT_ORDER.main }}
       >
         <ScrollContainerContext.Provider value={scrollRef as React.RefObject<HTMLElement>}>
-          <div ref={scrollRef} className="overflow-auto h-full isolate">
+          <div
+            ref={scrollRef}
+            className={`overflow-auto h-full${fullscreenLayer ? "" : " isolate"}`}
+          >
             <Breadcrumbs />
             {children}
           </div>
