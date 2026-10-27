@@ -530,13 +530,14 @@ function TerminalCell({
         {/* A square the header's full height, flush with the cell's left edge:
             the negative margin undoes the header's left padding, the tile
             drops its radius and frame, and an inset shadow draws the right
-            divider. 30px tile, 16px glyph, as mockup S. */}
+            divider. 30px tile, 16px glyph and 4px of right margin before the
+            LED, as mockup S. */}
         <ProjectMark
           project={session.project}
           size={30}
           style={{
             fontSize: 16,
-            margin: "0 0 0 -8px",
+            margin: "0 4px 0 -8px",
             borderRadius: 0,
             border: "none",
             boxShadow: `inset -1px 0 0 color-mix(in srgb, ${accentColor} 38%, transparent)`,

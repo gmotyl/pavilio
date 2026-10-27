@@ -712,6 +712,9 @@ describe("TerminalLayoutGrid — the cell header's mark", () => {
     // Flush with the cell's left edge: the margin undoes the header's padding.
     expect(mark.style.marginLeft).toBe("-8px");
     expect(header.style.paddingLeft).toBe("8px");
+    // And 4px of air between the tile and the LED, on top of the row's gap
+    // (mockup S `.cellhd .tile { margin-right: 4px }`).
+    expect(mark.style.marginRight).toBe("4px");
     // Tinted with the project's colour.
     expect(mark.style.background).toContain("color-mix");
     expect(mark.style.background).toContain(rgb(TEST_PROJECT_COLORS.alpha));
