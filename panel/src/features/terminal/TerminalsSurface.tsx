@@ -12,6 +12,7 @@ import {
   reconnectOnActivate,
 } from "./terminalInstances";
 import { writeTerminalFocus } from "./useTerminalSessions";
+import { useIsMobile } from "../shell/useIsMobile";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { useAnyAnswerPaneOpen } from "./answerPaneState";
 import { visibleSessionId } from "./visibleSession";
@@ -189,6 +190,7 @@ export function TerminalsSurface({
   // auto-open, which must not blank the bar under the terminal on screen.
   const visibleId = visibleSessionId(visibleSessions, focusedId);
   const shortcutBarYielded = useAnyAnswerPaneOpen(visibleId ? [visibleId] : []);
+  const isMobile = useIsMobile();
 
   return (
     <div
@@ -243,7 +245,6 @@ export function TerminalsSurface({
           onCreate={(opts) => {
             onCreateTerminal(opts || {});
           }}
-          onOpenDrawer={() => onSetDrawerOpen(!drawerOpen)}
           onReconnect={handleReconnect}
           minimisedIds={minimisedIds}
           onRestore={handleRestore}
@@ -284,8 +285,10 @@ export function TerminalsSurface({
           />
         </div>
 
-        {/* Cross-project drawer (mobile-first, desktop-compatible) */}
-        {drawerOpen && (
+        {/* Cross-project drawer, opened from the desktop spine. Never on a
+            phone: there the global corner ☰ (the left sidebar) is the one
+            menu, so a second session list would only duplicate it. */}
+        {drawerOpen && !isMobile && (
           <TerminalSpineDrawer
             sessions={allSessions}
             focusedId={focusedId}

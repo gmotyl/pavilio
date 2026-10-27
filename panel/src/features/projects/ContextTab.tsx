@@ -299,6 +299,7 @@ export default function ContextTab({ projectName }: Props) {
   return (
     <FileListSidebar
       testId="context-tab"
+      openPath={selectedBasePath ?? selectedPath}
       title="Context"
       icon={<BookOpen size={16} style={{ color: "var(--accent)" }} />}
       sources={sources}

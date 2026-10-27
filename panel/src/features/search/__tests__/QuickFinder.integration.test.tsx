@@ -88,6 +88,39 @@ describe("QuickFinder integration", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("opens as a modal-tier dialog, above a fullscreen mockup", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<QuickFinder />);
+    await user.keyboard("{Meta>}p{/Meta}");
+
+    const dialog = await screen.findByRole("dialog", { name: "Quick finder" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    // The mockup fullscreen layer is z-[90]; modals sit at z-[100].
+    expect(dialog.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["fixed", "inset-0", "z-[100]"]),
+    );
+  });
+
+  it("marks Escape as handled so a fullscreen mockup stays up", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<QuickFinder />);
+    await user.keyboard("{Meta>}p{/Meta}");
+    const input = await screen.findByPlaceholderText(/Search files/);
+    let prevented: boolean | undefined;
+    const spy = (e: KeyboardEvent) => {
+      if (e.key === "Escape") prevented = e.defaultPrevented;
+    };
+    window.addEventListener("keydown", spy);
+
+    try {
+      await user.type(input, "{Escape}");
+    } finally {
+      window.removeEventListener("keydown", spy);
+    }
+
+    expect(prevented).toBe(true);
+  });
+
   it("opens on pavilio:open-quick-finder event", async () => {
     renderWithRouter(<QuickFinder />);
     expect(

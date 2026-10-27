@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
 import { useIsMobile } from "./useIsMobile";
+import { useSidebarState } from "./useSidebarState";
+import { projectHref } from "./projectHref";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
@@ -35,8 +37,10 @@ import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { ProjectMark } from "../projects/ProjectMark";
+import { nameColor, usePanelTheme } from "../projects/nameColor";
 import NewProjectDialog, { type NewProjectKind } from "../projects/NewProjectDialog";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
+import { useProjectColors } from "../terminal/useProjectColors";
 import { SessionIndicator } from "../terminal/SessionIndicator";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
@@ -49,7 +53,10 @@ import {
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
 import { createTerminalSession } from "../terminal/createTerminalSession";
-import { matchProjectFromPath } from "../projects/matchProjectFromPath";
+import {
+  matchProjectFromPath,
+  matchProjectFromViewPath,
+} from "../projects/matchProjectFromPath";
 
 /**
  * `leading` is the slot the corner hamburger occupies — passed to whichever
@@ -203,6 +210,15 @@ export default function LeftSidebar() {
   const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
   const isMobile = useIsMobile();
+  const { colorFor } = useProjectColors();
+  const theme = usePanelTheme();
+  // Mark tile: 22px on a desktop, 24px on a phone where the row is a tap target.
+  const tileSize = isMobile ? 24 : 22;
+  // Where a project row's name starts: row inset (4) + chevron (16) + gap (4)
+  // + activity slot (10) + gap (4) + tile + gap (4). The session list sits so
+  // its rows' content starts there too, net of its 1px guide border and the
+  // session button's 6px padding — so the tile size moves both together.
+  const sessionListIndent = 42 + tileSize - 7;
   const { archive, archivedNames, restore } = useArchivedProjects();
   const [newKind, setNewKind] = useState<NewProjectKind | null>(null);
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
@@ -285,6 +301,28 @@ export default function LeftSidebar() {
       return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
     });
   }, [projects]);
+  // On a phone the global ☰ is the one menu, and it opens on the project the
+  // user is standing in: that project expands so its sessions — the focused one
+  // highlighted — are one tap away. Not persisted: the in-memory expand flips
+  // (and stays flipped after the menu closes), but the stored preference is
+  // never written — only a user's own toggle writes it. It fires on opening
+  // (or on a project change while open), so a user who folds the project back
+  // while the menu stays open keeps it folded. A desktop sidebar does none of this.
+  //
+  // "Standing in" also covers a file opened from the project (`/view/<p>/…`,
+  // e.g. via Quick Finder). That wider reading is kept to this reveal only:
+  // `currentProject` also scopes the focused-session highlight and the archive
+  // redirect, which stay `/project/…`-only so desktop behaves as before.
+  const { expanded: sidebarOpen } = useSidebarState("leftSidebar");
+  const mobileMenuOpen = isMobile && sidebarOpen;
+  const revealProject =
+    currentProject ?? matchProjectFromViewPath(location.pathname);
+  useEffect(() => {
+    if (!mobileMenuOpen || revealProject === null) return;
+    setExpandedState((prev) =>
+      prev[revealProject] ? prev : { ...prev, [revealProject]: true },
+    );
+  }, [mobileMenuOpen, revealProject]);
   const isExpanded = useCallback(
     (name: string) => expanded[name] ?? false,
     [expanded],
@@ -367,6 +405,31 @@ export default function LeftSidebar() {
     .filter((p) => kindOf(p) !== "project")
     .sort(compareResearch);
 
+  // The same reveal one level up: a project listed under a collapsed Research
+  // section is hidden however expanded its own row is, so the menu also opens
+  // that section — in memory only, for as long as the menu stays open. The
+  // reveal is set only over a section that is actually collapsed, and is
+  // decided when the menu opens: `researchCollapsed` is read, not a dep, so
+  // a collapse tap with the menu still open does not re-reveal the section.
+  const revealIsResearch =
+    revealProject !== null &&
+    researchProjects.some((p) => p.name === revealProject);
+  const [researchRevealed, setResearchRevealed] = useState(false);
+  useEffect(() => {
+    setResearchRevealed(mobileMenuOpen && revealIsResearch && researchCollapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealIsResearch]);
+  const researchHidden = researchCollapsed && !researchRevealed;
+  // Any explicit tap ends the reveal and flips what the user sees, in one tap.
+  // The stored preference is written only when it differs from the new state:
+  // folding a revealed section stores nothing, as storage already says
+  // collapsed.
+  const toggleResearch = () => {
+    setResearchRevealed(false);
+    if (researchHidden) setResearchCollapsed(false);
+    else if (!researchCollapsed) setResearchCollapsed(true);
+  };
+
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
     for (const s of sessions) {
@@ -376,45 +439,6 @@ export default function LeftSidebar() {
     }
     return m;
   }, [sessions]);
-
-  /**
-   * Where tapping a project goes — from its NAME or from any of its session
-   * rows. One function for both, because the reason below is about what is
-   * worth arriving at on a phone and says nothing about which row the thumb
-   * landed on; two copies of it would be one edit away from disagreeing, and
-   * did disagree until the session rows were brought in with it.
-   *
-   * On a desktop it is the bare project route, which `ProjectRedirect` resolves
-   * through the Last-open-view bookmark — the user is returned to whichever view
-   * they left the project in. A phone has one view worth arriving at, and it is
-   * the terminal: the sections are reading surfaces opened deliberately, while
-   * the reason to pick the phone up at all is an agent waiting in a session. So
-   * the tap is sent straight there, over the top of whatever the bookmark holds.
-   *
-   * This overrides the DESTINATION and nothing else. The bookmark goes on being
-   * written by the page the user lands on (`useLastPath`, mounted in
-   * `ProjectView`), so a phone visit still records where they were, and the bare
-   * route still restores it on their desktop. Suppressing the write instead would
-   * be the easy mistake here: it looks the same from the phone and quietly loses
-   * the desktop's place.
-   *
-   * Derived from the live `useIsMobile()` rather than a `matchMedia` read taken
-   * once at mount, so a rotation moves the destination with it — and never
-   * stored, because being on a phone is a fact about the viewport, not a
-   * preference the user expressed.
-   *
-   * The name is percent-encoded, matching `QuickTerminalModal`, which builds
-   * this same `/project/<name>/iterm` target. A project may be named with a
-   * space or a `#`, and unencoded those do not survive the trip: a `#` starts
-   * the fragment, so the route would see a truncated name. Encoding is safe on
-   * the far side — `matchProjectFromPath` decodes the segment itself, and the
-   * router hands `useParams` the decoded form, which is what every preference
-   * scope downstream (the bookmark, the expand state) is keyed on.
-   */
-  const projectHref = (name: string) =>
-    isMobile
-      ? `/project/${encodeURIComponent(name)}/iterm`
-      : `/project/${encodeURIComponent(name)}`;
 
   const renderProjectRow = (project: SidebarProject) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
@@ -447,6 +471,10 @@ export default function LeftSidebar() {
       matchProjectFromPath(location.pathname)?.name === project.name;
 
     const fav = isFavorite(project.name);
+    // An unresolved (blank) name is not a preference scope: no tile and no
+    // colour lookup for it.
+    const hasName =
+      typeof project.name === "string" && project.name.trim() !== "";
 
     return (
       <li key={project.name}>
@@ -476,27 +504,26 @@ export default function LeftSidebar() {
               <ChevronRight size={11} />
             )}
           </button>
-          {!expandedNow && (
-            <span className="flex items-center">
-              {/* The aggregate group shows every status this project has at
-                  once — busy, attention, and the speaker when one of its
-                  sessions is talking. */}
-              <ProjectActivityLed sessionIds={projectSessionIds} />
-            </span>
+          {/* The slot is always there so the mark tiles align across rows;
+              expanded, it stays empty because the session rows below carry
+              each state themselves. */}
+          <ProjectActivityLed
+            sessionIds={expandedNow ? [] : projectSessionIds}
+          />
+          {hasName && (
+            <ProjectMark project={project.name} size={tileSize} kind={kind} />
           )}
-          {/* An unresolved (blank) name is not a preference scope: no tile for it. */}
-          {typeof project.name === "string" && project.name.trim() !== "" && (
-            <ProjectMark project={project.name} size={18} kind={kind} />
-          )}
+          {/* The name wears the project colour on every row; the current one
+              is told apart by the active background and the weight alone. */}
           <NavLink
-            to={projectHref(project.name)}
+            to={projectHref(project.name, isMobile)}
             className="flex-1 truncate text-[13px] py-0.5"
-            style={({ isActive }) => ({
-              color:
-                isCurrent || isActive
-                  ? "var(--text-primary)"
-                  : "var(--text-secondary)",
-            })}
+            style={{
+              color: hasName
+                ? nameColor(colorFor(project.name), theme)
+                : "var(--text-secondary)",
+              fontWeight: isCurrent ? 600 : undefined,
+            }}
           >
             {project.name}
           </NavLink>
@@ -568,8 +595,11 @@ export default function LeftSidebar() {
         </div>
         {expandedNow && projectSessions.length > 0 && (
           <ul
-            className="ml-3 mt-0.5 pl-3 space-y-0.5 border-l"
-            style={{ borderColor: "var(--border-subtle)" }}
+            className="mt-0.5 space-y-0.5 border-l"
+            style={{
+              marginLeft: sessionListIndent,
+              borderColor: "var(--border-subtle)",
+            }}
           >
             {projectSessions.map((s) => {
               // The highlight tracks the project, not the route: a focused
@@ -596,7 +626,7 @@ export default function LeftSidebar() {
                       // tab on a phone. Tapping a SESSION and landing on notes
                       // was the sharpest form of the problem the phone rule
                       // exists to solve.
-                      navigate(projectHref(s.project));
+                      navigate(projectHref(s.project, isMobile));
                     }}
                     className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
                     style={{
@@ -679,12 +709,12 @@ export default function LeftSidebar() {
           testId="sidebar-section-research"
           count={researchProjects.length}
           collapse={{
-            collapsed: researchCollapsed,
-            onToggle: () => setResearchCollapsed((v) => !v),
+            collapsed: researchHidden,
+            onToggle: toggleResearch,
           }}
           onNew={() => setNewKind("research")}
         />
-        {!researchCollapsed && (
+        {!researchHidden && (
           <ul className="space-y-0.5">
             {researchProjects.map(renderProjectRow)}
           </ul>

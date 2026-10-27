@@ -440,6 +440,7 @@ export default function ProjectView() {
         >
         <FileListSidebar
           testId="section-files"
+          openPath={selectedFile}
           title={sectionTitle(section)}
           fillHeight={fillsHeight}
           controls={sectionControls.controlsBar}

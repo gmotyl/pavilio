@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import type { ReactElement } from "react";
 
 vi.mock("../../shell/vscode", () => ({
   openInVSCode: vi.fn(),
@@ -13,6 +15,9 @@ vi.mock("../../realtime/useWebSocket", () => ({
 
 import MockupFrame from "../MockupFrame";
 import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
+
+/** MockupFrame reads its fullscreen state from the router location. */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 const PNG_PATH = "pavilio/mockups/2026-10-07-hero.png";
 const PNG_ABSOLUTE = "/root/git/prv/projects/projects/pavilio/mockups/2026-10-07-hero.png";

@@ -38,10 +38,6 @@ vi.mock("../useTerminalActivityChannel", async (importOriginal) => ({
   }),
 }));
 
-vi.mock("../../favicon/useAggregateActivity", () => ({
-  useAggregateActivity: () => "idle",
-}));
-
 import { TerminalMobileRail } from "../TerminalMobileRail";
 import type { SessionMeta } from "../useTerminalSessions";
 import {
@@ -73,7 +69,6 @@ function renderRail(
       currentProject={sessions[0]?.project ?? "ch"}
       onFocus={vi.fn()}
       onCreate={vi.fn()}
-      onOpenDrawer={vi.fn()}
     />,
   );
 }
@@ -180,7 +175,6 @@ describe("TerminalMobileRail — minimised aggregate", () => {
         currentProject="alpha"
         onFocus={vi.fn()}
         onCreate={vi.fn()}
-        onOpenDrawer={vi.fn()}
         onReconnect={vi.fn()}
         minimisedIds={minimised}
         onRestore={(id) => {
@@ -216,14 +210,32 @@ describe("TerminalMobileRail — minimised aggregate", () => {
     expect(agg).toHaveTextContent("▁ 2");
     expect(agg).toHaveAccessibleName(/2 minimised terminals/i);
 
-    // Mockup order: chip and dots, "+", then the aggregate, Reconnect, menu.
+    // Mockup order: chip and dots, "+", then the aggregate and Reconnect.
     expect(railOrder()).toEqual([
       "terminal-mobile-rail-session-s1",
       "terminal-mobile-rail-new",
       "terminal-mobile-rail-minimised",
       "terminal-mobile-rail-reconnect",
-      "terminal-mobile-rail-drawer",
     ]);
+  });
+
+  // Mockup S: the rail without its ☰ — the global corner ☰ is the one menu.
+  it("mobile rail has no menu button", () => {
+    render(
+      <StatefulRail sessions={three()} initial={["s3"]} onRestore={vi.fn()} />,
+    );
+
+    // Pills and dots, the minimised aggregate and the new-terminal button stay.
+    expect(screen.getByTestId("terminal-mobile-rail-session-s1")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-mobile-rail-session-s2")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-mobile-rail-minimised")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-mobile-rail-new")).toBeInTheDocument();
+
+    // No menu button of any kind.
+    const rail = screen.getByTestId("terminal-mobile-rail");
+    expect(screen.queryByTestId("terminal-mobile-rail-drawer")).not.toBeInTheDocument();
+    expect(within(rail).queryByTitle("All terminals")).not.toBeInTheDocument();
+    expect(rail.querySelector("svg.lucide-menu")).toBeNull();
   });
 
   it("no aggregate when nothing is minimised", () => {

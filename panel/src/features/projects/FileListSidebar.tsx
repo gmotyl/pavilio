@@ -39,6 +39,12 @@ const PANE_BOUNDS: PaneBounds = { min: 200, max: 560, step: 16 };
  *  boxes stay identical — the no-reflow guarantee depends on it. */
 const TOGGLE_ICON_SIZE = 14;
 
+/** A path's directories (with the trailing slash) and its file name. */
+const splitPath = (path: string) => {
+  const cut = path.lastIndexOf("/") + 1;
+  return { path, dir: path.slice(0, cut), name: path.slice(cut) };
+};
+
 export interface FileListSource {
   id: string;
   label: string;
@@ -79,6 +85,11 @@ interface Props {
    * `useTabScrollMemory` restores into on the text file sections.
    */
   fillHeight?: boolean;
+  /**
+   * The open file's path, shown beside the toggle in the collapsed mobile row.
+   * Omitted or null → the row holds only the toggle.
+   */
+  openPath?: string | null;
 }
 
 function SourceGroup({
@@ -135,8 +146,9 @@ export default function FileListSidebar({
   aboveList,
   controls,
   fillHeight = false,
+  openPath,
 }: Props) {
-  const { collapsed, peeking, toggle, startPeek, endPeek } =
+  const { collapsed, peeking, toggle, startPeek, endPeek, isMobile } =
     useFileListSidebar();
   // Independent of `collapsed`: the width is what the list comes BACK to, so
   // collapsing must not touch it.
@@ -268,6 +280,56 @@ export default function FileListSidebar({
   // states, so opening a peek never reflows the detail pane. The peek overlay is
   // absolutely positioned, floating over the detail without shifting it.
   const railMode = collapsed || peeking;
+
+  // Below `md` a side rail would indent the document for a single button, so
+  // the toggle and the open file's path sit in a thin row above it instead and
+  // the document runs full width. No peek on mobile, so no overlay here.
+  if (railMode && isMobile) {
+    const openPathParts = openPath ? splitPath(openPath) : null;
+    return (
+      <div className={`flex flex-col gap-2${fillRow}`}>
+        <div
+          data-testid="file-list-sidebar-row"
+          className="flex items-center gap-1 h-8 min-w-0"
+        >
+          {toggleButton}
+          {openPathParts && (
+            // Plain `truncate` cuts the end, which is the file name on a long
+            // path. The directories shrink and take the ellipsis instead; the
+            // file name does not shrink and only truncates once it alone is
+            // wider than the row.
+            <span
+              data-testid="file-list-sidebar-path"
+              className="flex min-w-0 text-xs"
+              style={{ color: "var(--text-muted)" }}
+              title={openPathParts.path}
+            >
+              {openPathParts.dir && (
+                <span
+                  data-testid="file-list-sidebar-path-dir"
+                  className="truncate min-w-0"
+                >
+                  {openPathParts.dir}
+                </span>
+              )}
+              <span
+                data-testid="file-list-sidebar-path-name"
+                className="shrink-0 max-w-full truncate"
+              >
+                {openPathParts.name}
+              </span>
+            </span>
+          )}
+        </div>
+        <section
+          data-testid="file-list-sidebar-detail"
+          className={`min-w-0${fillDetail}`}
+        >
+          {wrappedDetail}
+        </section>
+      </div>
+    );
+  }
 
   if (railMode) {
     // Bubble-phase (not capture): the file row's own onClick — selection /

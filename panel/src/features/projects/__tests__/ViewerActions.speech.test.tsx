@@ -405,10 +405,12 @@ describe("markdown surfaces", () => {
     // Mockup frame: never.
     const mockup = render(
       <Host>
-        <MockupFrame
-          filePath="pavilio/mockups/boot.html"
-          absolutePath={`${PROJECTS}/pavilio/mockups/boot.html`}
-        />
+        <MemoryRouter>
+          <MockupFrame
+            filePath="pavilio/mockups/boot.html"
+            absolutePath={`${PROJECTS}/pavilio/mockups/boot.html`}
+          />
+        </MemoryRouter>
       </Host>,
     );
     await waitFor(() => expect(screen.getByTestId("mockup-viewer-copy-path")).not.toBeDisabled());

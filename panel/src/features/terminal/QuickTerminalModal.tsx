@@ -256,7 +256,8 @@ export default function QuickTerminalModal() {
       aria-modal="true"
       aria-label="Quick terminal"
       data-testid="quick-terminal-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      // Modal tier (z-[100]): Cmd+O also opens over a fullscreen mockup (z-[90]).
+      className="fixed inset-0 z-[100] flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)" }}
       onClick={() => setOpen(false)}
     >

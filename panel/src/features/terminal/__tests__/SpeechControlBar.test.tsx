@@ -27,7 +27,7 @@ import { emptyUtteranceQueue, type UtteranceQueue } from "../../speech/utterance
 import { READY_PULSE_MS } from "../../speech/useReadyPulseWindow";
 import type { Utterance } from "../../speech/types";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../../speech/voices";
-import { CellSpeakButton } from "../CellSpeakButton";
+import { speechPulse } from "../CellSpeakButton";
 import { refreshSessions } from "../sessionStore";
 import { SpeechControlBar } from "../SpeechControlBar";
 import { StubResizeObserver } from "../../../test-utils";
@@ -886,17 +886,15 @@ describe("SpeechControlBar", () => {
   /**
    * The pulse, repeated — and capped.
    *
-   * The header speak control pulses on `data-pulse="1"` — set for `ready`, the
-   * one state that is asking for something. An open bar covers the top of the
-   * cell, so a user watching the transport would have to look back up at the
-   * header to learn that anything is waiting. The bar's play button carries the
-   * same attribute, from the same derivation: one fact in two places, and no
-   * second rule to keep in sync.
+   * The bar's play button pulses on `data-pulse="1"` — set for `ready`, the
+   * one state that is asking for something, by `speechPulse`. The header speak
+   * control used to carry the same answer; it now exists only while the cell
+   * speaks (and always pulses then), so the bar is the one place a ready answer
+   * is announced, and the derivation is asserted against the function itself.
    *
-   * The bar's copy stands still after ten seconds. It is a large control lying
+   * The bar's pulse stands still after ten seconds. It is a large control lying
    * over the terminal, so a pulse there that never stops reads as a nag over
-   * the work; the header control is the small one that keeps saying something
-   * is waiting. So the agreement below is asserted INSIDE the window, and the
+   * the work. So the derivation below is asserted INSIDE the window, and the
    * cap is asserted past it.
    */
   describe("the pulse", () => {
@@ -921,17 +919,6 @@ describe("SpeechControlBar", () => {
     const pulseOf = (testId: string): string | null =>
       screen.getByTestId(testId).getAttribute("data-pulse");
 
-    /** The header, rendered beside the bar so the two can be compared. */
-    const header = (state: CellSpeechState) => (
-      <CellSpeakButton
-        sessionId="cell-a"
-        state={state}
-        onSpeak={() => {}}
-        onPause={() => {}}
-        onResume={() => {}}
-      />
-    );
-
     // The cap is a timer, so every case here owns the clock.
     beforeEach(() => {
       vi.useFakeTimers();
@@ -947,22 +934,17 @@ describe("SpeechControlBar", () => {
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("1");
     });
 
-    it("the play button stops pulsing after ten seconds while the header keeps going", () => {
-      render(
-        <>
-          {header("ready")}
-          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("ready")} />
-        </>,
-      );
+    it("the play button stops pulsing after ten seconds", () => {
+      render(<SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor("ready")} />);
 
       act(() => {
         vi.advanceTimersByTime(READY_PULSE_MS);
       });
 
+      // Nothing was answered by the ten seconds passing — the derivation still
+      // says `ready` is asking — but the bar's copy has gone quiet.
+      expect(speechPulse("ready")).toBe("1");
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
-      // Nothing was answered by the ten seconds passing, so the header — the
-      // small control that is allowed to keep asking — is still pulsing.
-      expect(pulseOf("terminal-cell-speak-cell-a")).toBe("1");
     });
 
     it("a newer utterance restarts the play button's pulse", () => {
@@ -1005,34 +987,27 @@ describe("SpeechControlBar", () => {
       expect(pulseOf("speech-bar-playpause-cell-a")).toBe("0");
     });
 
-    it("the play button and the header control agree for the first ten seconds", () => {
-      // The criterion is not "both pulse on ready" — it is that, inside the
-      // window, there is only one derivation. Checking every state is how a
-      // second rule, computed in the bar, would be caught the first time the
-      // two drifted. Past the window they part on purpose, and the case above
-      // pins that.
+    it("the play button follows the shared derivation for the first ten seconds", () => {
+      // The criterion is not "it pulses on ready" — it is that, inside the
+      // window, the bar computes no rule of its own. Checking every state is
+      // how a second rule, computed in the bar, would be caught the first time
+      // the two drifted. Past the window they part on purpose, and the case
+      // above pins that.
       for (const state of ALL_STATES) {
         const view = render(
-          <>
-            {header(state)}
-            <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(state)} />
-          </>,
+          <SpeechControlBar sessionId="cell-a" answerOpen={false} onToggleAnswer={noop} send={noSend} speech={barFor(state)} />,
         );
 
-        // `empty` used to be the one state with no play button to agree with,
-        // because the row carried the launchers instead. The button is
-        // rendered in every state now — disabled, not absent — so the loop has
-        // no case to skip: `empty` is asked the same question as the rest, and
-        // both sides answer `0` from the one derivation.
-        const headerPulse = pulseOf("terminal-cell-speak-cell-a");
-        expect(headerPulse).toMatch(/^[01]$/);
-        expect(pulseOf("speech-bar-playpause-cell-a")).toBe(headerPulse);
+        // The button is rendered in every state — disabled, not absent — so
+        // the loop has no case to skip: `empty` is asked the same question as
+        // the rest.
+        expect(pulseOf("speech-bar-playpause-cell-a")).toBe(speechPulse(state));
 
-        // Still one derivation a millisecond before the cap.
+        // Still the derivation a millisecond before the cap.
         act(() => {
           vi.advanceTimersByTime(READY_PULSE_MS - 1);
         });
-        expect(pulseOf("speech-bar-playpause-cell-a")).toBe(headerPulse);
+        expect(pulseOf("speech-bar-playpause-cell-a")).toBe(speechPulse(state));
 
         view.unmount();
       }

@@ -3,8 +3,12 @@ import { useFavorites } from "./useFavorites";
 import { useProjects, Project } from "./useProjects";
 import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
 import { useFileDropTarget } from "../explorer/useFileDrag";
+import { projectHref } from "../shell/projectHref";
+import { useIsMobile } from "../shell/useIsMobile";
+import { ProjectMark } from "./ProjectMark";
+import { nameColor, usePanelTheme, type PanelTheme } from "./nameColor";
+import { useProjectColors } from "../terminal/useProjectColors";
 import {
-  FolderOpen,
   FileText,
   TrendingUp,
   Map as MapIcon,
@@ -42,14 +46,18 @@ function ProjectCard({
   project,
   isFav,
   onToggleFav,
+  theme,
 }: {
   project: Project;
   isFav: boolean;
   onToggleFav: () => void;
+  theme: PanelTheme;
 }) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const formattedDate = formatDate(project.latestProgressDate);
   const { hover, dropHandlers } = useFileDropTarget(project.name);
+  const { colorFor } = useProjectColors();
 
   return (
     <div
@@ -60,7 +68,9 @@ function ProjectCard({
         background: hover ? "var(--accent-dim, var(--bg-elevated))" : "var(--bg-surface)",
         border: `1px solid ${hover ? "var(--accent)" : isFav ? "var(--accent-dim)" : "var(--border-subtle)"}`,
       }}
-      onClick={() => navigate(`/project/${project.name}`)}
+      // Same destination as the sidebar row: terminals on a phone, the
+      // bookmark-restoring bare route on a desktop.
+      onClick={() => navigate(projectHref(project.name, isMobile))}
       onMouseEnter={(e) => {
         if (hover) return;
         e.currentTarget.style.borderColor = "var(--border-strong)";
@@ -95,9 +105,14 @@ function ProjectCard({
         />
       </button>
 
-      <div className="flex items-center gap-2 mb-3">
-        <FolderOpen size={16} style={{ color: "var(--accent)" }} />
-        <h2 className="text-[15px] font-semibold">{project.name}</h2>
+      <div className="flex items-center gap-2.5 mb-3">
+        <ProjectMark project={project.name} size={28} kind={project.kind} />
+        <h2
+          className="text-[15px] font-semibold"
+          style={{ color: nameColor(colorFor(project.name), theme) }}
+        >
+          {project.name}
+        </h2>
       </div>
 
       <div className="flex flex-wrap gap-1 mb-3">
@@ -124,6 +139,9 @@ function ProjectCard({
 export default function Dashboard() {
   const projects = useProjects();
   const { toggle, isFavorite, sortWithFavorites } = useFavorites();
+  // Read once here and passed down: the hook backs onto a MutationObserver,
+  // and one per card would mean one observer per project.
+  const theme = usePanelTheme();
 
   const sorted = sortWithFavorites(projects);
 
@@ -171,6 +189,7 @@ export default function Dashboard() {
               project={project}
               isFav={isFavorite(project.name)}
               onToggleFav={() => toggle(project.name)}
+              theme={theme}
             />
           ))}
         </div>

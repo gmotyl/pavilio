@@ -493,12 +493,28 @@ async function pressTransport(code: string): Promise<void> {
   });
 }
 
+/**
+ * A cell's speech state, read off its bar's play button. The header speak
+ * control exists only while a cell speaks, so it is no longer where every
+ * state is legible; the bar's transport is on every cell from mount and
+ * reports the same `stateFor` answer as `data-speech`.
+ */
 const speakState = (sessionId: string): string | null =>
-  screen.getByTestId(`terminal-cell-speak-${sessionId}`).getAttribute("data-speech");
+  screen.getByTestId(`speech-bar-playpause-${sessionId}`).getAttribute("data-speech");
 
-/** The control's other channel: what a click would do, not where the audio is. */
+/** The transport's other channel: what a click would do, not where the audio is. */
 const speakIcon = (sessionId: string): string | null =>
-  screen.getByTestId(`terminal-cell-speak-${sessionId}`).getAttribute("data-icon");
+  screen.getByTestId(`speech-bar-playpause-${sessionId}`).getAttribute("data-icon");
+
+/**
+ * One press of a cell's play/pause — the bar's transport, the control that
+ * starts, holds and resumes a run in every state. The bar is brought out first
+ * if a test hid it.
+ */
+async function press(sessionId: string): Promise<void> {
+  await openBar(sessionId);
+  await click(`speech-bar-playpause-${sessionId}`);
+}
 
 /**
  * Whether a cell is armed, read where arming is now SHOWN: the switch inside
@@ -732,10 +748,12 @@ describe("autoplay — the armed cell", () => {
     expect(synth.requests).toEqual(["Nobody armed this cell."]);
     expect(played).toEqual([]);
     expect(speakState("cell-b")).toBe("ready");
-    // The pulse is the whole notification: same attribute the activity LED uses.
+    // The pulse is the whole notification: same attribute the activity LED uses,
+    // on the bar's play button — the header control stays away until it speaks.
     expect(
-      screen.getByTestId("terminal-cell-speak-cell-b").getAttribute("data-pulse"),
+      screen.getByTestId("speech-bar-playpause-cell-b").getAttribute("data-pulse"),
     ).toBe("1");
+    expect(screen.queryByTestId("terminal-cell-speak-cell-b")).toBeNull();
   });
 
   it("a response with nothing to say is not announced anywhere", async () => {
@@ -755,9 +773,10 @@ describe("autoplay — the armed cell", () => {
     expect(synth.requests).toEqual([]);
     for (const id of ["cell-a", "cell-b"]) {
       expect(speakState(id)).toBe("empty");
-      expect(screen.getByTestId(`terminal-cell-speak-${id}`).getAttribute("data-pulse")).not.toBe(
-        "1",
-      );
+      expect(
+        screen.getByTestId(`speech-bar-playpause-${id}`).getAttribute("data-pulse"),
+      ).not.toBe("1");
+      expect(screen.queryByTestId(`terminal-cell-speak-${id}`)).toBeNull();
     }
   });
 
@@ -793,7 +812,7 @@ describe("autoplay — taking over and stopping", () => {
     await emitUtterance("cell-b", "b1", "B is waiting its turn.");
     expect(speakState("cell-a")).toBe("speaking");
 
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
 
     await waitFor(() => expect(speakState("cell-b")).toBe("speaking"));
     expect(synth.requests).toContain("B is waiting its turn.");
@@ -809,7 +828,7 @@ describe("autoplay — taking over and stopping", () => {
     // The amendment: there is no explicit stop control any more. The same
     // control, clicked while speaking, PAUSES — the run is not torn down, and
     // it is certainly not heard: it never reached its last unit.
-    await click("terminal-cell-speak-cell-a");
+    await press("cell-a");
 
     expect(speakState("cell-a")).toBe("paused");
     expect(speakState("cell-a")).not.toBe("heard");
@@ -1054,16 +1073,19 @@ describe("the row is reserved from mount", () => {
     // state AND the pulse. A pulse that leaked across the grid is the failure
     // a single-cell reading cannot see.
     //
-    // Read off the HEADER control, not the bar. The bar's play button is on
-    // every cell now — disabled until that cell's own first answer — so the
-    // header is where a silent cell's state and pulse are legible as values
-    // rather than as an absence. The bar's side of it is asserted below.
-    const quiet = screen.getByTestId("terminal-cell-speak-cell-b");
+    // Read off the bar's play button, which is on every cell from mount —
+    // disabled until that cell's own first answer — so a silent cell's state
+    // and pulse are legible as values rather than as an absence. (The header
+    // speak control is absent on all three: none of them is speaking.)
+    const quiet = screen.getByTestId("speech-bar-playpause-cell-b");
     expect(quiet).toHaveAttribute("data-speech", "empty");
     expect(quiet).toHaveAttribute("data-pulse", "0");
-    const alsoQuiet = screen.getByTestId("terminal-cell-speak-cell-c");
+    const alsoQuiet = screen.getByTestId("speech-bar-playpause-cell-c");
     expect(alsoQuiet).toHaveAttribute("data-speech", "empty");
     expect(alsoQuiet).toHaveAttribute("data-pulse", "0");
+    for (const id of ["cell-a", "cell-b", "cell-c"]) {
+      expect(screen.queryByTestId(`terminal-cell-speak-${id}`)).toBeNull();
+    }
     // The row's contents followed the state, per cell: the cell that spoke
     // dropped its launchers, and the two that did not still carry theirs.
     expect(screen.queryByTestId("speech-bar-launchers-cell-a")).toBeNull();
@@ -1105,7 +1127,10 @@ describe("the row is reserved from mount", () => {
     await emitUtterance("cell-a", "a2", "And here is the next answer.");
 
     expect(barVisible("cell-a")).toBe(false);
-    // The cell did receive it — hiding the bar is not muting the cell.
+    // The cell did receive it — hiding the bar is not muting the cell. Read
+    // off the bar brought back out: a ready cell has no header speak control.
+    expect(screen.queryByTestId("terminal-cell-speak-cell-a")).toBeNull();
+    await openBar("cell-a");
     expect(speakState("cell-a")).toBe("ready");
   });
 
@@ -1243,42 +1268,37 @@ describe("the header control and the bar", () => {
     expect(other).toHaveAccessibleName(/speech off/i);
   });
 
-  it("the header speak control is unchanged", async () => {
+  it("the header speak control appears only while the cell speaks", async () => {
     await renderProjectSurface();
     await emitUtterance("cell-a", "a1", "The speak control keeps its job.");
 
-    const before = screen.getByTestId("terminal-cell-speak-cell-a");
-    const snapshot = {
-      state: before.getAttribute("data-speech"),
-      icon: before.getAttribute("data-icon"),
-      pulse: before.getAttribute("data-pulse"),
-      label: before.getAttribute("aria-label"),
-    };
-    expect(snapshot).toEqual({
-      state: "ready",
-      icon: "speaker",
-      pulse: "1",
-      label: "Speak the last response",
-    });
+    // Ready is the bar's to announce: the header has no speak control yet.
+    expect(speakState("cell-a")).toBe("ready");
+    expect(screen.queryByTestId("terminal-cell-speak-cell-a")).toBeNull();
 
-    // Both of its neighbours' new jobs leave it exactly as it was: it is the
-    // "new text arrived" signal across a grid, and neither task touches it.
+    // Neither of its neighbours' jobs brings it out: hiding cell a's bar and
+    // arming cell b leave the header as it was.
     await click(testIdFor("speech-controls", "cell-a"));
     await arm("cell-b");
-    const after = screen.getByTestId("terminal-cell-speak-cell-a");
-    expect({
-      state: after.getAttribute("data-speech"),
-      icon: after.getAttribute("data-icon"),
-      pulse: after.getAttribute("data-pulse"),
-      label: after.getAttribute("aria-label"),
-    }).toEqual(snapshot);
+    expect(screen.queryByTestId("terminal-cell-speak-cell-a")).toBeNull();
 
-    // And its click still speaks — with cell a's bar closed and cell b armed,
-    // neither of which has any say over what this control does.
-    await click("terminal-cell-speak-cell-a");
+    // Started from the transport, the cell speaks — and the header grows the
+    // pulsing speaker whose click holds the run.
+    await press("cell-a");
     expect(speakState("cell-a")).toBe("speaking");
     expect(speakIcon("cell-a")).toBe("pause");
     expect(played).toEqual(["blob:The speak control keeps its job."]);
+    const speaker = screen.getByTestId("terminal-cell-speak-cell-a");
+    expect({
+      state: speaker.getAttribute("data-speech"),
+      pulse: speaker.getAttribute("data-pulse"),
+      label: speaker.getAttribute("aria-label"),
+    }).toEqual({ state: "speaking", pulse: "1", label: "Pause speaking" });
+
+    await click("terminal-cell-speak-cell-a");
+    expect(speakState("cell-a")).toBe("paused");
+    expect(screen.queryByTestId("terminal-cell-speak-cell-a")).toBeNull();
+
     // Speaking a cell is not arming it. Read from the bars, which is where
     // arming is legible — so cell a's is brought back out to be asked.
     await openBar("cell-a");
@@ -1420,7 +1440,7 @@ describe("warming the first unit on arrival", () => {
     expect(synth.requests).toEqual([prepared.units[0].text]);
     expect(played).toEqual([]);
 
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
 
     // The click played unit 0 out of the cache: not one additional request for
     // it, which is the whole promise the lit control makes. A warm that used a
@@ -1437,9 +1457,8 @@ describe("warming the first unit on arrival", () => {
  * from the frame that arrives to the unit that ends.
  *
  * jsdom applies no stylesheet, so nothing here proves a colour. What it proves
- * is the STATE the colour is keyed off; that `preparing`/`stalled` are red and
- * `heard` the dimmed yellow is asserted on the rule itself in
- * `features/terminal/__tests__/CellSpeakButton.test.tsx`.
+ * is the STATE the colour is keyed off, read off the bar's transport — the
+ * header speak control exists only while a cell speaks.
  */
 describe("the control's colour and icon, end to end", () => {
   it("click → pause → resume speaks the same unit once", async () => {
@@ -1450,18 +1469,18 @@ describe("the control's colour and icon, end to end", () => {
     await emitUtterance("cell-b", "b1", markdown);
     expect(speakState("cell-b")).toBe("ready");
 
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
     expect(speakState("cell-b")).toBe("speaking");
     expect(speakIcon("cell-b")).toBe("pause");
     expect(played).toEqual([`blob:${unit0}`]);
 
     // The pause holds the run rather than ending it: the cell is the user's to
     // resume, so it is neither `ready` nor `heard`.
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
     expect(speakState("cell-b")).toBe("paused");
-    expect(speakIcon("cell-b")).toBe("play");
+    expect(speakIcon("cell-b")).toBe("resume");
 
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
     expect(speakState("cell-b")).toBe("speaking");
     expect(speakIcon("cell-b")).toBe("pause");
 
@@ -1628,7 +1647,7 @@ describe("autoplay — the queue across cells", () => {
     await emitUtterance("cell-c", "c1", "From C.");
     expect(played).toEqual(["blob:A first."]);
 
-    await click("terminal-cell-speak-cell-c");
+    await press("cell-c");
     await waitFor(() => expect(lastPlayed()).toBe("blob:From C."));
     // A was cut short, so it is unheard — and the queue did NOT jump in.
     expect(speakState("cell-a")).toBe("ready");
@@ -1657,7 +1676,7 @@ describe("autoplay — the queue across cells", () => {
     await emitUtterance("cell-b", "b1", "From B.");
 
     // The user plays B themselves, all the way through.
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
     await waitFor(() => expect(lastPlayed()).toBe("blob:From B."));
     await endCurrentUnit();
     await waitFor(() => expect(speakState("cell-b")).toBe("heard"));
@@ -1672,7 +1691,7 @@ describe("autoplay — the queue across cells", () => {
     await arm("cell-b");
 
     await emitUtterance("cell-a", "a1", "A first. A second.");
-    await click("terminal-cell-speak-cell-a");
+    await press("cell-a");
     expect(speakState("cell-a")).toBe("paused");
 
     await emitUtterance("cell-b", "b1", "From B.");
@@ -1682,7 +1701,7 @@ describe("autoplay — the queue across cells", () => {
     expect(speakState("cell-b")).toBe("ready");
 
     // Resumed and played out: then B.
-    await click("terminal-cell-speak-cell-a");
+    await press("cell-a");
     expect(speakState("cell-a")).toBe("speaking");
     await endCurrentUnit();
     await endCurrentUnit();
@@ -1810,7 +1829,7 @@ describe("the speaking alert, end to end", () => {
       { ...SESSIONS[1], project: "beta" },
     ]);
     await emitUtterance("cell-b", "b1", "B first. B second.");
-    await click("terminal-cell-speak-cell-b");
+    await press("cell-b");
     expect(speakingAlert()?.title).toBe("Speaking — beta · claude-b");
 
     await act(async () => {

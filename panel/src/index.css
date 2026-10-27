@@ -496,22 +496,27 @@ input[type="checkbox"] {
   height: 8px;
 }
 
+/* The project row's activity slot (`ProjectActivityLed`): one fixed-width box
+   before the mark tile, holding at most one LED or the speaker, or nothing.
+   Its width never depends on its content, so mark tiles align across rows. */
+.project-activity-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  flex-shrink: 0;
+}
+
 /* The sidebar speaker (`SessionSpeaker`), shown while a session's audio is
-   playing. Two rows draw it, and they place it differently:
-     - the expanded session row (`SessionIndicator`) has one slot, so the
-       speaker REPLACES that session's LED there;
-     - the collapsed project row (`ProjectActivityLed`) shows every state at
-       once, so the speaker sits BESIDE the busy and attention dots. It only
-       takes the idle dot's place, and only when idle is all there would be.
+   playing. Both rows that draw it have one slot, and in both the speaker
+   REPLACES the LED while it plays:
+     - the expanded session row (`SessionIndicator`), for that session;
+     - the project row (`ProjectActivityLed`), for any of its sessions — even
+       over an attention dot belonging to a different session. That trade was
+       accepted on purpose: it lasts only as long as the audio, and the
+       attention dot returns when speech stops.
 
-   WHY beside and not instead: speaking is a status like busy or attention, not
-   a summary of the project. Collapsing the group down to the speaker would hide
-   an attention signal belonging to a DIFFERENT session for as long as the audio
-   plays — the row would trade a request for your attention for the one thing
-   that needs none. Idle is the single exception: it says nothing the speaker
-   does not already imply.
-
-   Its box is EXACTLY the LED's, because in the single-slot row the two swap in
+   Its box is EXACTLY the LED's, because in a single-slot row the two swap in
    and out of the same place and the row's text must not move when they do. So
    the glyph inside is drawn bigger and centred on that box, overflowing it
    symmetrically: a speaker rendered at 6px is a smudge, and the box, not the
@@ -545,7 +550,7 @@ input[type="checkbox"] {
 /* Cell-header speak control and speech-controls disclosure. Both borrow the
    activity LED's vocabulary above rather than inventing a second one: the same
    green (#9ece6a), the same `terminal-led-pulse-attention` keyframes, and the
-   same `data-pulse` switch that stops the animation.
+   same `data-pulse` switch.
 
    Only the speak control uses that vocabulary now. The disclosure beside it is
    muted, full stop: it reports nothing, so it has nothing to be coloured by. */
@@ -558,93 +563,38 @@ input[type="checkbox"] {
     box-shadow 200ms ease;
 }
 
-/* Empty is the inert state: muted and dimmed, never green. */
-.terminal-speak[data-speech="empty"] {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* COLOUR SAYS WHERE THE AUDIO IS, and nothing else — the icon channel is the
-   component's (`data-icon`), and the two are deliberately not derivable from
-   each other. Four colours, keyed off `data-speech` alone:
-     muted        → nothing to play                     (the base rule above)
-     green        → something here has not been heard   (ready/speaking/paused)
-     red          → blocked on synthesis, more is coming (preparing/stalled)
-     dimmed yellow→ played through to the end           (heard)
-   Nothing is invented here: the green and the pulse are the activity LED's,
-   the red and the yellow are the panel's own `--red` / `--yellow` tokens. */
-
-/* Green is "unheard": a cell waiting to be played, one playing, and one the
-   user is holding are all the same promise — there is still something in it. */
-.terminal-speak[data-speech="ready"],
-.terminal-speak[data-speech="speaking"],
-.terminal-speak[data-speech="paused"] {
+/* The speak control exists only while its cell is speaking (`CellSpeakButton`
+   renders nothing otherwise), so only the two "run in hand" states are styled.
+   Green is a run playing — the activity LED's green; red is a run blocked on
+   its next unit — the panel's `--red`, the same "the audio is not here yet" the
+   bar's warming segments draw. Each gets a fill so it reads as a thing being
+   held rather than a thing being offered. */
+.terminal-speak[data-speech="speaking"] {
   color: #9ece6a;
+  background: rgba(158, 206, 106, 0.16);
 }
 
-/* Red is "the audio is not here yet", on both sides of the click: a cell whose
-   first unit is still warming, and a live run blocked on its next one. One
-   colour for both, because the user's question — "is it here?" — is the same. */
-.terminal-speak[data-speech="preparing"],
 .terminal-speak[data-speech="stalled"] {
   color: var(--red);
+  background: var(--red-dim);
 }
 
-/* Heard: the panel's yellow, dimmed. Dimmed because a finished cell must not
-   compete for attention with the green ones that still have something to say —
-   and yellow rather than green because "already listened to" is a different
-   answer to "where is the audio", not a quieter version of the same one. */
-.terminal-speak[data-speech="heard"] {
-  color: var(--yellow);
-  opacity: 0.55;
-}
+/* ONE animation, two controls. The header speak control pulses for as long as
+   it is there (it is only there while the cell speaks); the bar's play button
+   pulses while an unheard answer is ready, for its first ten seconds
+   (`speechPulse` ANDed with `useReadyPulseWindow` in `SpeechControlBar.tsx`).
+   Different reasons, one rule: a second copy of the declaration is a second
+   thing to keep in sync, and that includes whatever this rule grows later.
 
-/* ONE rule, two controls. The bar's play button repeats the header control's
-   pulse because the bar covers the top of the cell — a user watching the
-   transport should not have to look back at the header to learn that something
-   is waiting. Both get their `data-pulse` from `speechPulse` in
-   `CellSpeakButton.tsx`, and both are animated here rather than each carrying
-   its own declaration: a second copy is a second thing to keep in sync, and
-   that includes whatever this rule grows later.
-
-   One thing is NOT shared any more: `SpeechControlBar.tsx` ANDs `speechPulse`
-   with a ten-second ready window (`useReadyPulseWindow`), so the two pulses
-   are the same pulse only for the first ten seconds of a ready answer; after
-   that the header keeps pulsing and the bar goes quiet. The animation stays
-   one rule regardless — what differs is which control still asks for it.
-
-   Which is also the whole of the reduced-motion story: no pulse in this
-   stylesheet carries a `prefers-reduced-motion` query — not the activity LED,
-   not the speak control, not this one — so the bar inherits exactly the
-   treatment the header control has, by being the same rule. Adding a query for
-   the bar alone would be the two disagreeing; adding one for every pulse in the
-   panel is a change of its own.
-
-   The answer pane's waiting wave DOES carry one, and that is not this rule
-   quietly losing its argument: the wave is a row of bars moving continuously in
-   the middle of the pane's body for as long as an answer takes, where these are
-   a tint on a 24px control. The note above the `@media (prefers-reduced-motion)`
-   query at the FOOT of this file spells the distinction out. */
+   Both stop under `prefers-reduced-motion`, together, in the query at the FOOT
+   of this file — one query for both, so the two can never disagree. */
 .terminal-speak[data-pulse="1"],
 .speech-bar-primary[data-pulse="1"] {
   animation: terminal-led-pulse-attention 0.8s ease-in-out infinite;
 }
 
-.terminal-speak[data-pulse="0"],
 .speech-bar-primary[data-pulse="0"] {
   animation: none;
-}
-
-/* A run in hand gets a fill, so it reads as a thing being held rather than a
-   thing being offered. The fill follows the colour channel: green under a
-   playing or held run, the panel's `--red-dim` under a stalled one. */
-.terminal-speak[data-speech="speaking"],
-.terminal-speak[data-speech="paused"] {
-  background: rgba(158, 206, 106, 0.16);
-}
-
-.terminal-speak[data-speech="stalled"] {
-  background: var(--red-dim);
 }
 
 /* The header disclosure used to take the same green plus a fill under
@@ -655,11 +605,8 @@ input[type="checkbox"] {
    ever match again. The bar keeps the green — see
    `.speech-bar-btn[data-speech-mode="autoplay"]` below.
 
-   Hover feedback like the sibling header buttons, but only where no fill is
-   already standing — a speaking cell keeps its green. The disclosure never has
-   a fill now, so it is simply always hovered, no gate needed. */
-.terminal-speak[data-speech="ready"]:hover,
-.terminal-speak[data-speech="heard"]:hover,
+   Hover feedback like the sibling header buttons. The speak control always
+   stands on its fill, so only the disclosure takes it. */
 .terminal-speech-controls:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -2513,13 +2460,14 @@ input[type="checkbox"] {
 
 /* ── REDUCED MOTION, LAST IN THE FILE ─────────────────────────────────────────
 
-   The one `prefers-reduced-motion` query in this stylesheet — and the note on
-   `.terminal-speak[data-pulse]` says why the pulses still have none. Those are
-   a 0.8s tint on a 24px control, the same rule in the header and the row, and a
-   query for one of them would be the two disagreeing. This is not that: the
-   wave is a row of bars moving continuously in the middle of the pane's body,
-   in the reader's line of sight, for as long as the agent takes to answer, and
-   the legend is an overlay that arrives over a surface the user is reading.
+   The one `prefers-reduced-motion` query in this stylesheet. The wave is a row
+   of bars moving continuously in the middle of the pane's body, in the reader's
+   line of sight, for as long as the agent takes to answer, and the legend is an
+   overlay that arrives over a surface the user is reading. The speak control's
+   pulse joined them once it became the header's only signal that a cell is
+   talking: it pulses for the whole run now, not for a moment. It stops in ONE
+   arm with the bar's play button, because the two share one pulse rule and a
+   query for one of them alone would be the two disagreeing.
 
    `animation: none`, NEVER `display: none`. The wave IS how the pane says it is
    waiting, so taking the movement away has to leave the shape — which is what
@@ -2562,6 +2510,13 @@ input[type="checkbox"] {
   /* The copy acknowledgement appears and goes without a fade. */
   .objective-field-copied {
     transition: none;
+  }
+
+  /* The speak control and the bar's play button stand still, in their colour.
+     One arm for both, as their pulse is one rule (see `.terminal-speak`). */
+  .terminal-speak[data-pulse="1"],
+  .speech-bar-primary[data-pulse="1"] {
+    animation: none;
   }
 
   /* Alerts arrive without the drop and keep no moving bar; their timers run. */

@@ -611,6 +611,7 @@ export default function PlansTab({ projectName, archived = false }: Props) {
   return (
     <FileListSidebar
       testId="plans-tab"
+      openPath={selectedRelative ?? selectedPath}
       title="Plans"
       icon={<ClipboardList size={16} style={{ color: "var(--accent)" }} />}
       sources={sources}
