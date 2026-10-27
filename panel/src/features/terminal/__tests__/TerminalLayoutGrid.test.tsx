@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
+import type { CellSpeechState } from "../../speech/types";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession, sendDismiss } from "../terminalInstances";
@@ -783,16 +784,16 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     expect(header[2]).toHaveTextContent("claude-alpha");
     expect(header[3]).toBe(groupEl);
 
-    // The whole group, in order: speak · speech-controls · printer · minimise ·
+    // The whole group, in order: speech-controls · printer · minimise ·
     // maximise · kill. An exact list, so a control added to it (a colour
     // swatch) fails here. (The disconnected badge leads it but renders nothing
-    // while healthy.)
+    // while healthy, and the speak control leads it only while the cell is
+    // speaking — this cell has nothing to say.)
     const group = Array.from(groupEl.children) as HTMLElement[];
     const separator = screen.getByTestId("terminal-cell-separator-s-nc");
     expect(
       group.filter((el) => el !== separator).map((el) => el.dataset.testid),
     ).toEqual([
-      "terminal-cell-speak-s-nc",
       "terminal-cell-speech-controls-s-nc",
       "terminal-cell-reader-s-nc",
       "terminal-cell-minimise-s-nc",
@@ -812,6 +813,36 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     expect(
       screen.getByRole("button", { name: "Maximise" }),
     ).toBe(screen.getByTestId("terminal-cell-maximise-s-nc"));
+  });
+
+  it("header controls keep their order without the speak button", async () => {
+    const REST = ["speech-controls", "reader", "minimise", "maximise", "kill"];
+    const order = (id: string) => {
+      const groupEl = screen.getByTestId(`terminal-cell-reader-${id}`).parentElement!;
+      return (Array.from(groupEl.children) as HTMLElement[])
+        .filter((el) => el.dataset.testid !== `terminal-cell-separator-${id}`)
+        .map((el) => el.dataset.testid!.replace(`terminal-cell-`, "").replace(`-${id}`, ""));
+    };
+    const withState = (state: CellSpeechState) => ({ ...INERT_SPEECH, stateFor: () => state });
+
+    // Speaking: the pulsing speaker leads, then speech controls, printer,
+    // minimise, maximise, close (mockup S).
+    const talking = makeSession({ id: "s-talk" });
+    const first = renderGrid({ sessions: [talking], focusedId: talking.id, speech: withState("speaking") });
+    await settleColors();
+    expect(order("s-talk")).toEqual(["speak", ...REST]);
+    first.unmount();
+
+    // Every other state: no speak button and no gap for one — the rest keep
+    // their order.
+    for (const state of ["empty", "preparing", "ready", "paused", "heard"] as const) {
+      const session = makeSession({ id: `s-${state}` });
+      const view = renderGrid({ sessions: [session], focusedId: session.id, speech: withState(state) });
+      await settleColors();
+      expect(screen.queryByTestId(`terminal-cell-speak-${session.id}`)).toBeNull();
+      expect(order(session.id)).toEqual(REST);
+      view.unmount();
+    }
   });
 
   it("reader control is a printer, not an eye", async () => {
@@ -955,7 +986,6 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
       expect(screen.queryByRole("button", { name: /^(Maximise|Grid)$/, hidden: true })).toBeNull();
       const group = Array.from(minimise.parentElement!.children) as HTMLElement[];
       expect(group.map((el) => el.dataset.testid)).toEqual([
-        "terminal-cell-speak-mo-a",
         "terminal-cell-speech-controls-mo-a",
         "terminal-cell-reader-mo-a",
         "terminal-cell-minimise-mo-a",
@@ -1658,45 +1688,28 @@ describe("TerminalLayoutGrid — seam resize", () => {
  * control that rule when it wires `onSpeak`, `onPause` and `onResume`.
  */
 describe("TerminalLayoutGrid — the header speak control is an arrival", () => {
-  const speakingSpeech = (state: "ready" | "speaking" | "paused") => ({
+  // The header control exists only while the cell speaks, so the one press it
+  // can make is a pause. Starting and resuming are the bar's transport, whose
+  // arrival is asserted in `attentionDismiss.test.tsx`.
+  const speakingSpeech = () => ({
     ...INERT_SPEECH,
-    stateFor: () => state,
+    stateFor: () => "speaking" as const,
   });
 
   const setAttention = (sessionId: string): void => {
     _applyEventForTests({ sessionId, state: "attention", at: 1, attentionSinceAt: 1 });
   };
 
-  it("clears the LED when the header control starts the answer", () => {
-    const session = makeSession({ id: "s-speak" });
-    setAttention(session.id);
-    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("ready") });
-
-    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
-
-    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-speak");
-  });
-
-  // Same button, same press, the other direction — see `attentionArrival` on
-  // why the rule is keyed on the gesture rather than on where the audio is.
+  // See `attentionArrival` on why the rule is keyed on the gesture rather than
+  // on where the audio is.
   it("clears the LED when the header control holds a live run", () => {
     const session = makeSession({ id: "s-pause" });
     setAttention(session.id);
-    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("speaking") });
+    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech() });
 
     fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
 
     expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-pause");
-  });
-
-  it("clears the LED when the header control resumes a held run", () => {
-    const session = makeSession({ id: "s-resume" });
-    setAttention(session.id);
-    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("paused") });
-
-    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
-
-    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-resume");
   });
 
   // `busy` is the agent's own state rather than a notice to the user, and a
@@ -1710,7 +1723,7 @@ describe("TerminalLayoutGrid — the header speak control is an arrival", () => 
     renderGrid({
       sessions: [busy, idle],
       focusedId: busy.id,
-      speech: speakingSpeech("ready"),
+      speech: speakingSpeech(),
     });
 
     fireEvent.click(screen.getByTestId(`terminal-cell-speak-${busy.id}`));

@@ -6,287 +6,127 @@ import type { CellSpeechState } from "../../speech/types";
 import { CellSpeakButton } from "../CellSpeakButton";
 
 // The control is presentational on purpose: it takes the cell's speech state
-// and raises intents. Neither `useUtteranceChannel` nor `useSpeechPlayer` is
+// and raises one intent. Neither `useUtteranceChannel` nor `useSpeechPlayer` is
 // touched here, so there is nothing to mock — the host owns that wiring.
 //
-// What it carries is TWO INDEPENDENT CHANNELS: colour says where the audio is,
-// icon says what a click does. Neither encodes the other, which is why the
-// icon is read off its own attribute (`data-icon`) rather than off
-// `data-speech` — and why the last two tests in this file assert the two
-// channels against each other rather than one at a time.
+// It exists only while the cell is speaking (mockup S: "speaker button only
+// while speaking (pulsing)"). Starting, resuming and replaying all live in the
+// speech control bar's transport; the header control is the one-click way to
+// hold a run that is already talking.
 
 const SESSION = "s1";
 const testId = `terminal-cell-speak-${SESSION}`;
 
-/** Every state the control has to render, in the order the user meets them. */
-const STATES: CellSpeechState[] = [
-  "empty",
-  "preparing",
-  "ready",
-  "speaking",
-  "stalled",
-  "paused",
-  "heard",
-];
-
-/** RTL cleans up between tests, not between renders inside one. */
-function cleanup(button: HTMLElement): void {
-  button.closest("body > div")?.remove();
-}
+/** The states that leave the header without a speak control. */
+const HIDDEN: CellSpeechState[] = ["empty", "preparing", "ready", "paused", "heard"];
 
 function renderButton(state: CellSpeechState) {
-  const onSpeak = vi.fn();
   const onPause = vi.fn();
-  const onResume = vi.fn();
-  render(
-    <CellSpeakButton
-      sessionId={SESSION}
-      state={state}
-      onSpeak={onSpeak}
-      onPause={onPause}
-      onResume={onResume}
-    />,
-  );
-  const button = screen.getByTestId(testId);
-  return {
-    onSpeak,
-    onPause,
-    onResume,
-    button,
-    /** Every intent the control can raise, so "raises nothing" is assertable. */
-    calls: () => ({
-      speak: onSpeak.mock.calls.length,
-      pause: onPause.mock.calls.length,
-      resume: onResume.mock.calls.length,
-    }),
-  };
-}
-
-/** The icon channel, read the way the stylesheet reads the colour channel. */
-function iconFor(state: CellSpeechState): string | null {
-  const { button } = renderButton(state);
-  const icon = button.getAttribute("data-icon");
-  cleanup(button);
-  return icon;
+  const view = render(<CellSpeakButton sessionId={SESSION} state={state} onPause={onPause} />);
+  return { onPause, view };
 }
 
 // ---------------------------------------------------------------------------
-// The colour channel lives in the stylesheet, and jsdom applies no stylesheet:
-// `getComputedStyle` here would report the user-agent value and prove nothing.
-// So the colour channel is asserted ON THE RULE — the file is read and its
-// declarations parsed, exactly as the plan's criterion asks. This proves which
-// declarations the stylesheet makes, NOT what a browser paints.
+// The pulse's reduced-motion stop lives in the stylesheet, and jsdom applies no
+// stylesheet and evaluates no media query. So it is asserted ON THE RULE — the
+// file is read, comments stripped, and the body of the reduced-motion query is
+// cut out by brace matching. This proves what the stylesheet declares, NOT what
+// a browser paints.
 // ---------------------------------------------------------------------------
 
-// Walked at test time, exactly as `src/__tests__/buttonTestIds.contract.test.ts`
-// walks the source tree: `src/features/terminal/__tests__` → `src/index.css`.
-// Comments are stripped first — the stylesheet documents every rule, and a
-// comment sitting in front of one would otherwise be read as part of its
-// selector list.
 const css = readFileSync(join(__dirname, "..", "..", "..", "index.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
   "",
 );
 
-interface CssRule {
-  selectors: string[];
-  declarations: Record<string, string>;
-}
-
-function parseRules(source: string): CssRule[] {
-  const rules: CssRule[] = [];
-  // Flat blocks only. `@keyframes` bodies match as their own inner blocks and
-  // are simply never selected by the queries below, which all name
-  // `.terminal-speak`.
-  const blocks = source.matchAll(/([^{}]+)\{([^{}]*)\}/g);
-  for (const [, selectorList, body] of blocks) {
-    const declarations: Record<string, string> = {};
-    for (const declaration of body.split(";")) {
-      const at = declaration.indexOf(":");
-      if (at === -1) continue;
-      declarations[declaration.slice(0, at).trim()] = declaration.slice(at + 1).trim();
+/** Every `@media (prefers-reduced-motion: reduce)` body in the stylesheet. */
+function reducedMotionBodies(source: string): string[] {
+  const bodies: string[] = [];
+  const head = /@media\s*\(\s*prefers-reduced-motion:\s*reduce\s*\)\s*\{/g;
+  for (const match of source.matchAll(head)) {
+    let depth = 1;
+    let at = (match.index ?? 0) + match[0].length;
+    const start = at;
+    while (depth > 0 && at < source.length) {
+      if (source[at] === "{") depth += 1;
+      else if (source[at] === "}") depth -= 1;
+      at += 1;
     }
-    rules.push({
-      selectors: selectorList.split(",").map((selector) => selector.trim()),
-      declarations,
-    });
+    bodies.push(source.slice(start, at - 1));
   }
-  return rules;
+  return bodies;
 }
 
-const RULES = parseRules(css);
-
-/**
- * The declarations the base `.terminal-speak[data-speech="<state>"]` rules make,
- * in cascade order. Pseudo-class rules (`:hover`) are left out: they are not the
- * resting colour.
- */
-function declarationsFor(state: CellSpeechState): Record<string, string> {
+/** The declarations a rule inside `body` makes for exactly `selector`. */
+function declarationsIn(body: string, selector: string): Record<string, string> {
   const merged: Record<string, string> = {};
-  for (const rule of RULES) {
-    const matches = rule.selectors.some(
-      (selector) =>
-        selector.startsWith(".terminal-speak") &&
-        selector.includes(`[data-speech="${state}"]`) &&
-        !selector.includes(":hover"),
-    );
-    if (!matches) continue;
-    Object.assign(merged, rule.declarations);
+  for (const [, selectorList, block] of body.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = selectorList.split(",").map((s) => s.trim());
+    if (!selectors.includes(selector)) continue;
+    for (const declaration of block.split(";")) {
+      const colon = declaration.indexOf(":");
+      if (colon === -1) continue;
+      merged[declaration.slice(0, colon).trim()] = declaration.slice(colon + 1).trim();
+    }
   }
   return merged;
 }
 
-/** What the stylesheet paints a state, or `undefined` if it says nothing. */
-const colourOf = (state: CellSpeechState): string | undefined =>
-  declarationsFor(state).color;
-
 describe("CellSpeakButton", () => {
-  it("empty is disabled and raises nothing", () => {
-    const { button, calls } = renderButton("empty");
+  it("speak button is hidden unless speaking", () => {
+    for (const state of HIDDEN) {
+      const { view, onPause } = renderButton(state);
 
-    expect(button).toHaveAttribute("data-speech", "empty");
-    expect(button).toHaveAttribute("data-icon", "mute");
-    expect(button).toBeDisabled();
-
-    fireEvent.click(button);
-
-    expect(calls()).toEqual({ speak: 0, pause: 0, resume: 0 });
-  });
-
-  it("preparing is inert", () => {
-    const { button, calls } = renderButton("preparing");
-
-    // The utterance is here but its first unit is still synthesizing: the
-    // speaker icon says what the click WILL do, while the click itself has
-    // nothing to start yet.
-    expect(button).toHaveAttribute("data-speech", "preparing");
-    expect(button).toHaveAttribute("data-icon", "speaker");
-    expect(button).toHaveAttribute("aria-disabled", "true");
-
-    // Deliberately not `disabled`: a disabled button swallows the click in the
-    // DOM, which would leave the guard in the handler untested. The click is
-    // fired for real and must raise nothing.
-    fireEvent.click(button);
-
-    expect(calls()).toEqual({ speak: 0, pause: 0, resume: 0 });
-  });
-
-  it("ready pulses and speaks on click", () => {
-    const { button, onSpeak, calls } = renderButton("ready");
-
-    // `data-pulse` is the activity LED's own switch (index.css `.terminal-led`),
-    // not a second animation — see the speak-control rules in index.css.
-    expect(button).toHaveAttribute("data-speech", "ready");
-    expect(button).toHaveAttribute("data-icon", "speaker");
-    expect(button).toHaveAttribute("data-pulse", "1");
-    expect(button).not.toBeDisabled();
-    expect(button).not.toHaveAttribute("aria-disabled", "true");
-
-    fireEvent.click(button);
-
-    expect(onSpeak).toHaveBeenCalledWith(SESSION);
-    expect(calls()).toEqual({ speak: 1, pause: 0, resume: 0 });
-  });
-
-  it("speaking and stalled both show pause and raise onPause", () => {
-    for (const state of ["speaking", "stalled"] as const) {
-      const { button, onPause, calls } = renderButton(state);
-
-      expect(button).toHaveAttribute("data-speech", state);
-      expect(button).toHaveAttribute("data-icon", "pause");
-
-      fireEvent.click(button);
-
-      expect(onPause).toHaveBeenCalledWith(SESSION);
-      expect(calls()).toEqual({ speak: 0, pause: 1, resume: 0 });
-      cleanup(button);
+      // Nothing at all — no placeholder that would hold the header's space.
+      expect(screen.queryByTestId(testId)).toBeNull();
+      expect(view.container).toBeEmptyDOMElement();
+      expect(onPause).not.toHaveBeenCalled();
+      view.unmount();
     }
   });
 
-  it("paused shows play and raises onResume", () => {
-    const { button, onResume, calls } = renderButton("paused");
+  it("speaking shows a pulsing speaker that pauses", () => {
+    const { onPause } = renderButton("speaking");
+    const button = screen.getByTestId(testId);
 
-    expect(button).toHaveAttribute("data-speech", "paused");
-    expect(button).toHaveAttribute("data-icon", "play");
-
-    // A resume is emphatically NOT a speak: `onSpeak` would restart the
-    // utterance from unit 0, which is the very position the pause is holding.
-    fireEvent.click(button);
-
-    expect(onResume).toHaveBeenCalledWith(SESSION);
-    expect(calls()).toEqual({ speak: 0, pause: 0, resume: 1 });
-  });
-
-  it("heard replays on click without pulsing", () => {
-    const { button, onSpeak, calls } = renderButton("heard");
-
-    expect(button).toHaveClass("terminal-speak");
-    expect(button).toHaveAttribute("data-speech", "heard");
-    expect(button).toHaveAttribute("data-icon", "speaker");
-    expect(button).toHaveAttribute("data-pulse", "0");
+    expect(button).toHaveAttribute("data-speech", "speaking");
+    expect(button).toHaveAttribute("data-pulse", "1");
+    expect(button).toHaveAttribute("aria-label", "Pause speaking");
+    expect(button).toHaveAttribute("title", "Pause speaking");
+    // A speaker, not a pause glyph: the control says what is happening and the
+    // label says what a click does.
+    expect(button.querySelector("svg.lucide-volume-2")).not.toBeNull();
 
     fireEvent.click(button);
 
-    // A replay is the same intent: the audio is still in the synthesis LRU
-    // cache, so nothing is re-synthesized.
-    expect(onSpeak).toHaveBeenCalledWith(SESSION);
-    expect(calls()).toEqual({ speak: 1, pause: 0, resume: 0 });
+    expect(onPause).toHaveBeenCalledTimes(1);
+    expect(onPause).toHaveBeenCalledWith(SESSION);
   });
 
-  it("every state has its own label", () => {
-    const labels = STATES.map((state) => {
-      const { button } = renderButton(state);
-      const title = button.getAttribute("title");
-      // The sighted user reads the tooltip, the screen-reader user hears the
-      // label; they must be the same sentence.
-      expect(button).toHaveAttribute("aria-label", title ?? "");
-      cleanup(button);
-      return title ?? "";
-    });
+  it("stalled shows the pulsing speaker", () => {
+    const { onPause } = renderButton("stalled");
+    const button = screen.getByTestId(testId);
 
-    expect(new Set(labels).size).toBe(STATES.length);
-    expect(labels.every((label) => label.length > 0)).toBe(true);
+    // A run blocked on its next unit is still a run in hand: same control,
+    // same intent. `data-speech` keeps the red the stylesheet keys off it.
+    expect(button).toHaveAttribute("data-speech", "stalled");
+    expect(button).toHaveAttribute("data-pulse", "1");
+    expect(button).toHaveAttribute("aria-label", "Pause speaking");
+    expect(button.querySelector("svg.lucide-volume-2")).not.toBeNull();
+
+    fireEvent.click(button);
+
+    expect(onPause).toHaveBeenCalledWith(SESSION);
   });
 
-  it("red is one colour for preparing and stalled, heard is the dimmed yellow", () => {
-    // Both sides of the click are the same red: a cell whose first unit is
-    // still synthesizing, and a live run blocked on its next one.
-    expect(colourOf("preparing")).toBe("var(--red)");
-    expect(colourOf("stalled")).toBe("var(--red)");
-    expect(colourOf("preparing")).toBe(colourOf("stalled"));
+  it("reduced motion stops the speaker's pulse", () => {
+    const bodies = reducedMotionBodies(css);
+    expect(bodies.length).toBeGreaterThan(0);
 
-    // Heard is the panel's yellow, dimmed — not the green it used to be.
-    expect(colourOf("heard")).toBe("var(--yellow)");
-    expect(Number(declarationsFor("heard").opacity)).toBeLessThan(1);
-    expect(colourOf("heard")).not.toBe(colourOf("ready"));
-
-    // Unheard audio keeps the activity LED's green, whatever the run is doing.
-    expect(colourOf("ready")).toBe("#9ece6a");
-    expect(colourOf("speaking")).toBe("#9ece6a");
-    expect(colourOf("paused")).toBe("#9ece6a");
-  });
-
-  it("colour and icon are two channels, neither derivable from the other", () => {
-    const colour = Object.fromEntries(STATES.map((state) => [state, colourOf(state)]));
-    const icon = Object.fromEntries(STATES.map((state) => [state, iconFor(state)]));
-
-    // Same colour, different icon: red says "the audio is not here yet" on
-    // both sides of the click, while the click means nothing on one side and
-    // "hold the run" on the other.
-    expect(colour.preparing).toBe(colour.stalled);
-    expect(icon.preparing).not.toBe(icon.stalled);
-
-    // Same icon, different colour: the speaker icon means "start or replay"
-    // whether the cell is green-unheard or yellow-heard.
-    expect(icon.ready).toBe(icon.heard);
-    expect(colour.ready).not.toBe(colour.heard);
-
-    // And therefore neither channel is a function of the other: collapsing
-    // them back into one attribute breaks one of the two pairs above.
-    expect(new Set(Object.values(icon)).size).toBe(4);
-    expect(new Set(STATES.map((state) => `${colour[state]}|${icon[state]}`)).size).toBe(
-      STATES.length,
+    const stopped = bodies.some(
+      (body) => declarationsIn(body, '.terminal-speak[data-pulse="1"]').animation === "none",
     );
+    expect(stopped).toBe(true);
   });
 
   it("the drag and focus guards still hold", () => {
@@ -297,13 +137,7 @@ describe("CellSpeakButton", () => {
     render(
       <div onClick={onFocus}>
         <div draggable onDragStart={onDragStart}>
-          <CellSpeakButton
-            sessionId={SESSION}
-            state="ready"
-            onSpeak={() => {}}
-            onPause={() => {}}
-            onResume={() => {}}
-          />
+          <CellSpeakButton sessionId={SESSION} state="speaking" onPause={() => {}} />
         </div>
       </div>,
     );

@@ -53,8 +53,8 @@ import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
 
 /**
- * One click on the cell's control, routed exactly as `CellSpeakButton` routes
- * it: `speaking` and `stalled` raise the pause, `paused` raises the resume,
+ * One click on the cell's play/pause, routed exactly as the bar's
+ * `SpeechTransport` routes it: `speaking` and `stalled` raise the pause, `paused` raises the resume,
  * `empty` and `preparing` raise nothing, and everything else speaks.
  *
  * The routing is the load-bearing half of the paused-cell bug — a cell that

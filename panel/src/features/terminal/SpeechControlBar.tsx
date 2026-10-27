@@ -470,20 +470,16 @@ export function SpeechControlBar({
           onResume={() => speech.onResume(sessionId)}
           onJumpToUnit={(index) => speech.onJumpToUnit(sessionId, index)}
           onSeekWithinUnit={(seconds) => speech.onSeekWithinUnit(sessionId, seconds)}
-          // The header speak control's own switch, from the header speak
-          // control's own function — not a second rule computed here. The row
-          // sits between the header and the terminal, so without this a user
-          // watching the transport has to look back at the header to learn that
-          // something is waiting. `index.css` styles both selectors in one rule,
-          // which is what keeps the two the same pulse — for ten seconds.
+          // `speechPulse` says whether the cell is asking (only `ready` is) —
+          // not a second rule computed here. The header speak control exists
+          // only while a cell speaks, so this button is where a ready answer
+          // announces itself; `index.css` animates it with the header's own
+          // pulse rule, for ten seconds.
           //
-          // Then this one stops. The bar is a 56px rail sitting directly above
-          // the terminal, and a pulse that size that never ends reads as a nag
-          // over the work rather than a notice about it. The header control is
-          // small, at rest, and off to the side, so it keeps pulsing for as
-          // long as the answer goes unheard: it stays the place that says
-          // something is still waiting. The cap narrows where the shared
-          // derivation is read, never what it means.
+          // Then it stops. The bar is a 56px rail sitting directly above the
+          // terminal, and a pulse that size that never ends reads as a nag
+          // over the work rather than a notice about it. The cap narrows where
+          // the derivation is read, never what it means.
           pulse={speechPulse(state) === "1" && withinReadyPulse}
           // A reply the cell is still waiting for. The mark is on from the
           // moment the draft goes out until the reply lands, so it outlives
