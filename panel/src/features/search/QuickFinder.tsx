@@ -162,6 +162,8 @@ export default function QuickFinder() {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Escape") {
+        // Handled here: a fullscreen mockup underneath must not exit too.
+        e.preventDefault();
         setOpen(false);
         return;
       }
@@ -187,8 +189,12 @@ export default function QuickFinder() {
   if (!open) return null;
 
   return (
+    // Modal tier (z-[100]): Cmd+P also opens over a fullscreen mockup (z-[90]).
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Quick finder"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]"
       style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)" }}
       onClick={() => setOpen(false)}
     >

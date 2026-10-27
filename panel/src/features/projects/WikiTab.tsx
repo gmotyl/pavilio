@@ -601,6 +601,7 @@ export default function WikiTab({ projectName }: Props) {
       <AskHint projectName={projectName} />
       <FileListSidebar
         testId="wiki-tab"
+        openPath={selectedPath}
         title="Wiki"
         icon={<BookOpen size={16} style={{ color: "var(--accent)" }} />}
         sources={treeSources(filtered, filter)}

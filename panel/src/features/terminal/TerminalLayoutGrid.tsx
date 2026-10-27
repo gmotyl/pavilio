@@ -11,6 +11,8 @@ import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { ProjectMark } from "../projects/ProjectMark";
+import { nameColor, usePanelTheme } from "../projects/nameColor";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { CellSpeakButton } from "./CellSpeakButton";
@@ -383,6 +385,7 @@ function TerminalCell({
 }: CellProps) {
   const { colorFor } = useProjectColors();
   const accentColor = colorFor(session.project);
+  const theme = usePanelTheme();
   const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
   const handleRef = useRef<TerminalHandle | null>(null);
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
@@ -508,8 +511,11 @@ function TerminalCell({
     >
       {/* Cell header — the whole row is a drag handle for swapping cells */}
       <div
-        className="flex items-center gap-1.5 px-2 py-1 shrink-0"
-        style={{ background: headerBg, cursor: "grab" }}
+        className="flex items-center gap-1.5 shrink-0"
+        // A definite height (mockup S's 30px) so the mark below can be a
+        // fixed square: `aspect-ratio` on a stretched item in an auto-height
+        // row resolves to a sliver in a real browser.
+        style={{ background: headerBg, cursor: "grab", height: 30, padding: "0 8px" }}
         title="Drag to place this terminal"
         draggable
         onDragStart={(e) => {
@@ -523,6 +529,22 @@ function TerminalCell({
           onDragStart();
         }}
       >
+        {/* A square the header's full height, flush with the cell's left edge:
+            the negative margin undoes the header's left padding, the tile
+            drops its radius and frame, and an inset shadow draws the right
+            divider. 30px tile, 16px glyph and 4px of right margin before the
+            LED, as mockup S. */}
+        <ProjectMark
+          project={session.project}
+          size={30}
+          style={{
+            fontSize: 16,
+            margin: "0 4px 0 -8px",
+            borderRadius: 0,
+            border: "none",
+            boxShadow: `inset -1px 0 0 color-mix(in srgb, ${accentColor} 38%, transparent)`,
+          }}
+        />
         <TerminalActivityLed sessionId={session.id} />
         {editingName ? (
           // The edit group: the name field and the colour picker are one edit,
@@ -603,6 +625,8 @@ function TerminalCell({
           // while the panel's generated name still stands, the chosen name
           // once there is one. The editor below still edits the NAME, which is
           // why it reads `session.name` and this reads `sessionLabel`.
+          // Reads "<project> · <session>": the project in its own colour and
+          // bold (mockup S `.who`), then the session label.
           <span
             className="text-[10.5px] font-mono tracking-wide truncate flex-1"
             style={{ color: "var(--text-secondary)", letterSpacing: "0.08em" }}
@@ -614,7 +638,14 @@ function TerminalCell({
               setEditingName(true);
             }}
           >
-            {sessionLabel(session)}
+            <span
+              data-testid={`terminal-cell-project-${session.id}`}
+              style={{ color: nameColor(accentColor, theme), fontWeight: 600 }}
+            >
+              {session.project}
+            </span>
+            {" · "}
+            <span>{sessionLabel(session)}</span>
           </span>
         )}
         <div className="flex gap-0.5">
@@ -622,10 +653,11 @@ function TerminalCell({
               healthy, so the group's usual width is unchanged. */}
           <TerminalDisconnectedBadge sessionId={session.id} />
           {/* Speak · speech-controls lead the group: they change per utterance,
-              the rest are static. The speak control is inert until a speech
-              host is passed; the disclosure beside it never needed one — it
-              shows and hides the bar and reports nothing about arming, so the
-              armed session is not among its props. */}
+              the rest are static. The speak control renders only while the
+              cell is speaking (mockup S), and nothing — not even a gap —
+              otherwise; the disclosure beside it never needed a speech host —
+              it shows and hides the bar and reports nothing about arming, so
+              the armed session is not among its props. */}
           {/*
               The arrival is wired HERE rather than inside `CellSpeakButton`,
               which is presentational by design and imports nothing that talks
@@ -634,26 +666,17 @@ function TerminalCell({
               header's intents are joined to the panel, so it is also where a
               press is joined to "the user has arrived at this cell".
 
-              All three intents, not only `onSpeak`: they are one button whose
-              meaning is decided by where the run happens to be, and the rule is
-              keyed on the press rather than on the direction. See
+              The press is a pause — the only intent the control has left — and
+              the rule is keyed on the press rather than on the direction. See
               `attentionArrival`, which is the same rule the bar's play control
               and the keyboard and OS transports call.
           */}
           <CellSpeakButton
             sessionId={session.id}
             state={speech?.stateFor(session.id) ?? "empty"}
-            onSpeak={(id) => {
-              dismissAttentionOnArrival(id);
-              speech?.onSpeak(id);
-            }}
             onPause={(id) => {
               dismissAttentionOnArrival(id);
               speech?.onPause(id);
-            }}
-            onResume={(id) => {
-              dismissAttentionOnArrival(id);
-              speech?.onResume(id);
             }}
           />
           <CellSpeechControlsToggle

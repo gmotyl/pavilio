@@ -198,6 +198,7 @@ describe("every toolbar call site", () => {
     const mockupAbsolute = `${ROOT}/projects/pavilio/mockups/boot.html`;
     const mockup = render(
       <MockupFrame filePath="pavilio/mockups/boot.html" absolutePath={mockupAbsolute} />,
+      { wrapper: MemoryRouter },
     );
     expect(await copied("mockup-viewer-copy-path")).toBe(
       "projects/pavilio/mockups/boot.html",

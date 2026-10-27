@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   act,
   cleanup,
@@ -42,8 +45,16 @@ import {
   _resetForTests,
 } from "../../terminal/useTerminalActivityChannel";
 import { preferences } from "../../../preferences/declarations";
-import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import {
+  __resetPreferenceStoreForTests,
+  readPreference,
+  writePreference,
+} from "../../../preferences/store";
+import { useSidebarState } from "../useSidebarState";
+import SidebarHamburger from "../SidebarHamburger";
 import { __resetProjectColorsForTests } from "../../terminal/useProjectColors";
+import { nameColor } from "../../projects/nameColor";
+import { installMatchMedia } from "../../../test-utils";
 
 // "vector" is the current project in most of these tests, matching the sibling
 // LeftSidebar.lastTab.test.tsx's mocked project. "atlas" is a second project
@@ -370,21 +381,129 @@ describe("LeftSidebar speech indicator", () => {
     expect(within(row).queryByTestId("session-speaker-s1")).toBeNull();
   });
 
-  it("the collapsed row keeps its dots while a session speaks", () => {
+  it("the collapsed row swaps its dot for the speaker while a session speaks", () => {
     setActivity("s1", "busy");
+    setActivity("s2", "attention");
     speech.stateFor = (id) => (id === "s1" ? "speaking" : "empty");
 
     setup();
 
-    // The speaker joins the aggregate group as one more status; the busy dot
-    // (and, for another session, the attention dot) stays put, so the row
-    // never trades a pending signal for the audio it is playing.
+    // One slot, one thing in it: the speaker outranks every LED state, even
+    // the attention of a different session, for as long as the audio plays.
     expect(
       within(projectRow()).getByTestId("session-speaker-s1"),
     ).toBeInTheDocument();
-    expect(
-      projectRow().querySelector('.terminal-led[data-state="busy"]'),
-    ).not.toBeNull();
+    expect(projectRow().querySelector(".terminal-led")).toBeNull();
+  });
+});
+
+/** The stylesheet as text, resolved relative to this file (see SessionIndicator.test.tsx). */
+const indexCss = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../../../index.css"),
+  "utf8",
+);
+
+/** The declarations of one top-level CSS rule in `index.css`. */
+function cssRule(selector: string): Record<string, string> {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, "m").exec(indexCss);
+  if (!match) throw new Error(`no rule for ${selector} in index.css`);
+  return Object.fromEntries(
+    match[1]
+      .split(";")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const at = line.indexOf(":");
+        return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+      }),
+  );
+}
+
+describe("LeftSidebar activity slot", () => {
+  /** The slot inside one project row. */
+  const slotsIn = (project: string) =>
+    Array.from(
+      screen
+        .getByTestId(`sidebar-project-row-${project}`)
+        .querySelectorAll<HTMLElement>('[data-testid="project-activity-slot"]'),
+    );
+
+  it("expanded project row keeps an empty activity slot", () => {
+    setActivity("s1", "busy");
+    setActivity("s2", "attention");
+
+    setup();
+    expand("vector");
+
+    // Present, so the mark tile does not jump left when the row opens, and
+    // empty, because the session rows below now carry each state themselves.
+    const slots = slotsIn("vector");
+    expect(slots).toHaveLength(1);
+    expect(slots[0].childElementCount).toBe(0);
+  });
+
+  it("activity slot has a fixed width on every project row", () => {
+    shell.projects = () =>
+      ["p-att", "p-busy", "p-idle", "p-speak", "p-none"].map((name) => ({
+        name,
+        repos: [],
+      }));
+    const meta = (id: string, project: string): SessionMeta => ({
+      id,
+      project,
+      name: id,
+      cwd: `/repo/${project}`,
+      pid: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    shell.sessions = () => [
+      meta("att", "p-att"),
+      meta("busy", "p-busy"),
+      meta("idle", "p-idle"),
+      meta("speak", "p-speak"),
+    ];
+    setActivity("att", "attention");
+    setActivity("busy", "busy");
+    setActivity("idle", "idle");
+    setActivity("speak", "busy");
+    speech.stateFor = (id) => (id === "speak" ? "speaking" : "empty");
+
+    setup();
+
+    const contents: Record<string, string> = {};
+    for (const project of ["p-att", "p-busy", "p-idle", "p-speak", "p-none"]) {
+      const slots = slotsIn(project);
+      expect(slots).toHaveLength(1);
+      const slot = slots[0];
+      // The width comes from the class alone, never from an inline override
+      // that could differ per row.
+      expect(slot).toHaveClass("project-activity-slot");
+      expect(slot.style.width).toBe("");
+      expect(slot.style.minWidth).toBe("");
+      // The slot sits directly before the mark tile, so a constant slot
+      // width means a constant tile offset.
+      expect(slot.nextElementSibling).toHaveAttribute(
+        "data-testid",
+        "project-mark",
+      );
+      contents[project] = slot.firstElementChild
+        ? (slot.firstElementChild.getAttribute("data-state") ??
+          slot.firstElementChild.getAttribute("data-testid")!)
+        : "";
+    }
+    expect(contents).toEqual({
+      "p-att": "attention",
+      "p-busy": "busy",
+      "p-idle": "idle",
+      "p-speak": "session-speaker-speak",
+      "p-none": "",
+    });
+
+    // 0 or 1 lit dot, same box: fixed width, never shrunk by a long name.
+    const rule = cssRule(".project-activity-slot");
+    expect(rule.width).toBe("10px");
+    expect(rule["flex-shrink"]).toBe("0");
   });
 });
 
@@ -441,6 +560,119 @@ describe("LeftSidebar.mark", () => {
       expect(tile.getAttribute("data-color")).toBe("#98c379");
       expect(tile.querySelector("[data-testid='project-mark-icon-folder']")).toBeTruthy();
     });
+  });
+});
+
+/**
+ * Mockup N: each project name in its own colour (mixed toward black on a light
+ * theme), the current row bold on the active background, a 22px tile (24px on a
+ * phone, mockup S) and session rows indented to sit under the name.
+ */
+describe("LeftSidebar.identity", () => {
+  const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+
+  beforeEach(() => {
+    __resetProjectColorsForTests();
+    __resetPreferenceStoreForTests();
+    writePreference(preferences.projectColor, "#e06c75", "vector");
+    writePreference(preferences.projectColor, "#98c379", "atlas");
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete document.documentElement.dataset.theme;
+    if (nativeMatchMedia)
+      Object.defineProperty(window, "matchMedia", nativeMatchMedia);
+    else delete (window as { matchMedia?: unknown }).matchMedia;
+    __resetProjectColorsForTests();
+    localStorage.clear();
+    __resetPreferenceStoreForTests();
+  });
+
+  function setupAt(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <TerminalSpeechHost>
+          <LeftSidebar />
+        </TerminalSpeechHost>
+      </MemoryRouter>,
+    );
+  }
+
+  /** A CSS colour as jsdom serialises it, so a hex and its rgb() compare equal. */
+  function normalised(color: string): string {
+    const probe = document.createElement("span");
+    probe.style.color = color;
+    return probe.style.color;
+  }
+
+  const nameLink = (project: string) =>
+    screen.getByRole("link", { name: project });
+  const tileOf = (project: string) =>
+    screen
+      .getByTestId(`sidebar-project-row-${project}`)
+      .querySelector("[data-testid='project-mark']") as HTMLElement;
+
+  it("sidebar project names use the project colour", () => {
+    setupAt("/");
+    expect(nameLink("vector").style.color).toBe(normalised(nameColor("#e06c75", "dark")));
+    expect(nameLink("atlas").style.color).toBe(normalised(nameColor("#98c379", "dark")));
+
+    // Light theme: the 72%-toward-black mix keeps contrast on pale surfaces.
+    cleanup();
+    document.documentElement.dataset.theme = "light";
+    setupAt("/");
+    expect(nameLink("vector").style.color).toBe(
+      normalised("color-mix(in srgb, #e06c75 72%, black)"),
+    );
+  });
+
+  it("current project name is bold on the active background", () => {
+    setupAt("/project/vector/notes");
+    expect(screen.getByTestId("sidebar-project-row-vector").style.background).toBe(
+      "var(--bg-active)",
+    );
+    expect(nameLink("vector").style.fontWeight).toBe("600");
+    // The current row keeps its project colour; only the weight marks it.
+    expect(nameLink("vector").style.color).toBe(normalised("#e06c75"));
+    expect(screen.getByTestId("sidebar-project-row-atlas").style.background).toBe(
+      "transparent",
+    );
+    expect(nameLink("atlas").style.fontWeight).not.toBe("600");
+  });
+
+  it("sidebar mark tile is 22px on desktop and 24px on mobile", () => {
+    installMatchMedia();
+    setupAt("/");
+    expect(tileOf("vector").style.width).toBe("22px");
+    expect(tileOf("vector").style.height).toBe("22px");
+    // Session rows start under the name: row inset (4) + chevron (16) + gap (4)
+    // + activity slot (10) + gap (4) + tile + gap (4), less the list's 1px
+    // guide border and the session button's 6px padding.
+    expand("vector");
+    const list = screen.getByTestId("sidebar-session-s1").closest("ul") as HTMLElement;
+    expect(list.style.marginLeft).toBe(`${42 + 22 - 7}px`);
+
+    cleanup();
+    installMatchMedia({ mobile: true });
+    setupAt("/");
+    expect(tileOf("vector").style.width).toBe("24px");
+    // The expanded state may carry over from the first render; open it if not.
+    if (screen.queryByTestId("sidebar-session-s1") === null) expand("vector");
+    const mobileList = screen.getByTestId("sidebar-session-s1").closest("ul") as HTMLElement;
+    expect(mobileList.style.marginLeft).toBe(`${42 + 24 - 7}px`);
+  });
+
+  it("sidebar expand control uses lucide chevrons", () => {
+    setupAt("/");
+    const control = screen.getByTestId("sidebar-project-expand-vector");
+    expect(control.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-chevron-right",
+    );
+    fireEvent.click(control);
+    expect(control.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-chevron-down",
+    );
   });
 });
 
@@ -569,5 +801,207 @@ describe("LeftSidebar.unresolvedProject", () => {
 
       expect(expandedKeys()).toEqual([]);
     });
+  });
+});
+
+/**
+ * Mockup S: on a phone the global corner ☰ is the one menu. Opened on a
+ * project's page, the sidebar shows that project already expanded with its
+ * sessions and the focused one highlighted. The expansion is transient like
+ * the phone's open state: the stored per-project expand preference is never
+ * written. A desktop sidebar is the stored preference and nothing else.
+ */
+describe("LeftSidebar.mobileMenu", () => {
+  const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+
+  beforeEach(() => {
+    __resetPreferenceStoreForTests();
+    writeTerminalFocus("vector", "s2");
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (nativeMatchMedia)
+      Object.defineProperty(window, "matchMedia", nativeMatchMedia);
+    else delete (window as { matchMedia?: unknown }).matchMedia;
+    localStorage.clear();
+    __resetPreferenceStoreForTests();
+  });
+
+  /** The global ☰, wired to the left sidebar's state the way `Layout` wires it. */
+  function GlobalHamburger() {
+    const left = useSidebarState("leftSidebar");
+    return <SidebarHamburger expanded={left.expanded} onToggle={left.toggle} />;
+  }
+
+  function setupAt(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <GlobalHamburger />
+        <TerminalSpeechHost>
+          <LeftSidebar />
+        </TerminalSpeechHost>
+      </MemoryRouter>,
+    );
+  }
+
+  const openMenu = () => fireEvent.click(screen.getByTestId("sidebar-hamburger"));
+  const tileOf = (project: string) =>
+    screen
+      .getByTestId(`sidebar-project-row-${project}`)
+      .querySelector("[data-testid='project-mark']") as HTMLElement;
+  const storedExpandKeys = () =>
+    Object.keys(
+      (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
+        .__PAVILIO_PREFS__ ?? {},
+    ).filter((k) => k.startsWith("shell.project.expanded"));
+
+  it("opening the sidebar on mobile expands the current project", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+
+    openMenu();
+
+    // The current project's sessions are listed, the focused one highlighted.
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+    expect(rowBackground("s2")).toBe(HIGHLIGHTED);
+    expect(rowBackground("s1")).toBe(PLAIN);
+    // Only the current project opens; the mobile tile is 24px.
+    expect(screen.queryByTestId("sidebar-session-a1")).not.toBeInTheDocument();
+    expect(tileOf("vector").style.width).toBe("24px");
+  });
+
+  it("mobile auto-expand does not write the expand preference", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+
+    openMenu();
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+
+    expect(readPreference(preferences.projectExpanded, "vector")).toBe(false);
+    expect(storedExpandKeys()).toEqual([]);
+
+    // Control: a user's own toggle is still what writes it.
+    expand("vector");
+    expand("vector");
+    expect(readPreference(preferences.projectExpanded, "vector")).toBe(true);
+  });
+
+  it("collapsing the auto-expanded project keeps it collapsed while the menu stays open", async () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+
+    openMenu();
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+
+    // The user folds the project the menu opened on; the menu stays open.
+    expand("vector");
+    await act(async () => {});
+
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-hamburger").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  // An unstarred research project with one session, listed under Research.
+  const withResearchProject = () => {
+    shell.projects = () => [
+      { name: "vector", repos: [] },
+      { name: "edge-tts", repos: [], kind: "research" } as { name: string; repos: unknown[] },
+    ];
+    shell.sessions = () => [
+      ...sessions,
+      {
+        id: "e1",
+        project: "edge-tts",
+        name: "edge-1",
+        cwd: "/repo/edge-tts",
+        pid: 4245,
+        createdAt: "2026-01-01T00:00:03.000Z",
+      },
+    ];
+  };
+
+  it("opening the sidebar on mobile reveals a current research project in a collapsed Research section, without writing it", () => {
+    withResearchProject();
+    writePreference(preferences.researchSectionCollapsed, true);
+    installMatchMedia({ mobile: true });
+    setupAt("/project/edge-tts/iterm");
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+
+    openMenu();
+
+    // The section opens for this visit, the project in it expanded.
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-session-e1")).toBeInTheDocument();
+    // The stored section preference is untouched.
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+
+    // Folding the revealed section hides it again in one tap and still
+    // writes nothing — the stored value already says collapsed.
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+
+    // After the reveal ends, each tap flips the section and the preference.
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(false);
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+  });
+
+  it("opening the sidebar on mobile over an expanded Research section, one tap collapses it and stores that", () => {
+    withResearchProject();
+    installMatchMedia({ mobile: true });
+    setupAt("/project/edge-tts/iterm");
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+
+    openMenu();
+    expect(screen.getByTestId("sidebar-session-e1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+
+    // And one more tap brings it back.
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(false);
+  });
+
+  it("opening the sidebar on mobile expands the project of a file-view route", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/view/vector/notes/2026-10-27.md");
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+
+    openMenu();
+
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-session-a1")).not.toBeInTheDocument();
+    expect(storedExpandKeys()).toEqual([]);
+  });
+
+  it("a virtual file-view route expands no project on mobile", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/view/_root/skills/vector/SKILL.md");
+
+    openMenu();
+
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+  });
+
+  it("desktop sidebar does not auto-expand", () => {
+    installMatchMedia({ mobile: false });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+
+    // Desktop starts open (stored default); close and reopen it.
+    openMenu();
+    openMenu();
+
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+    expect(readPreference(preferences.projectExpanded, "vector")).toBe(false);
   });
 });

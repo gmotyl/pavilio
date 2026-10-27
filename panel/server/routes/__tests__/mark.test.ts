@@ -67,6 +67,25 @@ describe("/api/projects/:name/mark", () => {
     expect(markFiles()).toEqual([]);
   });
 
+  it("PUT accepts an image of exactly 256 KB", async () => {
+    const edge = Buffer.concat([PNG, Buffer.alloc(262144 - PNG.length)]);
+    expect(edge.length).toBe(262144);
+    const res = await request(app()).put("/api/projects/p/mark").attach("image", edge, "edge.png");
+    expect(res.status).toBe(200);
+    expect(readFileSync(join(projectDir(), "mark.png")).length).toBe(262144);
+  });
+
+  it("PUT rejects an image one byte over 256 KB and writes nothing", async () => {
+    writeFileSync(join(projectDir(), "mark.svg"), SVG);
+    const over = Buffer.concat([PNG, Buffer.alloc(262145 - PNG.length)]);
+    expect(over.length).toBe(262145);
+    const res = await request(app()).put("/api/projects/p/mark").attach("image", over, "over.png");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual(expect.any(String));
+    expect(markFiles()).toEqual(["mark.svg"]);
+    expect(readdirSync(projectDir()).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+
   it("PUT rejects unsupported types", async () => {
     writeFileSync(join(projectDir(), "mark.svg"), SVG);
     for (const [buf, name] of [

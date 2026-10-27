@@ -11,9 +11,8 @@ import {
  *
  * This is the SINGLE-slot form, used where the row has exactly one dot to give:
  * the speaker and the LED share an identical box, so the row's text does not
- * move when one becomes the other. Where a row shows several statuses at once —
- * the collapsed project row — the speaker is one flag among them instead; see
- * `ProjectActivityLed`.
+ * move when one becomes the other. The project row does the same over its
+ * sessions' aggregate; see `ProjectActivityLed`.
  *
  * Speaking outranks the activity state here because the sidebar is the one
  * place a listener looks to find WHICH of several rows is talking, and the

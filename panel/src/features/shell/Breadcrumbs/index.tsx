@@ -6,10 +6,23 @@ import {
   BreadcrumbActionsProvider,
 } from "./BreadcrumbActionsProvider";
 import { HostBadge } from "../../host-mode/HostBadge";
+import { nameColor, usePanelTheme } from "../../projects/nameColor";
+import { useProjectColors } from "../../terminal/useProjectColors";
 
 interface Crumb {
   label: string;
   to?: string;
+  /** Set on the crumb that names a project: it is drawn in that project's colour. */
+  project?: string;
+}
+
+/** A path segment decoded once; a malformed escape stays as written. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 function parsePath(pathname: string): Crumb[] {
@@ -27,7 +40,9 @@ function parsePath(pathname: string): Crumb[] {
 
   if (segments[0] === "project" && segments.length >= 2) {
     const name = segments[1];
-    const crumbs: Crumb[] = [{ label: name, to: `/project/${name}` }];
+    const crumbs: Crumb[] = [
+      { label: name, to: `/project/${name}`, project: decodeSegment(name) },
+    ];
 
     if (segments[2]) {
       crumbs.push({ label: segments[2] });
@@ -41,7 +56,11 @@ function parsePath(pathname: string): Crumb[] {
     const isVirtual = raw.startsWith("_");
     const label = isVirtual ? raw.slice(1) : raw;
     const crumbs: Crumb[] = [
-      { label, to: isVirtual ? undefined : `/project/${label}` },
+      {
+        label,
+        to: isVirtual ? undefined : `/project/${label}`,
+        project: isVirtual ? undefined : decodeSegment(label),
+      },
     ];
     const rest = segments.slice(2);
     const projectName = isVirtual ? null : raw;
@@ -76,6 +95,8 @@ export function Breadcrumbs() {
   const { pathname } = useLocation();
   const { actions } = useContext(BreadcrumbActionsContext);
   const crumbs = parsePath(pathname);
+  const { colorFor } = useProjectColors();
+  const theme = usePanelTheme();
 
   const homeStyle: CSSProperties = {
     color: "var(--text-muted)",
@@ -127,22 +148,36 @@ export function Breadcrumbs() {
 
       {crumbs.map((crumb, index) => {
         const isLast = index === crumbs.length - 1;
+        // The project crumb keeps its project colour, also through a hover.
+        const projectColor =
+          crumb.project && crumb.project.trim() !== ""
+            ? nameColor(colorFor(crumb.project), theme)
+            : undefined;
+        const restColor = projectColor ?? "var(--text-muted)";
 
         return (
           <span key={index} className="flex items-center gap-1">
             <ChevronRight size={12} style={separatorStyle} />
             {isLast || !crumb.to ? (
-              <span style={crumbTextStyle}>{crumb.label}</span>
+              <span
+                style={
+                  projectColor
+                    ? { ...crumbTextStyle, color: projectColor }
+                    : crumbTextStyle
+                }
+              >
+                {crumb.label}
+              </span>
             ) : (
               <Link
                 to={crumb.to}
-                style={crumbLinkStyle}
+                style={{ ...crumbLinkStyle, color: restColor }}
                 onMouseEnter={(e) =>
-                  (e.currentTarget.style.color = "var(--text-primary)")
+                  (e.currentTarget.style.color = projectColor
+                    ? projectColor
+                    : "var(--text-primary)")
                 }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.color = "var(--text-muted)")
-                }
+                onMouseLeave={(e) => (e.currentTarget.style.color = restColor)}
               >
                 {crumb.label}
               </Link>

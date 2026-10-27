@@ -5,8 +5,8 @@ import { Volume2 } from "lucide-react";
  *
  * It lives in its own module because two unrelated rows draw it: the session
  * row, via {@link SessionIndicator}, where it replaces that session's LED, and
- * the project row's aggregate group, via `ProjectActivityLed`, where it sits
- * alongside the other status dots. Owning it here is what keeps the aggregate
+ * the project row's aggregate slot, via `ProjectActivityLed`, where it replaces
+ * the aggregate dot. Owning it here is what keeps the aggregate
  * from importing the single-slot indicator (and `TerminalActivityLed` behind
  * it) just to borrow a glyph. One definition also keeps both spellings — class,
  * box, title, label — identical, which is what stops a row's text from moving

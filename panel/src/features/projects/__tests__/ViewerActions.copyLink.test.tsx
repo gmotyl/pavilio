@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import type { ReactElement } from "react";
 import ViewerActions from "../ViewerActions";
 import FileViewer from "../FileViewer";
 import MockupFrame from "../MockupFrame";
 import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
+
+/** MockupFrame reads its fullscreen state from the router location. */
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter });
 
 vi.mock("../../shell/vscode", () => ({
   openInVSCode: vi.fn(),

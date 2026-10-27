@@ -1,10 +1,9 @@
-import { Plus, Menu, RotateCw } from "lucide-react";
+import { Plus, RotateCw } from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { mobileShortName } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
-import { useAggregateActivity } from "../favicon/useAggregateActivity";
 import { MinimisedCounter } from "./MinimisedCounter";
 
 interface Props {
@@ -13,7 +12,6 @@ interface Props {
   currentProject: string;
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
-  onOpenDrawer: () => void;
   onReconnect?: () => void;
   /** Sessions minimised on this surface, in session order — the aggregate's contents. */
   minimisedIds?: string[];
@@ -32,12 +30,10 @@ export function TerminalMobileRail({
   currentProject,
   onFocus,
   onCreate,
-  onOpenDrawer,
   onReconnect,
   minimisedIds = NONE,
   onRestore,
 }: Props) {
-  const activity = useAggregateActivity();
   const { colorFor } = useProjectColors();
   // Dots are for visible sessions only; minimised ones live in the aggregate.
   const visible =
@@ -144,33 +140,6 @@ export function TerminalMobileRail({
           <RotateCw size={13} />
         </button>
       )}
-
-      <div className="relative shrink-0">
-        <button
-          type="button"
-          data-testid="terminal-mobile-rail-drawer"
-          onClick={onOpenDrawer}
-          className="w-7 h-7 rounded-md flex items-center justify-center active:scale-95 transition-transform"
-          style={{
-            background: "var(--bg-base)",
-            border: "1px solid var(--border-subtle)",
-            color: "var(--text-secondary)",
-          }}
-          title="All terminals"
-        >
-          <Menu size={13} />
-        </button>
-        {activity !== "idle" && (
-          <span
-            aria-hidden
-            className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full"
-            style={{
-              background: activity === "busy" ? "#f9e2af" : "#a6e3a1",
-              boxShadow: "0 0 0 1px var(--bg-surface)",
-            }}
-          />
-        )}
-      </div>
     </div>
   );
 }

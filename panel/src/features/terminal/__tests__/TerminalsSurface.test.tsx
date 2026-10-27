@@ -7,6 +7,7 @@ import type { TerminalHandle } from "../TerminalView";
 import type { SessionMeta } from "../useTerminalSessions";
 import { INERT_SPEECH } from "./speech.harness";
 import { forgetAnswerPane, setAnswerPaneOpen } from "../answerPaneState";
+import { installMatchMedia } from "../../../test-utils";
 
 const gridProps = vi.fn();
 const toolbarProps = vi.fn();
@@ -51,7 +52,9 @@ vi.mock("../TerminalShortcutBar", () => ({
     return <div data-testid="shortcut-bar" />;
   },
 }));
-vi.mock("../TerminalSpineDrawer", () => ({ TerminalSpineDrawer: () => <div /> }));
+vi.mock("../TerminalSpineDrawer", () => ({
+  TerminalSpineDrawer: () => <div data-testid="spine-drawer" />,
+}));
 
 function Harness({
   tiles,
@@ -66,7 +69,9 @@ function Harness({
   minimisedIds,
   onMinimise,
   onRestore,
+  drawerOpen = false,
 }: {
+  drawerOpen?: boolean;
   tiles?: TileLayout;
   onPlace?: (layout: TileLayout) => void;
   onApplyPreset?: (preset: LayoutPreset) => void;
@@ -93,7 +98,7 @@ function Harness({
       allSessions={[]}
       maximized={maximized}
       onToggleMaximize={onToggleMaximize}
-      drawerOpen={false}
+      drawerOpen={drawerOpen}
       onSetDrawerOpen={() => {}}
       terminalHandlesRef={ref}
       onCreateTerminal={() => {}}
@@ -145,6 +150,35 @@ describe("TerminalsSurface", () => {
     const props = toolbarProps.mock.calls.at(-1)?.[0];
     expect(props.sessions).toEqual([]);
     expect(props.onApplyPreset).toBe(onApplyPreset);
+  });
+});
+
+/**
+ * Mockup S: on a phone the global corner ☰ is the one menu, so the surface
+ * mounts no spine drawer there — not even with the drawer flag set — and the
+ * rail gets no handle to open one. The desktop spine and its drawer stay.
+ */
+describe("TerminalsSurface mobile menu", () => {
+  const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+  afterEach(() => {
+    if (nativeMatchMedia)
+      Object.defineProperty(window, "matchMedia", nativeMatchMedia);
+    else delete (window as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it("terminals surface mounts no spine drawer on mobile", () => {
+    installMatchMedia({ mobile: true });
+    render(<Harness drawerOpen />);
+
+    expect(screen.queryByTestId("spine-drawer")).not.toBeInTheDocument();
+    expect(railProps.mock.calls.at(-1)?.[0]).not.toHaveProperty("onOpenDrawer");
+  });
+
+  it("the desktop spine still opens the drawer", () => {
+    installMatchMedia({ mobile: false });
+    render(<Harness drawerOpen />);
+
+    expect(screen.getByTestId("spine-drawer")).toBeInTheDocument();
   });
 });
 

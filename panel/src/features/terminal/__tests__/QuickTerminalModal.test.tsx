@@ -160,6 +160,22 @@ describe("QuickTerminalModal", () => {
     );
   });
 
+  it("opens at the modal tier, above a fullscreen mockup", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [makeSession({ id: "t1" })],
+    }) as unknown as typeof fetch;
+
+    renderAt("/project/pavilio");
+    pressCmdO();
+
+    const modal = await screen.findByTestId("quick-terminal-modal");
+    // The mockup fullscreen layer is z-[90]; modals sit at z-[100].
+    expect(modal.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["fixed", "inset-0", "z-[100]"]),
+    );
+  });
+
   it("falls back to the first terminal when no last-focus stored", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

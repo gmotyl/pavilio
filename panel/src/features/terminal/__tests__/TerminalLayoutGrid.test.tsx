@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { TerminalLayoutGrid } from "../TerminalLayoutGrid";
 import { TerminalToolbar } from "../TerminalToolbar";
 import type { SessionMeta } from "../useTerminalSessions";
+import type { CellSpeechState } from "../../speech/types";
 import { getLayoutPresets, expandPreset, type TileLayout } from "../tileLayout";
 import type { ConnectionState } from "../terminalInstances";
 import { reconnectSession, sendDismiss } from "../terminalInstances";
@@ -673,6 +674,99 @@ describe("TerminalLayoutGrid — project colour", () => {
   });
 });
 
+describe("TerminalLayoutGrid — the cell header's mark", () => {
+  /** Seed the project colours plus `marks`, keyed by project. */
+  function installMarks(marks: Record<string, string>) {
+    installProjectColors();
+    const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
+    for (const [name, mark] of Object.entries(marks)) doc[`project.mark@${name}`] = mark;
+  }
+
+  const headerChildren = (index: number) =>
+    Array.from(
+      screen.getAllByTitle("Drag to place this terminal")[index].children,
+    ) as HTMLElement[];
+
+  it("cell header leads with a full-height mark before the activity LED", async () => {
+    installMarks({ alpha: "lucide:rocket" });
+    renderGrid({ sessions: [makeSession({ id: "s1", project: "alpha" })], focusedId: "s1" });
+
+    await waitFor(() =>
+      expect(headerChildren(0)[0].dataset.color).toBe(TEST_PROJECT_COLORS.alpha),
+    );
+    const [mark, led] = headerChildren(0);
+    expect(mark.dataset.testid).toBe("project-mark");
+    expect(within(mark).getByTestId("project-mark-icon-rocket")).toBeInTheDocument();
+    expect(led.dataset.testid).toBe("activity-led");
+    // A square that fills the header's height, flush with the cell's edge: it
+    // stretches across the row, has no radius, and only a right-hand divider.
+    // Sized deterministically rather than by `aspect-ratio` + stretch, which a
+    // real browser resolves to a sliver in an auto-height flex row: a fixed
+    // 30px header and a 30px x 30px tile with a 16px glyph (mockup S).
+    const header = screen.getAllByTitle("Drag to place this terminal")[0] as HTMLElement;
+    expect(header.style.height).toBe("30px");
+    expect(mark.style.width).toBe("30px");
+    expect(mark.style.height).toBe(mark.style.width);
+    expect(mark.style.fontSize).toBe("16px");
+    expect(mark.style.aspectRatio).toBe("");
+    // Flush with the cell's left edge: the margin undoes the header's padding.
+    expect(mark.style.marginLeft).toBe("-8px");
+    expect(header.style.paddingLeft).toBe("8px");
+    // And 4px of air between the tile and the LED, on top of the row's gap
+    // (mockup S `.cellhd .tile { margin-right: 4px }`).
+    expect(mark.style.marginRight).toBe("4px");
+    // Tinted with the project's colour.
+    expect(mark.style.background).toContain("color-mix");
+    expect(mark.style.background).toContain(rgb(TEST_PROJECT_COLORS.alpha));
+    expect(mark.style.borderRadius).toMatch(/^0(px)?$/);
+    expect(mark.style.boxShadow).toContain("inset -1px 0 0");
+  });
+
+  it("cell header names the project in its colour, then the session", async () => {
+    installMarks({});
+    renderGrid({
+      sessions: [makeSession({ id: "s1", project: "alpha", name: "claude-alpha" })],
+      focusedId: "s1",
+    });
+
+    const who = await screen.findByTestId("terminal-cell-project-s1");
+    await waitFor(() => expect(who.style.color).toBe(rgb(TEST_PROJECT_COLORS.alpha)));
+    expect(who).toHaveTextContent(/^alpha$/);
+    expect(who.style.fontWeight).toBe("600");
+    expect(who.parentElement!.textContent).toBe("alpha · claude-alpha");
+  });
+
+  it("cell header project name uses the light-theme name colour", async () => {
+    installMarks({});
+    document.documentElement.dataset.theme = "light";
+    try {
+      renderGrid({
+        sessions: [makeSession({ id: "s1", project: "alpha", name: "claude-alpha" })],
+        focusedId: "s1",
+      });
+      const probe = document.createElement("span");
+      probe.style.color = `color-mix(in srgb, ${TEST_PROJECT_COLORS.alpha} 72%, black)`;
+      const who = await screen.findByTestId("terminal-cell-project-s1");
+      await waitFor(() => expect(who.style.color).toBe(probe.style.color));
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
+  it("cell header without a mark shows the folder glyph", async () => {
+    installMarks({});
+    renderGrid({ sessions: [makeSession({ id: "s1", project: "beta" })], focusedId: "s1" });
+
+    await waitFor(() =>
+      expect(headerChildren(0)[0].dataset.color).toBe(TEST_PROJECT_COLORS.beta),
+    );
+    const [mark] = headerChildren(0);
+    expect(mark.dataset.testid).toBe("project-mark");
+    expect(within(mark).getByTestId("project-mark-icon-folder")).toBeInTheDocument();
+    expect(mark.style.color).toBe(rgb(TEST_PROJECT_COLORS.beta));
+  });
+});
+
 describe("TerminalLayoutGrid — the cell header's controls", () => {
   beforeEach(() => installProjectColors());
 
@@ -700,25 +794,26 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     renderGrid({ sessions: [session], focusedId: session.id });
     await settleColors();
 
-    // The header row: LED, label, then the control group.
+    // The header row: mark, LED, label, then the control group.
     const reader = screen.getByTestId("terminal-cell-reader-s-nc");
     const groupEl = reader.parentElement!;
     const header = Array.from(groupEl.parentElement!.children) as HTMLElement[];
-    expect(header).toHaveLength(3);
-    expect(header[0].dataset.testid).toBe("activity-led");
-    expect(header[1]).toHaveTextContent("claude-alpha");
-    expect(header[2]).toBe(groupEl);
+    expect(header).toHaveLength(4);
+    expect(header[0].dataset.testid).toBe("project-mark");
+    expect(header[1].dataset.testid).toBe("activity-led");
+    expect(header[2]).toHaveTextContent("claude-alpha");
+    expect(header[3]).toBe(groupEl);
 
-    // The whole group, in order: speak · speech-controls · printer · minimise ·
+    // The whole group, in order: speech-controls · printer · minimise ·
     // maximise · kill. An exact list, so a control added to it (a colour
     // swatch) fails here. (The disconnected badge leads it but renders nothing
-    // while healthy.)
+    // while healthy, and the speak control leads it only while the cell is
+    // speaking — this cell has nothing to say.)
     const group = Array.from(groupEl.children) as HTMLElement[];
     const separator = screen.getByTestId("terminal-cell-separator-s-nc");
     expect(
       group.filter((el) => el !== separator).map((el) => el.dataset.testid),
     ).toEqual([
-      "terminal-cell-speak-s-nc",
       "terminal-cell-speech-controls-s-nc",
       "terminal-cell-reader-s-nc",
       "terminal-cell-minimise-s-nc",
@@ -738,6 +833,36 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     expect(
       screen.getByRole("button", { name: "Maximise" }),
     ).toBe(screen.getByTestId("terminal-cell-maximise-s-nc"));
+  });
+
+  it("header controls keep their order without the speak button", async () => {
+    const REST = ["speech-controls", "reader", "minimise", "maximise", "kill"];
+    const order = (id: string) => {
+      const groupEl = screen.getByTestId(`terminal-cell-reader-${id}`).parentElement!;
+      return (Array.from(groupEl.children) as HTMLElement[])
+        .filter((el) => el.dataset.testid !== `terminal-cell-separator-${id}`)
+        .map((el) => el.dataset.testid!.replace(`terminal-cell-`, "").replace(`-${id}`, ""));
+    };
+    const withState = (state: CellSpeechState) => ({ ...INERT_SPEECH, stateFor: () => state });
+
+    // Speaking: the pulsing speaker leads, then speech controls, printer,
+    // minimise, maximise, close (mockup S).
+    const talking = makeSession({ id: "s-talk" });
+    const first = renderGrid({ sessions: [talking], focusedId: talking.id, speech: withState("speaking") });
+    await settleColors();
+    expect(order("s-talk")).toEqual(["speak", ...REST]);
+    first.unmount();
+
+    // Every other state: no speak button and no gap for one — the rest keep
+    // their order.
+    for (const state of ["empty", "preparing", "ready", "paused", "heard"] as const) {
+      const session = makeSession({ id: `s-${state}` });
+      const view = renderGrid({ sessions: [session], focusedId: session.id, speech: withState(state) });
+      await settleColors();
+      expect(screen.queryByTestId(`terminal-cell-speak-${session.id}`)).toBeNull();
+      expect(order(session.id)).toEqual(REST);
+      view.unmount();
+    }
   });
 
   it("reader control is a printer, not an eye", async () => {
@@ -881,7 +1006,6 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
       expect(screen.queryByRole("button", { name: /^(Maximise|Grid)$/, hidden: true })).toBeNull();
       const group = Array.from(minimise.parentElement!.children) as HTMLElement[];
       expect(group.map((el) => el.dataset.testid)).toEqual([
-        "terminal-cell-speak-mo-a",
         "terminal-cell-speech-controls-mo-a",
         "terminal-cell-reader-mo-a",
         "terminal-cell-minimise-mo-a",
@@ -1573,56 +1697,39 @@ describe("TerminalLayoutGrid — seam resize", () => {
 });
 
 /**
- * The cell header's speak control is a play button too.
+ * The cell header's speak control is an arrival too.
  *
- * The bar carries one and the header carries another, on the same cell, and
- * until this was wired only the bar's cleared the attention LED — two buttons
- * with the same icon disagreeing about what a press meant. The rule itself is
+ * It exists only while its cell is speaking, so its one press is a pause of
+ * the live run, and that press counts as the user arriving at the cell: it
+ * clears the attention LED just as the bar's transport does. The rule itself is
  * `attentionArrival.dismissAttentionOnArrival`, and the rest of its cases are
  * asserted in `attentionDismiss.test.tsx`; what belongs here is the one thing
  * only this file can see, which is that the grid actually hands the header
- * control that rule when it wires `onSpeak`, `onPause` and `onResume`.
+ * control that rule when it wires `onPause`.
  */
 describe("TerminalLayoutGrid — the header speak control is an arrival", () => {
-  const speakingSpeech = (state: "ready" | "speaking" | "paused") => ({
+  // The header control exists only while the cell speaks, so the one press it
+  // can make is a pause. Starting and resuming are the bar's transport, whose
+  // arrival is asserted in `attentionDismiss.test.tsx`.
+  const speakingSpeech = () => ({
     ...INERT_SPEECH,
-    stateFor: () => state,
+    stateFor: () => "speaking" as const,
   });
 
   const setAttention = (sessionId: string): void => {
     _applyEventForTests({ sessionId, state: "attention", at: 1, attentionSinceAt: 1 });
   };
 
-  it("clears the LED when the header control starts the answer", () => {
-    const session = makeSession({ id: "s-speak" });
-    setAttention(session.id);
-    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("ready") });
-
-    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
-
-    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-speak");
-  });
-
-  // Same button, same press, the other direction — see `attentionArrival` on
-  // why the rule is keyed on the gesture rather than on where the audio is.
+  // See `attentionArrival` on why the rule is keyed on the gesture rather than
+  // on where the audio is.
   it("clears the LED when the header control holds a live run", () => {
     const session = makeSession({ id: "s-pause" });
     setAttention(session.id);
-    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("speaking") });
+    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech() });
 
     fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
 
     expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-pause");
-  });
-
-  it("clears the LED when the header control resumes a held run", () => {
-    const session = makeSession({ id: "s-resume" });
-    setAttention(session.id);
-    renderGrid({ sessions: [session], focusedId: session.id, speech: speakingSpeech("paused") });
-
-    fireEvent.click(screen.getByTestId(`terminal-cell-speak-${session.id}`));
-
-    expect(vi.mocked(sendDismiss)).toHaveBeenCalledWith("s-resume");
   });
 
   // `busy` is the agent's own state rather than a notice to the user, and a
@@ -1636,12 +1743,20 @@ describe("TerminalLayoutGrid — the header speak control is an arrival", () => 
     renderGrid({
       sessions: [busy, idle],
       focusedId: busy.id,
-      speech: speakingSpeech("ready"),
+      speech: speakingSpeech(),
     });
 
     fireEvent.click(screen.getByTestId(`terminal-cell-speak-${busy.id}`));
     fireEvent.click(screen.getByTestId(`terminal-cell-speak-${idle.id}`));
 
     expect(vi.mocked(sendDismiss)).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalLayoutGrid — projectless session", () => {
+  it("renders the cell of a session whose project is empty", () => {
+    const session = makeSession({ id: "np", name: "bare", project: "" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+    expect(screen.getAllByTestId("project-mark").length).toBeGreaterThan(0);
   });
 });

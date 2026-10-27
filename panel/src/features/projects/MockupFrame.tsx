@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Maximize, Minimize } from "lucide-react";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { isMockupImage, isRasterImage } from "./mockupFiles";
+import { holdFullscreenLayer } from "../shell/Layout/fullscreenLayer";
 
 /**
  * The widths the viewer can pin the frame to. `full` fills the pane; the
@@ -82,6 +85,49 @@ const BUTTON_CLASS =
   "text-sm px-2 py-1 rounded-md transition-colors cursor-pointer";
 
 /**
+ * The router location-state key that marks the entry pushed on entering
+ * fullscreen (react-router keeps it under `history.state.usr`).
+ * Its value is the file shown, so the entry means "this mockup, fullscreen"
+ * wherever it ends up in the stack.
+ */
+const FULLSCREEN_STATE = "mockupFullscreen";
+
+/** The file a history entry shows fullscreen, or null for an ordinary entry. */
+const fullscreenFileOf = (state: unknown): string | null => {
+  if (typeof state !== "object" || state === null) return null;
+  const file = (state as Record<string, unknown>)[FULLSCREEN_STATE];
+  return typeof file === "string" ? file : null;
+};
+
+/** The entry's state with the fullscreen marker dropped (null when nothing else is left). */
+const withoutMarker = (state: unknown): unknown => {
+  if (typeof state !== "object" || state === null) return null;
+  const { [FULLSCREEN_STATE]: _marker, ...rest } = state as Record<string, unknown>;
+  return Object.keys(rest).length > 0 ? rest : null;
+};
+
+/**
+ * How long a pop of the marker may take to reach the router before it is
+ * taken as spent on the frame's own history (see `popMarker`). A same-document
+ * traversal of the panel lands within a task or two; this leaves room for a
+ * busy main thread without making a stuck exit feel broken.
+ */
+const POP_SETTLE_MS = 300;
+
+/**
+ * The fixed full-viewport layer fullscreen toggles on the element that already
+ * holds the mockup. Above the panel chrome (sidebars, terminal drawer, z-50
+ * popovers), below the modal tier (z-[100]: Quick finder, Quick terminal and
+ * the other dialogs) and alerts (110). The classes change on the same node,
+ * never a new parent, so the iframe is not re-mounted and an interactive
+ * mockup keeps its state.
+ */
+const LAYER_CLASS = "fixed inset-0 z-[90]";
+
+/** An open modal dialog; while one is up, Escape belongs to it. */
+const MODAL_SELECTOR = '[aria-modal="true"], [role="alertdialog"]';
+
+/**
  * A mockup with its toolbar: an HTML mockup in a sandboxed frame with a width
  * picker, or an image mockup (SVG, PNG, JPEG, WebP) through `<img>` with a
  * Fit / 100% toggle. An SVG goes through `<img>` too, never a frame or inline
@@ -108,6 +154,158 @@ export function MockupFrame({
     const changedPath = lastMessage.path as string | undefined;
     if (changedPath?.includes(filePath)) setImageVersion((v) => v + 1);
   }, [lastMessage, filePath, isImage]);
+  // Fullscreen is a property of the router location, not of this component:
+  // it is on exactly while the current entry's state marks this file. Entering
+  // pushes that entry through the router, so browser Back exits and leaves the
+  // mockup open; the exit button and Escape pop it again (otherwise a duplicate
+  // of this page would sit behind it and the next Back would seem to do
+  // nothing).
+  //
+  // Deriving it means every way the location moves is handled alike: Back,
+  // Forward or a reload onto a marker shows that file fullscreen; a routed
+  // navigation (Quick finder, a link — even to this same file) lands on an
+  // entry without the marker and so leaves it, and Back onto the marker brings
+  // it back. Nothing mirrors the location in local state, so there is no
+  // popstate listener to keep in sync and no unmount cleanup for StrictMode to
+  // replay: a frame unmounted on its marker shows fullscreen again if it
+  // mounts there again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fullscreen = fullscreenFileOf(location.state) === filePath;
+  // The router commits a navigation in a transition, so the location can lag a
+  // click: a second Enter on the toggle (still focusable under the layer) or a
+  // second Escape must not push or pop a second entry. Cleared once the
+  // location moves.
+  const navigating = useRef(false);
+  // A pending check that the last pop reached this page (see `popMarker`).
+  const popCheck = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    navigating.current = false;
+    clearTimeout(popCheck.current);
+  }, [location.key]);
+  useEffect(() => () => clearTimeout(popCheck.current), []);
+  // The committed location, for the pop check that runs after a render.
+  const latest = useRef(location);
+  useEffect(() => {
+    latest.current = location;
+  });
+  const enterFullscreen = () => {
+    if (fullscreen || navigating.current) return;
+    navigating.current = true;
+    const state: unknown = location.state;
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      {
+        state: {
+          ...(typeof state === "object" && state !== null ? state : {}),
+          [FULLSCREEN_STATE]: filePath,
+        },
+      },
+    );
+  };
+  // Pops the marker entry `file` left on top, so Back is not needed twice.
+  //
+  // A navigation inside the sandboxed frame (a link, an anchor) adds a
+  // joint-history entry above the marker without moving the router, and `-1`
+  // then steps the frame instead: the router never hears a popstate, the
+  // location keeps its key, and fullscreen (and the lock with it) would stay
+  // forever. The frame is cross-origin (no `allow-same-origin`), so its history
+  // cannot be read beforehand to tell. Instead, a pop that has not moved the
+  // router within POP_SETTLE_MS is taken as spent on the frame, and the marker
+  // is dropped from the current entry in place: leaving is then certain, at
+  // the cost of one duplicate entry below it (the next Back lands on the same
+  // page, not fullscreen). A pop that did land changes the key, which cancels
+  // the check; one that lands after it only finds the marker already gone.
+  const popMarker = useCallback(
+    (file: string) => {
+      navigating.current = true;
+      const key = latest.current.key;
+      navigate(-1);
+      clearTimeout(popCheck.current);
+      popCheck.current = setTimeout(() => {
+        const at = latest.current;
+        if (at.key !== key || fullscreenFileOf(at.state) !== file) return;
+        navigate(
+          { pathname: at.pathname, search: at.search, hash: at.hash },
+          { replace: true, state: withoutMarker(at.state) },
+        );
+      }, POP_SETTLE_MS);
+    },
+    [navigate],
+  );
+  // Pops only while this file's marker is the current entry — the only time
+  // `fullscreen` is true.
+  const exitFullscreen = useCallback(() => {
+    if (!fullscreen || navigating.current) return;
+    popMarker(filePath);
+  }, [fullscreen, filePath, popMarker]);
+  // A new file on the same entry (a parent swapping the prop without a
+  // navigation) leaves fullscreen by derivation; the marker it left on top is
+  // popped so Back does not land on a dead duplicate. A file change that came
+  // with a navigation has already moved off the marker. Keyed on the file, so
+  // a StrictMode replay (same file) does nothing.
+  const shownPath = useRef(filePath);
+  useEffect(() => {
+    const left = shownPath.current;
+    if (left === filePath) return;
+    shownPath.current = filePath;
+    if (fullscreenFileOf(location.state) === left && !navigating.current) popMarker(left);
+  }, [filePath, location.state, popMarker]);
+  // Lifts the shell's scroll-container isolation while the layer is up, so
+  // its z-index competes with the chrome instead of being capped inside it.
+  // A layout effect, so the chrome never paints one frame over the layer.
+  useLayoutEffect(() => (fullscreen ? holdFullscreenLayer() : undefined), [fullscreen]);
+  // Focus follows the layer: onto the exit control on enter (the toolbar is
+  // covered), back to the Fullscreen toggle on leaving it. Starts from "not
+  // fullscreen", so a frame mounted on its marker (reload, Back/Forward onto
+  // it) takes focus to the exit control too; a StrictMode replay finds the
+  // ref already caught up and does nothing.
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const exitRef = useRef<HTMLButtonElement>(null);
+  const wasFullscreen = useRef(false);
+  useEffect(() => {
+    if (fullscreen === wasFullscreen.current) return;
+    wasFullscreen.current = fullscreen;
+    (fullscreen ? exitRef : toggleRef).current?.focus();
+  }, [fullscreen]);
+  useEffect(() => {
+    if (!fullscreen) return;
+    // A key pressed inside the frame stays in the frame's document; Escape
+    // works once focus is on the panel, and the exit button always does — it
+    // follows the frame in tab order, so Tab out of the mockup reaches it.
+    // No Escape bridge out of the frame on purpose: it would mean rewriting
+    // the user's HTML in the generic raw-file route, a mockup's own CSP meta
+    // can block the injected script, a page the frame navigates to has none,
+    // and the opaque-origin frame's messages cannot be told from the mockup's.
+    // A modal above the layer owns Escape: one that handled it (Quick finder
+    // marks it) or is still open (the Quick terminal leaves Escape to xterm)
+    // closes alone, and the mockup stays fullscreen behind it.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector(MODAL_SELECTOR)) return;
+      exitFullscreen();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fullscreen, exitFullscreen]);
+  const exitButton = fullscreen && (
+    <button
+      ref={exitRef}
+      type="button"
+      onClick={exitFullscreen}
+      data-testid={`${testIdPrefix}-fullscreen-exit`}
+      aria-label="Exit fullscreen"
+      title="Exit fullscreen"
+      className="fixed top-3 right-3 w-10 h-10 rounded-full grid place-items-center cursor-pointer"
+      style={{
+        background: "rgba(18, 18, 21, 0.62)",
+        color: "#fff",
+        boxShadow: "0 2px 10px rgba(0, 0, 0, 0.35)",
+      }}
+    >
+      <Minimize size={18} />
+    </button>
+  );
   const workspaceRoot = useWorkspaceRoot();
   const relativePath = workspaceRoot
     ? relativeToWorkspace(absolutePath, workspaceRoot)
@@ -174,6 +372,19 @@ export function MockupFrame({
                 {w.label}
               </button>
             ))}
+        <button
+          ref={toggleRef}
+          data-testid={`${testIdPrefix}-fullscreen-toggle`}
+          onClick={enterFullscreen}
+          className={`${BUTTON_CLASS} ml-auto flex items-center gap-1.5`}
+          style={{
+            color: "var(--text-secondary)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        >
+          <Maximize size={14} />
+          Fullscreen
+        </button>
         <ViewerActions
           absolutePath={absolutePath}
           // The path that means something inside an agent conversation, not the
@@ -197,7 +408,11 @@ export function MockupFrame({
       {isImage ? (
         // The pane scrolls, not the page: at 100% a large export overflows in
         // both directions inside the same height-bounded box the frame gets.
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div
+          data-testid={fullscreen ? `${testIdPrefix}-fullscreen` : undefined}
+          className={`${fullscreen ? LAYER_CLASS : "flex-1 min-h-0"} overflow-auto`}
+          style={fullscreen ? { background: "var(--bg-base)" } : undefined}
+        >
           <img
             data-testid={`${testIdPrefix}-image`}
             src={
@@ -207,10 +422,15 @@ export function MockupFrame({
             className="block mx-auto"
             style={{ maxWidth: zoom.maxWidth, height: "auto" }}
           />
+          {exitButton}
         </div>
       ) : (
         /* Centres the frame once a device width leaves it narrower than the pane. */
-        <div className="flex justify-center flex-1 min-h-0">
+        <div
+          data-testid={fullscreen ? `${testIdPrefix}-fullscreen` : undefined}
+          className={`flex justify-center ${fullscreen ? LAYER_CLASS : "flex-1 min-h-0"}`}
+          style={fullscreen ? { background: "var(--bg-base)" } : undefined}
+        >
           {/* The width lives in `style` rather than in a key or a swapped wrapper
               element: React then keeps this exact iframe across a width change, so
               an interactive mockup does not reload and lose its state. */}
@@ -229,6 +449,7 @@ export function MockupFrame({
               background: "var(--bg-surface)",
             }}
           />
+          {exitButton}
         </div>
       )}
     </div>

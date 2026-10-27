@@ -240,7 +240,6 @@ function renderRail(sessions: SessionMeta[]) {
       currentProject="pavilio"
       onFocus={vi.fn()}
       onCreate={vi.fn()}
-      onOpenDrawer={vi.fn()}
     />,
   );
 }

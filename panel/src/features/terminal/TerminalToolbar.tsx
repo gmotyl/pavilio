@@ -6,6 +6,8 @@ import { useProjectColors } from "./useProjectColors";
 import { useOsUsers } from "./useOsUsers";
 import { useDefaultTerminalUsers } from "./useDefaultTerminalUsers";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { ProjectMark } from "../projects/ProjectMark";
+import { nameColor, usePanelTheme } from "../projects/nameColor";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
@@ -58,6 +60,7 @@ export function TerminalToolbar({
   const draggedIdRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const { colorFor } = useProjectColors();
+  const theme = usePanelTheme();
   const { users } = useOsUsers();
   const { defaultUsers, setDefaultUser } = useDefaultTerminalUsers();
   // Chips are for visible sessions only; minimised ones live in the tray.
@@ -328,6 +331,8 @@ export function TerminalToolbar({
               }}
             >
               <TerminalActivityLed sessionId={s.id} />
+              {/* Always shown, so a project reads at a glance on /terminals. */}
+              <ProjectMark project={s.project} size={20} />
               {editing ? (
                 <input
                   autoFocus
@@ -348,6 +353,7 @@ export function TerminalToolbar({
               ) : (
                 <span
                   className="font-mono truncate max-w-[140px]"
+                  style={{ color: nameColor(chipColor, theme), fontWeight: focused ? 600 : undefined }}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     setEditingId(s.id);

@@ -341,6 +341,10 @@ describe("scripts/update.sh panel build", () => {
     expect(output).toMatch(/^Done\./m);
     expect(output).toMatch(/built and ready to start: pnpm start/);
     expect(output).not.toMatch(/build failed/i);
+    // Flushed before "Done.": a WSL2 VM killed by a Windows restart loses the
+    // page cache, and every unflushed file of the pull comes back zero bytes.
+    expect(output.indexOf("Flushing to disk")).toBeGreaterThan(-1);
+    expect(output.indexOf("Flushing to disk")).toBeLessThan(output.search(/^Done\./m));
     // The bundle lands in the destination workspace, never copied from upstream.
     expect(existsSync(join(dest, "panel", "dist", "index.html"))).toBe(true);
   });
@@ -800,6 +804,8 @@ describe("scripts/update.sh clone mode", () => {
 
     expect(status).toBe(0);
     expect(output).toContain(`Updated to ${sha} ${subject}.`);
+    expect(output.indexOf("Flushing to disk")).toBeGreaterThan(-1);
+    expect(output.indexOf("Flushing to disk")).toBeLessThan(output.indexOf("Updated to"));
     expect(output).toMatch(/The running panel still serves the old bundle — run: pnpm reboot/);
     // The recording stub above is the real assertion: scripts/panel — the only
     // thing that can stop or start the panel — was never invoked at all.
