@@ -300,4 +300,84 @@ describe("FileListSidebar", () => {
     expect(screen.queryByTestId("file-list-sidebar-peek")).toBeNull();
     expect(screen.queryByTestId("section-files-file-a.md")).toBeNull();
   });
+
+  // --- mobile collapsed row ------------------------------------------------
+  function renderMobileCollapsed(openPath: string | null = "plans/some-file.md") {
+    installMatchMedia({ mobile: true });
+    render(
+      <FileListSidebar
+        testId="plans-tab"
+        title="Plans"
+        sources={single}
+        detail={<p>the document</p>}
+        openPath={openPath}
+      />,
+    );
+  }
+
+  it("collapsed list on mobile renders a row above the document", () => {
+    renderMobileCollapsed();
+    expect(screen.queryByTestId("file-list-sidebar-rail")).toBeNull();
+    const row = screen.getByTestId("file-list-sidebar-row");
+    const detail = screen.getByTestId("file-list-sidebar-detail");
+    expect(row.contains(screen.getByTestId("file-list-sidebar-toggle"))).toBe(true);
+    // The row precedes the detail in document order.
+    expect(
+      row.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("collapsed row shows the open file path", () => {
+    renderMobileCollapsed();
+    const path = screen.getByTestId("file-list-sidebar-path");
+    expect(path.textContent).toBe("plans/some-file.md");
+    expect(path.className).toContain("truncate");
+    expect(screen.getByTestId("file-list-sidebar-row").contains(path)).toBe(true);
+  });
+
+  it("collapsed row shows only the toggle when no file is open", () => {
+    renderMobileCollapsed(null);
+    expect(screen.getByTestId("file-list-sidebar-row")).toBeTruthy();
+    expect(screen.queryByTestId("file-list-sidebar-path")).toBeNull();
+  });
+
+  it("collapsed mobile document is full width", () => {
+    renderMobileCollapsed();
+    const detail = screen.getByTestId("file-list-sidebar-detail");
+    const container = detail.parentElement!;
+    expect(container.className).not.toContain("flex-row");
+    expect(container.className).toContain("flex-col");
+  });
+
+  it("tapping the collapsed row toggle expands the list", () => {
+    renderMobileCollapsed();
+    expect(screen.queryByText("rows")).toBeNull();
+    fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
+    expect(screen.getByText("rows")).toBeTruthy();
+    expect(screen.queryByTestId("file-list-sidebar-row")).toBeNull();
+    // Stacked: the list comes before the document.
+    const list = screen.getByTestId("file-list-sidebar");
+    const detail = screen.getByTestId("file-list-sidebar-detail");
+    expect(
+      list.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("desktop collapsed list keeps the rail", () => {
+    render(
+      <FileListSidebar
+        testId="plans-tab"
+        title="Plans"
+        sources={single}
+        detail={<p>the document</p>}
+        openPath="plans/some-file.md"
+      />,
+    );
+    fireEvent.click(screen.getByTestId("file-list-sidebar-toggle"));
+    expect(screen.getByTestId("file-list-sidebar-rail")).toBeTruthy();
+    expect(screen.queryByTestId("file-list-sidebar-row")).toBeNull();
+    expect(screen.queryByTestId("file-list-sidebar-path")).toBeNull();
+    const container = screen.getByTestId("file-list-sidebar-detail").parentElement!;
+    expect(container.className).toContain("flex-row");
+  });
 });

@@ -79,6 +79,11 @@ interface Props {
    * `useTabScrollMemory` restores into on the text file sections.
    */
   fillHeight?: boolean;
+  /**
+   * The open file's path, shown beside the toggle in the collapsed mobile row.
+   * Omitted or null → the row holds only the toggle.
+   */
+  openPath?: string | null;
 }
 
 function SourceGroup({
@@ -135,8 +140,9 @@ export default function FileListSidebar({
   aboveList,
   controls,
   fillHeight = false,
+  openPath,
 }: Props) {
-  const { collapsed, peeking, toggle, startPeek, endPeek } =
+  const { collapsed, peeking, toggle, startPeek, endPeek, isMobile } =
     useFileListSidebar();
   // Independent of `collapsed`: the width is what the list comes BACK to, so
   // collapsing must not touch it.
@@ -268,6 +274,38 @@ export default function FileListSidebar({
   // states, so opening a peek never reflows the detail pane. The peek overlay is
   // absolutely positioned, floating over the detail without shifting it.
   const railMode = collapsed || peeking;
+
+  // Below `md` a side rail would indent the document for a single button, so
+  // the toggle and the open file's path sit in a thin row above it instead and
+  // the document runs full width. No peek on mobile, so no overlay here.
+  if (railMode && isMobile) {
+    return (
+      <div className={`flex flex-col gap-2${fillRow}`}>
+        <div
+          data-testid="file-list-sidebar-row"
+          className="flex items-center gap-1 h-8 min-w-0"
+        >
+          {toggleButton}
+          {openPath && (
+            <span
+              data-testid="file-list-sidebar-path"
+              className="truncate text-xs"
+              style={{ color: "var(--text-muted)" }}
+              title={openPath}
+            >
+              {openPath}
+            </span>
+          )}
+        </div>
+        <section
+          data-testid="file-list-sidebar-detail"
+          className={`min-w-0${fillDetail}`}
+        >
+          {wrappedDetail}
+        </section>
+      </div>
+    );
+  }
 
   if (railMode) {
     // Bubble-phase (not capture): the file row's own onClick — selection /
