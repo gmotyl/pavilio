@@ -53,7 +53,10 @@ import {
   type TerminalFocusEventDetail,
 } from "../terminal/useTerminalSessions";
 import { createTerminalSession } from "../terminal/createTerminalSession";
-import { matchProjectFromPath } from "../projects/matchProjectFromPath";
+import {
+  matchProjectFromPath,
+  matchProjectFromViewPath,
+} from "../projects/matchProjectFromPath";
 
 /**
  * `leading` is the slot the corner hamburger occupies — passed to whichever
@@ -305,14 +308,21 @@ export default function LeftSidebar() {
   // never written — only a user's own toggle writes it. It fires on opening
   // (or on a project change while open), so a user who folds the project back
   // while the menu stays open keeps it folded. A desktop sidebar does none of this.
+  //
+  // "Standing in" also covers a file opened from the project (`/view/<p>/…`,
+  // e.g. via Quick Finder). That wider reading is kept to this reveal only:
+  // `currentProject` also scopes the focused-session highlight and the archive
+  // redirect, which stay `/project/…`-only so desktop behaves as before.
   const { expanded: sidebarOpen } = useSidebarState("leftSidebar");
   const mobileMenuOpen = isMobile && sidebarOpen;
+  const revealProject =
+    currentProject ?? matchProjectFromViewPath(location.pathname);
   useEffect(() => {
-    if (!mobileMenuOpen || currentProject === null) return;
+    if (!mobileMenuOpen || revealProject === null) return;
     setExpandedState((prev) =>
-      prev[currentProject] ? prev : { ...prev, [currentProject]: true },
+      prev[revealProject] ? prev : { ...prev, [revealProject]: true },
     );
-  }, [mobileMenuOpen, currentProject]);
+  }, [mobileMenuOpen, revealProject]);
   const isExpanded = useCallback(
     (name: string) => expanded[name] ?? false,
     [expanded],
@@ -394,6 +404,24 @@ export default function LeftSidebar() {
   const researchProjects = unstarred
     .filter((p) => kindOf(p) !== "project")
     .sort(compareResearch);
+
+  // The same reveal one level up: a project listed under a collapsed Research
+  // section is hidden however expanded its own row is, so the menu also opens
+  // that section — in memory only, for as long as the menu stays open. The
+  // stored preference is never written; folding the section while it is
+  // revealed just ends the reveal (it was collapsed already in storage).
+  const revealIsResearch =
+    revealProject !== null &&
+    researchProjects.some((p) => p.name === revealProject);
+  const [researchRevealed, setResearchRevealed] = useState(false);
+  useEffect(() => {
+    setResearchRevealed(mobileMenuOpen && revealIsResearch);
+  }, [mobileMenuOpen, revealIsResearch]);
+  const researchHidden = researchCollapsed && !researchRevealed;
+  const toggleResearch = () => {
+    if (researchCollapsed && researchRevealed) setResearchRevealed(false);
+    else setResearchCollapsed((v) => !v);
+  };
 
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
@@ -674,12 +702,12 @@ export default function LeftSidebar() {
           testId="sidebar-section-research"
           count={researchProjects.length}
           collapse={{
-            collapsed: researchCollapsed,
-            onToggle: () => setResearchCollapsed((v) => !v),
+            collapsed: researchHidden,
+            onToggle: toggleResearch,
           }}
           onNew={() => setNewKind("research")}
         />
-        {!researchCollapsed && (
+        {!researchHidden && (
           <ul className="space-y-0.5">
             {researchProjects.map(renderProjectRow)}
           </ul>

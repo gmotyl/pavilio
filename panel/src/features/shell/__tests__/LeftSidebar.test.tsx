@@ -903,6 +903,62 @@ describe("LeftSidebar.mobileMenu", () => {
     expect(screen.getByTestId("sidebar-hamburger").getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("opening the sidebar on mobile reveals a current research project in a collapsed Research section, without writing it", () => {
+    shell.projects = () => [
+      { name: "vector", repos: [] },
+      { name: "edge-tts", repos: [], kind: "research" } as { name: string; repos: unknown[] },
+    ];
+    shell.sessions = () => [
+      ...sessions,
+      {
+        id: "e1",
+        project: "edge-tts",
+        name: "edge-1",
+        cwd: "/repo/edge-tts",
+        pid: 4245,
+        createdAt: "2026-01-01T00:00:03.000Z",
+      },
+    ];
+    writePreference(preferences.researchSectionCollapsed, true);
+    installMatchMedia({ mobile: true });
+    setupAt("/project/edge-tts/iterm");
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+
+    openMenu();
+
+    // The section opens for this visit, the project in it expanded.
+    expect(screen.getByTestId("sidebar-project-row-edge-tts")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-session-e1")).toBeInTheDocument();
+    // The stored section preference is untouched.
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+
+    // Folding the revealed section hides it again and still writes nothing.
+    fireEvent.click(screen.getByTestId("sidebar-section-research-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-edge-tts")).not.toBeInTheDocument();
+    expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
+  });
+
+  it("opening the sidebar on mobile expands the project of a file-view route", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/view/vector/notes/2026-10-27.md");
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+
+    openMenu();
+
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-session-a1")).not.toBeInTheDocument();
+    expect(storedExpandKeys()).toEqual([]);
+  });
+
+  it("a virtual file-view route expands no project on mobile", () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/view/_root/skills/vector/SKILL.md");
+
+    openMenu();
+
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+  });
+
   it("desktop sidebar does not auto-expand", () => {
     installMatchMedia({ mobile: false });
     setupAt("/project/vector/iterm");
