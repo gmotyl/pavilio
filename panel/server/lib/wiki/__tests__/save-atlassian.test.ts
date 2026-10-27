@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { parseAtlassianUrl, saveAtlassian } from "../save-atlassian";
+import { isAtlassianHost, parseAtlassianUrl, saveAtlassian } from "../save-atlassian";
 
 const HOST = "acme.atlassian.net";
 const NOW = new Date("2026-10-27T13:07:34Z");
@@ -42,6 +42,12 @@ describe("parseAtlassianUrl", () => {
     expect(parseAtlassianUrl("https://example.com/wiki/spaces/ENG/pages/123456")).toBeNull();
     expect(parseAtlassianUrl("https://example.com/browse/CHK-42")).toBeNull();
     expect(parseAtlassianUrl("not a url")).toBeNull();
+    // Only a real `*.atlassian.net` subdomain counts, not a lookalike suffix or prefix.
+    for (const host of ["evilatlassian.net", "x.atlassian.net.evil.com"]) {
+      expect(isAtlassianHost(`https://${host}/browse/CHK-42`)).toBe(false);
+      expect(parseAtlassianUrl(`https://${host}/browse/CHK-42`)).toBeNull();
+      expect(parseAtlassianUrl(`https://${host}/wiki/pages/123456`)).toBeNull();
+    }
   });
 });
 
@@ -115,7 +121,43 @@ describe("saveAtlassian", () => {
       now: NOW,
     });
     expect(stub.warning).toBeTruthy();
+    // Each login marker trips the guard on its own.
+    for (const body of [
+      "Please log in to view this page.",
+      "Sign up to view this page.",
+      "This page needs an Atlassian account.",
+      "You need to log in.",
+      "Continue with Google",
+    ]) {
+      expect(saveAtlassian(projectDir, url, { title: "Page", body, now: NOW }).warning, body).toBeTruthy();
+    }
     expect(existsSync(rawDir()) ? readdirSync(rawDir()) : []).toEqual([]);
+  });
+
+  it("collapses newlines in title and meta so nothing injects a heading", () => {
+    const url = `https://${HOST}/browse/CHK-9`;
+    const receipt = saveAtlassian(projectDir, url, {
+      title: "Real title\n\n# Injected",
+      body: LONG_BODY,
+      meta: { "sta\ntus": "Done\n## Injected\t  too" },
+      now: NOW,
+    });
+    expect(receipt.title).toBe("Real title # Injected");
+    const text = readFileSync(join(rawDir(), "jira-CHK-9.md"), "utf8");
+    expect(text).toContain("\n# Real title # Injected\n\n- sta tus: Done ## Injected too\n");
+    expect(text.slice(0, text.indexOf(LONG_BODY))).not.toMatch(/^#+ Injected/m);
+  });
+
+  it("refuses a symlinked target before removing old-slug snapshots", () => {
+    mkdirSync(rawDir(), { recursive: true });
+    writeFileSync(join(rawDir(), "confluence-123456-old-title.md"), "old");
+    const outside = join(projectDir, "outside.md");
+    writeFileSync(outside, "outside");
+    symlinkSync(outside, join(rawDir(), "confluence-123456-new-title.md"));
+    const url = `https://${HOST}/wiki/pages/123456`;
+    expect(() => saveAtlassian(projectDir, url, { title: "New Title", body: LONG_BODY, now: NOW })).toThrow(/symlink/);
+    expect(readFileSync(join(rawDir(), "confluence-123456-old-title.md"), "utf8")).toBe("old");
+    expect(readFileSync(outside, "utf8")).toBe("outside");
   });
 
   it("keeps a long body that mentions logging in", () => {

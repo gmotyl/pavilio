@@ -78,6 +78,11 @@ function stubWarning(body: string): string | null {
   return null;
 }
 
+/** One line: a newline in a title or meta value must not start a heading of its own. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /** A planted symlink must never redirect the write or the removal. */
 function refuseSymlink(file: string): void {
   if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) {
@@ -89,7 +94,7 @@ function refuseSymlink(file: string): void {
 export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassianOptions): AtlassianReceipt {
   const ref = parseAtlassianUrl(url);
   if (!ref) throw new Error(`not a Confluence page or Jira issue URL: ${url}`);
-  const title = opts.title.trim() || url;
+  const title = oneLine(opts.title) || url;
 
   const warning = stubWarning(opts.body);
   if (warning) return { raw: "", title, warning };
@@ -97,6 +102,9 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
   const rawDir = ensureContainedDir(projectDir, ["wiki", "raw"]);
   const name =
     ref.kind === "jira" ? `jira-${ref.key}.md` : `confluence-${ref.id}-${slugify(title) || "untitled"}.md`;
+  const file = join(rawDir, name);
+  // Checked before the old-slug removal, so a refused save deletes nothing.
+  refuseSymlink(file);
 
   // The page id is the identity; a renamed page leaves its old-slug snapshot behind otherwise.
   const replaced: string[] = [];
@@ -104,15 +112,15 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
     const prefix = `confluence-${ref.id}-`;
     for (const old of readdirSync(rawDir)) {
       if (old === name || !old.startsWith(prefix) || !old.endsWith(".md")) continue;
-      const file = join(rawDir, old);
-      refuseSymlink(file);
-      rmSync(file);
+      const oldFile = join(rawDir, old);
+      refuseSymlink(oldFile);
+      rmSync(oldFile);
       replaced.push(`raw/${old}`);
     }
   }
 
   const captured = (opts.now ?? new Date()).toISOString().slice(0, 10);
-  const meta = Object.entries(opts.meta ?? {}).map(([key, value]) => `- ${key}: ${value}`);
+  const meta = Object.entries(opts.meta ?? {}).map(([key, value]) => `- ${oneLine(key)}: ${oneLine(value)}`);
   const header = [
     "---",
     `source_url: ${JSON.stringify(url)}`,
@@ -124,8 +132,6 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
     ...(meta.length ? [...meta, ""] : []),
     "",
   ].join("\n");
-  const file = join(rawDir, name);
-  refuseSymlink(file);
   writeFileSync(file, `${header}${opts.body}`);
 
   const receipt: AtlassianReceipt = { raw: `raw/${name}`, title };
