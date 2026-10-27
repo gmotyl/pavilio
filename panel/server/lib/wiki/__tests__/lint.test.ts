@@ -239,6 +239,18 @@ describe("lintWiki", () => {
     ]);
   });
 
+  it("missingUrl lists an Atlassian source page without url", () => {
+    write(
+      `${W}/sources/confluence-123.md`,
+      page("source", "Page.\n", "raw: wiki/raw/confluence-123-team-setup.md\n"),
+    );
+    write(`${W}/sources/jira-ABC-42.md`, page("source", "Issue.\n", "raw: raw/jira-ABC-42.md\n"));
+    expect(lintWiki(root, "pavilio").missingUrl).toEqual([
+      "wiki/sources/confluence-123.md",
+      "wiki/sources/jira-ABC-42.md",
+    ]);
+  });
+
   it("missingUrl skips record-backed and context-snapshot sources", () => {
     write(`${W}/sources/note-x.md`, page("source", "Note.\n", "record: notes/2026-10-01-x.md\n"));
     write(

@@ -161,4 +161,58 @@ describe("fetchArticle", () => {
 
     expect(receipt.warning).toBeUndefined();
   });
+
+  it("refuses an atlassian.net URL without fetching", async () => {
+    let calls = 0;
+    const spy = (async () => {
+      calls += 1;
+      return new Response(ARTICLE_HTML, { headers: { "content-type": "text/html" } });
+    }) as typeof fetch;
+
+    const receipt = await fetchArticle(projectDir, "https://acme.atlassian.net/wiki/spaces/ENG/pages/123/Runbook", {
+      fetch: spy,
+    });
+
+    expect(receipt).toEqual({
+      raw: "",
+      title: "",
+      warning: "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)",
+    });
+    expect(calls).toBe(0);
+    expect(existsSync(join(projectDir, "wiki"))).toBe(false);
+  });
+
+  it("refuses a URL that redirects to atlassian.net", async () => {
+    const spy = (async () => {
+      const res = new Response(ARTICLE_HTML, { headers: { "content-type": "text/html" } });
+      // A followed redirect surfaces only as the response's final url.
+      Object.defineProperty(res, "url", { value: "https://acme.atlassian.net/login?continue=%2Fwiki" });
+      return res;
+    }) as typeof fetch;
+
+    const receipt = await fetchArticle(projectDir, "https://go.example.com/runbook", { fetch: spy });
+
+    expect(receipt).toEqual({
+      raw: "",
+      title: "",
+      warning: "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)",
+    });
+    expect(readdirSync(join(projectDir, "wiki", "raw"))).toEqual([]);
+  });
+
+  it("still fetches atlassian.com marketing pages", async () => {
+    const urls: string[] = [];
+    const spy = (async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return new Response(ARTICLE_HTML, { headers: { "content-type": "text/html" } });
+    }) as typeof fetch;
+    const url = "https://www.atlassian.com/blog/teamwork/wikis-beat-context-windows";
+
+    const receipt = await fetchArticle(projectDir, url, { fetch: spy });
+
+    expect(urls).toEqual([url]);
+    expect(receipt.raw).toBe("raw/article-wikis-beat-context-windows.md");
+    expect(receipt.warning).toBeUndefined();
+    expect(existsSync(join(projectDir, "wiki", receipt.raw))).toBe(true);
+  });
 });

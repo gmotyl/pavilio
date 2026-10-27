@@ -46,10 +46,11 @@ import { extractWikiLinks, parseWikiLink, wikiLinkKey, type WikiLink } from "./w
  *   reported path on the same line is reported once, as the path.
  * - **missingUrl** — pages from external material without a `url` frontmatter field: every
  *   `type: repo` page, and every `type: source` page whose `raw` (wiki-relative, `wiki/…`
- *   accepted) is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`) or a
- *   clone (`raw/repos/…`). Record-backed sources and the other raw snapshots (outside files,
- *   snippets, `context-snapshot-*`) have no original to link and are never listed. A repo page
- *   from a local-path or `file://` clone has no `url` either and stays listed, by design.
+ *   accepted) is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`), an
+ *   Atlassian snapshot (`raw/confluence-*.md`, `raw/jira-*.md`) or a clone (`raw/repos/…`).
+ *   Record-backed sources and the other raw snapshots (outside files, snippets,
+ *   `context-snapshot-*`) have no original to link and are never listed. A repo page from a
+ *   local-path or `file://` clone has no `url` either and stays listed, by design.
  *
  * Mermaid blocks are parse-checked separately, by `lintDiagrams` (./diagrams), which the CLI merges
  * into the same report as `diagrams`.
@@ -235,7 +236,7 @@ export function bodyFirstLine(absPath: string, body: string): number {
 /** A raw path (wiki-relative, `wiki/…` accepted) that snapshots material with an original URL. */
 function isExternalRaw(raw: string): boolean {
   const rel = raw.trim().replace(/^\/+/, "").replace(/^wiki\//, "");
-  return /^raw\/(?:article-[^/]+\.md|youtube-[^/]+\.md|repos\/.+)$/.test(rel);
+  return /^raw\/(?:(?:article|youtube|confluence|jira)-[^/]+\.md|repos\/.+)$/.test(rel);
 }
 
 /** A page that must carry `url`: a repo page, or a source page written from external material. */

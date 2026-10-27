@@ -108,17 +108,61 @@ is optional, and only its `## Archived Projects` rows are refused.
 | path in another project | stop; suggest ingesting into that project's wiki |
 | repo URL (`<forge>/<owner>/<repo>`, `.git`) | `scripts/wiki clone-repo <p> <url>` → `repo_writer` (architecture mode) |
 | YouTube URL (`youtube.com/watch`, `youtu.be/…`) | `scripts/wiki fetch-youtube <p> <url>` → `wiki/raw/youtube-<id>.md` |
-| other URL | `scripts/wiki fetch-article <p> <url>` → `wiki/raw/article-<slug>.md` |
+| any `*.atlassian.net` URL (Confluence `/wiki/…`, Jira `/browse/…`, `selectedIssue=` links, boards…) | § Atlassian fetch → `wiki/raw/confluence-<id>-<slug>.md` / `jira-<KEY>.md` |
+| any other URL | `scripts/wiki fetch-article <p> <url>` → `wiki/raw/article-<slug>.md` |
 | quoted text | verbatim to `wiki/raw/snippet-<YYYY-MM-DD>-<slug>.md` |
 
 An in-project path that is not a record (`tasks.md`, a delta spec under `specs/`, an active
 change's files, today's progress — `CONVENTIONS.md § Identity and the ledger`) is refused with
 the reason before any `--only`. A raw snapshot is then a record: `pending <p> --only wiki/raw/<file>`
-gives its hash. A `fetch-article` receipt with `warning` → delete that raw file, write no source
-page, report the warning. `fetch-youtube` exit 2 means `uv` is missing — pass its `reason` (the
-install hint) to the user and skip that URL. No `wiki/` yet → this ingest creates it; mention
+gives its hash. A `fetch-article` receipt with `warning` → write no source page, report the
+warning, and delete `wiki/<raw>` only when `raw` is non-empty — an empty `raw` (Atlassian host,
+also after a redirect) means nothing was written, so there is nothing to delete.
+`fetch-youtube` exit 2 means `uv` is missing — pass its `reason` (the install hint) to the user
+and skip that URL. An Atlassian URL never goes to `fetch-article` (it refuses the host with a
+`warning`). No `wiki/` yet → this ingest creates it; mention
 `/pavilio-wiki-migrate <p>` for the backfill. More than 10 pending on a user-invoked catch-up →
 show the count and confirm first.
+
+### Atlassian fetch
+
+Confluence and Jira come through the agent's Atlassian MCP; the CLI only saves what it fetched.
+Per URL:
+
+1. **Pick the server.** Tool names differ per agent (Claude Code `mcp__atlassian-infopoly__…` /
+   `mcp__claude_ai_Atlassian__…`, opencode `atlassian-infopoly_…`, codex: check its tool list
+   for the server name) — match on the server part. Order: `atlassian-<project>` → any Atlassian
+   server whose `getAccessibleAtlassianResources` lists the URL host → none. A server answering
+   with an auth error counts as none.
+2. **None** → skip this URL, tell the user which server to connect or authenticate (Claude Code:
+   `/mcp`), never fall back to `fetch-article`, continue with the other inputs.
+3. **Resolve** the Confluence page id (a space `overview` URL → the space home page; a tiny link →
+   its page) or the Jira issue key (a board with `selectedIssue=` → that issue), and build the
+   canonical URL: `https://<host>/wiki/spaces/<space>/pages/<id>` / `https://<host>/browse/<KEY>`.
+   A URL that names no single page or issue (a board, a filter) → report it and skip it.
+4. **Fetch** as markdown — Confluence: body, comments (author, date, text), attachment names and
+   types; Jira: summary, description, status, assignee, links, comments.
+5. **Save** — the body is piped on stdin (a terminal stdin is refused):
+
+   ```sh
+   scripts/wiki save-atlassian <p> <canonical-url> --title "<t>" \
+     --meta status=… --meta parent_id=… --meta last_modified=… <<'EOF'
+   <markdown body from step 4>
+   EOF
+   ```
+
+   → `{raw, title, replaced?}`; a `warning` comes with exit 1 and nothing written (step 7). A
+   re-fetch overwrites (the id is the identity), `replaced` names a removed old-slug file — the
+   existing `sources/confluence-<id>.md` is rewritten with the new `raw:`, never a second page
+   (`CONVENTIONS.md § Identity and the ledger`). Exit 2 `{ask, reason}` (no page id / issue key
+   in the URL — the step 3 resolution was skipped or failed) → resolve it through the MCP and
+   retry once with the canonical URL; still exit 2 → report the URL, skip it.
+6. **Children** — Confluence only: direct children, one level; more than 20 → show the count and
+   confirm first. Each child goes through steps 3–5. Linked Jira issues are not fetched.
+7. A receipt with `warning` (exit 1; stub guard: empty or login-page body; nothing written) → no
+   source page, report it. A cross-site collision (`raw/` already holds that id or key from another
+   Atlassian site, or a snapshot with no readable `source_url`; nothing written or removed) →
+   report the URL and the warning, don't ingest it.
 
 ### Sequence
 
@@ -131,7 +175,7 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    ingesting and stop without writing. `takenOver: true` → note it for the log entry. Nothing
    is written to `raw/` before this step.
 3. **Route** — apply § Route the inputs (raw snapshots, `fetch-article`, `fetch-youtube`,
-   `clone-repo`).
+   § Atlassian fetch, `clone-repo`).
 4. **Pending** — the routed records with their hashes. A catch-up (no inputs) takes
    `scripts/wiki pending <p>` as is: it already includes unledgered or changed top-level
    `wiki/raw/*.md` snapshots (not migration's `context-snapshot-*.md`), so a snapshot left
@@ -142,13 +186,14 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
    For external material, hand the writer its original `url` (`PAGES.md § Common frontmatter`):
-   an article/YouTube raw file's `source_url` frontmatter, a clone's `git -C <clonePath> remote
-   get-url origin` normalised by its form — a GitHub origin → `https://github.com/<owner>/<repo>`
-   (no `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
-   `https://host/<owner>/<repo>`; any other `scheme://host/<owner>/<repo>` (`ssh://`, `http://`,
-   `git://`) → `https://host/<owner>/<repo>`; a local path or `file://` origin → no `url`. Strip any
-   userinfo (`user:token@`) from the origin — never write credentials onto a page. None → pass no
-   `url`; never guess one (never fabricate a GitHub URL for a non-GitHub or local clone).
+   an article/YouTube/Atlassian raw file's `source_url` frontmatter, a clone's `git -C <clonePath>
+   remote get-url origin` normalised by its form — a GitHub origin →
+   `https://github.com/<owner>/<repo>` (no `.git`); another https origin → as-is minus `.git`;
+   scp-like `user@host:<owner>/<repo>` → `https://host/<owner>/<repo>`; any other
+   `scheme://host/<owner>/<repo>` (`ssh://`, `http://`, `git://`) → `https://host/<owner>/<repo>`;
+   a local path or `file://` origin → no `url`. Strip any userinfo (`user:token@`) from the origin
+   — never write credentials onto a page. None → pass no `url`; never guess one (never fabricate a
+   GitHub URL for a non-GitHub or local clone).
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
    `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each
    with `scripts/wiki backlink <p> <source page> <target>`, where `<target>` is the link's bare

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
+import { parseAtlassianUrl } from "./atlassian-url";
 import { pageBacklog } from "./backlog";
 import { cloneRepo } from "./clone-repo";
 import { loadWikiConfig, readWikiConfig, type WikiConfig } from "./config";
@@ -17,6 +18,7 @@ import { countMentions } from "./mentions";
 import { projectKind } from "../projects/kind";
 import { panelLink } from "./panel-link";
 import { resolveProject, type FetchLike } from "./project";
+import { oneLine, saveAtlassian } from "./save-atlassian";
 
 /**
  * `scripts/wiki <command>` — the wiki's deterministic half, for skills and agents.
@@ -25,7 +27,7 @@ import { resolveProject, type FetchLike } from "./project";
  * or 2 (ask the user, `{ask: true, reason}`). Diagnostics and usage go to stderr only.
  *
  * Paths in receipts: `pending` and `record` paths are project-relative; `index` `written`/`removed`,
- * `fetch-article`/`fetch-youtube` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
+ * `fetch-article`/`fetch-youtube`/`save-atlassian` `raw`, `clone-repo` `clonePath` and every page in `mentions`/`lint` are
  * wiki-relative (relative to `projects/<p>/wiki/`), except `lint`'s own `wiki/…` page keys and
  * `backlog`'s source paths, which are project-root `wiki/…` paths ready for a page writer.
  *
@@ -56,6 +58,12 @@ const USAGE = `usage: scripts/wiki <command> [args]
   fetch-article <p> <url>                   {raw, title, warning?}
   fetch-youtube <p> <url>                   {raw, title, track}: transcript via uvx yt-dlp into
                                             raw/youtube-<id>.md | exit 2 {ask, reason} without uv
+  save-atlassian <p> <url> --title <t> [--meta k=v]
+                                            {raw, title, replaced?}: stdin body →
+                                            raw/confluence-<id>-<slug>.md | raw/jira-<KEY>.md;
+                                            --meta repeats (distinct keys); body must be piped
+                                            | exit 2 {ask, reason} for a URL without
+                                            an id | exit 1 {raw: "", title, warning} on a stub
   clone-repo <p> <url>                      {clonePath, commitSha, action}
   candidates                                {items: [{id, project, text, details, date, source}]}: the
                                             ## Knowledge candidates of every non-archived wiki
@@ -86,7 +94,19 @@ export type CliDeps = {
   run?: Runner;
   /** Clock for `harvest-status` (tests pin "today"). */
   now?: () => Date;
+  /** Whole stdin as utf8, for `save-atlassian` (tests feed a string). */
+  readStdin?: () => Promise<string>;
 };
+
+type StdinLike = AsyncIterable<Buffer | string> & { isTTY?: boolean };
+
+/** Read all of `stdin` as utf8; a terminal is refused, since waiting for its EOF only hangs the agent. */
+export async function readProcessStdin(stdin: StdinLike = process.stdin): Promise<string> {
+  if (stdin.isTTY) throw new CliError("save-atlassian reads the body from stdin; it must be piped on stdin, not a terminal");
+  const chunks: Buffer[] = [];
+  for await (const chunk of stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 /** The dir above `panel/`: `panel/server/lib/wiki/cli.ts` → four levels up. */
 const DEFAULT_WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -274,6 +294,42 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
         if (err instanceof UvMissingError) return { code: 2, body: { ask: true, reason: err.message } };
         throw err;
       }
+    }
+    case "save-atlassian": {
+      const usage = "save-atlassian <p> <url> --title <t> [--meta k=v]";
+      const [p, url] = only(parsed, 2, usage, ["title", "meta"]);
+      const title = flag("title");
+      if (title === undefined) throw new CliError(`save-atlassian needs --title: ${usage}`);
+      // `--meta key=value` repeats; pairs keep their command-line order (entries, not an object,
+      // which would sort integer-like keys first). A repeated key is refused, like a repeated flag.
+      const meta: Array<[string, string]> = [];
+      for (const pair of parsed.flags.get("meta") ?? []) {
+        const eq = pair.indexOf("=");
+        const key = pair.slice(0, eq);
+        if (eq <= 0 || !key.trim()) throw new CliError(`--meta needs key=value, got ${JSON.stringify(pair)}`);
+        // Compared as written: the file puts the key on one line, so "a b" and "a  b" are one key.
+        const written = oneLine(key);
+        if (meta.some(([k]) => oneLine(k) === written)) {
+          throw new CliError(`--meta key ${JSON.stringify(written)} given more than once`);
+        }
+        meta.push([key, pair.slice(eq + 1)]);
+      }
+      const dir = projectDir(workspaceRoot, p);
+      if (!parseAtlassianUrl(url)) {
+        return {
+          code: 2,
+          body: {
+            ask: true,
+            reason: `not a Confluence page or Jira issue URL: ${url} — pass a page or issue URL resolved through the Atlassian MCP`,
+          },
+        };
+      }
+      const body = await (deps.readStdin ?? readProcessStdin)();
+      const receipt = saveAtlassian(dir, url, { title, body, meta, now: deps.now?.() });
+      // The stub or collision guard wrote nothing: an error (`error`, like every exit 1), but the
+      // receipt still says why in `warning`.
+      if (receipt.warning) return { code: 1, body: { ...receipt, error: receipt.warning } };
+      return ok({ ...receipt });
     }
     case "clone-repo": {
       const [p, url] = only(parsed, 2, "clone-repo <p> <url>");

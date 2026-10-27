@@ -25,13 +25,15 @@
  * SOFTWARE.
  */
 import { createHash } from "crypto";
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 
 import { ensureContainedDir } from "./contained-dir";
+import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
+import { isAtlassianHost } from "./atlassian-url";
 
 /**
  * Fetch a web article into `<projectDir>/wiki/raw/article-<slug>.md` as markdown (a slug
@@ -62,6 +64,9 @@ const PAYWALL_MARKERS = [
   /you('ve| have) reached your (free )?article limit/i,
 ];
 
+/** Receipt warning for an `*.atlassian.net` URL, which only the Atlassian MCP route can read. */
+const ATLASSIAN_WARNING = "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)";
+
 const STRIP_TAGS = ["script", "style", "noscript", "nav", "footer", "form", "button", "svg", "iframe"];
 
 export type ArticleReceipt = {
@@ -76,20 +81,6 @@ export type FetchArticleOptions = {
   timeoutMs?: number;
   now?: Date;
 };
-
-/** Filesystem-safe, deterministic slug: ASCII, lowercase, dash-separated, ≤ 60 chars. */
-export function slugify(text: string, limit = 60): string {
-  const slug = text
-    .normalize("NFKD")
-    .replace(/[^\x20-\x7e]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
-  if (slug.length <= limit) return slug;
-  const cut = slug.slice(0, limit);
-  const lastDash = cut.lastIndexOf("-");
-  return lastDash > 0 ? cut.slice(0, lastDash) : cut;
-}
 
 /** Slug from the last URL path segment, falling back to the title. */
 export function articleSlug(url: string, title: string): string {
@@ -111,13 +102,6 @@ function snapshotUrl(file: string): string | null {
     return typeof value === "string" ? value : null;
   } catch {
     return null;
-  }
-}
-
-/** A planted `raw/article-*.md` symlink must never redirect the write. */
-function refuseSymlink(file: string): void {
-  if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) {
-    throw new Error(`refusing a symlinked raw snapshot: ${file}`);
   }
 }
 
@@ -146,17 +130,16 @@ function metaContent(document: Document, selector: string): string | null {
   return value ? value : null;
 }
 
-function countWords(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
-async function fetchHtml(url: string, options: FetchArticleOptions): Promise<string> {
+/** The page's HTML, or null when a followed redirect landed on an Atlassian host. */
+async function fetchHtml(url: string, options: FetchArticleOptions): Promise<string | null> {
   const doFetch = options.fetch ?? fetch;
   const res = await doFetch(url, {
     headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
     redirect: "follow",
     signal: AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS),
   });
+  // A redirect onto Atlassian ends at its login page, which would be saved as the article.
+  if (res.url && isAtlassianHost(res.url)) return null;
   if (!res.ok) throw new Error(`fetch failed for ${url}: HTTP ${res.status}`);
   const type = res.headers.get("content-type") ?? "";
   if (type && !/text\/html|application\/xhtml\+xml/i.test(type)) {
@@ -179,9 +162,13 @@ export async function fetchArticle(
   url: string,
   options: FetchArticleOptions = {},
 ): Promise<ArticleReceipt> {
+  // Atlassian pages answer an anonymous fetch with a login stub; they go through the agent's MCP.
+  const atlassianRefusal: ArticleReceipt = { raw: "", title: "", warning: ATLASSIAN_WARNING };
+  if (isAtlassianHost(url)) return atlassianRefusal;
   // Refuse a symlinked or escaping wiki/raw before any network or disk work.
   const rawDir = ensureContainedDir(projectDir, ["wiki", "raw"]);
   const html = await fetchHtml(url, options);
+  if (html === null) return atlassianRefusal;
   const { document } = parseHTML(html);
 
   const ogTitle = metaContent(document, 'meta[property="og:title"]');

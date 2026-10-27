@@ -1,0 +1,136 @@
+import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+
+import { parseAtlassianUrl } from "./atlassian-url";
+import { ensureContainedDir } from "./contained-dir";
+import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
+
+/**
+ * Write an Atlassian snapshot — one Confluence page or Jira issue the agent already fetched through
+ * its Atlassian MCP — into `<projectDir>/wiki/raw/`, named by page id (`confluence-<id>-<slug>.md`)
+ * or issue key (`jira-<KEY>.md`). No network here: the body arrives as text.
+ */
+
+export type AtlassianReceipt = {
+  /** Raw file path relative to the wiki dir, e.g. `raw/jira-ABC-1.md`; empty when nothing was written. */
+  raw: string;
+  title: string;
+  /** Older snapshots of the same page under another slug, removed by this save. */
+  replaced?: string[];
+  warning?: string;
+};
+
+export type SaveAtlassianOptions = {
+  title: string;
+  body: string;
+  /** Written in order; entries keep integer-like keys where a plain object would sort them first. */
+  meta?: Record<string, string> | Array<[string, string]>;
+  now?: Date;
+};
+
+/** A login marker only counts on bodies shorter than this; real pages may mention logging in. */
+const LOGIN_MARKER_MAX_WORDS = 50;
+
+// Whole phrases only: a bare `/log in/` matches "Catalog integration", `/sign up/` "Design update".
+const LOGIN_MARKERS = [
+  /\blog in\b/i,
+  /\bsign up\b/i,
+  /\batlassian account\b/i,
+  /\byou need to log in\b/i,
+  /\bcontinue with google\b/i,
+];
+
+/** Why `body` is not worth a snapshot (empty or a login wall), or null when it is. */
+function stubWarning(body: string): string | null {
+  if (!body.trim()) return "empty body — nothing on stdin (pipe the body, e.g. a heredoc) or the MCP returned no content";
+  const words = countWords(body);
+  if (words < LOGIN_MARKER_MAX_WORDS && LOGIN_MARKERS.some((re) => re.test(body))) {
+    return `body is only ${words} words and matches a login marker — likely a sign-in page, not the content`;
+  }
+  return null;
+}
+
+/** One line: a newline in a title or meta value must not start a heading of its own. */
+export function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** The lowercased host in an existing snapshot's `source_url` frontmatter, or null when it has none parseable. */
+function snapshotHost(file: string): string | null {
+  const frontmatter = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(readFileSync(file, "utf8"))?.[1] ?? "";
+  const quoted = /^source_url: (.*)$/m.exec(frontmatter)?.[1];
+  if (quoted === undefined) return null;
+  try {
+    const url: unknown = JSON.parse(quoted);
+    return typeof url === "string" ? new URL(url).hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why an existing snapshot under the same id is not this page, or null when every one is.
+ * Ids and keys are site-scoped but the file name drops the host, so `CHK-42` on another site
+ * would silently overwrite this one. A snapshot without a parseable `source_url` cannot prove it
+ * is the same page, so it blocks the save too: refusing is recoverable, overwriting is not.
+ */
+function collisionWarning(rawDir: string, files: string[], host: string): string | null {
+  for (const name of files) {
+    const file = join(rawDir, name);
+    // Only regular files carry a source_url; anything else fails the write on its own.
+    if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) continue;
+    const existing = snapshotHost(file);
+    if (existing === host) continue;
+    const from = existing ?? "an unknown site (no parseable source_url)";
+    return `cross-site collision — raw/${name} holds a snapshot from ${from}, not ${host}; nothing written`;
+  }
+  return null;
+}
+
+/** Save the snapshot of `url`; throws when `url` is not a Confluence page or Jira issue URL. */
+export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassianOptions): AtlassianReceipt {
+  const ref = parseAtlassianUrl(url);
+  if (!ref) throw new Error(`not a Confluence page or Jira issue URL: ${url}`);
+  const title = oneLine(opts.title) || url;
+
+  const warning = stubWarning(opts.body);
+  if (warning) return { raw: "", title, warning };
+
+  const rawDir = ensureContainedDir(projectDir, ["wiki", "raw"]);
+  const name =
+    ref.kind === "jira" ? `jira-${ref.key}.md` : `confluence-${ref.id}-${slugify(title) || "untitled"}.md`;
+  const file = join(rawDir, name);
+  // The page id is the identity; a renamed page leaves its old-slug snapshot behind otherwise.
+  const prefix = ref.kind === "confluence" ? `confluence-${ref.id}-` : null;
+  const oldSlugs = prefix
+    ? readdirSync(rawDir).filter((old) => old !== name && old.startsWith(prefix) && old.endsWith(".md"))
+    : [];
+  // Every check runs before the write and the old-slug removal, so a refused save touches nothing.
+  refuseSymlink(file);
+  for (const old of oldSlugs) refuseSymlink(join(rawDir, old));
+  const collision = collisionWarning(rawDir, [name, ...oldSlugs], ref.host);
+  if (collision) return { raw: "", title, warning: collision };
+
+  const captured = (opts.now ?? new Date()).toISOString().slice(0, 10);
+  const pairs = Array.isArray(opts.meta) ? opts.meta : Object.entries(opts.meta ?? {});
+  const meta = pairs.map(([key, value]) => `- ${oneLine(key)}: ${oneLine(value)}`);
+  const header = [
+    "---",
+    `source_url: ${JSON.stringify(url)}`,
+    `captured: ${captured}`,
+    "---",
+    "",
+    `# ${title}`,
+    "",
+    ...(meta.length ? [...meta, ""] : []),
+    "",
+  ].join("\n");
+  writeFileSync(file, `${header}${opts.body}`);
+
+  // Removed only once the replacement is on disk: a failed write keeps the old snapshot.
+  for (const old of oldSlugs) rmSync(join(rawDir, old));
+
+  const receipt: AtlassianReceipt = { raw: `raw/${name}`, title };
+  if (oldSlugs.length) receipt.replaced = oldSlugs.map((old) => `raw/${old}`);
+  return receipt;
+}
