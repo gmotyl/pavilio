@@ -130,17 +130,11 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
   const oldSlugs = prefix
     ? readdirSync(rawDir).filter((old) => old !== name && old.startsWith(prefix) && old.endsWith(".md"))
     : [];
-  // Every check runs before the first removal, so a refused save deletes nothing.
+  // Every check runs before the write and the old-slug removal, so a refused save touches nothing.
   refuseSymlink(file);
   for (const old of oldSlugs) refuseSymlink(join(rawDir, old));
   const collision = collisionWarning(rawDir, [name, ...oldSlugs], ref.host);
   if (collision) return { raw: "", title, warning: collision };
-
-  const replaced: string[] = [];
-  for (const old of oldSlugs) {
-    rmSync(join(rawDir, old));
-    replaced.push(`raw/${old}`);
-  }
 
   const captured = (opts.now ?? new Date()).toISOString().slice(0, 10);
   const pairs = Array.isArray(opts.meta) ? opts.meta : Object.entries(opts.meta ?? {});
@@ -158,7 +152,10 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
   ].join("\n");
   writeFileSync(file, `${header}${opts.body}`);
 
+  // Removed only once the replacement is on disk: a failed write keeps the old snapshot.
+  for (const old of oldSlugs) rmSync(join(rawDir, old));
+
   const receipt: AtlassianReceipt = { raw: `raw/${name}`, title };
-  if (replaced.length) receipt.replaced = replaced;
+  if (oldSlugs.length) receipt.replaced = oldSlugs.map((old) => `raw/${old}`);
   return receipt;
 }

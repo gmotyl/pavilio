@@ -174,6 +174,17 @@ describe("saveAtlassian", () => {
     expect(readFileSync(outside, "utf8")).toBe("outside");
   });
 
+  it("keeps the old-slug snapshot when writing the replacement fails", () => {
+    mkdirSync(rawDir(), { recursive: true });
+    const old = snapshot(`https://${HOST}/wiki/pages/123456`);
+    writeFileSync(join(rawDir(), "confluence-123456-old-title.md"), old);
+    // A directory at the target path makes the write fail with EISDIR.
+    mkdirSync(join(rawDir(), "confluence-123456-new-title.md"));
+    const url = `https://${HOST}/wiki/pages/123456`;
+    expect(() => saveAtlassian(projectDir, url, { title: "New Title", body: LONG_BODY, now: NOW })).toThrow(/EISDIR/);
+    expect(readFileSync(join(rawDir(), "confluence-123456-old-title.md"), "utf8")).toBe(old);
+  });
+
   it("keeps a long body that mentions logging in", () => {
     const url = `https://${HOST}/browse/CHK-7`;
     const body = `${LONG_BODY}\nUsers who log in with SSO see the cached cart.`;
