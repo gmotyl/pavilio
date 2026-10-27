@@ -246,7 +246,9 @@ describe("ProjectSettingsCard appearance", () => {
   });
 
   it("apply uploads the picked image then stores the mark", async () => {
-    answerMark({ mark: "image:mark.png", hash: "abc123" });
+    // The server's answer differs from the draft (`image:mark.png`), so the
+    // stored value can only come from the PUT response.
+    const put = deferMark();
     render(<ProjectSettingsCard project="alpha" />);
     unfold();
     fireEvent.click(screen.getByRole("tab", { name: "Image" }));
@@ -254,14 +256,99 @@ describe("ProjectSettingsCard appearance", () => {
     pickImage(file);
     expect(markCalls()).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    await waitFor(() => expect(readPreference(preferences.projectMark, "alpha")).toBe("image:mark.png"));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
     const [call] = markCalls();
     expect(call[1]?.method).toBe("PUT");
     expect((call[1]?.body as FormData).get("image")).toBe(file);
+    // Nothing is stored until the PUT resolves.
+    await Promise.resolve();
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
+    put.resolve({ mark: "image:mark.webp", hash: "abc123" });
+    await waitFor(() => expect(readPreference(preferences.projectMark, "alpha")).toBe("image:mark.webp"));
     await waitFor(() => expect(screen.queryByTestId("appearance-body")).toBeNull());
     expect(row().querySelector("img")?.getAttribute("src")).toBe(
       "/api/projects/alpha/mark?v=abc123",
     );
+  });
+
+  it("a failed upload keeps the mark, shows the error and stays open", async () => {
+    const put = deferMark();
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    pickImage(new File([new Uint8Array(1024)], "logo.png", { type: "image/png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    put.fail(500, { error: "Could not write the mark image" });
+    await waitFor(() =>
+      expect(screen.getByTestId("appearance-image-error").textContent).toBe(
+        "Could not write the mark image",
+      ),
+    );
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
+    expect(screen.getByTestId("appearance-body")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a failed upload is shown even when another Mark tab is open", async () => {
+    const put = deferMark();
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    pickImage(new File([new Uint8Array(1024)], "logo.png", { type: "image/png" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Icon" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    put.fail(500, { error: "Could not write the mark image" });
+    await waitFor(() =>
+      expect(screen.getByTestId("appearance-image-error").textContent).toBe(
+        "Could not write the mark image",
+      ),
+    );
+    expect(screen.getByRole("tab", { name: "Image" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("Cancel is disabled while an upload is in flight", async () => {
+    deferMark();
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    pickImage(new File([new Uint8Array(1024)], "logo.png", { type: "image/png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    const cancel = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+    expect(cancel.disabled).toBe(true);
+    fireEvent.click(cancel);
+    expect(screen.getByTestId("appearance-body")).toBeTruthy();
+  });
+
+  it("Escape during an upload folds and the late result is not stored", async () => {
+    const put = deferMark();
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    pickImage(new File([new Uint8Array(1024)], "logo.png", { type: "image/png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    fireEvent.keyDown(screen.getByTestId("appearance-body"), { key: "Escape" });
+    expect(screen.queryByTestId("appearance-body")).toBeNull();
+    put.resolve({ mark: "image:mark.webp", hash: "abc123" });
+    await put.settled();
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
+  });
+
+  it("unmounting during an upload drops the late result", async () => {
+    const put = deferMark();
+    const { unmount } = render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    pickImage(new File([new Uint8Array(1024)], "logo.png", { type: "image/png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    unmount();
+    put.resolve({ mark: "image:mark.webp", hash: "abc123" });
+    await put.settled();
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
   });
 
   it("cancel after picking an image makes no request", () => {
@@ -299,13 +386,29 @@ function markCalls() {
     .mock.calls.filter(([url]) => String(url) === "/api/projects/alpha/mark");
 }
 
-/** Answer the mark route's PUT with `body`; everything else stays an empty 200. */
-function answerMark(body: { mark: string; hash: string }) {
-  vi.mocked(globalThis.fetch).mockImplementation(async (url) =>
-    ({
-      ok: true,
-      status: 200,
-      json: async () => (String(url) === "/api/projects/alpha/mark" ? body : {}),
-    }) as Response,
+/**
+ * Hold the mark route's PUT until the test settles it; everything else stays
+ * an empty 200. `settled()` waits until the component has seen the answer.
+ */
+function deferMark() {
+  let answer!: (res: Response) => void;
+  const pending = new Promise<Response>((r) => {
+    answer = r;
+  });
+  vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+    String(url) === "/api/projects/alpha/mark" && init?.method === "PUT"
+      ? pending
+      : ({ ok: true, status: 200, json: async () => ({}) } as Response),
   );
+  const reply = (status: number, body: object) =>
+    answer({ ok: status < 400, status, json: async () => body } as Response);
+  return {
+    resolve: (body: { mark: string; hash: string }) => reply(200, body),
+    fail: (status: number, body: object) => reply(status, body),
+    settled: async () => {
+      await pending;
+      // Let the component's await chain (fetch, then json) run to the end.
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    },
+  };
 }

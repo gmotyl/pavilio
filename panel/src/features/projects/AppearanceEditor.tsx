@@ -85,6 +85,12 @@ export default function AppearanceEditor({ project }: { project: string }) {
   const [imageError, setImageError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Bumped on every fold and on unmount: an upload that resolves after its
+  // editor session ended must not write the mark.
+  const session = useRef(0);
+  useEffect(() => () => {
+    session.current += 1;
+  }, []);
 
   // Release a picked file's object URL once it is replaced, dropped or unmounted.
   useEffect(() => () => {
@@ -102,6 +108,7 @@ export default function AppearanceEditor({ project }: { project: string }) {
   };
 
   const fold = () => {
+    session.current += 1;
     setPicked(null);
     setOpen(false);
   };
@@ -157,12 +164,17 @@ export default function AppearanceEditor({ project }: { project: string }) {
 
   const apply = async () => {
     if (picked) {
+      const started = session.current;
       setBusy(true);
       try {
         const value = await uploadMarkImage(project, picked.file);
+        if (session.current !== started) return;
         writePreference(preferences.projectMark, value, project);
       } catch (err) {
+        if (session.current !== started) return;
         setImageError(err instanceof Error ? err.message : "Upload failed");
+        // The error lives on the Image tab; show it wherever Apply was pressed.
+        setTab("image");
         return;
       } finally {
         setBusy(false);
@@ -458,7 +470,7 @@ export default function AppearanceEditor({ project }: { project: string }) {
             )}
           </div>
           <div className="mt-3 flex justify-end gap-2">
-            <button type="button" data-testid="appearance-cancel" onClick={fold} className="rounded px-2 py-1 text-[11px]" style={btn}>
+            <button type="button" data-testid="appearance-cancel" onClick={fold} disabled={busy} className="rounded px-2 py-1 text-[11px]" style={btn}>
               Cancel
             </button>
             <button
