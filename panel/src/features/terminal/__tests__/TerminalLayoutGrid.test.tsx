@@ -736,6 +736,23 @@ describe("TerminalLayoutGrid — the cell header's mark", () => {
     expect(who.parentElement!.textContent).toBe("alpha · claude-alpha");
   });
 
+  it("cell header project name uses the light-theme name colour", async () => {
+    installMarks({});
+    document.documentElement.dataset.theme = "light";
+    try {
+      renderGrid({
+        sessions: [makeSession({ id: "s1", project: "alpha", name: "claude-alpha" })],
+        focusedId: "s1",
+      });
+      const probe = document.createElement("span");
+      probe.style.color = `color-mix(in srgb, ${TEST_PROJECT_COLORS.alpha} 72%, black)`;
+      const who = await screen.findByTestId("terminal-cell-project-s1");
+      await waitFor(() => expect(who.style.color).toBe(probe.style.color));
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
   it("cell header without a mark shows the folder glyph", async () => {
     installMarks({});
     renderGrid({ sessions: [makeSession({ id: "s1", project: "beta" })], focusedId: "s1" });

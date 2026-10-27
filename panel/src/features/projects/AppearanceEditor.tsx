@@ -7,6 +7,7 @@ import { alerts } from "../alerts/store";
 import { ProjectColorPicker } from "../terminal/ProjectColorPicker";
 import { useProjectColors } from "../terminal/useProjectColors";
 import { deleteMarkImage, markImageProblem, uploadMarkImage } from "./markImage";
+import { nameColor, usePanelTheme } from "./nameColor";
 import { PROJECT_MARK_COMPONENTS, ProjectMark } from "./ProjectMark";
 import { PROJECT_MARK_EMOJI, PROJECT_MARK_ICONS, isSingleEmoji } from "./projectIdentity";
 
@@ -67,6 +68,7 @@ function PickedTile({ url, color, size }: { url: string; color: string; size: nu
  */
 export default function AppearanceEditor({ project }: { project: string }) {
   const { colorFor, setColor } = useProjectColors();
+  const theme = usePanelTheme();
   const storedMark = useSyncExternalStore(
     (cb) => subscribePreference(preferences.projectMark, project, cb),
     () => readPreference(preferences.projectMark, project),
@@ -210,7 +212,7 @@ export default function AppearanceEditor({ project }: { project: string }) {
         <span
           data-testid="appearance-name"
           className="text-sm font-semibold truncate"
-          style={{ color: previewColor }}
+          style={{ color: nameColor(previewColor, theme) }}
         >
           {project}
         </span>

@@ -155,6 +155,21 @@ describe("ProjectSettingsCard appearance", () => {
     expect(within(row()).getByTestId("appearance-name").style.color).toBe(rgb("#61afef"));
   });
 
+  it("appearance header name uses the light-theme name colour", () => {
+    document.documentElement.dataset.theme = "light";
+    try {
+      render(<ProjectSettingsCard project="alpha" />);
+      unfold();
+      const probe = document.createElement("span");
+      probe.style.color = "color-mix(in srgb, #f0c674 72%, black)";
+      expect(within(row()).getByTestId("appearance-name").style.color).toBe(probe.style.color);
+      // The tile keeps the raw colour; only the name text is mixed.
+      expect(within(row()).getByTestId("project-mark").getAttribute("data-color")).toBe("#f0c674");
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
   it("mark tabs are Icon, Emoji, Image", () => {
     render(<ProjectSettingsCard project="alpha" />);
     unfold();

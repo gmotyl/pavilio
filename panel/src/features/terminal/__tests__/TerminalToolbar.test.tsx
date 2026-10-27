@@ -244,6 +244,21 @@ describe("TerminalToolbar — project colour", () => {
     expect(mark.dataset.color).toBe(TEST_PROJECT_COLORS.beta);
     expect(chipParts("s2").label.style.fontWeight).toBe("");
   });
+
+  it("chip label uses the light-theme name colour", async () => {
+    document.documentElement.dataset.theme = "light";
+    try {
+      const sessions = [makeSession({ id: "s1", project: "alpha", name: "claude-alpha" })];
+      renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
+      const probe = document.createElement("span");
+      probe.style.color = `color-mix(in srgb, ${TEST_PROJECT_COLORS.alpha} 72%, black)`;
+      await waitFor(() => expect(chipParts("s1").label.style.color).toBe(probe.style.color));
+      // The chip's top edge is the project colour itself, not the name mix.
+      expect(chipParts("s1").chip.style.borderTopColor).toBe(rgb(TEST_PROJECT_COLORS.alpha));
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
+  });
 });
 
 describe("TerminalToolbar — run-as-user dropdown", () => {

@@ -12,6 +12,7 @@ import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
 import { ProjectMark } from "../projects/ProjectMark";
+import { nameColor, usePanelTheme } from "../projects/nameColor";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { CellSpeakButton } from "./CellSpeakButton";
@@ -384,6 +385,7 @@ function TerminalCell({
 }: CellProps) {
   const { colorFor } = useProjectColors();
   const accentColor = colorFor(session.project);
+  const theme = usePanelTheme();
   const headerBg = `color-mix(in srgb, ${accentColor} 22%, rgb(15,16,20))`;
   const handleRef = useRef<TerminalHandle | null>(null);
   const [snapshot, setSnapshot] = useState<BufferSnapshot | null>(null);
@@ -638,7 +640,7 @@ function TerminalCell({
           >
             <span
               data-testid={`terminal-cell-project-${session.id}`}
-              style={{ color: accentColor, fontWeight: 600 }}
+              style={{ color: nameColor(accentColor, theme), fontWeight: 600 }}
             >
               {session.project}
             </span>
