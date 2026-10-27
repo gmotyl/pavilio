@@ -337,7 +337,9 @@ describe("ProjectSettingsCard appearance", () => {
     expect(screen.getByTestId("appearance-body")).toBeTruthy();
   });
 
-  it("Escape during an upload folds and the late result is not stored", async () => {
+  it("Escape during an upload is ignored; the upload's result is stored", async () => {
+    // The PUT has already replaced the bytes: folding as "cancel" would hide a
+    // change that happened anyway.
     const put = deferMark();
     render(<ProjectSettingsCard project="alpha" />);
     unfold();
@@ -346,10 +348,46 @@ describe("ProjectSettingsCard appearance", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(markCalls()).toHaveLength(1));
     fireEvent.keyDown(screen.getByTestId("appearance-body"), { key: "Escape" });
-    expect(screen.queryByTestId("appearance-body")).toBeNull();
+    expect(screen.getByTestId("appearance-body")).toBeTruthy();
     put.resolve({ mark: "image:mark.webp", hash: "abc123" });
     await put.settled();
-    expect(readPreference(preferences.projectMark, "alpha")).toBe("");
+    await waitFor(() => expect(readPreference(preferences.projectMark, "alpha")).toBe("image:mark.webp"));
+    await waitFor(() => expect(screen.queryByTestId("appearance-body")).toBeNull());
+  });
+
+  it("draft controls are locked while an upload is in flight", async () => {
+    const put = deferMark();
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Image" }));
+    pickImage(new File([new Uint8Array(1024)], "logo.png", { type: "image/png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    const body = screen.getByTestId("appearance-body");
+    const drop = screen.getByTestId("appearance-image-drop");
+    // `:disabled`, not `.disabled`: a control in a disabled fieldset is
+    // disabled without carrying the attribute itself.
+    for (const name of ["Replace…", "Remove"]) {
+      expect(within(drop).getByRole("button", { name }).matches(":disabled")).toBe(true);
+    }
+    expect(screen.getByLabelText("Mark image file").matches(":disabled")).toBe(true);
+    expect(screen.getByRole("tab", { name: "Icon" }).matches(":disabled")).toBe(true);
+    // Every colour swatch and field in the palette too.
+    const palette = [...body.querySelectorAll("button, input")].filter(
+      (el) => !drop.contains(el) && el.getAttribute("role") !== "tab",
+    );
+    expect(palette.length).toBeGreaterThan(0);
+    for (const el of palette) {
+      expect([el.outerHTML.slice(0, 60), el.matches(":disabled")]).toEqual([el.outerHTML.slice(0, 60), true]);
+    }
+    // A file dropped meanwhile is not picked.
+    fireEvent.drop(drop, {
+      dataTransfer: { files: [new File([new Uint8Array(8)], "other.svg", { type: "image/svg+xml" })] },
+    });
+    expect(within(drop).queryByText(/other\.svg/)).toBeNull();
+    put.resolve({ mark: "image:mark.png", hash: "abc123" });
+    await put.settled();
+    await waitFor(() => expect(readPreference(preferences.projectMark, "alpha")).toBe("image:mark.png"));
   });
 
   it("unmounting during an upload drops the late result", async () => {
@@ -386,6 +424,30 @@ describe("ProjectSettingsCard appearance", () => {
     fireEvent.click(within(screen.getByTestId("appearance-emoji-grid")).getByRole("button", { name: "🚀" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(markCalls().map(([, init]) => init?.method)).toEqual(["DELETE"]);
+    expect(readPreference(preferences.projectMark, "alpha")).toBe("emoji:🚀");
+  });
+
+  it("the editor stays locked until the image DELETE has finished", async () => {
+    // A new upload must not be able to start while the old file is still
+    // being deleted, or the late DELETE could remove it.
+    writePreference(preferences.projectMark, "image:mark.png", "alpha");
+    let answer!: (res: Response) => void;
+    const pending = new Promise<Response>((r) => (answer = r));
+    vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+      String(url) === "/api/projects/alpha/mark" && init?.method === "DELETE"
+        ? pending
+        : ({ ok: true, status: 200, json: async () => ({}) } as Response),
+    );
+    render(<ProjectSettingsCard project="alpha" />);
+    unfold();
+    fireEvent.click(screen.getByRole("tab", { name: "Emoji" }));
+    fireEvent.click(within(screen.getByTestId("appearance-emoji-grid")).getByRole("button", { name: "🚀" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(markCalls()).toHaveLength(1));
+    expect(screen.getByTestId("appearance-body")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled).toBe(true);
+    answer({ ok: true, status: 204, json: async () => ({}) } as Response);
+    await waitFor(() => expect(screen.queryByTestId("appearance-body")).toBeNull());
     expect(readPreference(preferences.projectMark, "alpha")).toBe("emoji:🚀");
   });
 });

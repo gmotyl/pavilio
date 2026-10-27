@@ -147,7 +147,8 @@ export default function AppearanceEditor({ project }: { project: string }) {
   };
 
   const pickImage = (file: File | undefined) => {
-    if (!file) return;
+    // A drop is not a form control, so the locked fieldset does not stop it.
+    if (!file || busy) return;
     const problem = markImageProblem(file);
     if (problem) {
       setImageError(problem);
@@ -182,13 +183,20 @@ export default function AppearanceEditor({ project }: { project: string }) {
         setBusy(false);
       }
     } else if (mark !== storedMark) {
-      // Leaving an image mark: the file in the project folder goes with it.
-      if (storedMark.startsWith("image:") && !mark.startsWith("image:")) {
-        void deleteMarkImage(project).catch(() => {
-          alerts.error(`Could not delete the mark image for ${project}`);
-        });
-      }
       writePreference(preferences.projectMark, mark, project);
+      // Leaving an image mark: the file in the project folder goes with it.
+      // Stay locked until the DELETE is done, so a new upload cannot start
+      // and then be removed by it.
+      if (storedMark.startsWith("image:") && !mark.startsWith("image:")) {
+        setBusy(true);
+        try {
+          await deleteMarkImage(project);
+        } catch {
+          alerts.error(`Could not delete the mark image for ${project}`);
+        } finally {
+          setBusy(false);
+        }
+      }
     }
     if (color.toLowerCase() !== storedColor.toLowerCase()) {
       void setColor(project, color).catch(() => {
@@ -248,9 +256,14 @@ export default function AppearanceEditor({ project }: { project: string }) {
           data-testid="appearance-body"
           className="mt-3"
           onKeyDown={(e) => {
-            if (e.key === "Escape") fold();
+            // Not while saving: the PUT has already replaced the bytes, so
+            // there is nothing left to cancel (Cancel is disabled too).
+            if (e.key === "Escape" && !busy) fold();
           }}
         >
+          {/* Locked while saving: the save writes the draft it started with, so
+              an edit made meanwhile would be silently dropped. */}
+          <fieldset disabled={busy} className="contents" data-testid="appearance-draft">
           <ProjectColorPicker
             project={project}
             variant="inline"
@@ -471,6 +484,7 @@ export default function AppearanceEditor({ project }: { project: string }) {
               </div>
             )}
           </div>
+          </fieldset>
           <div className="mt-3 flex justify-end gap-2">
             <button type="button" data-testid="appearance-cancel" onClick={fold} disabled={busy} className="rounded px-2 py-1 text-[11px]" style={btn}>
               Cancel
