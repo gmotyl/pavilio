@@ -116,3 +116,23 @@ describe("ProjectMark", () => {
     for (const glyph of all) expect([glyph, isSingleEmoji(glyph)]).toEqual([glyph, true]);
   });
 });
+
+describe("ProjectMark — no project", () => {
+  // `POST /api/terminal/sessions` defaults an omitted project to "", and a
+  // whitespace-only directory name passes discovery. Neither is a preference
+  // scope, so the mark must not read `project.mark` for it (storageKey throws).
+  for (const project of ["", "   "]) {
+    it(`renders a neutral folder tile for ${JSON.stringify(project)}`, () => {
+      render(<ProjectMark project={project} />);
+      const tile = screen.getByTestId("project-mark");
+      expect(screen.getByTestId("project-mark-icon-folder")).toBeInTheDocument();
+      expect(tile.dataset.color).toBe("var(--text-muted)");
+    });
+  }
+
+  it("ignores an image mark for a missing project (no /api/projects//mark request)", () => {
+    render(<ProjectMark project="" mark="image:mark.png" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByTestId("project-mark-icon-folder")).toBeInTheDocument();
+  });
+});

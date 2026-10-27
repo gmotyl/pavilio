@@ -9,6 +9,7 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ProjectKind } from "../../../server/lib/projects/kind";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, subscribePreference } from "../../preferences/store";
+import { isPreferenceScope } from "../../preferences/types";
 import { useProjectColors } from "../terminal/useProjectColors";
 import { markImageSrc, useMarkHash } from "./markImage";
 import { parseProjectMark } from "./projectIdentity";
@@ -22,13 +23,25 @@ export const PROJECT_MARK_COMPONENTS: Record<string, LucideIcon> = {
   cam: Camera,
 };
 
+const noop = () => {};
+
+/**
+ * The stored mark, or "" for a missing project. A projectless terminal session
+ * carries `project: ""` (the server's default) and discovery accepts a
+ * whitespace-only directory name; neither is a preference scope, and
+ * `storageKey` throws for both, so they read nothing.
+ */
 function useStoredMark(project: string): string {
+  const scoped = isPreferenceScope(project);
   return useSyncExternalStore(
-    (cb) => subscribePreference(preferences.projectMark, project, cb),
-    () => readPreference(preferences.projectMark, project),
+    (cb) => (scoped ? subscribePreference(preferences.projectMark, project, cb) : noop),
+    () => (scoped ? readPreference(preferences.projectMark, project) : ""),
     () => "",
   );
 }
+
+/** The tile colour of a missing project: neutral, never a derived project colour. */
+const NO_PROJECT_COLOR = "var(--text-muted)";
 
 export interface ProjectMarkProps {
   project: string;
@@ -67,12 +80,14 @@ function MarkImage({ src, fallback }: { src: string; fallback: ReactNode }) {
 
 export function ProjectMark({ project, mark, color, size = 22, kind }: ProjectMarkProps) {
   const { colorFor } = useProjectColors();
+  const scoped = isPreferenceScope(project);
   const stored = useStoredMark(project);
-  const hex = color ?? colorFor(project);
+  const hex = color ?? (scoped ? colorFor(project) : NO_PROJECT_COLOR);
   const parsed = parseProjectMark((kind && KIND_MARKS[kind]) ?? mark ?? stored);
   const emoji = parsed.startsWith("emoji:") ? parsed.slice(6) : null;
   const hash = useMarkHash(project);
-  const image = parsed.startsWith("image:") ? markImageSrc(project, hash) : null;
+  // No project, no mark file to fetch: an image mark falls back to the glyph.
+  const image = scoped && parsed.startsWith("image:") ? markImageSrc(project, hash) : null;
   const name = parsed.startsWith("lucide:") ? parsed.slice(7) : "folder";
   const Icon = PROJECT_MARK_COMPONENTS[name] ?? Folder;
 
