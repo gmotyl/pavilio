@@ -130,13 +130,16 @@ function metaContent(document: Document, selector: string): string | null {
   return value ? value : null;
 }
 
-async function fetchHtml(url: string, options: FetchArticleOptions): Promise<string> {
+/** The page's HTML, or null when a followed redirect landed on an Atlassian host. */
+async function fetchHtml(url: string, options: FetchArticleOptions): Promise<string | null> {
   const doFetch = options.fetch ?? fetch;
   const res = await doFetch(url, {
     headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
     redirect: "follow",
     signal: AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS),
   });
+  // A redirect onto Atlassian ends at its login page, which would be saved as the article.
+  if (res.url && isAtlassianHost(res.url)) return null;
   if (!res.ok) throw new Error(`fetch failed for ${url}: HTTP ${res.status}`);
   const type = res.headers.get("content-type") ?? "";
   if (type && !/text\/html|application\/xhtml\+xml/i.test(type)) {
@@ -160,12 +163,12 @@ export async function fetchArticle(
   options: FetchArticleOptions = {},
 ): Promise<ArticleReceipt> {
   // Atlassian pages answer an anonymous fetch with a login stub; they go through the agent's MCP.
-  if (isAtlassianHost(url)) {
-    return { raw: "", title: "", warning: ATLASSIAN_WARNING };
-  }
+  const atlassianRefusal: ArticleReceipt = { raw: "", title: "", warning: ATLASSIAN_WARNING };
+  if (isAtlassianHost(url)) return atlassianRefusal;
   // Refuse a symlinked or escaping wiki/raw before any network or disk work.
   const rawDir = ensureContainedDir(projectDir, ["wiki", "raw"]);
   const html = await fetchHtml(url, options);
+  if (html === null) return atlassianRefusal;
   const { document } = parseHTML(html);
 
   const ogTitle = metaContent(document, 'meta[property="og:title"]');

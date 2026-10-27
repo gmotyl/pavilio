@@ -182,6 +182,24 @@ describe("fetchArticle", () => {
     expect(existsSync(join(projectDir, "wiki"))).toBe(false);
   });
 
+  it("refuses a URL that redirects to atlassian.net", async () => {
+    const spy = (async () => {
+      const res = new Response(ARTICLE_HTML, { headers: { "content-type": "text/html" } });
+      // A followed redirect surfaces only as the response's final url.
+      Object.defineProperty(res, "url", { value: "https://acme.atlassian.net/login?continue=%2Fwiki" });
+      return res;
+    }) as typeof fetch;
+
+    const receipt = await fetchArticle(projectDir, "https://go.example.com/runbook", { fetch: spy });
+
+    expect(receipt).toEqual({
+      raw: "",
+      title: "",
+      warning: "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)",
+    });
+    expect(readdirSync(join(projectDir, "wiki", "raw"))).toEqual([]);
+  });
+
   it("still fetches atlassian.com marketing pages", async () => {
     const urls: string[] = [];
     const spy = (async (input: string | URL | Request) => {
