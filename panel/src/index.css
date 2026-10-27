@@ -513,8 +513,8 @@ input[type="checkbox"] {
      - the expanded session row (`SessionIndicator`), for that session;
      - the project row (`ProjectActivityLed`), for any of its sessions — even
        over an attention dot belonging to a different session. That trade was
-       accepted on purpose (navigation-polish Q8): it lasts only as long as the
-       audio, and the attention dot returns when speech stops.
+       accepted on purpose: it lasts only as long as the audio, and the
+       attention dot returns when speech stops.
 
    Its box is EXACTLY the LED's, because in a single-slot row the two swap in
    and out of the same place and the row's text must not move when they do. So

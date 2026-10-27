@@ -105,6 +105,11 @@ describe("ProjectActivityLed", () => {
       </Wrap>,
     );
     expect(leds(container)).toEqual(["busy"]);
+    // Labelled like the idle and attention dots, so a screen reader names it.
+    expect(container.querySelector('.terminal-led[data-state="busy"]')).toHaveAttribute(
+      "aria-label",
+      "Busy",
+    );
   });
 
   it("attention wins over busy in the aggregate dot", () => {

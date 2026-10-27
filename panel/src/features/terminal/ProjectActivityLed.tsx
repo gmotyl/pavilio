@@ -4,7 +4,7 @@ import { useAggregateActivityFlags } from "./useTerminalActivityChannel";
 import { useAttentionPulse } from "./useAttentionPulse";
 
 /**
- * Aggregate activity indicator for a project row: one fixed-width slot holding
+ * The aggregate activity dot for a project row: one fixed-width slot holding
  * at most one thing, picked by priority —
  *  1. a speaker when any session of the project is being spoken,
  *  2. a green "needs attention" dot when any session is waiting,
@@ -46,7 +46,14 @@ export function ProjectActivityLed({
       />
     );
   } else if (hasBusy) {
-    content = <span className="terminal-led" data-state="busy" title="Busy" />;
+    content = (
+      <span
+        className="terminal-led"
+        data-state="busy"
+        title="Busy"
+        aria-label="Busy"
+      />
+    );
   } else if (hasAny) {
     content = (
       <span
