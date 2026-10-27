@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Maximize, Minimize } from "lucide-react";
 import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
@@ -81,6 +82,20 @@ const mockupLink = (relativePath: string, filePath: string, project: string) => 
 const BUTTON_CLASS =
   "text-sm px-2 py-1 rounded-md transition-colors cursor-pointer";
 
+/** The `history.state` key that marks the entry pushed on entering fullscreen. */
+const FULLSCREEN_STATE = "mockupFullscreen";
+
+const isFullscreenEntry = (state: unknown) =>
+  typeof state === "object" && state !== null && FULLSCREEN_STATE in state;
+
+/**
+ * The fixed full-viewport layer fullscreen toggles on the element that already
+ * holds the mockup. Above the panel chrome and alerts (z-60), below modals
+ * (z-[100]). The classes change on the same node, never a new parent, so the
+ * iframe is not re-mounted and an interactive mockup keeps its state.
+ */
+const LAYER_CLASS = "fixed inset-0 z-[90]";
+
 /**
  * A mockup with its toolbar: an HTML mockup in a sandboxed frame with a width
  * picker, or an image mockup (SVG, PNG, JPEG, WebP) through `<img>` with a
@@ -108,6 +123,55 @@ export function MockupFrame({
     const changedPath = lastMessage.path as string | undefined;
     if (changedPath?.includes(filePath)) setImageVersion((v) => v + 1);
   }, [lastMessage, filePath, isImage]);
+  // Fullscreen owns one history entry, pushed on enter, so browser Back exits it
+  // and leaves the mockup open. Leaving through the exit button or Escape pops
+  // that entry again; otherwise a duplicate of this page would sit behind it
+  // and the next Back would seem to do nothing.
+  const [fullscreen, setFullscreen] = useState(false);
+  const enterFullscreen = () => {
+    const state: unknown = window.history.state;
+    window.history.pushState(
+      { ...(typeof state === "object" && state !== null ? state : {}), [FULLSCREEN_STATE]: true },
+      "",
+    );
+    setFullscreen(true);
+  };
+  const exitFullscreen = useCallback(() => {
+    setFullscreen(false);
+    if (isFullscreenEntry(window.history.state)) window.history.back();
+  }, []);
+  useEffect(() => {
+    if (!fullscreen) return;
+    // Back has already popped the entry: only the state has to follow.
+    const onPopState = () => setFullscreen(false);
+    // A key pressed inside the frame stays in the frame's document; Escape
+    // works once focus is on the panel, and the exit button always does.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitFullscreen();
+    };
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [fullscreen, exitFullscreen]);
+  const exitButton = fullscreen && (
+    <button
+      type="button"
+      onClick={exitFullscreen}
+      aria-label="Exit fullscreen"
+      title="Exit fullscreen"
+      className="fixed top-3 right-3 w-10 h-10 rounded-full grid place-items-center cursor-pointer"
+      style={{
+        background: "rgba(18, 18, 21, 0.62)",
+        color: "#fff",
+        boxShadow: "0 2px 10px rgba(0, 0, 0, 0.35)",
+      }}
+    >
+      <Minimize size={18} />
+    </button>
+  );
   const workspaceRoot = useWorkspaceRoot();
   const relativePath = workspaceRoot
     ? relativeToWorkspace(absolutePath, workspaceRoot)
@@ -174,6 +238,18 @@ export function MockupFrame({
                 {w.label}
               </button>
             ))}
+        <button
+          data-testid={`${testIdPrefix}-fullscreen-toggle`}
+          onClick={enterFullscreen}
+          className={`${BUTTON_CLASS} ml-auto flex items-center gap-1.5`}
+          style={{
+            color: "var(--text-secondary)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        >
+          <Maximize size={14} />
+          Fullscreen
+        </button>
         <ViewerActions
           absolutePath={absolutePath}
           // The path that means something inside an agent conversation, not the
@@ -197,7 +273,11 @@ export function MockupFrame({
       {isImage ? (
         // The pane scrolls, not the page: at 100% a large export overflows in
         // both directions inside the same height-bounded box the frame gets.
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div
+          data-testid={fullscreen ? `${testIdPrefix}-fullscreen` : undefined}
+          className={`${fullscreen ? LAYER_CLASS : "flex-1 min-h-0"} overflow-auto`}
+          style={fullscreen ? { background: "var(--bg-base)" } : undefined}
+        >
           <img
             data-testid={`${testIdPrefix}-image`}
             src={
@@ -207,10 +287,15 @@ export function MockupFrame({
             className="block mx-auto"
             style={{ maxWidth: zoom.maxWidth, height: "auto" }}
           />
+          {exitButton}
         </div>
       ) : (
         /* Centres the frame once a device width leaves it narrower than the pane. */
-        <div className="flex justify-center flex-1 min-h-0">
+        <div
+          data-testid={fullscreen ? `${testIdPrefix}-fullscreen` : undefined}
+          className={`flex justify-center ${fullscreen ? LAYER_CLASS : "flex-1 min-h-0"}`}
+          style={fullscreen ? { background: "var(--bg-base)" } : undefined}
+        >
           {/* The width lives in `style` rather than in a key or a swapped wrapper
               element: React then keeps this exact iframe across a width change, so
               an interactive mockup does not reload and lose its state. */}
@@ -229,6 +314,7 @@ export function MockupFrame({
               background: "var(--bg-surface)",
             }}
           />
+          {exitButton}
         </div>
       )}
     </div>
