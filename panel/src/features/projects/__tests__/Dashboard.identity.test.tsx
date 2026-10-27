@@ -51,6 +51,7 @@ describe("Dashboard card identity", () => {
     __resetProjectColorsForTests();
     localStorage.clear();
     __resetPreferenceStoreForTests();
+    delete document.documentElement.dataset.theme;
   });
 
   it("Dashboard card shows a 28px mark and a coloured name", () => {
@@ -73,5 +74,18 @@ describe("Dashboard card identity", () => {
     expect(
       tile.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("Dashboard card name takes the light-theme mix under data-theme=light", () => {
+    document.documentElement.dataset.theme = "light";
+    render(
+      <MemoryRouter>
+        <Dashboard />
+      </MemoryRouter>,
+    );
+    const name = screen.getByRole("heading", { name: "metro" });
+    expect(name.style.color).toBe(
+      normalised("color-mix(in srgb, #d19a66 72%, black)"),
+    );
   });
 });

@@ -6,7 +6,7 @@ import { useFileDropTarget } from "../explorer/useFileDrag";
 import { projectHref } from "../shell/projectHref";
 import { useIsMobile } from "../shell/useIsMobile";
 import { ProjectMark } from "./ProjectMark";
-import { nameColor, usePanelTheme } from "./nameColor";
+import { nameColor, usePanelTheme, type PanelTheme } from "./nameColor";
 import { useProjectColors } from "../terminal/useProjectColors";
 import {
   FileText,
@@ -46,17 +46,18 @@ function ProjectCard({
   project,
   isFav,
   onToggleFav,
+  theme,
 }: {
   project: Project;
   isFav: boolean;
   onToggleFav: () => void;
+  theme: PanelTheme;
 }) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const formattedDate = formatDate(project.latestProgressDate);
   const { hover, dropHandlers } = useFileDropTarget(project.name);
   const { colorFor } = useProjectColors();
-  const theme = usePanelTheme();
 
   return (
     <div
@@ -138,6 +139,9 @@ function ProjectCard({
 export default function Dashboard() {
   const projects = useProjects();
   const { toggle, isFavorite, sortWithFavorites } = useFavorites();
+  // Read once here and passed down: the hook backs onto a MutationObserver,
+  // and one per card would mean one observer per project.
+  const theme = usePanelTheme();
 
   const sorted = sortWithFavorites(projects);
 
@@ -185,6 +189,7 @@ export default function Dashboard() {
               project={project}
               isFav={isFavorite(project.name)}
               onToggleFav={() => toggle(project.name)}
+              theme={theme}
             />
           ))}
         </div>
