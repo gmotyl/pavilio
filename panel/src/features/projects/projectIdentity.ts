@@ -40,6 +40,40 @@ export const PROJECT_MARK_ICONS: readonly string[] = [
 ];
 
 /**
+ * The curated emoji the Appearance editor offers as a tappable grid, by
+ * category (20 each). Anything else can still be pasted; every entry here must
+ * pass `isSingleEmoji` (text-default glyphs carry VS16).
+ */
+export const PROJECT_MARK_EMOJI: Readonly<
+  Record<"Tech" | "Objects" | "Nature" | "Food" | "Symbols" | "Faces", readonly string[]>
+> = {
+  Tech: [
+    "💻", "🖥️", "⌨️", "🖱️", "📱", "🔌", "🔋", "💾", "💿", "📡",
+    "🛰️", "🤖", "🧠", "🧪", "🔬", "⚙️", "🔧", "🛠️", "🧰", "🚀",
+  ],
+  Objects: [
+    "📦", "📚", "📝", "📌", "📎", "🔑", "🔒", "💡", "🔦", "🧭",
+    "⏰", "📷", "🎥", "🎧", "🎨", "🎯", "🎲", "🧩", "🏆", "💎",
+  ],
+  Nature: [
+    "🌱", "🌿", "🍀", "🌲", "🌵", "🌸", "🌻", "🌊", "🔥", "⚡",
+    "🌙", "⭐", "☀️", "🌈", "❄️", "🐝", "🦋", "🐙", "🦊", "🐢",
+  ],
+  Food: [
+    "🍎", "🍋", "🍉", "🍇", "🍓", "🍒", "🥑", "🌶️", "🥕", "🍄",
+    "🍞", "🧀", "🍕", "🍔", "🌮", "🍣", "🍩", "🍪", "☕", "🍵",
+  ],
+  Symbols: [
+    "❤️", "💜", "💙", "💚", "💛", "🧡", "✅", "❌", "⚠️", "♻️",
+    "🔴", "🟢", "🔵", "🟣", "🔶", "🔷", "✨", "💬", "🔔", "🏁",
+  ],
+  Faces: [
+    "😀", "😎", "🤓", "🥳", "😇", "🤔", "😴", "🤯", "🥶", "🤠",
+    "👻", "👽", "👾", "💀", "🎃", "😺", "🐶", "🐱", "🦄", "🐼",
+  ],
+};
+
+/**
  * FNV-1a over the name's UTF-16 code units. Hand-rolled rather than anything
  * locale- or engine-dependent, so one name gets one colour on every machine.
  */
