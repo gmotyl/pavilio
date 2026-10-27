@@ -47,6 +47,8 @@ import {
 import { preferences } from "../../../preferences/declarations";
 import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
 import { __resetProjectColorsForTests } from "../../terminal/useProjectColors";
+import { nameColor } from "../../projects/nameColor";
+import { installMatchMedia } from "../../../test-utils";
 
 // "vector" is the current project in most of these tests, matching the sibling
 // LeftSidebar.lastTab.test.tsx's mocked project. "atlas" is a second project
@@ -552,6 +554,119 @@ describe("LeftSidebar.mark", () => {
       expect(tile.getAttribute("data-color")).toBe("#98c379");
       expect(tile.querySelector("[data-testid='project-mark-icon-folder']")).toBeTruthy();
     });
+  });
+});
+
+/**
+ * Mockup N: each project name in its own colour (mixed toward black on a light
+ * theme), the current row bold on the active background, a 22px tile (24px on a
+ * phone, mockup S) and session rows indented to sit under the name.
+ */
+describe("LeftSidebar.identity", () => {
+  const nativeMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+
+  beforeEach(() => {
+    __resetProjectColorsForTests();
+    __resetPreferenceStoreForTests();
+    writePreference(preferences.projectColor, "#e06c75", "vector");
+    writePreference(preferences.projectColor, "#98c379", "atlas");
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete document.documentElement.dataset.theme;
+    if (nativeMatchMedia)
+      Object.defineProperty(window, "matchMedia", nativeMatchMedia);
+    else delete (window as { matchMedia?: unknown }).matchMedia;
+    __resetProjectColorsForTests();
+    localStorage.clear();
+    __resetPreferenceStoreForTests();
+  });
+
+  function setupAt(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <TerminalSpeechHost>
+          <LeftSidebar />
+        </TerminalSpeechHost>
+      </MemoryRouter>,
+    );
+  }
+
+  /** A CSS colour as jsdom serialises it, so a hex and its rgb() compare equal. */
+  function normalised(color: string): string {
+    const probe = document.createElement("span");
+    probe.style.color = color;
+    return probe.style.color;
+  }
+
+  const nameLink = (project: string) =>
+    screen.getByRole("link", { name: project });
+  const tileOf = (project: string) =>
+    screen
+      .getByTestId(`sidebar-project-row-${project}`)
+      .querySelector("[data-testid='project-mark']") as HTMLElement;
+
+  it("sidebar project names use the project colour", () => {
+    setupAt("/");
+    expect(nameLink("vector").style.color).toBe(normalised(nameColor("#e06c75", "dark")));
+    expect(nameLink("atlas").style.color).toBe(normalised(nameColor("#98c379", "dark")));
+
+    // Light theme: the 72%-toward-black mix keeps contrast on pale surfaces.
+    cleanup();
+    document.documentElement.dataset.theme = "light";
+    setupAt("/");
+    expect(nameLink("vector").style.color).toBe(
+      normalised("color-mix(in srgb, #e06c75 72%, black)"),
+    );
+  });
+
+  it("current project name is bold on the active background", () => {
+    setupAt("/project/vector/notes");
+    expect(screen.getByTestId("sidebar-project-row-vector").style.background).toBe(
+      "var(--bg-active)",
+    );
+    expect(nameLink("vector").style.fontWeight).toBe("600");
+    // The current row keeps its project colour; only the weight marks it.
+    expect(nameLink("vector").style.color).toBe(normalised("#e06c75"));
+    expect(screen.getByTestId("sidebar-project-row-atlas").style.background).toBe(
+      "transparent",
+    );
+    expect(nameLink("atlas").style.fontWeight).not.toBe("600");
+  });
+
+  it("sidebar mark tile is 22px on desktop and 24px on mobile", () => {
+    installMatchMedia();
+    setupAt("/");
+    expect(tileOf("vector").style.width).toBe("22px");
+    expect(tileOf("vector").style.height).toBe("22px");
+    // Session rows start under the name: row inset (4) + chevron (16) + gap (4)
+    // + activity slot (10) + gap (4) + tile + gap (4), less the list's 1px
+    // guide border and the session button's 6px padding.
+    expand("vector");
+    const list = screen.getByTestId("sidebar-session-s1").closest("ul") as HTMLElement;
+    expect(list.style.marginLeft).toBe(`${42 + 22 - 7}px`);
+
+    cleanup();
+    installMatchMedia({ mobile: true });
+    setupAt("/");
+    expect(tileOf("vector").style.width).toBe("24px");
+    // The expanded state may carry over from the first render; open it if not.
+    if (screen.queryByTestId("sidebar-session-s1") === null) expand("vector");
+    const mobileList = screen.getByTestId("sidebar-session-s1").closest("ul") as HTMLElement;
+    expect(mobileList.style.marginLeft).toBe(`${42 + 24 - 7}px`);
+  });
+
+  it("sidebar expand control uses lucide chevrons", () => {
+    setupAt("/");
+    const control = screen.getByTestId("sidebar-project-expand-vector");
+    expect(control.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-chevron-right",
+    );
+    fireEvent.click(control);
+    expect(control.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-chevron-down",
+    );
   });
 });
 

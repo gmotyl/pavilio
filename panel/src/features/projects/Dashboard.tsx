@@ -5,8 +5,10 @@ import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
 import { useFileDropTarget } from "../explorer/useFileDrag";
 import { projectHref } from "../shell/projectHref";
 import { useIsMobile } from "../shell/useIsMobile";
+import { ProjectMark } from "./ProjectMark";
+import { nameColor, usePanelTheme } from "./nameColor";
+import { useProjectColors } from "../terminal/useProjectColors";
 import {
-  FolderOpen,
   FileText,
   TrendingUp,
   Map as MapIcon,
@@ -53,6 +55,8 @@ function ProjectCard({
   const isMobile = useIsMobile();
   const formattedDate = formatDate(project.latestProgressDate);
   const { hover, dropHandlers } = useFileDropTarget(project.name);
+  const { colorFor } = useProjectColors();
+  const theme = usePanelTheme();
 
   return (
     <div
@@ -100,9 +104,14 @@ function ProjectCard({
         />
       </button>
 
-      <div className="flex items-center gap-2 mb-3">
-        <FolderOpen size={16} style={{ color: "var(--accent)" }} />
-        <h2 className="text-[15px] font-semibold">{project.name}</h2>
+      <div className="flex items-center gap-2.5 mb-3">
+        <ProjectMark project={project.name} size={28} kind={project.kind} />
+        <h2
+          className="text-[15px] font-semibold"
+          style={{ color: nameColor(colorFor(project.name), theme) }}
+        >
+          {project.name}
+        </h2>
       </div>
 
       <div className="flex flex-wrap gap-1 mb-3">

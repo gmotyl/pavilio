@@ -36,8 +36,10 @@ import { useArchivedProjects } from "../projects/useArchivedProjects";
 import { useFavorites } from "../projects/useFavorites";
 import { useProjects } from "../projects/useProjects";
 import { ProjectMark } from "../projects/ProjectMark";
+import { nameColor, usePanelTheme } from "../projects/nameColor";
 import NewProjectDialog, { type NewProjectKind } from "../projects/NewProjectDialog";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
+import { useProjectColors } from "../terminal/useProjectColors";
 import { SessionIndicator } from "../terminal/SessionIndicator";
 import { useAllTerminalSessions } from "../terminal/useAllTerminalSessions";
 import {
@@ -204,6 +206,15 @@ export default function LeftSidebar() {
   const { isFavorite, toggle } = useFavorites();
   const { sessions } = useAllTerminalSessions();
   const isMobile = useIsMobile();
+  const { colorFor } = useProjectColors();
+  const theme = usePanelTheme();
+  // Mark tile: 22px on a desktop, 24px on a phone where the row is a tap target.
+  const tileSize = isMobile ? 24 : 22;
+  // Where a project row's name starts: row inset (4) + chevron (16) + gap (4)
+  // + activity slot (10) + gap (4) + tile + gap (4). The session list sits so
+  // its rows' content starts there too, net of its 1px guide border and the
+  // session button's 6px padding — so the tile size moves both together.
+  const sessionListIndent = 42 + tileSize - 7;
   const { archive, archivedNames, restore } = useArchivedProjects();
   const [newKind, setNewKind] = useState<NewProjectKind | null>(null);
   const [mobileAccessOpen, setMobileAccessOpen] = useState(false);
@@ -409,6 +420,10 @@ export default function LeftSidebar() {
       matchProjectFromPath(location.pathname)?.name === project.name;
 
     const fav = isFavorite(project.name);
+    // An unresolved (blank) name is not a preference scope: no tile and no
+    // colour lookup for it.
+    const hasName =
+      typeof project.name === "string" && project.name.trim() !== "";
 
     return (
       <li key={project.name}>
@@ -444,19 +459,20 @@ export default function LeftSidebar() {
           <ProjectActivityLed
             sessionIds={expandedNow ? [] : projectSessionIds}
           />
-          {/* An unresolved (blank) name is not a preference scope: no tile for it. */}
-          {typeof project.name === "string" && project.name.trim() !== "" && (
-            <ProjectMark project={project.name} size={18} kind={kind} />
+          {hasName && (
+            <ProjectMark project={project.name} size={tileSize} kind={kind} />
           )}
+          {/* The name wears the project colour on every row; the current one
+              is told apart by the active background and the weight alone. */}
           <NavLink
             to={projectHref(project.name, isMobile)}
             className="flex-1 truncate text-[13px] py-0.5"
-            style={({ isActive }) => ({
-              color:
-                isCurrent || isActive
-                  ? "var(--text-primary)"
-                  : "var(--text-secondary)",
-            })}
+            style={{
+              color: hasName
+                ? nameColor(colorFor(project.name), theme)
+                : "var(--text-secondary)",
+              fontWeight: isCurrent ? 600 : undefined,
+            }}
           >
             {project.name}
           </NavLink>
@@ -528,8 +544,11 @@ export default function LeftSidebar() {
         </div>
         {expandedNow && projectSessions.length > 0 && (
           <ul
-            className="ml-3 mt-0.5 pl-3 space-y-0.5 border-l"
-            style={{ borderColor: "var(--border-subtle)" }}
+            className="mt-0.5 space-y-0.5 border-l"
+            style={{
+              marginLeft: sessionListIndent,
+              borderColor: "var(--border-subtle)",
+            }}
           >
             {projectSessions.map((s) => {
               // The highlight tracks the project, not the route: a focused
