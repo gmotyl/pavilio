@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { preferences } from "../../../preferences/declarations";
 import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
@@ -114,6 +114,46 @@ describe("ProjectMark", () => {
     expect(all.length).toBeGreaterThanOrEqual(100);
     expect(new Set(all).size).toBe(all.length);
     for (const glyph of all) expect([glyph, isSingleEmoji(glyph)]).toEqual([glyph, true]);
+  });
+
+  it("a file-change for the project's mark file refetches its image", () => {
+    const sockets: { onmessage: ((ev: { data: string }) => void) | null }[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        static OPEN = 1;
+        readyState = 1;
+        onopen = null;
+        onmessage: ((ev: { data: string }) => void) | null = null;
+        onclose = null;
+        onerror = null;
+        constructor() {
+          sockets.push(this);
+        }
+        close() {}
+      },
+    );
+    try {
+      render(<ProjectMark project="alpha" mark="image:mark.png" color="#61afef" />);
+      const src = () => screen.getByTestId("project-mark").querySelector("img")?.getAttribute("src");
+      expect(src()).toBe("/api/projects/alpha/mark");
+      const push = (path: string) =>
+        act(() => {
+          for (const ws of sockets) ws.onmessage?.({ data: JSON.stringify({ type: "file-change", event: "change", path }) });
+        });
+      // Another project's mark, or another file of this one, changes nothing.
+      push("/ws/projects/beta/mark.png");
+      push("/ws/projects/alpha/PROJECT.md");
+      expect(src()).toBe("/api/projects/alpha/mark");
+      // Written by another tab or device: this tab busts its image cache.
+      push("/ws/projects/alpha/mark.png");
+      const first = src();
+      expect(first).toMatch(/^\/api\/projects\/alpha\/mark\?v=/);
+      push("/ws/projects/alpha/mark.png");
+      expect(src()).not.toBe(first);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
