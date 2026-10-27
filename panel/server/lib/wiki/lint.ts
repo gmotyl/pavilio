@@ -235,7 +235,7 @@ export function bodyFirstLine(absPath: string, body: string): number {
 /** A raw path (wiki-relative, `wiki/…` accepted) that snapshots material with an original URL. */
 function isExternalRaw(raw: string): boolean {
   const rel = raw.trim().replace(/^\/+/, "").replace(/^wiki\//, "");
-  return /^raw\/(?:article-[^/]+\.md|youtube-[^/]+\.md|repos\/.+)$/.test(rel);
+  return /^raw\/(?:(?:article|youtube|confluence|jira)-[^/]+\.md|repos\/.+)$/.test(rel);
 }
 
 /** A page that must carry `url`: a repo page, or a source page written from external material. */
