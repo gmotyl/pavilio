@@ -8,6 +8,27 @@ const projects = withProjectsDir("pavilio-mark-test-");
 
 vi.mock("../../config", () => configMock(() => projects.dir()));
 
+// Lets a test hold a PUT right after its rename, to interleave two mutations.
+const fsGate = vi.hoisted(() => ({
+  afterRename: null as null | ((target: string) => Promise<void>),
+  beforeUnlink: null as null | ((target: string) => Promise<void>),
+}));
+vi.mock("fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs/promises")>();
+  return {
+    ...actual,
+    default: actual,
+    rename: async (from: string, to: string) => {
+      await actual.rename(from, to);
+      await fsGate.afterRename?.(to);
+    },
+    unlink: async (path: string) => {
+      await fsGate.beforeUnlink?.(path);
+      await actual.unlink(path);
+    },
+  };
+});
+
 import markRouter from "../mark";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 3, 250, 251]);
@@ -20,6 +41,8 @@ const markFiles = (project = "p") =>
 
 describe("/api/projects/:name/mark", () => {
   beforeEach(() => {
+    fsGate.afterRename = null;
+    fsGate.beforeUnlink = null;
     mkdirSync(projectDir(), { recursive: true });
     writeFileSync(join(projectDir(), "PROJECT.md"), "# p");
   });
@@ -110,5 +133,68 @@ describe("/api/projects/:name/mark", () => {
     expect((await request(app()).delete("/api/projects/nope/mark")).status).toBe(404);
     // A traversal name never reaches the filesystem.
     expect((await request(app()).get("/api/projects/..%2F..%2Fetc/mark")).status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("concurrent PUTs of different types leave exactly one mark", async () => {
+    // Hold the PNG write just after its rename until the SVG write has renamed
+    // too (or 300 ms pass): unserialized, each then deletes the other's file.
+    let svgRenamed!: () => void;
+    const svgDone = new Promise<void>((r) => (svgRenamed = r));
+    let pngRenamed!: () => void;
+    const pngDone = new Promise<void>((r) => (pngRenamed = r));
+    fsGate.afterRename = async (target) => {
+      if (target.endsWith("mark.svg")) svgRenamed();
+      if (target.endsWith("mark.png")) {
+        pngRenamed();
+        await Promise.race([svgDone, new Promise((r) => setTimeout(r, 300))]);
+      }
+    };
+    const a = request(app()).put("/api/projects/p/mark").attach("image", PNG, "a.png").then((r) => r);
+    await pngDone;
+    const b = await request(app()).put("/api/projects/p/mark").attach("image", SVG, "b.svg");
+    const first = await a;
+    expect(first.status).toBe(200);
+    expect(b.status).toBe(200);
+    // Arrival order wins: the later PUT's file is the mark.
+    expect(markFiles()).toEqual(["mark.svg"]);
+  });
+
+  it("a PUT that arrives during a DELETE is not deleted by it", async () => {
+    writeFileSync(join(projectDir(), "mark.png"), PNG);
+    // Hold the DELETE before it unlinks mark.png until the PUT has renamed a
+    // new mark.png into place (or 300 ms pass).
+    let deleting!: () => void;
+    const deleteStarted = new Promise<void>((r) => (deleting = r));
+    let pngRenamed!: () => void;
+    const pngDone = new Promise<void>((r) => (pngRenamed = r));
+    let held = false;
+    fsGate.beforeUnlink = async (target) => {
+      if (held || !target.endsWith("mark.png")) return;
+      held = true;
+      deleting();
+      await Promise.race([pngDone, new Promise((r) => setTimeout(r, 300))]);
+    };
+    fsGate.afterRename = async (target) => {
+      if (target.endsWith("mark.png")) pngRenamed();
+    };
+    const del = request(app()).delete("/api/projects/p/mark").then((r) => r);
+    await deleteStarted;
+    const put = await request(app()).put("/api/projects/p/mark").attach("image", PNG, "a.png");
+    expect((await del).status).toBe(204);
+    expect(put.status).toBe(200);
+    expect(markFiles()).toEqual(["mark.png"]);
+  });
+
+  it("GET serves an archived project's mark; writes stay live-only", async () => {
+    const archived = join(projects.dir(), "archived", "old");
+    mkdirSync(archived, { recursive: true });
+    writeFileSync(join(archived, "PROJECT.md"), "# old");
+    writeFileSync(join(archived, "mark.png"), PNG);
+    const res = await request(app()).get("/api/projects/old/mark");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/^image\/png/);
+    expect((await request(app()).put("/api/projects/old/mark").attach("image", SVG, "b.svg")).status).toBe(404);
+    expect((await request(app()).delete("/api/projects/old/mark")).status).toBe(404);
+    expect(readdirSync(archived).filter((f) => f.startsWith("mark."))).toEqual(["mark.png"]);
   });
 });
