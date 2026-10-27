@@ -34,7 +34,14 @@ export type SaveAtlassianOptions = {
 /** A login marker only counts on bodies shorter than this; real pages may mention logging in. */
 export const LOGIN_MARKER_MAX_WORDS = 50;
 
-const LOGIN_MARKERS = [/log in/i, /sign up/i, /atlassian account/i, /you need to log in/i, /continue with google/i];
+// Whole phrases only: a bare `/log in/` matches "Catalog integration", `/sign up/` "Design update".
+const LOGIN_MARKERS = [
+  /\blog in\b/i,
+  /\bsign up\b/i,
+  /\batlassian account\b/i,
+  /\byou need to log in\b/i,
+  /\bcontinue with google\b/i,
+];
 
 const JIRA_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 

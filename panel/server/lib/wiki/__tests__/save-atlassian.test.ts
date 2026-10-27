@@ -185,6 +185,16 @@ describe("saveAtlassian", () => {
     expect(readFileSync(join(rawDir(), "confluence-123456-old-title.md"), "utf8")).toBe(old);
   });
 
+  it("matches login markers as whole phrases, not inside other words", () => {
+    const url = `https://${HOST}/browse/CHK-8`;
+    // "Catalog integration" contains "log in", "Design update" contains "sign up".
+    for (const body of ["Catalog integration is failing.", "Design update for checkout."]) {
+      const receipt = saveAtlassian(projectDir, url, { title: "Short", body, now: NOW });
+      expect(receipt.warning, body).toBeUndefined();
+      expect(readFileSync(join(rawDir(), "jira-CHK-8.md"), "utf8").endsWith(body), body).toBe(true);
+    }
+  });
+
   it("keeps a long body that mentions logging in", () => {
     const url = `https://${HOST}/browse/CHK-7`;
     const body = `${LONG_BODY}\nUsers who log in with SSO see the cached cart.`;
