@@ -60,7 +60,8 @@ const USAGE = `usage: scripts/wiki <command> [args]
   save-atlassian <p> <url> --title <t> [--meta k=v]
                                             {raw, title, replaced?}: stdin body →
                                             raw/confluence-<id>-<slug>.md | raw/jira-<KEY>.md;
-                                            --meta repeats | exit 2 {ask, reason} for a URL without
+                                            --meta repeats (distinct keys); body must be piped
+                                            | exit 2 {ask, reason} for a URL without
                                             an id | exit 1 {raw: "", title, warning} on a stub
   clone-repo <p> <url>                      {clonePath, commitSha, action}
   candidates                                {items: [{id, project, text, details, date, source}]}: the
@@ -96,10 +97,13 @@ export type CliDeps = {
   readStdin?: () => Promise<string>;
 };
 
-/** Read all of `process.stdin` as utf8. */
-async function readProcessStdin(): Promise<string> {
+type StdinLike = AsyncIterable<Buffer | string> & { isTTY?: boolean };
+
+/** Read all of `stdin` as utf8; a terminal is refused, since waiting for its EOF only hangs the agent. */
+export async function readProcessStdin(stdin: StdinLike = process.stdin): Promise<string> {
+  if (stdin.isTTY) throw new CliError("save-atlassian reads the body from stdin; it must be piped on stdin, not a terminal");
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  for await (const chunk of stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -295,12 +299,15 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       const [p, url] = only(parsed, 2, usage, ["title", "meta"]);
       const title = flag("title");
       if (title === undefined) throw new CliError(`save-atlassian needs --title: ${usage}`);
-      // `--meta key=value` repeats; pairs keep their command-line order.
-      const meta: Record<string, string> = {};
+      // `--meta key=value` repeats; pairs keep their command-line order (entries, not an object,
+      // which would sort integer-like keys first). A repeated key is refused, like a repeated flag.
+      const meta: Array<[string, string]> = [];
       for (const pair of parsed.flags.get("meta") ?? []) {
         const eq = pair.indexOf("=");
-        if (eq <= 0) throw new CliError(`--meta needs key=value, got ${JSON.stringify(pair)}`);
-        meta[pair.slice(0, eq)] = pair.slice(eq + 1);
+        const key = pair.slice(0, eq);
+        if (eq <= 0 || !key.trim()) throw new CliError(`--meta needs key=value, got ${JSON.stringify(pair)}`);
+        if (meta.some(([k]) => k === key)) throw new CliError(`--meta key ${JSON.stringify(key)} given more than once`);
+        meta.push([key, pair.slice(eq + 1)]);
       }
       const dir = projectDir(workspaceRoot, p);
       if (!parseAtlassianUrl(url)) {

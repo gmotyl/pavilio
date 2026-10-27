@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { promisify } from "util";
 
-import { main, type CliDeps } from "../cli";
+import { main, readProcessStdin, type CliDeps } from "../cli";
 import { hashRecord } from "../ledger";
 import type { FetchLike } from "../project";
 
@@ -296,12 +296,48 @@ describe("wiki cli", () => {
       const text = readFileSync(join(project, "wiki", res.json.raw), "utf8");
       expect(text).toContain("- status: Done\n- assignee: Greg = owner\n");
 
-      const bad = await cli(
-        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug", "--meta", "status"],
+      for (const pair of ["status", "=x", " =x"]) {
+        const bad = await cli(
+          ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug", "--meta", pair],
+          stdin(body),
+        );
+        expect(bad.code, pair).toBe(1);
+        expect(bad.json.error, pair).toMatch(/--meta/);
+      }
+    });
+
+    it("save-atlassian refuses a repeated --meta key", async () => {
+      const res = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug",
+          "--meta", "z=1", "--meta", "z=2"],
         stdin(body),
       );
-      expect(bad.code).toBe(1);
-      expect(bad.json.error).toMatch(/--meta/);
+      expect(res.code).toBe(1);
+      expect(res.json.error).toMatch(/--meta key "z" given more than once/);
+      expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
+    });
+
+    it("save-atlassian keeps --meta in command-line order, integer-like keys included", async () => {
+      const res = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug",
+          "--meta", "z=1", "--meta", "2=a"],
+        stdin(body),
+      );
+      expect(res.code).toBe(0);
+      const text = readFileSync(join(project, "wiki", res.json.raw), "utf8");
+      expect(text).toContain("- z: 1\n- 2: a\n");
+    });
+
+    it("save-atlassian refuses a terminal stdin instead of waiting for EOF", async () => {
+      const tty = { isTTY: true, [Symbol.asyncIterator]: () => { throw new Error("must not read a TTY"); } };
+      const res = await cli(
+        ["save-atlassian", "demo", PAGE, "--title", "Runbook"],
+        { readStdin: () => readProcessStdin(tty) },
+      );
+      expect(res.code).toBe(1);
+      expect(res.json.error).toMatch(/piped on stdin/);
+      expect(res.stderr).toMatch(/usage:/);
+      expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
     });
 
     it("save-atlassian exits 2 with ask for a URL without an id", async () => {

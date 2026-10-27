@@ -26,7 +26,8 @@ export type AtlassianReceipt = {
 export type SaveAtlassianOptions = {
   title: string;
   body: string;
-  meta?: Record<string, string>;
+  /** Written in order; entries keep integer-like keys where a plain object would sort them first. */
+  meta?: Record<string, string> | Array<[string, string]>;
   now?: Date;
 };
 
@@ -120,7 +121,8 @@ export function saveAtlassian(projectDir: string, url: string, opts: SaveAtlassi
   }
 
   const captured = (opts.now ?? new Date()).toISOString().slice(0, 10);
-  const meta = Object.entries(opts.meta ?? {}).map(([key, value]) => `- ${oneLine(key)}: ${oneLine(value)}`);
+  const pairs = Array.isArray(opts.meta) ? opts.meta : Object.entries(opts.meta ?? {});
+  const meta = pairs.map(([key, value]) => `- ${oneLine(key)}: ${oneLine(value)}`);
   const header = [
     "---",
     `source_url: ${JSON.stringify(url)}`,

@@ -134,6 +134,17 @@ describe("saveAtlassian", () => {
     expect(existsSync(rawDir()) ? readdirSync(rawDir()) : []).toEqual([]);
   });
 
+  it("writes meta pairs in the given order when passed as entries", () => {
+    const receipt = saveAtlassian(projectDir, `https://${HOST}/browse/ENG-7`, {
+      title: "Bug",
+      body: "Real issue body with enough words to pass the stub guard.",
+      meta: [["z", "1"], ["2", "a"]],
+      now: NOW,
+    });
+    const text = readFileSync(join(projectDir, "wiki", receipt.raw), "utf8");
+    expect(text).toContain("- z: 1\n- 2: a\n");
+  });
+
   it("collapses newlines in title and meta so nothing injects a heading", () => {
     const url = `https://${HOST}/browse/CHK-9`;
     const receipt = saveAtlassian(projectDir, url, {
