@@ -115,8 +115,9 @@ is optional, and only its `## Archived Projects` rows are refused.
 An in-project path that is not a record (`tasks.md`, a delta spec under `specs/`, an active
 change's files, today's progress — `CONVENTIONS.md § Identity and the ledger`) is refused with
 the reason before any `--only`. A raw snapshot is then a record: `pending <p> --only wiki/raw/<file>`
-gives its hash. A `fetch-article` receipt with `warning` → delete that raw file, write no source
-page, report the warning. `fetch-youtube` exit 2 means `uv` is missing — pass its `reason` (the
+gives its hash. A `fetch-article` receipt with `warning` → write no source page, report the
+warning, and delete `wiki/<raw>` only when `raw` is non-empty — an empty `raw` (Atlassian host,
+also after a redirect) means nothing was written, so there is nothing to delete. `fetch-youtube` exit 2 means `uv` is missing — pass its `reason` (the
 install hint) to the user and skip that URL. An Atlassian URL never goes to `fetch-article` (it
 refuses the host with a `warning`). No `wiki/` yet → this ingest creates it; mention
 `/pavilio-wiki-migrate <p>` for the backfill. More than 10 pending on a user-invoked catch-up →
