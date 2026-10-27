@@ -26,8 +26,9 @@ paths (`wiki/sources/….md`). Links in bodies use the D14 form without `.md`.
 
 **`url` — the original of external material.** Required on every repo page and on a source page
 whose `raw` is an article (`raw/article-*.md`), a YouTube transcript (`raw/youtube-*.md`), an
-Atlassian snapshot (`raw/confluence-*.md`, `raw/jira-*.md`) or a clone (`raw/repos/…`); absent on record-backed sources and other raw snapshots (outside files,
-snippets, `context-snapshot-*`). Never guessed — taken from the raw file's `source_url`
+Atlassian snapshot (`raw/confluence-*.md`, `raw/jira-*.md`) or a clone (`raw/repos/…`); absent
+on record-backed sources and other raw snapshots (outside files, snippets,
+`context-snapshot-*`). Never guessed — taken from the raw file's `source_url`
 frontmatter, or for a clone from `git -C wiki/raw/repos/<owner>-<repo> remote get-url origin`,
 normalised by the origin's form: a GitHub origin → `https://github.com/<owner>/<repo>` (no
 `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →

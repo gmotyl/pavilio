@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync, existsSync, 
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { isAtlassianHost, parseAtlassianUrl, saveAtlassian } from "../save-atlassian";
+import { isAtlassianHost, parseAtlassianUrl } from "../atlassian-url";
+import { saveAtlassian } from "../save-atlassian";
 
 const HOST = "acme.atlassian.net";
 const NOW = new Date("2026-10-27T13:07:34Z");
@@ -117,7 +118,9 @@ describe("saveAtlassian", () => {
   it("refuses an empty body or a short login stub", () => {
     const url = `https://${HOST}/wiki/pages/123456`;
     const empty = saveAtlassian(projectDir, url, { title: "Page", body: "  \n\n ", now: NOW });
-    expect(empty.warning).toBeTruthy();
+    // Either cause of an empty body is named: nothing piped, or nothing from the MCP.
+    expect(empty.warning).toMatch(/nothing on stdin/);
+    expect(empty.warning).toMatch(/MCP returned no content/);
     const stub = saveAtlassian(projectDir, url, {
       title: "Page",
       body: "You need to log in with your Atlassian account to view this page. Continue with Google.",

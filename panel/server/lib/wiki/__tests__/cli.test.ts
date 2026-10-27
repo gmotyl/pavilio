@@ -281,6 +281,7 @@ describe("wiki cli", () => {
       const res = await cli(["save-atlassian", "demo", PAGE, "--title", "Runbook"], stdin(body));
       expect(res).toMatchObject({ code: 0, json: { raw: "raw/confluence-123456-runbook.md", title: "Runbook" } });
       expect(res.json.warning).toBeUndefined();
+      expect(res.json.error).toBeUndefined();
       const text = readFileSync(join(project, "wiki", res.json.raw), "utf8");
       expect(text).toContain("# Runbook");
       expect(text.endsWith(body)).toBe(true);
@@ -317,6 +318,18 @@ describe("wiki cli", () => {
       expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
     });
 
+    it("save-atlassian refuses --meta keys that only differ in whitespace", async () => {
+      // The file writes the key on one line, so "a b" and "a  b" would land as the same key.
+      const res = await cli(
+        ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug",
+          "--meta", "a b=1", "--meta", "a  b=2"],
+        stdin(body),
+      );
+      expect(res.code).toBe(1);
+      expect(res.json.error).toMatch(/--meta key "a b" given more than once/);
+      expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
+    });
+
     it("save-atlassian keeps --meta in command-line order, integer-like keys included", async () => {
       const res = await cli(
         ["save-atlassian", "demo", "https://acme.atlassian.net/browse/ENG-7", "--title", "Bug",
@@ -340,6 +353,16 @@ describe("wiki cli", () => {
       expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
     });
 
+    it("readProcessStdin reads a piped stream to the end as utf8", async () => {
+      async function* piped() {
+        yield Buffer.from("Zażółć ");
+        yield "gęślą\n";
+        yield Buffer.from("jaźń");
+      }
+      const stream = Object.assign(piped(), { isTTY: false });
+      expect(await readProcessStdin(stream)).toBe("Zażółć gęślą\njaźń");
+    });
+
     it("save-atlassian exits 2 with ask for a URL without an id", async () => {
       const res = await cli(
         ["save-atlassian", "demo", "https://acme.atlassian.net/wiki/spaces/ENG/overview", "--title", "ENG"],
@@ -360,6 +383,8 @@ describe("wiki cli", () => {
       expect(res.code).toBe(1);
       expect(res.json).toMatchObject({ raw: "", title: "Runbook" });
       expect(res.json.warning).toMatch(/login marker/);
+      // Exit 1 keeps the CLI-wide `{error}` contract next to the receipt's `warning`.
+      expect(res.json.error).toBe(res.json.warning);
       expect(existsSync(join(project, "wiki", "raw"))).toBe(false);
     });
 
@@ -375,6 +400,7 @@ describe("wiki cli", () => {
       expect(res.code).toBe(1);
       expect(res.json).toMatchObject({ raw: "", title: "Bug" });
       expect(res.json.warning).toMatch(/cross-site collision.*globex\.atlassian\.net.*acme\.atlassian\.net/);
+      expect(res.json.error).toBe(res.json.warning);
       expect(readFileSync(join(raw, "jira-ENG-7.md"), "utf8")).toBe(existing);
     });
 

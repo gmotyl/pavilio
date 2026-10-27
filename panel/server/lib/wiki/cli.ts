@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
+import { parseAtlassianUrl } from "./atlassian-url";
 import { pageBacklog } from "./backlog";
 import { cloneRepo } from "./clone-repo";
 import { loadWikiConfig, readWikiConfig, type WikiConfig } from "./config";
@@ -17,7 +18,7 @@ import { countMentions } from "./mentions";
 import { projectKind } from "../projects/kind";
 import { panelLink } from "./panel-link";
 import { resolveProject, type FetchLike } from "./project";
-import { parseAtlassianUrl, saveAtlassian } from "./save-atlassian";
+import { oneLine, saveAtlassian } from "./save-atlassian";
 
 /**
  * `scripts/wiki <command>` — the wiki's deterministic half, for skills and agents.
@@ -306,7 +307,11 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
         const eq = pair.indexOf("=");
         const key = pair.slice(0, eq);
         if (eq <= 0 || !key.trim()) throw new CliError(`--meta needs key=value, got ${JSON.stringify(pair)}`);
-        if (meta.some(([k]) => k === key)) throw new CliError(`--meta key ${JSON.stringify(key)} given more than once`);
+        // Compared as written: the file puts the key on one line, so "a b" and "a  b" are one key.
+        const written = oneLine(key);
+        if (meta.some(([k]) => oneLine(k) === written)) {
+          throw new CliError(`--meta key ${JSON.stringify(written)} given more than once`);
+        }
         meta.push([key, pair.slice(eq + 1)]);
       }
       const dir = projectDir(workspaceRoot, p);
@@ -321,8 +326,10 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       }
       const body = await (deps.readStdin ?? readProcessStdin)();
       const receipt = saveAtlassian(dir, url, { title, body, meta, now: deps.now?.() });
-      // The stub guard wrote nothing: an error, but the receipt still says why.
-      return { code: receipt.warning ? 1 : 0, body: { ...receipt } };
+      // The stub or collision guard wrote nothing: an error (`error`, like every exit 1), but the
+      // receipt still says why in `warning`.
+      if (receipt.warning) return { code: 1, body: { ...receipt, error: receipt.warning } };
+      return ok({ ...receipt });
     }
     case "clone-repo": {
       const [p, url] = only(parsed, 2, "clone-repo <p> <url>");

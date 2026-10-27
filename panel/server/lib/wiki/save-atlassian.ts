@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
+import { parseAtlassianUrl } from "./atlassian-url";
 import { ensureContainedDir } from "./contained-dir";
 import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
 
@@ -9,10 +10,6 @@ import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
  * its Atlassian MCP — into `<projectDir>/wiki/raw/`, named by page id (`confluence-<id>-<slug>.md`)
  * or issue key (`jira-<KEY>.md`). No network here: the body arrives as text.
  */
-
-export type AtlassianRef =
-  | { kind: "confluence"; host: string; id: string }
-  | { kind: "jira"; host: string; key: string };
 
 export type AtlassianReceipt = {
   /** Raw file path relative to the wiki dir, e.g. `raw/jira-ABC-1.md`; empty when nothing was written. */
@@ -32,7 +29,7 @@ export type SaveAtlassianOptions = {
 };
 
 /** A login marker only counts on bodies shorter than this; real pages may mention logging in. */
-export const LOGIN_MARKER_MAX_WORDS = 50;
+const LOGIN_MARKER_MAX_WORDS = 50;
 
 // Whole phrases only: a bare `/log in/` matches "Catalog integration", `/sign up/` "Design update".
 const LOGIN_MARKERS = [
@@ -43,38 +40,9 @@ const LOGIN_MARKERS = [
   /\bcontinue with google\b/i,
 ];
 
-const JIRA_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
-
-/** True when the URL's host is an Atlassian Cloud site (`*.atlassian.net`). */
-export function isAtlassianHost(url: string): boolean {
-  try {
-    return new URL(url).hostname.toLowerCase().endsWith(".atlassian.net");
-  } catch {
-    return false;
-  }
-}
-
-/** The page id or issue key a Confluence/Jira URL points at, or null for any other URL. */
-export function parseAtlassianUrl(url: string): AtlassianRef | null {
-  if (!isAtlassianHost(url)) return null;
-  const parsed = new URL(url);
-  const host = parsed.hostname.toLowerCase();
-  const path = parsed.pathname;
-
-  const page =
-    /^\/wiki\/spaces\/[^/]+\/pages\/(\d+)(?:\/|$)/.exec(path)?.[1] ??
-    /^\/wiki\/pages\/(\d+)\/?$/.exec(path)?.[1] ??
-    (/^\/wiki\/pages\/viewpage\.action$/.test(path) ? parsed.searchParams.get("pageId") : null);
-  if (page && /^\d+$/.test(page)) return { kind: "confluence", host, id: page };
-
-  const key = /^\/browse\/([^/]+)\/?$/.exec(path)?.[1] ?? parsed.searchParams.get("selectedIssue");
-  if (key && JIRA_KEY.test(key)) return { kind: "jira", host, key };
-  return null;
-}
-
 /** Why `body` is not worth a snapshot (empty or a login wall), or null when it is. */
 function stubWarning(body: string): string | null {
-  if (!body.trim()) return "empty body — the MCP returned no content";
+  if (!body.trim()) return "empty body — nothing on stdin (pipe the body, e.g. a heredoc) or the MCP returned no content";
   const words = countWords(body);
   if (words < LOGIN_MARKER_MAX_WORDS && LOGIN_MARKERS.some((re) => re.test(body))) {
     return `body is only ${words} words and matches a login marker — likely a sign-in page, not the content`;
@@ -83,7 +51,7 @@ function stubWarning(body: string): string | null {
 }
 
 /** One line: a newline in a title or meta value must not start a heading of its own. */
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 

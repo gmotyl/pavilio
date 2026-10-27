@@ -33,7 +33,7 @@ import TurndownService from "turndown";
 
 import { ensureContainedDir } from "./contained-dir";
 import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
-import { isAtlassianHost } from "./save-atlassian";
+import { isAtlassianHost } from "./atlassian-url";
 
 /**
  * Fetch a web article into `<projectDir>/wiki/raw/article-<slug>.md` as markdown (a slug
@@ -65,7 +65,7 @@ const PAYWALL_MARKERS = [
 ];
 
 /** Receipt warning for an `*.atlassian.net` URL, which only the Atlassian MCP route can read. */
-export const ATLASSIAN_WARNING = "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)";
+const ATLASSIAN_WARNING = "Atlassian URL — use the Atlassian MCP route (SKILL.md § Atlassian fetch)";
 
 const STRIP_TAGS = ["script", "style", "noscript", "nav", "footer", "form", "button", "svg", "iframe"];
 
