@@ -522,3 +522,11 @@ describe("TerminalToolbar — minimised tray and icon-only buttons", () => {
     expect(onApplyPreset).toHaveBeenCalledWith(getLayoutPresets(3)[0]);
   });
 });
+
+describe("TerminalToolbar — projectless session", () => {
+  it("renders a chip for a session whose project is empty", () => {
+    const session = makeSession({ id: "np", name: "bare", project: "" });
+    renderToolbar({ sessions: [session], focusedId: session.id, currentProject: "" });
+    expect(screen.getByText("bare")).toBeInTheDocument();
+  });
+});

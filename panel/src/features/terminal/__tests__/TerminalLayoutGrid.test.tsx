@@ -1752,3 +1752,11 @@ describe("TerminalLayoutGrid — the header speak control is an arrival", () => 
     expect(vi.mocked(sendDismiss)).not.toHaveBeenCalled();
   });
 });
+
+describe("TerminalLayoutGrid — projectless session", () => {
+  it("renders the cell of a session whose project is empty", () => {
+    const session = makeSession({ id: "np", name: "bare", project: "" });
+    renderGrid({ sessions: [session], focusedId: session.id });
+    expect(screen.getAllByTestId("project-mark").length).toBeGreaterThan(0);
+  });
+});
