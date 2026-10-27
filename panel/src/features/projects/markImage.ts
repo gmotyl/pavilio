@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { type RealtimeFrame, subscribeRealtime } from "../realtime/channel";
+
 /**
  * A project's mark image on the server (`PUT|GET|DELETE /api/projects/:p/mark`).
  *
@@ -10,6 +12,10 @@ import { useSyncExternalStore } from "react";
  * plain URL is used; the server answers it with `max-age=0` + ETag, so the
  * browser revalidates and still gets the current bytes. Keeping the hash out
  * of the preference keeps `project.mark` exactly `image:mark.<ext>`.
+ *
+ * A replacement made in another tab or on another device keeps the same
+ * value and URL, so the watcher's `file-change` frame for `<project>/mark.*`
+ * stands in for the PUT answer there: it gets a fresh token the same way.
  */
 
 export const MARK_IMAGE_MAX_BYTES = 256 * 1024;
@@ -22,6 +28,29 @@ const MARK_IMAGE_TYPES: Record<string, string> = {
 
 const hashes = new Map<string, string>();
 const listeners = new Set<() => void>();
+let detachRealtime: (() => void) | null = null;
+let changes = 0;
+
+/** `<projectsDir>/<project>/mark.<ext>`, live or under `archived/`; captures the project. */
+const MARK_FILE = /[\\/]([^\\/]+)[\\/]mark\.(?:png|svg|webp)$/;
+
+function onFrame(frame: RealtimeFrame): void {
+  if (frame.type !== "file-change" || typeof frame.path !== "string") return;
+  const project = MARK_FILE.exec(frame.path)?.[1];
+  if (project) rememberMarkHash(project, `fc${Date.now().toString(36)}-${++changes}`);
+}
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  detachRealtime ??= subscribeRealtime(onFrame);
+  return () => {
+    listeners.delete(cb);
+    if (listeners.size === 0 && detachRealtime) {
+      detachRealtime();
+      detachRealtime = null;
+    }
+  };
+}
 
 function markUrl(project: string): string {
   return `/api/projects/${encodeURIComponent(project)}/mark`;
@@ -39,10 +68,7 @@ export function rememberMarkHash(project: string, hash: string): void {
 
 export function useMarkHash(project: string): string | undefined {
   return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
+    subscribe,
     () => hashes.get(project),
     () => undefined,
   );
@@ -50,6 +76,8 @@ export function useMarkHash(project: string): string | undefined {
 
 export function __resetMarkHashesForTests(): void {
   hashes.clear();
+  detachRealtime?.();
+  detachRealtime = null;
 }
 
 /** Why `file` cannot be a mark image, or null when it can. */
