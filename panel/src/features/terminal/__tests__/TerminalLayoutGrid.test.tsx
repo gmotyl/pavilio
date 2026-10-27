@@ -699,9 +699,37 @@ describe("TerminalLayoutGrid — the cell header's mark", () => {
     expect(led.dataset.testid).toBe("activity-led");
     // A square that fills the header's height, flush with the cell's edge: it
     // stretches across the row, has no radius, and only a right-hand divider.
-    expect(mark.style.alignSelf).toBe("stretch");
+    // Sized deterministically rather than by `aspect-ratio` + stretch, which a
+    // real browser resolves to a sliver in an auto-height flex row: a fixed
+    // 30px header and a 30px x 30px tile with a 16px glyph (mockup S).
+    const header = screen.getAllByTitle("Drag to place this terminal")[0] as HTMLElement;
+    expect(header.style.height).toBe("30px");
+    expect(mark.style.width).toBe("30px");
+    expect(mark.style.height).toBe(mark.style.width);
+    expect(mark.style.fontSize).toBe("16px");
+    expect(mark.style.aspectRatio).toBe("");
+    // Flush with the cell's left edge: the margin undoes the header's padding.
+    expect(mark.style.marginLeft).toBe("-8px");
+    expect(header.style.paddingLeft).toBe("8px");
+    // Tinted with the project's colour.
+    expect(mark.style.background).toContain("color-mix");
+    expect(mark.style.background).toContain(rgb(TEST_PROJECT_COLORS.alpha));
     expect(mark.style.borderRadius).toMatch(/^0(px)?$/);
     expect(mark.style.boxShadow).toContain("inset -1px 0 0");
+  });
+
+  it("cell header names the project in its colour, then the session", async () => {
+    installMarks({});
+    renderGrid({
+      sessions: [makeSession({ id: "s1", project: "alpha", name: "claude-alpha" })],
+      focusedId: "s1",
+    });
+
+    const who = await screen.findByTestId("terminal-cell-project-s1");
+    await waitFor(() => expect(who.style.color).toBe(rgb(TEST_PROJECT_COLORS.alpha)));
+    expect(who).toHaveTextContent(/^alpha$/);
+    expect(who.style.fontWeight).toBe("600");
+    expect(who.parentElement!.textContent).toBe("alpha · claude-alpha");
   });
 
   it("cell header without a mark shows the folder glyph", async () => {

@@ -351,7 +351,7 @@ export function TerminalToolbar({
               ) : (
                 <span
                   className="font-mono truncate max-w-[140px]"
-                  style={{ color: chipColor }}
+                  style={{ color: chipColor, fontWeight: focused ? 600 : undefined }}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     setEditingId(s.id);

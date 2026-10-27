@@ -221,6 +221,10 @@ describe("TerminalToolbar — project colour", () => {
     expect(mark.style.width).toBe("20px");
     expect(mark.style.height).toBe("20px");
     expect(label).toHaveTextContent("claude-alpha");
+    // The chip's top edge carries the project colour.
+    expect(chipParts("s1").chip.style.borderTopColor).toBe(rgb(TEST_PROJECT_COLORS.alpha));
+    // The focused chip's label is bold (mockup N `.chip.on .lbl`).
+    expect(label.style.fontWeight).toBe("600");
   });
 
   it("unfocused chip keeps mark and colour", async () => {
@@ -238,6 +242,7 @@ describe("TerminalToolbar — project colour", () => {
     expect(chip.style.opacity).toBe("0.75");
     expect(mark.dataset.testid).toBe("project-mark");
     expect(mark.dataset.color).toBe(TEST_PROJECT_COLORS.beta);
+    expect(chipParts("s2").label.style.fontWeight).toBe("");
   });
 });
 

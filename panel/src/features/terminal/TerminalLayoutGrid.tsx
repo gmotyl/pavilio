@@ -509,8 +509,11 @@ function TerminalCell({
     >
       {/* Cell header — the whole row is a drag handle for swapping cells */}
       <div
-        className="flex items-center gap-1.5 px-2 py-1 shrink-0"
-        style={{ background: headerBg, cursor: "grab" }}
+        className="flex items-center gap-1.5 shrink-0"
+        // A definite height (mockup S's 30px) so the mark below can be a
+        // fixed square: `aspect-ratio` on a stretched item in an auto-height
+        // row resolves to a sliver in a real browser.
+        style={{ background: headerBg, cursor: "grab", height: 30, padding: "0 8px" }}
         title="Drag to place this terminal"
         draggable
         onDragStart={(e) => {
@@ -525,17 +528,15 @@ function TerminalCell({
         }}
       >
         {/* A square the header's full height, flush with the cell's left edge:
-            the negative margins undo the header's padding, the tile drops its
-            radius and frame, and an inset shadow draws the right divider. */}
+            the negative margin undoes the header's left padding, the tile
+            drops its radius and frame, and an inset shadow draws the right
+            divider. 30px tile, 16px glyph, as mockup S. */}
         <ProjectMark
           project={session.project}
-          size={24}
+          size={30}
           style={{
-            alignSelf: "stretch",
-            height: "auto",
-            width: "auto",
-            aspectRatio: "1 / 1",
-            margin: "-4px 0 -4px -8px",
+            fontSize: 16,
+            margin: "0 0 0 -8px",
             borderRadius: 0,
             border: "none",
             boxShadow: `inset -1px 0 0 color-mix(in srgb, ${accentColor} 38%, transparent)`,
@@ -621,6 +622,8 @@ function TerminalCell({
           // while the panel's generated name still stands, the chosen name
           // once there is one. The editor below still edits the NAME, which is
           // why it reads `session.name` and this reads `sessionLabel`.
+          // Reads "<project> · <session>": the project in its own colour and
+          // bold (mockup S `.who`), then the session label.
           <span
             className="text-[10.5px] font-mono tracking-wide truncate flex-1"
             style={{ color: "var(--text-secondary)", letterSpacing: "0.08em" }}
@@ -632,7 +635,14 @@ function TerminalCell({
               setEditingName(true);
             }}
           >
-            {sessionLabel(session)}
+            <span
+              data-testid={`terminal-cell-project-${session.id}`}
+              style={{ color: accentColor, fontWeight: 600 }}
+            >
+              {session.project}
+            </span>
+            {" · "}
+            <span>{sessionLabel(session)}</span>
           </span>
         )}
         <div className="flex gap-0.5">
