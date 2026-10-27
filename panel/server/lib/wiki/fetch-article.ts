@@ -25,13 +25,14 @@
  * SOFTWARE.
  */
 import { createHash } from "crypto";
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 
 import { ensureContainedDir } from "./contained-dir";
+import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
 import { isAtlassianHost } from "./save-atlassian";
 
 /**
@@ -81,20 +82,6 @@ export type FetchArticleOptions = {
   now?: Date;
 };
 
-/** Filesystem-safe, deterministic slug: ASCII, lowercase, dash-separated, ≤ 60 chars. */
-export function slugify(text: string, limit = 60): string {
-  const slug = text
-    .normalize("NFKD")
-    .replace(/[^\x20-\x7e]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
-  if (slug.length <= limit) return slug;
-  const cut = slug.slice(0, limit);
-  const lastDash = cut.lastIndexOf("-");
-  return lastDash > 0 ? cut.slice(0, lastDash) : cut;
-}
-
 /** Slug from the last URL path segment, falling back to the title. */
 export function articleSlug(url: string, title: string): string {
   let segment = "";
@@ -115,13 +102,6 @@ function snapshotUrl(file: string): string | null {
     return typeof value === "string" ? value : null;
   } catch {
     return null;
-  }
-}
-
-/** A planted `raw/article-*.md` symlink must never redirect the write. */
-function refuseSymlink(file: string): void {
-  if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) {
-    throw new Error(`refusing a symlinked raw snapshot: ${file}`);
   }
 }
 
@@ -148,10 +128,6 @@ function snapshotName(rawDir: string, slug: string, url: string): string {
 function metaContent(document: Document, selector: string): string | null {
   const value = document.querySelector(selector)?.getAttribute("content")?.trim();
   return value ? value : null;
-}
-
-function countWords(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
 }
 
 async function fetchHtml(url: string, options: FetchArticleOptions): Promise<string> {

@@ -1,8 +1,8 @@
-import { lstatSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { readdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
 import { ensureContainedDir } from "./contained-dir";
-import { slugify } from "./fetch-article";
+import { countWords, refuseSymlink, slugify } from "./raw-snapshot";
 
 /**
  * Write an Atlassian snapshot — one Confluence page or Jira issue the agent already fetched through
@@ -65,10 +65,6 @@ export function parseAtlassianUrl(url: string): AtlassianRef | null {
   return null;
 }
 
-function countWords(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
 /** Why `body` is not worth a snapshot (empty or a login wall), or null when it is. */
 function stubWarning(body: string): string | null {
   if (!body.trim()) return "empty body — the MCP returned no content";
@@ -82,13 +78,6 @@ function stubWarning(body: string): string | null {
 /** One line: a newline in a title or meta value must not start a heading of its own. */
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-/** A planted symlink must never redirect the write or the removal. */
-function refuseSymlink(file: string): void {
-  if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) {
-    throw new Error(`refusing a symlinked raw snapshot: ${file}`);
-  }
 }
 
 /** Save the snapshot of `url`; throws when `url` is not a Confluence page or Jira issue URL. */
