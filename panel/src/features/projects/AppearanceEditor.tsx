@@ -152,6 +152,13 @@ export default function AppearanceEditor({ project }: { project: string }) {
     const problem = markImageProblem(file);
     if (problem) {
       setImageError(problem);
+      // A rejected replacement drops the earlier pick too: Apply must not
+      // upload a file the error says was not taken. The draft falls back to
+      // the stored mark, so Apply leaves the mark as it is.
+      if (picked) {
+        setPicked(null);
+        setDraftMark(storedMark);
+      }
       return;
     }
     setImageError(null);

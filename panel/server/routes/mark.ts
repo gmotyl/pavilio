@@ -25,19 +25,26 @@ const MARK_TYPES = {
 type MarkExt = keyof typeof MARK_TYPES;
 const MARK_EXTS = Object.keys(MARK_TYPES) as MarkExt[];
 
+const TOO_LARGE = "Image is larger than 256 KB";
+
+// One byte over the limit: multer rejects at `fileSize` itself, so a file of
+// exactly MARK_MAX_BYTES must get through and be checked below.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { files: 1, fields: 0, fileSize: MARK_MAX_BYTES },
+  limits: { files: 1, fields: 0, fileSize: MARK_MAX_BYTES + 1 },
 });
 
 function receiveImage(req: Request, res: Response, next: NextFunction) {
   upload.single("image")(req, res, (err: unknown) => {
     if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ error: "Image is larger than 256 KB" });
+      return res.status(400).json({ error: TOO_LARGE });
     }
     if (err) {
       const message = err instanceof Error ? err.message : "Upload failed";
       return res.status(400).json({ error: message });
+    }
+    if (req.file && req.file.buffer.length > MARK_MAX_BYTES) {
+      return res.status(400).json({ error: TOO_LARGE });
     }
     next();
   });
