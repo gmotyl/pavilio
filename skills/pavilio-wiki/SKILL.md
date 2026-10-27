@@ -108,7 +108,8 @@ is optional, and only its `## Archived Projects` rows are refused.
 | path in another project | stop; suggest ingesting into that project's wiki |
 | repo URL (`<forge>/<owner>/<repo>`, `.git`) | `scripts/wiki clone-repo <p> <url>` → `repo_writer` (architecture mode) |
 | YouTube URL (`youtube.com/watch`, `youtu.be/…`) | `scripts/wiki fetch-youtube <p> <url>` → `wiki/raw/youtube-<id>.md` |
-| other URL | `scripts/wiki fetch-article <p> <url>` → `wiki/raw/article-<slug>.md` |
+| Atlassian URL (`*.atlassian.net/wiki/…`, `*.atlassian.net/browse/…`, Jira `selectedIssue=` links) | § Atlassian fetch → `wiki/raw/confluence-<id>-<slug>.md` / `jira-<KEY>.md` |
+| any other URL | `scripts/wiki fetch-article <p> <url>` → `wiki/raw/article-<slug>.md` |
 | quoted text | verbatim to `wiki/raw/snippet-<YYYY-MM-DD>-<slug>.md` |
 
 An in-project path that is not a record (`tasks.md`, a delta spec under `specs/`, an active
@@ -116,9 +117,37 @@ change's files, today's progress — `CONVENTIONS.md § Identity and the ledger`
 the reason before any `--only`. A raw snapshot is then a record: `pending <p> --only wiki/raw/<file>`
 gives its hash. A `fetch-article` receipt with `warning` → delete that raw file, write no source
 page, report the warning. `fetch-youtube` exit 2 means `uv` is missing — pass its `reason` (the
-install hint) to the user and skip that URL. No `wiki/` yet → this ingest creates it; mention
+install hint) to the user and skip that URL. An Atlassian URL never goes to `fetch-article` (it
+returns a login stub and now refuses the host with a `warning`). No `wiki/` yet → this ingest creates it; mention
 `/pavilio-wiki-migrate <p>` for the backfill. More than 10 pending on a user-invoked catch-up →
 show the count and confirm first.
+
+### Atlassian fetch
+
+Confluence and Jira come through the agent's Atlassian MCP; the CLI only saves what it fetched.
+Per URL:
+
+1. **Pick the server.** Tool names differ per agent (Claude Code `mcp__atlassian-infopoly__…` /
+   `mcp__claude_ai_Atlassian__…`, opencode `atlassian-infopoly_…`, codex its own prefix) — match on the
+   server part. Order: `atlassian-<project>` → any Atlassian server whose
+   `getAccessibleAtlassianResources` lists the URL host → none. A server answering with an auth
+   error counts as none.
+2. **None** → skip this URL, tell the user which server to connect or authenticate (Claude Code:
+   `/mcp`), never fall back to `fetch-article`, continue with the other inputs.
+3. **Resolve** the Confluence page id (a space `overview` URL → the space home page; a tiny link →
+   its page) or the Jira issue key, and build the canonical URL:
+   `https://<host>/wiki/spaces/<space>/pages/<id>` / `https://<host>/browse/<KEY>`.
+4. **Fetch** as markdown — Confluence: body, comments (author, date, text), attachment names and
+   types; Jira: summary, description, status, assignee, links, comments.
+5. **Save** — body on stdin:
+   `scripts/wiki save-atlassian <p> <canonical-url> --title "<t>" --meta status=… --meta parent_id=… --meta last_modified=…`
+   → `{raw, title, replaced?}`; a re-fetch overwrites (the id is the identity), `replaced` names a
+   removed old-slug file. Exit 2 `{ask, reason}` (no page id / issue key in the URL) → resolve it
+   through the MCP and retry once with the canonical URL; still exit 2 → report the URL, skip it.
+6. **Children** — Confluence only: direct children, one level; more than 20 → show the count and
+   confirm first. Each child goes through steps 4–5.
+7. A receipt with `warning` (stub guard: empty or login-page body; nothing written) → no source
+   page, report it.
 
 ### Sequence
 
@@ -131,7 +160,7 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    ingesting and stop without writing. `takenOver: true` → note it for the log entry. Nothing
    is written to `raw/` before this step.
 3. **Route** — apply § Route the inputs (raw snapshots, `fetch-article`, `fetch-youtube`,
-   `clone-repo`).
+   § Atlassian fetch, `clone-repo`).
 4. **Pending** — the routed records with their hashes. A catch-up (no inputs) takes
    `scripts/wiki pending <p>` as is: it already includes unledgered or changed top-level
    `wiki/raw/*.md` snapshots (not migration's `context-snapshot-*.md`), so a snapshot left
@@ -142,7 +171,7 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
    For external material, hand the writer its original `url` (`PAGES.md § Common frontmatter`):
-   an article/YouTube raw file's `source_url` frontmatter, a clone's `git -C <clonePath> remote
+   an article/YouTube/Atlassian raw file's `source_url` frontmatter, a clone's `git -C <clonePath> remote
    get-url origin` normalised by its form — a GitHub origin → `https://github.com/<owner>/<repo>`
    (no `.git`); another https origin → as-is minus `.git`; scp-like `user@host:<owner>/<repo>` →
    `https://host/<owner>/<repo>`; any other `scheme://host/<owner>/<repo>` (`ssh://`, `http://`,
