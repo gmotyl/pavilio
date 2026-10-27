@@ -201,6 +201,7 @@ export function MockupFrame({
     <button
       type="button"
       onClick={exitFullscreen}
+      data-testid={`${testIdPrefix}-fullscreen-exit`}
       aria-label="Exit fullscreen"
       title="Exit fullscreen"
       className="fixed top-3 right-3 w-10 h-10 rounded-full grid place-items-center cursor-pointer"
