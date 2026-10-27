@@ -300,9 +300,11 @@ export default function LeftSidebar() {
   }, [projects]);
   // On a phone the global ☰ is the one menu, and it opens on the project the
   // user is standing in: that project expands so its sessions — the focused one
-  // highlighted — are one tap away. Transient like the phone's open state
-  // itself: the in-memory expand flips, the stored preference is never written
-  // (only a user's own toggle writes it). A desktop sidebar does none of this.
+  // highlighted — are one tap away. Not persisted: the in-memory expand flips
+  // (and stays flipped after the menu closes), but the stored preference is
+  // never written — only a user's own toggle writes it. It fires on opening
+  // (or on a project change while open), so a user who folds the project back
+  // while the menu stays open keeps it folded. A desktop sidebar does none of this.
   const { expanded: sidebarOpen } = useSidebarState("leftSidebar");
   const mobileMenuOpen = isMobile && sidebarOpen;
   useEffect(() => {

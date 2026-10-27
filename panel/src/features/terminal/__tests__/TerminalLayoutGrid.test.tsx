@@ -1697,15 +1697,15 @@ describe("TerminalLayoutGrid — seam resize", () => {
 });
 
 /**
- * The cell header's speak control is a play button too.
+ * The cell header's speak control is an arrival too.
  *
- * The bar carries one and the header carries another, on the same cell, and
- * until this was wired only the bar's cleared the attention LED — two buttons
- * with the same icon disagreeing about what a press meant. The rule itself is
+ * It exists only while its cell is speaking, so its one press is a pause of
+ * the live run, and that press counts as the user arriving at the cell: it
+ * clears the attention LED just as the bar's transport does. The rule itself is
  * `attentionArrival.dismissAttentionOnArrival`, and the rest of its cases are
  * asserted in `attentionDismiss.test.tsx`; what belongs here is the one thing
  * only this file can see, which is that the grid actually hands the header
- * control that rule when it wires `onSpeak`, `onPause` and `onResume`.
+ * control that rule when it wires `onPause`.
  */
 describe("TerminalLayoutGrid — the header speak control is an arrival", () => {
   // The header control exists only while the cell speaks, so the one press it

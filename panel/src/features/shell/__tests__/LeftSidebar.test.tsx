@@ -888,6 +888,21 @@ describe("LeftSidebar.mobileMenu", () => {
     expect(readPreference(preferences.projectExpanded, "vector")).toBe(true);
   });
 
+  it("collapsing the auto-expanded project keeps it collapsed while the menu stays open", async () => {
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+
+    openMenu();
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+
+    // The user folds the project the menu opened on; the menu stays open.
+    expand("vector");
+    await act(async () => {});
+
+    expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-hamburger").getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("desktop sidebar does not auto-expand", () => {
     installMatchMedia({ mobile: false });
     setupAt("/project/vector/iterm");

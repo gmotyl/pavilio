@@ -175,7 +175,7 @@ describe("TerminalMobileRail — minimised aggregate", () => {
         currentProject="alpha"
         onFocus={vi.fn()}
         onCreate={vi.fn()}
-          onReconnect={vi.fn()}
+        onReconnect={vi.fn()}
         minimisedIds={minimised}
         onRestore={(id) => {
           onRestore(id);

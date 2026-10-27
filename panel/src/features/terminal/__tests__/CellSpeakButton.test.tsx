@@ -123,10 +123,11 @@ describe("CellSpeakButton", () => {
     const bodies = reducedMotionBodies(css);
     expect(bodies.length).toBeGreaterThan(0);
 
-    const stopped = bodies.some(
-      (body) => declarationsIn(body, '.terminal-speak[data-pulse="1"]').animation === "none",
-    );
-    expect(stopped).toBe(true);
+    // Both controls share one pulse rule, so both must stand still.
+    for (const selector of ['.terminal-speak[data-pulse="1"]', '.speech-bar-primary[data-pulse="1"]']) {
+      const stopped = bodies.some((body) => declarationsIn(body, selector).animation === "none");
+      expect(stopped, selector).toBe(true);
+    }
   });
 
   it("the drag and focus guards still hold", () => {
