@@ -3,6 +3,8 @@ import { useFavorites } from "./useFavorites";
 import { useProjects, Project } from "./useProjects";
 import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
 import { useFileDropTarget } from "../explorer/useFileDrag";
+import { projectHref } from "../shell/projectHref";
+import { useIsMobile } from "../shell/useIsMobile";
 import {
   FolderOpen,
   FileText,
@@ -48,6 +50,7 @@ function ProjectCard({
   onToggleFav: () => void;
 }) {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const formattedDate = formatDate(project.latestProgressDate);
   const { hover, dropHandlers } = useFileDropTarget(project.name);
 
@@ -60,7 +63,9 @@ function ProjectCard({
         background: hover ? "var(--accent-dim, var(--bg-elevated))" : "var(--bg-surface)",
         border: `1px solid ${hover ? "var(--accent)" : isFav ? "var(--accent-dim)" : "var(--border-subtle)"}`,
       }}
-      onClick={() => navigate(`/project/${project.name}`)}
+      // Same destination as the sidebar row: terminals on a phone, the
+      // bookmark-restoring bare route on a desktop.
+      onClick={() => navigate(projectHref(project.name, isMobile))}
       onMouseEnter={(e) => {
         if (hover) return;
         e.currentTarget.style.borderColor = "var(--border-strong)";

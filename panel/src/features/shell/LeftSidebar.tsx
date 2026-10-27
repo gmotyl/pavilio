@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
 import { useIsMobile } from "./useIsMobile";
+import { projectHref } from "./projectHref";
 import { preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 import { isPreferenceScope } from "../../preferences/types";
@@ -377,45 +378,6 @@ export default function LeftSidebar() {
     return m;
   }, [sessions]);
 
-  /**
-   * Where tapping a project goes — from its NAME or from any of its session
-   * rows. One function for both, because the reason below is about what is
-   * worth arriving at on a phone and says nothing about which row the thumb
-   * landed on; two copies of it would be one edit away from disagreeing, and
-   * did disagree until the session rows were brought in with it.
-   *
-   * On a desktop it is the bare project route, which `ProjectRedirect` resolves
-   * through the Last-open-view bookmark — the user is returned to whichever view
-   * they left the project in. A phone has one view worth arriving at, and it is
-   * the terminal: the sections are reading surfaces opened deliberately, while
-   * the reason to pick the phone up at all is an agent waiting in a session. So
-   * the tap is sent straight there, over the top of whatever the bookmark holds.
-   *
-   * This overrides the DESTINATION and nothing else. The bookmark goes on being
-   * written by the page the user lands on (`useLastPath`, mounted in
-   * `ProjectView`), so a phone visit still records where they were, and the bare
-   * route still restores it on their desktop. Suppressing the write instead would
-   * be the easy mistake here: it looks the same from the phone and quietly loses
-   * the desktop's place.
-   *
-   * Derived from the live `useIsMobile()` rather than a `matchMedia` read taken
-   * once at mount, so a rotation moves the destination with it — and never
-   * stored, because being on a phone is a fact about the viewport, not a
-   * preference the user expressed.
-   *
-   * The name is percent-encoded, matching `QuickTerminalModal`, which builds
-   * this same `/project/<name>/iterm` target. A project may be named with a
-   * space or a `#`, and unencoded those do not survive the trip: a `#` starts
-   * the fragment, so the route would see a truncated name. Encoding is safe on
-   * the far side — `matchProjectFromPath` decodes the segment itself, and the
-   * router hands `useParams` the decoded form, which is what every preference
-   * scope downstream (the bookmark, the expand state) is keyed on.
-   */
-  const projectHref = (name: string) =>
-    isMobile
-      ? `/project/${encodeURIComponent(name)}/iterm`
-      : `/project/${encodeURIComponent(name)}`;
-
   const renderProjectRow = (project: SidebarProject) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
     const projectSessionIds = projectSessions.map((s) => s.id);
@@ -489,7 +451,7 @@ export default function LeftSidebar() {
             <ProjectMark project={project.name} size={18} kind={kind} />
           )}
           <NavLink
-            to={projectHref(project.name)}
+            to={projectHref(project.name, isMobile)}
             className="flex-1 truncate text-[13px] py-0.5"
             style={({ isActive }) => ({
               color:
@@ -596,7 +558,7 @@ export default function LeftSidebar() {
                       // tab on a phone. Tapping a SESSION and landing on notes
                       // was the sharpest form of the problem the phone rule
                       // exists to solve.
-                      navigate(projectHref(s.project));
+                      navigate(projectHref(s.project, isMobile));
                     }}
                     className="w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded text-left"
                     style={{
