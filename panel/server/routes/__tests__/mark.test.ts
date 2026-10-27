@@ -82,6 +82,15 @@ describe("/api/projects/:name/mark", () => {
     expect(second.status).toBe(204);
   });
 
+  it("PUT leaves no temp file behind when the write fails", async () => {
+    // A non-empty directory named mark.png makes the rename onto it fail.
+    mkdirSync(join(projectDir(), "mark.png", "inner"), { recursive: true });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await request(app()).put("/api/projects/p/mark").attach("image", PNG, "logo.png");
+    expect(res.status).toBe(500);
+    expect(readdirSync(projectDir()).filter((f) => f.startsWith(".mark-"))).toEqual([]);
+  });
+
   it("unknown project is 404", async () => {
     const put = await request(app()).put("/api/projects/nope/mark").attach("image", PNG, "a.png");
     expect(put.status).toBe(404);

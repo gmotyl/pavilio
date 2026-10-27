@@ -73,15 +73,17 @@ router.put("/:project/mark", requireProject, receiveImage, async (req, res) => {
   }
   const ext = sniff.ext as MarkExt;
 
+  // Write a temp file and rename over the target: a `mark.*` symlink is
+  // replaced, never followed out of the project.
+  const target = resolve(dir, `mark${ext}`);
+  const tmp = resolve(dir, `.mark-${process.pid}-${Date.now()}.tmp`);
   try {
-    // Write a temp file and rename over the target: a `mark.*` symlink is
-    // replaced, never followed out of the project.
-    const target = resolve(dir, `mark${ext}`);
-    const tmp = resolve(dir, `.mark-${process.pid}-${Date.now()}.tmp`);
     await writeFile(tmp, file.buffer, { flag: "wx" });
     await rename(tmp, target);
     await removeMarks(dir, ext);
   } catch (err) {
+    // Never leave the temp file in the notes folder: auto-sync would commit it.
+    await unlink(tmp).catch(() => {});
     // fs errors carry absolute paths — log them, send a generic reason
     console.error("[mark] write failed:", err);
     return res.status(500).json({ error: "Could not write the mark image" });
