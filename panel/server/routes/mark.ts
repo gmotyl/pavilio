@@ -2,9 +2,11 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import multer from "multer";
 import { createHash, randomUUID } from "crypto";
 import { lstat, rename, unlink, writeFile } from "fs/promises";
-import { resolve } from "path";
+import { join, resolve } from "path";
 import { getConfig } from "../config.js";
+import { resolveProjectRoot } from "../lib/discovery.js";
 import { isPathUnder, sniffMockup } from "../lib/mockup-import.js";
+import { validateProjectName } from "../lib/projectName.js";
 import { requireProject } from "./mockups.js";
 
 /**
@@ -48,6 +50,23 @@ function projectDir(req: Request): string | null {
   return isPathUnder(dir, projectsDir) && dir !== resolve(projectsDir) ? dir : null;
 }
 
+/**
+ * Run `fn` after every earlier mutation of the same project's mark has
+ * settled. A PUT renames its file in and then deletes the other `mark.*`;
+ * two of those interleaved (or a DELETE racing a PUT) can delete each
+ * other's file and leave no mark at all. Requests run in arrival order.
+ */
+const markQueues = new Map<string, Promise<unknown>>();
+function serialized<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const run = (markQueues.get(dir) ?? Promise.resolve()).then(fn);
+  const tail = run.catch(() => {});
+  markQueues.set(dir, tail);
+  void tail.then(() => {
+    if (markQueues.get(dir) === tail) markQueues.delete(dir);
+  });
+  return run;
+}
+
 /** Remove every `mark.*` except `keep`; a missing file is not an error. */
 async function removeMarks(dir: string, keep?: MarkExt): Promise<void> {
   await Promise.all(
@@ -78,9 +97,11 @@ router.put("/:project/mark", requireProject, receiveImage, async (req, res) => {
   const target = resolve(dir, `mark${ext}`);
   const tmp = resolve(dir, `.mark-${randomUUID()}.tmp`);
   try {
-    await writeFile(tmp, file.buffer, { flag: "wx" });
-    await rename(tmp, target);
-    await removeMarks(dir, ext);
+    await serialized(dir, async () => {
+      await writeFile(tmp, file.buffer, { flag: "wx" });
+      await rename(tmp, target);
+      await removeMarks(dir, ext);
+    });
   } catch (err) {
     // Never leave the temp file in the notes folder: auto-sync would commit it.
     await unlink(tmp).catch(() => {});
@@ -93,9 +114,15 @@ router.put("/:project/mark", requireProject, receiveImage, async (req, res) => {
   res.json({ mark: `image:mark${ext}`, hash });
 });
 
-router.get("/:project/mark", requireProject, async (req, res) => {
-  const dir = projectDir(req);
-  if (!dir) return res.status(400).json({ error: "Invalid project" });
+// Reads also resolve an archived project (`archived/<name>/`), which the
+// Archive page still draws with its mark; writes stay live-only.
+router.get("/:project/mark", async (req, res) => {
+  const project = req.params.project as string;
+  const invalid = validateProjectName(project);
+  if (invalid) return res.status(400).json({ error: invalid });
+  const found = resolveProjectRoot(getConfig().projectsDir, project);
+  if (!found) return res.status(404).json({ error: "Project not found" });
+  const dir = join(found.root, project);
   for (const ext of MARK_EXTS) {
     const path = resolve(dir, `mark${ext}`);
     // Regular files only: a symlinked mark could point anywhere.
@@ -114,7 +141,7 @@ router.delete("/:project/mark", requireProject, async (req, res) => {
   const dir = projectDir(req);
   if (!dir) return res.status(400).json({ error: "Invalid project" });
   try {
-    await removeMarks(dir);
+    await serialized(dir, () => removeMarks(dir));
   } catch (err) {
     console.error("[mark] delete failed:", err);
     return res.status(500).json({ error: "Could not delete the mark image" });
