@@ -673,6 +673,51 @@ describe("TerminalLayoutGrid — project colour", () => {
   });
 });
 
+describe("TerminalLayoutGrid — the cell header's mark", () => {
+  /** Seed the project colours plus `marks`, keyed by project. */
+  function installMarks(marks: Record<string, string>) {
+    installProjectColors();
+    const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__!;
+    for (const [name, mark] of Object.entries(marks)) doc[`project.mark@${name}`] = mark;
+  }
+
+  const headerChildren = (index: number) =>
+    Array.from(
+      screen.getAllByTitle("Drag to place this terminal")[index].children,
+    ) as HTMLElement[];
+
+  it("cell header leads with a full-height mark before the activity LED", async () => {
+    installMarks({ alpha: "lucide:rocket" });
+    renderGrid({ sessions: [makeSession({ id: "s1", project: "alpha" })], focusedId: "s1" });
+
+    await waitFor(() =>
+      expect(headerChildren(0)[0].dataset.color).toBe(TEST_PROJECT_COLORS.alpha),
+    );
+    const [mark, led] = headerChildren(0);
+    expect(mark.dataset.testid).toBe("project-mark");
+    expect(within(mark).getByTestId("project-mark-icon-rocket")).toBeInTheDocument();
+    expect(led.dataset.testid).toBe("activity-led");
+    // A square that fills the header's height, flush with the cell's edge: it
+    // stretches across the row, has no radius, and only a right-hand divider.
+    expect(mark.style.alignSelf).toBe("stretch");
+    expect(mark.style.borderRadius).toMatch(/^0(px)?$/);
+    expect(mark.style.boxShadow).toContain("inset -1px 0 0");
+  });
+
+  it("cell header without a mark shows the folder glyph", async () => {
+    installMarks({});
+    renderGrid({ sessions: [makeSession({ id: "s1", project: "beta" })], focusedId: "s1" });
+
+    await waitFor(() =>
+      expect(headerChildren(0)[0].dataset.color).toBe(TEST_PROJECT_COLORS.beta),
+    );
+    const [mark] = headerChildren(0);
+    expect(mark.dataset.testid).toBe("project-mark");
+    expect(within(mark).getByTestId("project-mark-icon-folder")).toBeInTheDocument();
+    expect(mark.style.color).toBe(rgb(TEST_PROJECT_COLORS.beta));
+  });
+});
+
 describe("TerminalLayoutGrid — the cell header's controls", () => {
   beforeEach(() => installProjectColors());
 
@@ -700,14 +745,15 @@ describe("TerminalLayoutGrid — the cell header's controls", () => {
     renderGrid({ sessions: [session], focusedId: session.id });
     await settleColors();
 
-    // The header row: LED, label, then the control group.
+    // The header row: mark, LED, label, then the control group.
     const reader = screen.getByTestId("terminal-cell-reader-s-nc");
     const groupEl = reader.parentElement!;
     const header = Array.from(groupEl.parentElement!.children) as HTMLElement[];
-    expect(header).toHaveLength(3);
-    expect(header[0].dataset.testid).toBe("activity-led");
-    expect(header[1]).toHaveTextContent("claude-alpha");
-    expect(header[2]).toBe(groupEl);
+    expect(header).toHaveLength(4);
+    expect(header[0].dataset.testid).toBe("project-mark");
+    expect(header[1].dataset.testid).toBe("activity-led");
+    expect(header[2]).toHaveTextContent("claude-alpha");
+    expect(header[3]).toBe(groupEl);
 
     // The whole group, in order: speak · speech-controls · printer · minimise ·
     // maximise · kill. An exact list, so a control added to it (a colour

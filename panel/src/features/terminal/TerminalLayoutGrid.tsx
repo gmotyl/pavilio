@@ -11,6 +11,7 @@ import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { ProjectMark } from "../projects/ProjectMark";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { CellSpeakButton } from "./CellSpeakButton";
@@ -523,6 +524,23 @@ function TerminalCell({
           onDragStart();
         }}
       >
+        {/* A square the header's full height, flush with the cell's left edge:
+            the negative margins undo the header's padding, the tile drops its
+            radius and frame, and an inset shadow draws the right divider. */}
+        <ProjectMark
+          project={session.project}
+          size={24}
+          style={{
+            alignSelf: "stretch",
+            height: "auto",
+            width: "auto",
+            aspectRatio: "1 / 1",
+            margin: "-4px 0 -4px -8px",
+            borderRadius: 0,
+            border: "none",
+            boxShadow: `inset -1px 0 0 color-mix(in srgb, ${accentColor} 38%, transparent)`,
+          }}
+        />
         <TerminalActivityLed sessionId={session.id} />
         {editingName ? (
           // The edit group: the name field and the colour picker are one edit,

@@ -4,7 +4,7 @@ import {
   ShoppingCart, Terminal, Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 
 import type { ProjectKind } from "../../../server/lib/projects/kind";
 import { preferences } from "../../preferences/declarations";
@@ -43,6 +43,8 @@ export interface ProjectMarkProps {
    * place of the project's own mark; `project` (or absent) draws that mark.
    */
   kind?: ProjectKind;
+  /** Layout overrides merged over the tile's own style (e.g. a flush, full-height tile). */
+  style?: CSSProperties;
 }
 
 /** Kinds that draw a fixed icon instead of the project's own mark. */
@@ -65,7 +67,7 @@ function MarkImage({ src, fallback }: { src: string; fallback: ReactNode }) {
   );
 }
 
-export function ProjectMark({ project, mark, color, size = 22, kind }: ProjectMarkProps) {
+export function ProjectMark({ project, mark, color, size = 22, kind, style }: ProjectMarkProps) {
   const { colorFor } = useProjectColors();
   const stored = useStoredMark(project);
   const hex = color ?? colorFor(project);
@@ -92,6 +94,7 @@ export function ProjectMark({ project, mark, color, size = 22, kind }: ProjectMa
         color: hex,
         background: `color-mix(in srgb, ${hex} 16%, transparent)`,
         border: `1px solid color-mix(in srgb, ${hex} 38%, transparent)`,
+        ...style,
       }}
     >
       {image !== null ? (

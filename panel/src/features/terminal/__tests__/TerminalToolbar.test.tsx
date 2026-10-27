@@ -197,6 +197,48 @@ describe("TerminalToolbar — project colour", () => {
     expect(chipColor("s1")).not.toBe(chipColor("s2"));
   });
 
+  /**
+   * The chip's leading children in order, as the parts the mockup names: the
+   * LED, the mark tile, the label. Whatever follows the label (the close ×,
+   * the disconnected badge) is not part of the identity the chip leads with.
+   */
+  const chipParts = (id: string) => {
+    const chip = screen.getByTestId(`terminal-toolbar-chip-${id}`);
+    const [led, mark, label] = Array.from(chip.children) as HTMLElement[];
+    return { chip, led, mark, label };
+  };
+
+  it("chip shows the project mark and a coloured label", async () => {
+    const sessions = [makeSession({ id: "s1", project: "alpha", name: "claude-alpha" })];
+    renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
+
+    await waitFor(() =>
+      expect(chipParts("s1").label.style.color).toBe(rgb(TEST_PROJECT_COLORS.alpha)),
+    );
+    const { led, mark, label } = chipParts("s1");
+    expect(led).toHaveClass("terminal-led");
+    expect(mark.dataset.testid).toBe("project-mark");
+    expect(mark.style.width).toBe("20px");
+    expect(mark.style.height).toBe("20px");
+    expect(label).toHaveTextContent("claude-alpha");
+  });
+
+  it("unfocused chip keeps mark and colour", async () => {
+    const sessions = [
+      makeSession({ id: "s1", project: "alpha" }),
+      makeSession({ id: "s2", project: "beta", name: "claude-beta" }),
+    ];
+    renderToolbar({ sessions, focusedId: "s1", currentProject: "alpha" });
+
+    await waitFor(() =>
+      expect(chipParts("s2").label.style.color).toBe(rgb(TEST_PROJECT_COLORS.beta)),
+    );
+    const { chip, mark } = chipParts("s2");
+    // Dimmed as before, but the identity stays.
+    expect(chip.style.opacity).toBe("0.75");
+    expect(mark.dataset.testid).toBe("project-mark");
+    expect(mark.dataset.color).toBe(TEST_PROJECT_COLORS.beta);
+  });
 });
 
 describe("TerminalToolbar — run-as-user dropdown", () => {

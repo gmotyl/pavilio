@@ -6,6 +6,7 @@ import { useProjectColors } from "./useProjectColors";
 import { useOsUsers } from "./useOsUsers";
 import { useDefaultTerminalUsers } from "./useDefaultTerminalUsers";
 import { TerminalActivityLed } from "./TerminalActivityLed";
+import { ProjectMark } from "../projects/ProjectMark";
 import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
@@ -328,6 +329,8 @@ export function TerminalToolbar({
               }}
             >
               <TerminalActivityLed sessionId={s.id} />
+              {/* Always shown, so a project reads at a glance on /terminals. */}
+              <ProjectMark project={s.project} size={20} />
               {editing ? (
                 <input
                   autoFocus
@@ -348,6 +351,7 @@ export function TerminalToolbar({
               ) : (
                 <span
                   className="font-mono truncate max-w-[140px]"
+                  style={{ color: chipColor }}
                   onDoubleClick={(e) => {
                     e.stopPropagation();
                     setEditingId(s.id);
