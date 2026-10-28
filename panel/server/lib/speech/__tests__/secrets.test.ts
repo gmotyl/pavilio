@@ -89,4 +89,44 @@ describe("secrets store", () => {
     expect(process.env).toEqual(before);
     expect(process.env.SPEECHIFY_API_KEY).toBeUndefined();
   });
+  it("skips undefined entries; only null removes", async () => {
+    const { resolveKey, writeKeys } = await import("../secrets");
+    await writeKeys({ ELEVENLABS_API_KEY: "el-1", CARTESIA_API_KEY: "ca-1" });
+    await writeKeys({ ELEVENLABS_API_KEY: undefined, CARTESIA_API_KEY: null });
+
+    expect(resolveKey("ELEVENLABS_API_KEY")).toEqual({ value: "el-1", source: "file" });
+    expect(resolveKey("CARTESIA_API_KEY")).toEqual({ source: "none" });
+    expect(readFileSync(secretsFile(), "utf8")).toBe("ELEVENLABS_API_KEY=el-1\n");
+  });
+
+  it("refuses a name that is not a key variable, without echoing the value", async () => {
+    const { writeKeys } = await import("../secrets");
+    const entries = { PATH: "secret-value-123" } as unknown as Parameters<typeof writeKeys>[0];
+
+    const error = await writeKeys(entries).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).not.toContain("secret-value-123");
+    expect(() => statSync(secretsFile())).toThrow();
+  });
+
+  it("reads a CRLF file without carriage returns in the values", async () => {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(secretsFile(), "# keys\r\nELEVENLABS_API_KEY=el-1\r\nAZURE_SPEECH_REGION=westeurope\r\n", {
+      mode: 0o600,
+    });
+    const { resolveKey, writeKeys } = await import("../secrets");
+
+    expect(resolveKey("ELEVENLABS_API_KEY")).toEqual({ value: "el-1", source: "file" });
+    expect(resolveKey("AZURE_SPEECH_REGION")).toEqual({ value: "westeurope", source: "file" });
+
+    // A rewrite replaces the existing line instead of appending a second one.
+    await writeKeys({ ELEVENLABS_API_KEY: "el-2" });
+    expect(readFileSync(secretsFile(), "utf8")).toBe(
+      "# keys\nELEVENLABS_API_KEY=el-2\nAZURE_SPEECH_REGION=westeurope\n",
+    );
+  });
 });
