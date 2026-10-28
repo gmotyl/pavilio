@@ -739,7 +739,7 @@ export function AnswerPane({
                 const state = segmentStateFor({
                   index,
                   playingIndex: unitIndex,
-                  cache: speechCacheState(unit.text, { voice }),
+                  cache: speechCacheState(unit.text, { voice, lang: unit.lang }),
                 });
                 return (
                   <div

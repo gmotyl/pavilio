@@ -365,43 +365,23 @@ describe("prepare", () => {
     expect(spoken).toContain("The regression test covers the closing cell");
   });
 
-  it("applies the pronunciation map only on the Polish branch", () => {
-    const polish = "Zrobiłem deploy na Cloudflare.";
-
+  it("prepare no longer respells", () => {
+    // Respelling is anytts' job now, per engine, at synthesis: the panel hands
+    // over the text as written, on either branch.
+    const polish = "Zrobiłem deploy na Cloudflare, a codebase czyta code.";
     const spoken = prepare(polish, { language: "pl" });
+
     expect(spoken.language).toBe("pl");
-    expect(spoken.units[0].text).toBe("Zrobiłem diploj na klałdfler.");
-
-    // The same text on the English branch is left exactly as it is...
-    const unmapped = prepare(polish, { language: "en" });
-    expect(unmapped.language).toBe("en");
-    expect(unmapped.units[0].text).toBe(polish);
-
-    // ...and English is the default, so ordinary English prose is never mangled
-    // by map keys that are ordinary English words.
-    const english = prepare("We build and update the dashboard.");
-    expect(english.language).toBe("en");
-    expect(english.units[0].text).toBe("We build and update the dashboard.");
-    expect(prepare("We build and update the dashboard.", { language: "pl" }).units[0].text).toBe(
-      "We bild and apdejt the daszbord.",
-    );
-  });
-
-  it("polish branch respells a preset key and leaves a longer word that starts with it alone", () => {
-    const polish = "Macierz liczę na mac, a codebase czyta code.";
-    const { units } = prepare(polish, { language: "pl" });
-
-    // `mac` and `code` are preset keys; `macierz` and `codebase` merely start with one.
-    expect(units[0].text).toBe("Macierz liczę na mak, a codebase czyta koud.");
-    expect(applyPronunciation).toHaveBeenCalledWith(expect.any(String), "pl");
-  });
-
-  it("english branch applies no map", () => {
-    const text = "We build the mac app and update the code.";
-    const { units } = prepare(text, { language: "en" });
-
-    expect(units[0].text).toBe(text);
+    expect(spoken.units[0].text).toBe(polish);
+    expect(prepare(polish, { language: "en" }).units[0].text).toBe(polish);
     expect(applyPronunciation).not.toHaveBeenCalled();
+
+    // `source` is still what the answer pane matches against the rendered blocks.
+    const { units } = prepare(["## Wdrożenie", "", "Zrobiłem **deploy** na Cloudflare.", ""].join("\n"), {
+      language: "pl",
+    });
+    expect(units.map((unit) => unit.source)).toEqual(["## Wdrożenie", "Zrobiłem **deploy** na Cloudflare."]);
+    expect(units.map((unit) => unit.text)).toEqual(["Wdrożenie", "Zrobiłem deploy na Cloudflare."]);
   });
 
   it("returns no units for a response that is only code", () => {
@@ -437,9 +417,8 @@ describe("prepare", () => {
     expect(units.map((unit) => unit.text).join(" ")).toContain("A later heading");
   });
   it.each<[lang: "pl" | "en", words: string[]]>([
-    // `blok HTML` reaches the voice as `blok ejcz ti em el`: the substitution
-    // lands first and the pronunciation map then does its job on the acronym.
-    ["pl", ["blok kodu", "tabela", "blok ejcz ti em el", "obrazek", "link", "wyrażenie"]],
+    // `blok HTML` goes to synthesis as written: anytts' map says the acronym there.
+    ["pl", ["blok kodu", "tabela", "blok HTML", "obrazek", "link", "wyrażenie"]],
     ["en", ["code block", "table", "HTML block", "image", "link", "expression"]],
   ])("speaks every sentinel in the session language (%s)", (lang, words) => {
     const text = spoken(everySentinelResponse, lang);
@@ -519,8 +498,11 @@ describe("prepare", () => {
     // A pin, not a new behaviour: it passed before this change and must keep
     // passing. The substitution returns the text untouched when no sentinel
     // stood in it, so the tidy pass never runs over ordinary prose.
-    expect(prepare(noSentinelResponse, { language: "pl" }).units).toEqual(NO_SENTINEL_UNITS);
-    expect(prepare(noSentinelResponse, { language: "en" }).units).toEqual(NO_SENTINEL_UNITS);
+    for (const lang of ["pl", "en"] as const) {
+      expect(prepare(noSentinelResponse, { language: lang }).units).toEqual(
+        NO_SENTINEL_UNITS.map((unit) => ({ ...unit, lang })),
+      );
+    }
   });
 
   it("substitutes a sentinel before the pronunciation map can mangle it", () => {
@@ -528,8 +510,8 @@ describe("prepare", () => {
     // stem map holds `code → koud` and the acronym map holds
     // `html → ejcz ti em el`, and neither treats `⟦` as anything but a word
     // boundary. Run the map first and the sentinel is no longer a sentinel —
-    // a Polish session then says the literal "⟦koud⟧" out loud, which is what
-    // it did before this commit.
+    // a Polish session then says the literal "⟦koud⟧" out loud. anytts applies
+    // the map at synthesis, after preparation has worded every sentinel.
     expect(applyPronunciation("⟦code⟧", "pl")).toBe("⟦koud⟧");
     expect(applyPronunciation("⟦html⟧", "pl")).toBe("⟦ejcz ti em el⟧");
     // The token stage is ordered the same way: the acronym table matches `html`
@@ -549,7 +531,7 @@ describe("prepare", () => {
     ["an underscored identifier is spoken as its words (en)", "Regex HEADING_LINE_RE tutaj.\n", "en", "Regex variable heading line re tutaj."],
     ["an underscored identifier is spoken as its words (pl)", "Regex HEADING_LINE_RE tutaj.\n", "pl", "Regex zmienna heading line re tutaj."],
     // `strip.ts` has already unwrapped short inline code.
-    ["a backticked identifier arrives bare and is labelled", "Stała `user_id` tutaj.\n", "pl", "Stała zmienna user aj di tutaj."],
+    ["a backticked identifier arrives bare and is labelled", "Stała `user_id` tutaj.\n", "pl", "Stała zmienna user id tutaj."],
     ["a hash is named, not spelled (en)", "The tag points at 3f9a2b1c7d today.\n", "en", "The tag points at hash today."],
     ["a hash is named, not spelled (pl)", "Skrót 3f9a2b1c7d jest tutaj.\n", "pl", "Skrót hash jest tutaj."],
     // A digest prefix is part of the token — else "sha256 colon hash".
@@ -566,9 +548,9 @@ describe("prepare", () => {
     ["a UUID is named (pl)", "Sesja 550e8400-e29b-41d4-a716-446655440000 zakończona.\n", "pl", "Sesja identyfikator zakończona."],
     // Capitalisation is not a word boundary: splitting it ruins `TypeScript` and `GitHub`.
     ["camel case is not split", "We use useSpeechHost with TypeScript and GitHub.\n", "en", "We use useSpeechHost with TypeScript and GitHub."],
-    // The pronunciation map runs after the split, so the acronym is finally said.
-    ["the map runs after the split: HTML_PARSER (pl)", "Zmieniamy HTML_PARSER dzisiaj.\n", "pl", "Zmieniamy zmienna ejcz ti em el parser dzisiaj."],
-    ["the English branch never runs the map: HTML_PARSER (en)", "We change HTML_PARSER today.\n", "en", "We change variable html parser today."],
+    // The split hands anytts' map (at synthesis) a standalone acronym it can say.
+    ["the split leaves the acronym standing: HTML_PARSER (pl)", "Zmieniamy HTML_PARSER dzisiaj.\n", "pl", "Zmieniamy zmienna html parser dzisiaj."],
+    ["the split leaves the acronym standing: HTML_PARSER (en)", "We change HTML_PARSER today.\n", "en", "We change variable html parser today."],
     // `strip.ts` runs first and its path rule is destructive in both directions.
     ["a hash that is a path's last segment is still named", "Zobacz `.git/objects/ab/cdef1234567890` tutaj.\n", "pl", "Zobacz hash tutaj."],
     // Its underscores were already spoken as spaces: named as a path, not a variable.
@@ -603,14 +585,6 @@ describe("prepare", () => {
     expect(units[1].text).not.toContain("**");
     expect(units[1].source).toBe(tldr);
     expect(units[2].source).toBe("Body paragraph follows here.");
-  });
-
-  it("source is untouched by the Polish pronunciation map", () => {
-    const polish = "Zrobiłem deploy na Cloudflare.";
-    const { units } = prepare(polish, { language: "pl" });
-
-    expect(units[0].text).toBe("Zrobiłem diploj na klałdfler.");
-    expect(units[0].source).toBe(polish);
   });
 
   it("source keeps the sentinel the spoken text words", () => {

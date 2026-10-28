@@ -6,25 +6,44 @@
  * can change without either noticing. anytts owns synthesis, the request
  * scheduler (tiers, promotion, abort), the LRU cache and its in-flight dedupe,
  * the stall timeout and its retry, and the relay fallback for browsers that
- * cannot reach the Edge service directly. This module only translates: it
- * picks the engine from the `speech.engine` preference, maps the library's
- * cache states onto the panel's three words, and fans one library
- * subscription out to the panel's cache listeners.
+ * cannot reach the Edge service directly, plus the Pronunciation map. This
+ * module only translates: it builds each request from the preferences at call
+ * time — the engine from `speech.engine`; under the cascade the member voices,
+ * the order (only the members *In cascade*) and the pronunciation switches —
+ * maps the library's cache states onto the panel's three words, and fans one
+ * library subscription out to the panel's cache listeners.
+ *
+ * The keyed engines and the cascade are relay clients of the panel server,
+ * which holds the keys; Edge alone has a route.
  *
  * The instance is created lazily, on first use, so importing the module (or a
- * test that mocks anytts) never builds one. The `speech.route` preference is
- * baked into it (the edge engine's `mode`), so every use compares the route
- * against the one the instance was built with and rebuilds on a change —
- * dropping the cache, which was synthesized the same way either route.
+ * test that mocks anytts) never builds one. Two preferences are baked into it
+ * — `speech.route` (the edge engine's `mode`) and `speech.pronunciationByEngine`
+ * (each engine's `pronunciation`, which a single-engine request cannot carry)
+ * — so every use compares them against the ones the instance was built with
+ * and rebuilds on a change, dropping the cache.
  */
 import { createTts, resolveVoice, type SynthesisRequest, type Tts, type TtsConfig } from "anytts";
 import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
-import { SPEECH_ENGINES, speechEngines } from "./engines";
+import {
+  CASCADE,
+  SPEECH_ENGINES,
+  cascadeVoicesOf,
+  getCascadeOrder,
+  isCascadeVoiceKey,
+  speechEngines,
+} from "./engines";
 import { SPEECH_ROUTE_MODES, toSpeechRoute, type SpeechRoute } from "./route";
 
 export interface SpeechSynthesisOptions {
+  /** One engine's voice id, or under the cascade the session's member voices as one key. */
   voice?: string;
+  /**
+   * The text's language (`PreparedSpeech.language`): picks the Pronunciation
+   * map anytts respells with, and a member's voice where none is named.
+   */
+  lang?: string;
   /** Scheduler tier, most important first: `run` > `warm` > `preload`. */
   tier?: "run" | "warm" | "preload";
   /** Aborting removes a queued request; an in-flight one closes once nobody holds it. */
@@ -54,31 +73,51 @@ const TTS_CONFIG: TtsConfig = {
   cache: { max: SPEECH_CACHE_MAX_ENTRIES },
 };
 
-/** The config for `route`: the edge engine's `mode` is the route's. */
-function configFor(route: SpeechRoute): TtsConfig {
-  const engines = { ...TTS_CONFIG.engines };
+/**
+ * The config for `route` and the stored pronunciation switches: the edge
+ * engine's `mode` is the route's, and an engine with a switch stored gets it
+ * as its `pronunciation` (one without keeps anytts' default: Edge on, the
+ * others off). The cascade's members are switched per request instead.
+ */
+function configFor(route: SpeechRoute, pronunciation: Readonly<Record<string, boolean>>): TtsConfig {
+  const engines: TtsConfig["engines"] = { ...TTS_CONFIG.engines };
+  for (const id of Object.keys(engines)) {
+    if (id !== CASCADE && Object.hasOwn(pronunciation, id)) {
+      engines[id] = { ...engines[id], pronunciation: pronunciation[id] };
+    }
+  }
   engines.edge = { ...engines.edge, mode: SPEECH_ROUTE_MODES[route] };
   return { ...TTS_CONFIG, engines };
+}
+
+/** What the instance is built from, as one comparable string. */
+function instanceKey(route: SpeechRoute, pronunciation: Readonly<Record<string, boolean>>): string {
+  const switches = Object.keys(pronunciation)
+    .sort()
+    .map((id) => [id, pronunciation[id]]);
+  return JSON.stringify([route, switches]);
 }
 
 const cacheListeners = new Set<() => void>();
 let libraryUnsubscribe: (() => void) | undefined;
 
 let instance: Tts | undefined;
-let instanceRoute: SpeechRoute | undefined;
+let instanceBuiltFrom: string | undefined;
 
 /**
- * The instance for the route stored now. A route change lets the old instance
- * go and builds a new one; the library subscription moves with it, and the
- * panel's listeners hear about the (now empty) cache on a microtask, since
- * this can run inside a render-time peek.
+ * The instance for the route and pronunciation switches stored now. A change
+ * lets the old instance go and builds a new one; the library subscription
+ * moves with it, and the panel's listeners hear about the (now empty) cache
+ * on a microtask, since this can run inside a render-time peek.
  */
 function tts(): Tts {
   const route = toSpeechRoute(readPreference(preferences.speechRoute));
-  if (instance && instanceRoute === route) return instance;
+  const pronunciation = readPreference(preferences.speechPronunciationByEngine);
+  const key = instanceKey(route, pronunciation);
+  if (instance && instanceBuiltFrom === key) return instance;
   const swapped = instance !== undefined;
-  instance = createTts(configFor(route));
-  instanceRoute = route;
+  instance = createTts(configFor(route, pronunciation));
+  instanceBuiltFrom = key;
   if (swapped && libraryUnsubscribe) {
     libraryUnsubscribe();
     libraryUnsubscribe = instance.subscribe(notifyCacheListeners);
@@ -101,13 +140,34 @@ function engine(): string {
   return speechEngines().includes(stored) ? stored : TTS_CONFIG.defaultEngine;
 }
 
-/** The request for `text`, with the engine read from the preference at call time. */
+/**
+ * The request for `text`, built from the preferences at call time.
+ *
+ * A cascade request names no `voice` (anytts refuses one): its `voices` come
+ * from the session's cascade voice key, its `order` lists only the members
+ * *In cascade*, and its `pronunciation` is the stored switches — over the
+ * relay, the server respells per member. A single engine gets its `voice`
+ * (never a cascade key, which a race with an engine change could hand it) and
+ * respells in the browser from `lang`, by its configured switch.
+ */
 function request(text: string, options: SpeechSynthesisOptions): SynthesisRequest {
-  return {
-    text,
-    voice: options.voice || undefined,
-    engine: engine(),
-  };
+  const id = engine();
+  const lang = options.lang || undefined;
+  if (id === CASCADE) {
+    const voices = cascadeVoicesOf(options.voice);
+    return {
+      text,
+      engine: id,
+      ...(lang ? { lang } : {}),
+      ...(voices ? { voices } : {}),
+      order: getCascadeOrder()
+        .filter((member) => member.on)
+        .map((member) => member.id),
+      pronunciation: { ...readPreference(preferences.speechPronunciationByEngine) },
+    };
+  }
+  const voice = options.voice && !isCascadeVoiceKey(options.voice) ? options.voice : undefined;
+  return { text, voice, engine: id, ...(lang ? { lang } : {}) };
 }
 
 /**

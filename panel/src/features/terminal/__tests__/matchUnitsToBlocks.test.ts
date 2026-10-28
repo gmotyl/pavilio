@@ -107,10 +107,10 @@ describe("matchUnitsToBlocks", () => {
     expect(map.blockToUnit[CLOSING]).toBe(4);
   });
 
-  it("Polish pronunciation does not break the match", () => {
+  it("Polish preparation does not break the match", () => {
     const polish = prepare(answer, { language: "pl" });
-    // The spoken text changed; the source it was spoken from did not.
-    expect(polish.units[0].text).not.toBe(units[0].text);
+    // Prepared in Polish (anytts respells at synthesis); the source is the same.
+    expect(polish.units.every((unit) => unit.lang === "pl")).toBe(true);
     expect(polish.units.map((unit) => unit.source)).toEqual(units.map((unit) => unit.source));
 
     expect(matchUnitsToBlocks(polish.units, blocks)).toEqual(map);

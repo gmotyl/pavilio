@@ -261,8 +261,8 @@ export interface Utterance {
 }
 
 /**
- * One chunk of speakable text: prepared, pronunciation-mapped and ready to hand
- * to synthesis as-is. Chunking is what makes playback start fast — the player
+ * One chunk of speakable text: prepared and ready to hand to synthesis as-is
+ * (anytts applies the Pronunciation map there, from `lang`). Chunking is what makes playback start fast — the player
  * awaits only the first unit — so a unit is sized to be spoken, not to be read.
  */
 export interface SpeechUnit {
@@ -271,11 +271,17 @@ export interface SpeechUnit {
   /** `text.length`. */
   chars: number;
   /**
-   * The same unit before markers, sentinels and pronunciation — what the
-   * answer pane matches against the rendered markdown. Packed from the same
-   * paragraphs as `text`, joined the same way.
+   * The same unit before markers and sentinels — what the answer pane matches
+   * against the rendered markdown. Packed from the same paragraphs as `text`,
+   * joined the same way.
    */
   source: string;
+  /**
+   * The language `text` was prepared in, handed to synthesis as `lang`. Absent
+   * only on a unit built by hand: synthesis then gets no `lang`, so nothing is
+   * respelled.
+   */
+  lang?: "pl" | "en";
 }
 
 /**
@@ -283,9 +289,10 @@ export interface SpeechUnit {
  * and the whole response is what a run plays: nothing caps the spoken length,
  * so no unit is ever held back.
  *
- * `language` is the language the pronunciation map was gated on. It is the
- * session's language, handed *to* preparation rather than detected from this one
- * response (see `prepare.ts`), so it is reported back to make the gate visible.
+ * `language` is the language the response was prepared in — every unit's
+ * `lang`. It is the session's language, handed *to* preparation rather than
+ * detected from this one response (see `prepare.ts`), so it is reported back
+ * to make it visible.
  */
 export interface PreparedSpeech {
   /** May be empty — an utterance with nothing to say. */

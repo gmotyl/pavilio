@@ -25,11 +25,11 @@ import {
 } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
 import { projectOfDocKey } from "./docKey";
-import { speechEngines } from "./engines";
+import { CASCADE, cascadeVoiceKey, getCascadeOrder, speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
 
-export { DEFAULT_CASCADE_ORDER, DEFAULT_SPEECH_VOICE };
+export { DEFAULT_CASCADE_ORDER, DEFAULT_SPEECH_VOICE, getCascadeOrder };
 export type { CascadeEntry, EngineVoices };
 
 /**
@@ -102,11 +102,15 @@ export function catalogDefaultVoice(engine: string): string | undefined {
  * Read-only. The catalog check comes first so the common case — a valid pick —
  * never builds the anytts instance and never reaches the seam, which a render
  * path may call on every frame.
+ *
+ * `cascade` has no single voice (anytts throws asking it for one): it resolves
+ * to `""`, never fallen back — its voices are its members'.
  */
 export function resolveStoredVoice(
   stored: Readonly<EngineVoices>,
   engine: string = getStoredEngine(),
 ): { voice: string; fellBack: boolean } {
+  if (engine === CASCADE) return { voice: "", fellBack: false };
   const picked: unknown = Object.hasOwn(asRecord(stored), engine) ? stored[engine] : undefined;
   if (isCatalogVoice(engine, picked)) return { voice: picked, fellBack: false };
   return resolveSpeechVoice({ engine, voice: typeof picked === "string" ? picked : undefined });
@@ -236,36 +240,28 @@ export function voiceFor(engine: string, project?: string): string | undefined {
 
 /**
  * The voice a project speaks with on the current engine: its own, else the
- * default voice. Read-only: the answer pane and the control bar call it during
+ * default voice. Under the cascade it is every member's {@link voiceFor} the
+ * project, as one {@link cascadeVoiceKey} the seam opens into the request's
+ * `voices`. Read-only: the answer pane and the control bar call it during
  * render, through the terminal's `voiceForSession`.
  */
 export function voiceForProject(project: string | undefined): string {
   const engine = getStoredEngine();
+  if (engine === CASCADE) {
+    const voices: Record<string, string> = {};
+    for (const member of DEFAULT_CASCADE_ORDER) {
+      const voice = voiceFor(member, project);
+      if (voice !== undefined) voices[member] = voice;
+    }
+    return cascadeVoiceKey(voices);
+  }
   return (
     (project ? getProjectVoices(project)[engine] : undefined) ??
     resolveStoredVoice(readPreference(preferences.speechVoice), engine).voice
   );
 }
 
-/**
- * The cascade order in effect: the stored entries for engines the cascade can
- * hold, in their stored order (an unknown id or a repeat dropped), then any
- * member engine the record does not name, on — so an engine added to the list
- * later joins the cascade instead of vanishing from it.
- */
-export function getCascadeOrder(): CascadeEntry[] {
-  const seen = new Set<string>();
-  const order: CascadeEntry[] = [];
-  for (const entry of readPreference(preferences.speechCascadeOrder)) {
-    if (!DEFAULT_CASCADE_ORDER.includes(entry.id) || seen.has(entry.id)) continue;
-    seen.add(entry.id);
-    order.push({ id: entry.id, on: entry.on });
-  }
-  for (const id of DEFAULT_CASCADE_ORDER) if (!seen.has(id)) order.push({ id, on: true });
-  return order;
-}
-
-/** Stores `order` (repaired as {@link getCascadeOrder} reads it) and returns the order now in effect. */
+/** Stores `order` (repaired as `getCascadeOrder` reads it) and returns the order now in effect. */
 export function setCascadeOrder(order: readonly CascadeEntry[]): CascadeEntry[] {
   writePreference(
     preferences.speechCascadeOrder,

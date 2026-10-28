@@ -212,7 +212,7 @@ export function SpeechTransport({
     const state = segmentStateFor({
       index,
       playingIndex: progress?.unitIndex ?? null,
-      cache: speechCacheState(units[index]?.text ?? "", { voice }),
+      cache: speechCacheState(units[index]?.text ?? "", { voice, lang: units[index]?.lang }),
     });
     // A measured unit is one whose audio has been in the element: played, this
     // run, whether or not a run is still going. Only the bar has `durations`,

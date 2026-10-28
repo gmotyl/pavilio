@@ -16,13 +16,18 @@ import {
   getCascadeOrder,
   getPronunciationByEngine,
   getProjectVoices,
+  getStoredVoice,
   getStoredVoices,
+  resolveStoredVoice,
   setEngineVoice,
   setProjectEngineVoice,
+  setStoredEngine,
   setStoredVoice,
   voiceFor,
+  voiceForDocKey,
   voiceForProject,
 } from "../voices";
+import { cascadeVoicesOf } from "../engines";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -134,5 +139,27 @@ describe("per-engine voices and cascade preferences", () => {
     }
     expect(preferences.speechCascadeOrder.key).toBe("speech.cascadeOrder");
     expect(preferences.speechPronunciationByEngine.key).toBe("speech.pronunciationByEngine");
+  });
+
+  it("cascade as the engine resolves no single voice", () => {
+    // anytts throws asking `cascade` for a voice: every reader must stay clear of it.
+    setEngineVoice("edge", ANDREW);
+    setEngineVoice("elevenlabs", GEORGE);
+    expect(setStoredEngine("cascade")).toBe("cascade");
+    const before = readPreference(preferences.speechVoice);
+
+    expect(resolveStoredVoice(before)).toEqual({ voice: "", fellBack: false });
+    expect(getStoredVoice()).toBe("");
+    expect(readPreference(preferences.speechVoice)).toEqual(before);
+    expect(setStoredVoice(EMMA)).toBe("");
+    expect(catalogDefaultVoice("cascade")).toBeUndefined();
+
+    // The session's voice is the members' voices, as one key the seam opens.
+    setProjectEngineVoice("p", "elevenlabs", SARAH);
+    const voices = cascadeVoicesOf(voiceForProject("p"));
+    expect(voices).toMatchObject({ elevenlabs: SARAH, edge: ANDREW });
+    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "speechify"]);
+    expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });
+    expect(voiceForDocKey("doc:p/notes.md")).toBe(voiceForProject("p"));
   });
 });

@@ -21,11 +21,13 @@
  * across utterances, and defaults to English — the branch that changes nothing.
  *
  * It is also this module that turns `strip.ts`'s neutral sentinels into words,
- * and it does so **before** the pronunciation map — see
+ * which must happen **before** anytts' Pronunciation map sees the text — see
  * {@link speakSentinels}, where the collision that forces that order is spelled
- * out.
+ * out. The map itself is no longer applied here: anytts respells at synthesis,
+ * per engine, from the request's `lang` (the `speech.pronunciationByEngine`
+ * switches), so a unit's `text` is the text as written.
  */
-import { applyPronunciation, firstSentence, packUnits } from "anytts/text";
+import { firstSentence, packUnits } from "anytts/text";
 import { SENTINEL, SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
 import type { PreparedSpeech, SpeechUnit } from "./types";
 
@@ -38,8 +40,8 @@ export const UNIT_MAX_CHARS = 450;
 export interface PrepareOptions {
   /**
    * The session's language, as accumulated by `nextLanguageState`. Defaults to
-   * `"en"`: misapplying the pronunciation map is the harm, so the default is
-   * the branch that leaves the text alone.
+   * `"en"`. It words the placeholders here and is what synthesis receives as
+   * `lang`, where it picks the Pronunciation map.
    */
   language?: "pl" | "en";
 }
@@ -203,13 +205,13 @@ function tidyAroundPlaceholder(text: string): string {
 /**
  * Substitutes each sentinel for its spoken form in the session's language.
  *
- * This MUST run before {@link applyPronunciation}, and the reason is concrete
- * rather than stylistic: the Polish maps contain `code → koud` and the acronym
- * `html → ejcz ti em el`, and `⟦` is a word boundary to both. Applied first,
- * the map turns `⟦code⟧` into `⟦koud⟧` — no longer a sentinel, so nothing here
- * recognises it, and the voice spells the brackets out. Substituting first also
- * leaves the map a useful job: `blok HTML` then becomes `blok ejcz ti em el`,
- * which is the acronym said correctly.
+ * This MUST happen before anytts' Pronunciation map (applied at synthesis)
+ * sees the text, and the reason is concrete rather than stylistic: the Polish
+ * maps contain `code → koud` and the acronym `html → ejcz ti em el`, and `⟦` is
+ * a word boundary to both. Applied first, the map would turn `⟦code⟧` into
+ * `⟦koud⟧` — no longer a sentinel, and the voice spells the brackets out.
+ * Substituting first also leaves the map a useful job: `blok HTML` then becomes
+ * `blok ejcz ti em el`, which is the acronym said correctly.
  *
  * Returning `text` itself when nothing matched is not an optimisation — it is
  * what guarantees a response with no removals is prepared byte-for-byte as it
@@ -270,8 +272,8 @@ const SPOKEN_SHAPE: Readonly<Record<"pl" | "en", { variable: string; id: string 
 /**
  * Says the code-shaped tokens in the surviving prose as words.
  *
- * This runs AFTER {@link speakSentinels} and BEFORE {@link applyPronunciation},
- * and the second half of that is the part with teeth: the acronym table matches
+ * This runs AFTER {@link speakSentinels} and before anytts' Pronunciation map
+ * (applied at synthesis), and the second half of that is the part with teeth: the acronym table matches
  * `html` only as a standalone word and treats `_` as a word character, so
  * `HTML_PARSER` is invisible to the map until this stage has split it. Run the
  * map first and the acronym is simply never said. Substituting first hands the
@@ -299,16 +301,15 @@ function speakCodeShapes(text: string, language: "pl" | "en"): string {
 }
 
 /**
- * A paragraph as the voice will receive it: markers gone, line breaks collapsed
- * into spaces, placeholders said in words, code-shaped tokens said as words,
- * and the pronunciation map applied on the Polish branch only — in that order,
- * for the reasons on {@link speakSentinels} and {@link speakCodeShapes}.
+ * A paragraph as synthesis will receive it: markers gone, line breaks collapsed
+ * into spaces, placeholders said in words, then code-shaped tokens said as
+ * words — in that order, for the reasons on {@link speakSentinels} and
+ * {@link speakCodeShapes}.
  */
 function toSpokenText(text: string, language: "pl" | "en"): string {
   const spoken = speakSentinels(removeMarkers(text).replace(/\s+/g, " ").trim(), language);
-  const said = speakCodeShapes(spoken, language);
 
-  return language === "pl" ? applyPronunciation(said, "pl") : said;
+  return speakCodeShapes(spoken, language);
 }
 
 /** A paragraph paired with its spoken form, or `null` when nothing is left to say. */
@@ -471,11 +472,11 @@ function takeHeading(paragraphs: string[]): string | null {
  * to literally begin with one, after `removeMarkers`, whitespace collapse and a
  * trim.
  */
-function toUnits(packed: readonly Packed[]): SpeechUnit[] {
+function toUnits(packed: readonly Packed[], lang: "pl" | "en"): SpeechUnit[] {
   return packed.map(({ source, text: spoken }) => {
     const text = spoken.replace(/^ *, */, "");
 
-    return { text, chars: text.length, source };
+    return { text, chars: text.length, source, lang };
   });
 }
 
@@ -536,5 +537,5 @@ export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech
     }
   }
 
-  return { units: toUnits([...opening, ...packBody(body)]), language };
+  return { units: toUnits([...opening, ...packBody(body)], language), language };
 }

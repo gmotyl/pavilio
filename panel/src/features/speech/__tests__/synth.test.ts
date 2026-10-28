@@ -94,6 +94,7 @@ describe("the anytts seam", () => {
     synth.speechCacheState("hello", { voice: "v" });
 
     expect(lib.createTts).toHaveBeenCalledTimes(1);
+    const keyed = { relayUrl: "/api/tts", firstByteMs: 25_000, stallMs: 15_000 };
     const expected: TtsConfig = {
       engines: {
         edge: {
@@ -103,6 +104,12 @@ describe("the anytts seam", () => {
           stallMs: 15_000,
           mode: "auto",
         },
+        // The keyed engines and the cascade are relay clients, on every route.
+        cascade: { relayUrl: "/api/tts", firstByteMs: 60_000, stallMs: 15_000 },
+        elevenlabs: keyed,
+        cartesia: keyed,
+        speechify: keyed,
+        azure: keyed,
       },
       defaultEngine: "edge",
       scheduler: {
