@@ -64,7 +64,11 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
   "speech.engine": ["edge", "", "true", "240", "null"],
   "speech.route": ["auto", "server", "", "true", "240", "null"],
-  "speech.voice": ["fr-FR-VivienneMultilingualNeural", "", "true", "240", "null"],
+  "speech.voice": [
+    { edge: "fr-FR-VivienneMultilingualNeural" },
+    {},
+    { edge: "", elevenlabs: "true", azure: "240", cartesia: "null" },
+  ],
   "plans.taskPrompt": ["Implement all tasks in {path}.", "", "true", "240", "null", "{}"],
   // `optionalStr`: text that may be absent. No "" sample — a blank stored
   // value reads back as `null` by design, since a blank override is none.
@@ -120,14 +124,20 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "terminal.focus": [null, "", "sess-1", "true", "240", "null"],
   "speech.armedCell": [null, "", "sess-1", "true", "240", "null"],
   "speech.modes": [null, {}, { "sess-1": "armed", "sess-2": "autoplay" }],
-  "speech.voiceByProject": [{}, { pavilio: "en-US-EmmaMultilingualNeural" }, { "240": "true" }],
+  "speech.voiceByProject": [
+    {},
+    { pavilio: { edge: "en-US-EmmaMultilingualNeural" } },
+    { "240": { edge: "true" }, empty: {} },
+  ],
+  "speech.cascadeOrder": [[], [{ id: "edge", on: false }], [{ id: "true", on: true }]],
+  "speech.pronunciationByEngine": [{}, { edge: false, elevenlabs: true }],
   "nav.lastPath": [null, "", "/notes/today.md", "true", "240", "null"],
   "nav.lastFile": [null, "", "/notes/today.md", "true", "240", "null"],
   "nav.lastReposQuery": [null, "", "pavilio", "true", "240", "null"],
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 57;
+const DECLARATION_COUNT = 59;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

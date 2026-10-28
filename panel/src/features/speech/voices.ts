@@ -1,6 +1,7 @@
 /**
- * The speech feature's per-browser preferences: the engine and the picked
- * voice — both over anytts' catalog — and each cell's speech mode.
+ * The speech feature's preferences: the engine, one picked voice per engine —
+ * globally and per project, all over anytts' catalog — the cascade order, the
+ * per-engine pronunciation switch, and each cell's speech mode.
  *
  * The picked voice ALWAYS wins: nothing here consults
  * {@link import("./language").voteLanguage} or the per-session language
@@ -15,14 +16,21 @@ import { listVoices } from "anytts";
 // this value as `speech.voice`'s default. Re-exported so this module's
 // existing importers are untouched. The import points DOWN — registry →
 // feature would be the direction that closes a cycle.
-import { DEFAULT_SPEECH_VOICE, preferences } from "../../preferences/declarations";
+import {
+  DEFAULT_CASCADE_ORDER,
+  DEFAULT_SPEECH_VOICE,
+  preferences,
+  type CascadeEntry,
+  type EngineVoices,
+} from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
 import { projectOfDocKey } from "./docKey";
 import { speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
 
-export { DEFAULT_SPEECH_VOICE };
+export { DEFAULT_CASCADE_ORDER, DEFAULT_SPEECH_VOICE };
+export type { CascadeEntry, EngineVoices };
 
 /**
  * The seam's configured engines are the one list: an engine anytts lists but
@@ -55,30 +63,74 @@ function isCatalogVoice(engine: string, id: unknown): id is string {
   return typeof id === "string" && listVoices(engine).some((voice) => voice.id === id);
 }
 
+/** `value` as a record, or `{}`: the hand-editable records below may hold anything. */
+function asRecord<T>(value: unknown): Readonly<Record<string, T>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, T>)
+    : {};
+}
+
+/** The entries of `voices` that are voices of their engine's catalog: stale ids dropped. */
+function catalogVoices(voices: unknown): EngineVoices {
+  return Object.fromEntries(
+    Object.entries(asRecord<unknown>(voices)).filter(
+      (entry): entry is [string, string] => isCatalogVoice(entry[0], entry[1]),
+    ),
+  );
+}
+
 /**
- * Maps a stored default voice onto a voice of the current engine: a catalog
- * voice is kept, anything else goes through the seam's lenient
- * `resolveSpeechVoice`, which answers the engine default with `fellBack`.
+ * The voice `engine` speaks with when nothing is picked for it: anytts'
+ * default for the engine as the seam configures it (Edge's is
+ * {@link DEFAULT_SPEECH_VOICE}). `undefined` for an engine without voices of
+ * its own (`cascade`) and for one the seam does not configure — the seam's
+ * `resolveVoice` would throw RangeError for it, and a request that names no
+ * voice gets the same default from anytts on the server anyway.
+ */
+export function catalogDefaultVoice(engine: string): string | undefined {
+  if (!isKnownEngine(engine) || listVoices(engine).length === 0) return undefined;
+  return resolveSpeechVoice({ engine }).voice;
+}
+
+/**
+ * Maps a stored `speech.voice` record onto a voice of `engine` (default: the
+ * current engine): a catalog voice is kept, anything else goes through the
+ * seam's lenient `resolveSpeechVoice`, which answers the engine default with
+ * `fellBack`. An engine with no entry resolves to its default WITHOUT
+ * `fellBack` — nothing stale was stored.
  *
  * Read-only. The catalog check comes first so the common case — a valid pick —
  * never builds the anytts instance and never reaches the seam, which a render
  * path may call on every frame.
  */
-export function resolveStoredVoice(stored: string): { voice: string; fellBack: boolean } {
-  const engine = getStoredEngine();
-  if (isCatalogVoice(engine, stored)) return { voice: stored, fellBack: false };
-  return resolveSpeechVoice({ engine, voice: stored });
+export function resolveStoredVoice(
+  stored: Readonly<EngineVoices>,
+  engine: string = getStoredEngine(),
+): { voice: string; fellBack: boolean } {
+  const picked: unknown = Object.hasOwn(asRecord(stored), engine) ? stored[engine] : undefined;
+  if (isCatalogVoice(engine, picked)) return { voice: picked, fellBack: false };
+  return resolveSpeechVoice({ engine, voice: typeof picked === "string" ? picked : undefined });
+}
+
+/** `stored` with `engine`'s entry set to `id`, or deleted for `null`. */
+function withVoice(stored: unknown, engine: string, id: string | null): EngineVoices {
+  // Built by `fromEntries`, which defines its keys: an assignment would hand a
+  // key named `__proto__` to the prototype setter and drop the write.
+  const others = Object.entries(asRecord<string>(stored)).filter(([key]) => key !== engine);
+  return Object.fromEntries(id === null ? others : [...others, [engine, id]]);
 }
 
 /**
- * The voice, now a PORTABLE preference: which voice reads an answer is a choice
- * about the panel, not a fact about this machine, so it travels in the
- * workspace file. The store owns every try/catch around browser storage.
+ * The current engine's voice, a PORTABLE preference: which voice reads an
+ * answer is a choice about the panel, not a fact about this machine, so it
+ * travels in the workspace file. The store owns every try/catch around browser
+ * storage.
  *
- * The declaration's codec is `str`, so a stale or hand-edited id reaches here
- * intact. It is resolved onto the engine default and, when it fell back, the
- * effective voice is WRITTEN BACK — so the stale id is replaced once, and a
- * strict `unknown-voice` rejection never sees it.
+ * The declaration's codec checks only the shape, so a stale or hand-edited id
+ * reaches here intact. It is resolved onto the engine default and, when it fell
+ * back, the effective voice is WRITTEN BACK into the engine's entry — so the
+ * stale id is replaced once, and a strict `unknown-voice` rejection never sees
+ * it.
  *
  * NEVER CALL THIS DURING RENDER. The write notifies every `speech.voice`
  * subscriber synchronously, which from a render is a setState on a sibling
@@ -86,8 +138,10 @@ export function resolveStoredVoice(stored: string): { voice: string; fellBack: b
  * Settings picker writes back from a mount effect and from its engine handler.
  */
 export function getStoredVoice(): string {
-  const { voice, fellBack } = resolveStoredVoice(readPreference(preferences.speechVoice));
-  if (fellBack) writePreference(preferences.speechVoice, voice);
+  const engine = getStoredEngine();
+  const stored = readPreference(preferences.speechVoice);
+  const { voice, fellBack } = resolveStoredVoice(stored, engine);
+  if (fellBack) writePreference(preferences.speechVoice, withVoice(stored, engine, voice));
   return voice;
 }
 
@@ -101,51 +155,142 @@ export function getStoredVoice(): string {
  * control showing the attempted one would claim a choice that never applied.
  */
 export function setStoredVoice(id: string): string {
-  if (isCatalogVoice(getStoredEngine(), id)) writePreference(preferences.speechVoice, id);
+  setEngineVoice(getStoredEngine(), id);
   return getStoredVoice();
 }
 
+/** Every engine's default voice as stored, stale ids dropped. Read-only. */
+export function getStoredVoices(): EngineVoices {
+  return catalogVoices(readPreference(preferences.speechVoice));
+}
+
 /**
- * The project's own voice, or `null` when it follows the default. A project
- * voice is a voice of the global engine: an id outside its catalog reads as
- * `null` — the record's codec is plain `json`, so this is the boundary that
- * drops it, and the project inherits the default.
+ * Sets `engine`'s default voice; `null` DELETES the entry, so the engine
+ * speaks with its catalog default. An id outside the engine's catalog is
+ * ignored. The other engines' entries are kept.
+ */
+export function setEngineVoice(engine: string, id: string | null): void {
+  if (id !== null && !isCatalogVoice(engine, id)) return;
+  writePreference(
+    preferences.speechVoice,
+    withVoice(readPreference(preferences.speechVoice), engine, id),
+  );
+}
+
+/**
+ * The project's own voice per engine, stale ids dropped — `{}` when the project
+ * follows the default for every engine. The record's codec checks only the
+ * shape, so this is the boundary that drops an id outside its engine's catalog.
+ */
+export function getProjectVoices(project: string): EngineVoices {
+  const stored = asRecord<unknown>(readPreference(preferences.speechVoiceByProject));
+  return catalogVoices(Object.hasOwn(stored, project) ? stored[project] : undefined);
+}
+
+/**
+ * Sets the project's voice for `engine`; `null` DELETES that engine's entry,
+ * and a project left with no entry is deleted too, so it follows the default.
+ * An id outside the engine's catalog, or a blank project, is ignored.
+ */
+export function setProjectEngineVoice(project: string, engine: string, id: string | null): void {
+  if (project.trim() === "") return;
+  if (id !== null && !isCatalogVoice(engine, id)) return;
+  const stored = asRecord<unknown>(readPreference(preferences.speechVoiceByProject));
+  const voices = withVoice(Object.hasOwn(stored, project) ? stored[project] : undefined, engine, id);
+  // `fromEntries` again, so a project named `__proto__` is an ordinary entry.
+  const others = Object.entries(stored).filter(([key]) => key !== project) as [string, EngineVoices][];
+  writePreference(
+    preferences.speechVoiceByProject,
+    Object.fromEntries(Object.keys(voices).length === 0 ? others : [...others, [project, voices]]),
+  );
+}
+
+/**
+ * The project's own voice for the current engine, or `null` when it follows
+ * the default. An id outside the engine's catalog reads as `null`, and the
+ * project inherits the default.
  */
 export function getProjectVoice(project: string): string | null {
-  const stored = readPreference(preferences.speechVoiceByProject);
-  if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return null;
-  const id: unknown = Object.hasOwn(stored, project) ? stored[project] : null;
-  return isCatalogVoice(getStoredEngine(), id) ? id : null;
+  return getProjectVoices(project)[getStoredEngine()] ?? null;
 }
 
-/** Sets the project's voice; `null` DELETES the entry, so it follows the default. */
+/** Sets the project's voice for the current engine; `null` DELETES it, so it follows the default. */
 export function setProjectVoice(project: string, id: string | null): void {
-  if (project.trim() === "") return;
-  if (id !== null && !isCatalogVoice(getStoredEngine(), id)) return;
-  const stored = readPreference(preferences.speechVoiceByProject);
-  const others = Object.entries(
-    stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {},
-  ).filter(([key]) => key !== project);
-  // Built by `fromEntries`, which defines its keys: an assignment would hand a
-  // project named `__proto__` to the prototype setter and drop the write.
-  const next: Record<string, string> = Object.fromEntries(
-    id === null ? others : [...others, [project, id]],
-  );
-  writePreference(preferences.speechVoiceByProject, next);
-}
-
-/** The default voice in effect, resolved read-only — safe on a render path. */
-function defaultVoice(): string {
-  return resolveStoredVoice(readPreference(preferences.speechVoice)).voice;
+  setProjectEngineVoice(project, getStoredEngine(), id);
 }
 
 /**
- * The voice a project speaks with: its own, else the default voice. Read-only:
- * the answer pane and the control bar call it during render, through the
- * terminal's `voiceForSession`.
+ * The voice `engine` speaks with in `project`:
+ * `voiceByProject[project][engine] ?? voice[engine] ?? <engine's catalog default>`,
+ * a stale id dropped at each step. `undefined` only where
+ * {@link catalogDefaultVoice} has no default (`cascade`, an unconfigured
+ * engine) and nothing valid is stored. Read-only — safe on a render path.
+ */
+export function voiceFor(engine: string, project?: string): string | undefined {
+  return (
+    (project ? getProjectVoices(project)[engine] : undefined) ??
+    getStoredVoices()[engine] ??
+    catalogDefaultVoice(engine)
+  );
+}
+
+/**
+ * The voice a project speaks with on the current engine: its own, else the
+ * default voice. Read-only: the answer pane and the control bar call it during
+ * render, through the terminal's `voiceForSession`.
  */
 export function voiceForProject(project: string | undefined): string {
-  return (project ? getProjectVoice(project) : null) ?? defaultVoice();
+  const engine = getStoredEngine();
+  return (
+    (project ? getProjectVoices(project)[engine] : undefined) ??
+    resolveStoredVoice(readPreference(preferences.speechVoice), engine).voice
+  );
+}
+
+/**
+ * The cascade order in effect: the stored entries for engines the cascade can
+ * hold, in their stored order (an unknown id or a repeat dropped), then any
+ * member engine the record does not name, on — so an engine added to the list
+ * later joins the cascade instead of vanishing from it.
+ */
+export function getCascadeOrder(): CascadeEntry[] {
+  const seen = new Set<string>();
+  const order: CascadeEntry[] = [];
+  for (const entry of readPreference(preferences.speechCascadeOrder)) {
+    if (!DEFAULT_CASCADE_ORDER.includes(entry.id) || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    order.push({ id: entry.id, on: entry.on });
+  }
+  for (const id of DEFAULT_CASCADE_ORDER) if (!seen.has(id)) order.push({ id, on: true });
+  return order;
+}
+
+/** Stores `order` (repaired as {@link getCascadeOrder} reads it) and returns the order now in effect. */
+export function setCascadeOrder(order: readonly CascadeEntry[]): CascadeEntry[] {
+  writePreference(
+    preferences.speechCascadeOrder,
+    order.map((entry) => ({ id: entry.id, on: entry.on })),
+  );
+  return getCascadeOrder();
+}
+
+/**
+ * Per-engine pronunciation as stored — `{}` until something is switched, and
+ * an engine with no entry keeps anytts' own default (Edge on, the others off).
+ */
+export function getPronunciationByEngine(): Readonly<Record<string, boolean>> {
+  return readPreference(preferences.speechPronunciationByEngine);
+}
+
+/** Switches pronunciation for `engine`; `null` DELETES the entry, back to anytts' default. */
+export function setEnginePronunciation(engine: string, on: boolean | null): void {
+  const others = Object.entries(readPreference(preferences.speechPronunciationByEngine)).filter(
+    ([key]) => key !== engine,
+  );
+  writePreference(
+    preferences.speechPronunciationByEngine,
+    Object.fromEntries(on === null ? others : [...others, [engine, on]]),
+  );
 }
 
 /**

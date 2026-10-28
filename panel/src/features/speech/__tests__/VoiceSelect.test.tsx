@@ -192,7 +192,7 @@ describe("VoiceSelect", () => {
     render(<VoiceSelect />);
 
     expect(voiceSelect()).toHaveValue(DEFAULT_SPEECH_VOICE);
-    expect(prefsDocument()[VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+    expect(prefsDocument()[VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
   });
 
   it("changing the engine stores speech.engine and reloads the voice list", async () => {
@@ -204,12 +204,13 @@ describe("VoiceSelect", () => {
 
     expect(prefsDocument()[storageKey(preferences.speechEngine)]).toBe(FAKE_ENGINE);
     expect(engineSelect()).toHaveValue(FAKE_ENGINE);
-    // The list is now the other engine's catalog, and the edge voice that was
-    // picked is not in it, so the engine default is shown and written back.
+    // The list is now the other engine's catalog. Voices are kept per engine,
+    // and nothing is picked for this one, so its default is shown — and not
+    // written: an engine with no entry is not a stale pick.
     const options = within(voiceSelect()).getAllByRole("option") as HTMLOptionElement[];
     expect(options.map((option) => option.value)).toEqual(FAKE_VOICES.map((v) => v.id));
     expect(voiceSelect()).toHaveValue(FAKE_DEFAULT);
-    expect(prefsDocument()[VOICE_KEY]).toBe(FAKE_DEFAULT);
+    expect(prefsDocument()[VOICE_KEY]).toBeUndefined();
 
     await user.selectOptions(engineSelect(), "edge");
     expect(within(voiceSelect()).getAllByRole("option")).toHaveLength(listVoices("edge").length);
@@ -229,7 +230,7 @@ describe("VoiceSelect", () => {
       (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__![
         storageKey(preferences.speechVoice)
       ],
-    ).toBe("fr-FR-VivienneMultilingualNeural");
+    ).toEqual({ edge: "fr-FR-VivienneMultilingualNeural" });
     // The voice is a choice about the panel, not about this machine, so it
     // travels in the workspace file and touches no browser storage.
     expect(localStorage.length).toBe(0);

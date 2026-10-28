@@ -56,7 +56,7 @@ describe("project voice", () => {
     setProjectVoice("q", ANDREW);
     setProjectVoice("p", null);
 
-    expect(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY]).toEqual({ q: ANDREW });
+    expect(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY]).toEqual({ q: { edge: ANDREW } });
     expect(getProjectVoice("p")).toBeNull();
   });
 
@@ -70,7 +70,7 @@ describe("project voice", () => {
 
     setProjectVoice("__proto__", null);
     expect(getProjectVoice("__proto__")).toBeNull();
-    expect(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY]).toEqual({ p: ANDREW });
+    expect(globals.__PAVILIO_PREFS__![BY_PROJECT_KEY]).toEqual({ p: { edge: ANDREW } });
   });
 
   it("projects without an override follow a changed default", () => {

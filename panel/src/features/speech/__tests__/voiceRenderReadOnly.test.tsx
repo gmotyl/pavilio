@@ -41,7 +41,7 @@ describe("voice readers on a render path", () => {
     );
     expect(screen.getByTestId("a")).toHaveTextContent(DEFAULT_SPEECH_VOICE);
 
-    act(() => writePreference(preferences.speechVoice, STALE));
+    act(() => writePreference(preferences.speechVoice, { edge: STALE }));
 
     // Both readers show the engine default the stale id resolves to...
     expect(screen.getByTestId("a")).toHaveTextContent(DEFAULT_SPEECH_VOICE);
@@ -53,6 +53,6 @@ describe("voice readers on a render path", () => {
     expect(crossRender).toEqual([]);
     // ...and without writing from render: the write-back is the Settings
     // picker's, on mount, so the stored value is untouched here.
-    expect(prefsDocument()[VOICE_KEY]).toBe(STALE);
+    expect(prefsDocument()[VOICE_KEY]).toEqual({ edge: STALE });
   });
 });

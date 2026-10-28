@@ -42,7 +42,7 @@ describe("getStoredVoice", () => {
 
     expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
     expect(getStoredVoice()).toBe("en-US-EmmaMultilingualNeural");
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe("en-US-EmmaMultilingualNeural");
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: "en-US-EmmaMultilingualNeural" });
     expect(localStorage.length).toBe(0);
   });
 
@@ -55,19 +55,20 @@ describe("getStoredVoice", () => {
   });
 
   it("a stale stored voice falls back to the engine default and is written back", () => {
-    // The declaration's codec is `str`, so a dropped or hand-edited id arrives
-    // intact and is resolved through the seam's `resolveSpeechVoice` here.
+    // The declaration's codec checks only the shape, so a dropped or hand-edited
+    // id arrives intact (an old bare string reads as Edge's) and is resolved
+    // through the seam's `resolveSpeechVoice` here.
     globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
 
     globals.__PAVILIO_PREFS__![VOICE_KEY] = "";
     expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
 
     // An id outside the catalog is ignored by the setter.
     expect(setStoredVoice("not-a-voice")).toBe(DEFAULT_SPEECH_VOICE);
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe(DEFAULT_SPEECH_VOICE);
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
 
     // The auth interlock stands in for the old "site data blocked" case: this
     // page received no document, so the read answers the default and the write
