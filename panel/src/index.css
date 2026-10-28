@@ -409,6 +409,18 @@ code, pre, .font-mono {
   margin-bottom: 0;
 }
 
+/* A blockquote shares the code block's corner copy button; room on the right
+   keeps the button off the quote's text. */
+.quote-block > blockquote {
+  padding-right: 2rem;
+}
+.prose > .quote-block:first-child > blockquote {
+  margin-top: 0;
+}
+.prose > .quote-block:last-child > blockquote {
+  margin-bottom: 0;
+}
+
 /* Markdown tables: zebra rows + visible column lines */
 .prose table {
   border-collapse: collapse;

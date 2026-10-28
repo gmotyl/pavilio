@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Children, cloneElement, isValidElement, lazy, Suspense, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -118,6 +118,49 @@ function markBlockCode(children: ReactNode): ReactNode {
   });
 }
 
+interface HastLike {
+  type?: string;
+  value?: string;
+  children?: HastLike[];
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
+}
+
+/** Text content of a hast node — the fallback when there is no Markdown source to cut. */
+function hastText(node: HastLike | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(hastText).join("");
+}
+
+/**
+ * What a blockquote's copy button puts on the clipboard: the quote's own
+ * Markdown source with one level of `>` markers (and any list indentation in
+ * front of them) taken off each line, so it pastes as the message it quotes —
+ * the same Markdown the "Copy answer" button gives, minus the quoting. A nested
+ * quote keeps its inner markers. A raw `<blockquote>` has no Markdown markers
+ * to strip, so it copies its text instead of its tags.
+ */
+function quoteSource(node: HastLike | undefined, source: string): string {
+  const start = node?.position?.start?.offset;
+  const end = node?.position?.end?.offset;
+  const slice = typeof start === "number" && typeof end === "number" ? source.slice(start, end) : "";
+  if (!slice.startsWith(">")) return hastText(node).trim();
+  // The slice starts at this quote's own marker, but its later lines still
+  // carry every enclosing quote's marker too: count them from what precedes
+  // the start on its line, and take those off before this quote's own.
+  const lineStart = source.lastIndexOf("\n", start! - 1) + 1;
+  const ancestors = (source.slice(lineStart, start).match(/>/g) ?? []).length;
+  const continuation = new RegExp(`^(?:[ \\t]*> ?){0,${ancestors}}[ \\t]*> ?`);
+  return slice
+    .split("\n")
+    .map((line, i) => line.replace(i === 0 ? /^> ?/ : continuation, ""))
+    .join("\n")
+    // Boundary blank lines only: leading spaces can be Markdown (an indented
+    // code block), so the first line keeps its indentation.
+    .replace(/^(?:[ \t]*\r?\n)+/, "")
+    .trimEnd();
+}
+
 /**
  * The projectsDir-relative paths of every wikilink target in `content`, deduplicated and
  * sorted — joined with newlines so it is a stable effect dependency.
@@ -181,6 +224,11 @@ function useMissingWikiLinks(targets: string): ReadonlySet<string> {
 export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
   const navigate = useNavigate();
   const missingWikiLinks = useMissingWikiLinks(useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]));
+  // Read through a ref, not a memo dependency: new override functions are new
+  // component types, so every keystroke in a live preview would remount the
+  // whole tree (mermaid diagrams included) just to refresh the quote text.
+  const contentRef = useRef(content);
+  contentRef.current = content;
 
   const components = useMemo<Components>(() => {
     // Fenced-code handling does not depend on where the file lives. Keep it out
@@ -264,6 +312,15 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
           </div>
         );
       },
+      // A quoted message (a reply the answer proposes) is meant to be pasted
+      // somewhere else; copying it by selection drags the `>` markers along.
+      // Sibling button, positioned like the code block's.
+      blockquote: ({ node, children, ...props }) => (
+        <div className="code-block quote-block">
+          <blockquote {...props}>{children}</blockquote>
+          <CopyIconButton value={quoteSource(node as HastLike, contentRef.current ?? "")} label="Copy quote" />
+        </div>
+      ),
     };
 
     const inAppLink = (to: string, children: ReactNode, props: Record<string, unknown>) => (
