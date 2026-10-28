@@ -8,12 +8,13 @@ import { CASCADE_ORDER, KEYED_ENGINES, type KeyedEngineId, type TtsHolder } from
  *
  *   GET    /api/speech/engines      every cascade member: label, key source, status
  *   PUT    /api/speech/keys/:engine { apiKey, region? } → 204 | 400 | 409 | 500
- *   DELETE /api/speech/keys/:engine → 204 | 400 | 409 | 500
+ *   DELETE /api/speech/keys/:engine → 204 | 400 | 500
  *
  * A saved key goes to the secrets store and the server's Tts is rebuilt from
  * it. No response carries a key: GET shows only its last four characters, and
  * errors never echo the request body. A key set in the environment wins over
  * the file, so writing one there would change nothing — that answers 409.
+ * DELETE always removes the file entries; an environment key stays in force.
  */
 
 export interface SpeechEngineInfo {
@@ -127,11 +128,6 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
     const id = req.params.engine;
     if (!isKeyed(id)) {
       res.status(400).json({ error: "unknown or keyless engine" });
-      return;
-    }
-    // Removing the file entry would leave an environment key in force.
-    if (resolveKey(KEYED_ENGINES[id]).source === "env") {
-      res.status(409).json({ error: "the key is set in the server environment" });
       return;
     }
     const entries = Object.fromEntries(varsOf(id).map((name) => [name, null]));

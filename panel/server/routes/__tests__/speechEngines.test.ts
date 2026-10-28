@@ -271,6 +271,20 @@ describe("/api/speech engines and keys", () => {
     }
   });
 
+  it("removing a key the environment also sets", async () => {
+    const { app, configs } = loadApp();
+    await request(app).put("/api/speech/keys/elevenlabs").set("Cookie", COOKIE).send({ apiKey: KEY });
+    expect(secrets()).toBe(`ELEVENLABS_API_KEY=${KEY}\n`);
+    vi.stubEnv("ELEVENLABS_API_KEY", "sk-env-0123456789abcdef-ENVK");
+
+    // DELETE removes the file entry; the environment value stays in force.
+    const removed = await request(app).delete("/api/speech/keys/elevenlabs").set("Cookie", COOKIE);
+    expect(removed.status).toBe(204);
+    expect(secrets()).toBe("");
+    expect(configs).toHaveLength(3);
+    expect(engine(await engines(app), "elevenlabs")).toMatchObject({ keySource: "env", keyLast4: "ENVK" });
+  });
+
   it("behind auth", async () => {
     const { app, configs } = loadApp();
 
