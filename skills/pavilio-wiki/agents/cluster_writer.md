@@ -26,7 +26,8 @@ Nothing. Work only from the inputs: no files, no wiki, no code, no web.
    origin project. Keep findings about a tool, library, platform or technique that would help in
    another project.
 2. **Cluster** the kept items: items stating the same finding (across projects too) go in one
-   cluster; one item never sits in two clusters. A single item is a cluster of one.
+   cluster; one item never sits in two clusters. A single item is a cluster of one. Different
+   findings about the same subject are separate clusters sharing a slug.
 3. Per cluster:
    - `subject` — the tool / library / platform / technique it is about, lowercase-kebab
      (`edge-tts`, `wsl2`, `prisma`, `git-worktrees`)

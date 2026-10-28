@@ -297,13 +297,17 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
    `items` into chunks of ≤150 (by project, any number of chunks) and spawn one `cluster_writer`
    per chunk (`agents/cluster_writer.md`, § Writers; ≤10 in parallel), passing the chunk inline
    and the existing `knowledge` page slugs. Writers drop what is not generic, merge duplicates
-   into clusters and give each a subject and slug. With more than one chunk, merge clusters that
-   share a `slug` across receipts. No subagent tool in this harness → do the same work inline,
-   chunk by chunk. A receipt that is not JSON → re-run that chunk once → still failing: release
-   the lock and stop.
+   into clusters and give each a subject and slug. With more than one chunk, merge clusters across
+   receipts only when they state the same finding; distinct findings on one slug stay separate
+   clusters (step 5 groups them per page). No subagent tool in this harness → do the same work
+   inline, chunk by chunk. A receipt that is not JSON, has `status` other than `ok`, or lacks the
+   `clusters` / `dropped` arrays → re-run that chunk once → still failing: release the lock and
+   stop.
    The orchestrator then computes each cluster's count — distinct origin `source` pages of its
    items (an item with `source` null counts as its own origin) — and checks that every item id
-   ends in exactly one cluster or the dropped list; a missing id goes to a cluster of one.
+   ends in exactly one cluster or the dropped list. Ids missing from a chunk's receipt → re-run
+   that chunk once; still missing → they stay out of every cluster and out of step 7's clear, so
+   they remain candidates for the next harvest.
    Steps 1–3 run without stopping: no progress report, no question, no threshold table before
    step 4.
 4. **Pick** —
