@@ -1,9 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { listEngines, listVoices } from "anytts";
 
 import { preferences, type CascadeEntry } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { groupVoices } from "./voiceGroups";
+import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import {
   getCascadeOrder,
   getStoredVoices,
@@ -21,13 +22,6 @@ import {
   type ChipTone,
   type EngineInfo,
 } from "./useEngineInfo";
-
-/**
- * Below this pane width the row cells stack in one column. Measured on the
- * component's own root, not the window: Settings opens in a split pane that is
- * narrow long before the window is.
- */
-export const ENGINE_ROWS_NARROW_BELOW = 560;
 
 /** Each provider's free tier, as the row's limit note (mockup copy). */
 const LIMIT_NOTES: Readonly<Record<string, string>> = {
@@ -67,25 +61,6 @@ const GHOST_STYLE: CSSProperties = {
 const CELL_LABEL_CLASS = "block text-xs mb-1";
 const MUTED: CSSProperties = { color: "var(--text-muted)" };
 
-/** The pane width, from a `ResizeObserver` on `ref`; `0` until something lays out. */
-function useWidth(ref: React.RefObject<HTMLElement | null>): number {
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setWidth(el.getBoundingClientRect().width);
-    // Guarded: not every environment the suite renders in has the constructor.
-    if (typeof ResizeObserver !== "function") return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[entries.length - 1];
-      if (entry) setWidth(entry.contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref]);
-  return width;
-}
-
 /** The error a key route answered with, as one line for the row. */
 async function keyRequest(engine: string, init: RequestInit): Promise<string | null> {
   try {
@@ -116,8 +91,8 @@ async function keyRequest(engine: string, init: RequestInit): Promise<string | n
  */
 export function EngineSettings() {
   const rootRef = useRef<HTMLDivElement>(null);
-  const width = useWidth(rootRef);
-  const narrow = width > 0 && width < ENGINE_ROWS_NARROW_BELOW;
+  const width = usePaneWidth(rootRef);
+  const narrow = width > 0 && width < SPEECH_ROWS_NARROW_BELOW;
   const { engines, refresh } = useEngineInfo();
   // Subscriptions: each value below is read through `voices.ts`, which repairs
   // and catalog-checks it; the hooks are here so a write re-renders the rows.
