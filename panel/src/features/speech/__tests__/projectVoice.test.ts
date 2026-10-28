@@ -9,9 +9,9 @@ import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
 import {
   getProjectVoice,
-  getStoredVoice,
+  getStoredVoices,
   setProjectVoice,
-  setStoredVoice,
+  setEngineVoice,
   voiceForDocKey,
   voiceForProject,
 } from "../voices";
@@ -30,7 +30,7 @@ describe("project voice", () => {
   it("an explicit default voice is kept", () => {
     globals.__PAVILIO_PREFS__![VOICE_KEY] = ANDREW;
 
-    expect(getStoredVoice()).toBe(ANDREW);
+    expect(getStoredVoices()).toEqual({ edge: ANDREW });
     expect(voiceForProject("p")).toBe(ANDREW);
   });
 
@@ -75,7 +75,7 @@ describe("project voice", () => {
 
   it("projects without an override follow a changed default", () => {
     setProjectVoice("p", EMMA);
-    setStoredVoice(ANDREW);
+    setEngineVoice("edge", ANDREW);
 
     expect(voiceForProject("q")).toBe(ANDREW);
     expect(voiceForProject("p")).toBe(EMMA);

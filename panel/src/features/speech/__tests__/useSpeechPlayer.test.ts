@@ -191,7 +191,7 @@ import { useSpeechPlayer } from "../useSpeechPlayer";
 import { voiceForSession } from "../../terminal/sessionVoice";
 import type { SpeechUnit } from "../types";
 import { refreshSessions } from "../../terminal/sessionStore";
-import { DEFAULT_SPEECH_VOICE, setProjectVoice, setStoredVoice } from "../voices";
+import { DEFAULT_SPEECH_VOICE, setEngineVoice, setProjectVoice } from "../voices";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length, source: text }));
@@ -817,7 +817,7 @@ describe("useSpeechPlayer", () => {
   });
 
   it("resumes at fromUnit", async () => {
-    setStoredVoice("en-US-EmmaMultilingualNeural");
+    setEngineVoice("edge", "en-US-EmmaMultilingualNeural");
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 

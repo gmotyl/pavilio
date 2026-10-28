@@ -14,7 +14,7 @@ import {
   DEFAULT_SPEECH_VOICE,
   getProjectVoice,
   setProjectVoice,
-  setStoredVoice,
+  setEngineVoice,
 } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
@@ -50,7 +50,7 @@ describe("ProjectVoiceSelect", () => {
     render(<ProjectVoiceSelect project="p" />);
 
     act(() => {
-      setStoredVoice(ANDREW);
+      setEngineVoice("edge", ANDREW);
     });
 
     expect(select().selectedOptions[0].textContent).toBe(`Default — ${labelOf(ANDREW)}`);

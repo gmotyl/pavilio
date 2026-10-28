@@ -19,9 +19,10 @@ import { INITIAL_LANGUAGE_STATE, nextLanguageState, voteLanguage } from "../lang
 import {
   DEFAULT_SPEECH_VOICE,
   getStoredEngine,
-  getStoredVoice,
+  getStoredVoices,
+  setEngineVoice,
   setStoredEngine,
-  setStoredVoice,
+  voiceForProject,
 } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
@@ -35,13 +36,16 @@ const ENGINE_KEY = storageKey(preferences.speechEngine);
 
 const voiceIds = (): string[] => listVoices("edge").map((voice) => voice.id);
 
-describe("getStoredVoice", () => {
+/** The voice the current engine speaks with when no project overrides it. */
+const effectiveVoice = (): string => voiceForProject(undefined);
+
+describe("default voice", () => {
   it("defaults to Vivienne when nothing is stored", () => {
     expect(DEFAULT_SPEECH_VOICE).toBe("fr-FR-VivienneMultilingualNeural");
-    expect(getStoredVoice()).toBe("fr-FR-VivienneMultilingualNeural");
+    expect(effectiveVoice()).toBe("fr-FR-VivienneMultilingualNeural");
 
-    expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe("en-US-EmmaMultilingualNeural");
-    expect(getStoredVoice()).toBe("en-US-EmmaMultilingualNeural");
+    setEngineVoice("edge", "en-US-EmmaMultilingualNeural");
+    expect(effectiveVoice()).toBe("en-US-EmmaMultilingualNeural");
     expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: "en-US-EmmaMultilingualNeural" });
     expect(localStorage.length).toBe(0);
   });
@@ -50,34 +54,34 @@ describe("getStoredVoice", () => {
     // The multilingual-only invariant is gone: the catalog is anytts', and a
     // Polish voice is a voice of the edge engine like any other.
     expect(voiceIds()).toContain("pl-PL-MarekNeural");
-    expect(setStoredVoice("pl-PL-MarekNeural")).toBe("pl-PL-MarekNeural");
-    expect(getStoredVoice()).toBe("pl-PL-MarekNeural");
+    setEngineVoice("edge", "pl-PL-MarekNeural");
+    expect(effectiveVoice()).toBe("pl-PL-MarekNeural");
   });
 
-  it("a stale stored voice falls back to the engine default and is written back", () => {
+  it("a stale stored voice resolves to the engine default", () => {
     // The declaration's codec checks only the shape, so a dropped or hand-edited
     // id arrives intact (an old bare string reads as Edge's) and is resolved
-    // through the seam's `resolveSpeechVoice` here.
+    // through the seam's `resolveSpeechVoice` on read — and dropped from the
+    // per-engine list Settings shows.
     globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
-    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(getStoredVoices()).toEqual({});
 
     globals.__PAVILIO_PREFS__![VOICE_KEY] = "";
-    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
 
     // An id outside the catalog is ignored by the setter.
-    expect(setStoredVoice("not-a-voice")).toBe(DEFAULT_SPEECH_VOICE);
-    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: DEFAULT_SPEECH_VOICE });
+    setEngineVoice("edge", "not-a-voice");
+    expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toBe("");
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
 
     // The auth interlock stands in for the old "site data blocked" case: this
     // page received no document, so the read answers the default and the write
-    // is dropped without throwing. The setter answers what is now in effect —
-    // the stored default the player will synthesize with, not the attempt.
+    // is dropped without throwing — the player keeps the stored default.
     delete globals.__PAVILIO_PREFS__;
-    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
-    expect(() => setStoredVoice("en-US-EmmaMultilingualNeural")).not.toThrow();
-    expect(setStoredVoice("en-US-EmmaMultilingualNeural")).toBe(DEFAULT_SPEECH_VOICE);
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(() => setEngineVoice("edge", "en-US-EmmaMultilingualNeural")).not.toThrow();
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
   });
 });
 
@@ -98,7 +102,7 @@ describe("getStoredEngine", () => {
       globals.__PAVILIO_PREFS__![ENGINE_KEY] = stale;
       expect(getStoredEngine()).toBe("edge");
       globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
-      expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+      expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
     }
 
     // The setter ignores an unknown engine rather than storing it.
@@ -113,8 +117,8 @@ describe("getStoredEngine", () => {
     globals.__PAVILIO_PREFS__![ENGINE_KEY] = "unconfigured";
     expect(getStoredEngine()).toBe("edge");
     globals.__PAVILIO_PREFS__![VOICE_KEY] = "xx-XX-NobodyNeural";
-    expect(() => getStoredVoice()).not.toThrow();
-    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(() => effectiveVoice()).not.toThrow();
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
 
     globals.__PAVILIO_PREFS__![ENGINE_KEY] = "edge";
     expect(setStoredEngine("unconfigured")).toBe("edge");
@@ -142,6 +146,6 @@ describe("language detection", () => {
     expect(ids).not.toContain(voteLanguage(english));
     expect(ids).not.toContain(spoken.lang);
     expect(voteLanguage(polish)).not.toBe("pl-PL-MarekNeural");
-    expect(getStoredVoice()).toBe(DEFAULT_SPEECH_VOICE);
+    expect(effectiveVoice()).toBe(DEFAULT_SPEECH_VOICE);
   });
 });

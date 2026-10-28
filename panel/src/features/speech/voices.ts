@@ -29,7 +29,7 @@ import { CASCADE, cascadeVoiceKey, getCascadeOrder, speechEngines } from "./engi
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
 
-export { DEFAULT_CASCADE_ORDER, DEFAULT_SPEECH_VOICE, getCascadeOrder };
+export { DEFAULT_SPEECH_VOICE, getCascadeOrder };
 export type { CascadeEntry, EngineVoices };
 
 /**
@@ -122,45 +122,6 @@ function withVoice(stored: unknown, engine: string, id: string | null): EngineVo
   // key named `__proto__` to the prototype setter and drop the write.
   const others = Object.entries(asRecord<string>(stored)).filter(([key]) => key !== engine);
   return Object.fromEntries(id === null ? others : [...others, [engine, id]]);
-}
-
-/**
- * The current engine's voice, a PORTABLE preference: which voice reads an
- * answer is a choice about the panel, not a fact about this machine, so it
- * travels in the workspace file. The store owns every try/catch around browser
- * storage.
- *
- * The declaration's codec checks only the shape, so a stale or hand-edited id
- * reaches here intact. It is resolved onto the engine default and, when it fell
- * back, the effective voice is WRITTEN BACK into the engine's entry — so the
- * stale id is replaced once, and a strict `unknown-voice` rejection never sees
- * it.
- *
- * NEVER CALL THIS DURING RENDER. The write notifies every `speech.voice`
- * subscriber synchronously, which from a render is a setState on a sibling
- * mid-render plus a PATCH. Render paths read {@link defaultVoice}; the
- * Settings picker writes back from a mount effect and from its engine handler.
- */
-export function getStoredVoice(): string {
-  const engine = getStoredEngine();
-  const stored = readPreference(preferences.speechVoice);
-  const { voice, fellBack } = resolveStoredVoice(stored, engine);
-  if (fellBack) writePreference(preferences.speechVoice, withVoice(stored, engine, voice));
-  return voice;
-}
-
-/**
- * Stores `id` and returns the voice now in effect; an id outside the engine's
- * catalog is ignored.
- *
- * The return value is what the caller should hold, and it is read back from
- * the store rather than echoed: a page whose portable document never arrived
- * has its write dropped, the player goes on reading the stored voice, and a
- * control showing the attempted one would claim a choice that never applied.
- */
-export function setStoredVoice(id: string): string {
-  setEngineVoice(getStoredEngine(), id);
-  return getStoredVoice();
 }
 
 /** Every engine's default voice as stored, stale ids dropped. Read-only. */

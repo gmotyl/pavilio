@@ -16,13 +16,11 @@ import {
   getCascadeOrder,
   getPronunciationByEngine,
   getProjectVoices,
-  getStoredVoice,
   getStoredVoices,
   resolveStoredVoice,
   setEngineVoice,
   setProjectEngineVoice,
   setStoredEngine,
-  setStoredVoice,
   voiceFor,
   voiceForDocKey,
   voiceForProject,
@@ -55,7 +53,7 @@ describe("per-engine voices and cascade preferences", () => {
     expect(voiceForProject("r")).toBe(ANDREW);
 
     // The first write stores the new shape; the old string is not kept.
-    setStoredVoice(EMMA);
+    setEngineVoice("edge", EMMA);
     expect(globals.__PAVILIO_PREFS__![VOICE_KEY]).toEqual({ edge: EMMA });
   });
 
@@ -149,9 +147,7 @@ describe("per-engine voices and cascade preferences", () => {
     const before = readPreference(preferences.speechVoice);
 
     expect(resolveStoredVoice(before)).toEqual({ voice: "", fellBack: false });
-    expect(getStoredVoice()).toBe("");
     expect(readPreference(preferences.speechVoice)).toEqual(before);
-    expect(setStoredVoice(EMMA)).toBe("");
     expect(catalogDefaultVoice("cascade")).toBeUndefined();
 
     // The session's voice is the members' voices, as one key the seam opens.
