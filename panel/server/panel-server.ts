@@ -40,6 +40,7 @@ import systemRouter from "./routes/system.js";
 import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import { createTtsHandler } from "./routes/tts.js";
 import { createTtsHolder } from "./lib/speech/ttsHolder.js";
+import { createSpeechEnginesRouter } from "./routes/speechEngines.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
@@ -229,6 +230,7 @@ export async function startPanel(
   app.use("/api/system", systemRouter);
   app.use("/api", preferencesRouter);
   app.use("/api/speech", speechRouter);
+  app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder }));
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
