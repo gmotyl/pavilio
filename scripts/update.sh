@@ -290,6 +290,10 @@ echo "Syncing panel/..."
 #     exists on both sides and so would not be pruned anyway, but an upstream
 #     clone that has not run install yet does not have it, and without this
 #     exclude the prune would take the downstream git hooks with it.
+#   * .panel.log is the running panel's own log (scripts/panel appends to it).
+#     Copying upstream's over it replaces the file under the live process, which
+#     keeps writing to the unlinked inode — and when that panel later dies, the
+#     log that would say why is gone with it.
 # Structural check rather than an emptiness check: a panel/ holding only a
 # hidden placeholder (.gitkeep) counts as non-empty, so an emptiness test would
 # pass and --delete would then wipe the downstream tree — the exact failure this
@@ -310,6 +314,7 @@ rsync -a --delete --max-delete=100 \
   --exclude='dist/' \
   --exclude='.DS_Store' \
   --exclude='.husky/_' \
+  --exclude='.panel.log' \
   "$UPSTREAM_DIR/panel/" "$REPO_ROOT/panel/"
 
 echo "Syncing skills/..."

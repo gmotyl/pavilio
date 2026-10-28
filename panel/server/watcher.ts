@@ -234,6 +234,52 @@ export function broadcast(data: Record<string, unknown>): void {
   });
 }
 
+/** Quiet period after the last file event before the index is rebuilt. */
+export const INDEX_REBUILD_DELAY_MS = 100;
+
+type FileEvent = { event: string; path: string };
+
+/**
+ * Collect file events and hand them over in one batch once the tree has been
+ * quiet for `delayMs`. A full index walk per event made an agent's bulk write
+ * or `rm -rf` re-walk the whole projects tree hundreds of times; batched, it is
+ * walked once per burst.
+ */
+export function coalesceFileEvents(
+  delayMs: number,
+  flush: (events: FileEvent[]) => void,
+): (event: string, path: string) => void {
+  let pending: FileEvent[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (event, path) => {
+    pending.push({ event, path });
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      const batch = pending;
+      pending = [];
+      flush(batch);
+    }, delayMs);
+  };
+}
+
+/**
+ * Rebuild the index, then broadcast every event of the batch — rebuild first, so
+ * a client refetching the index on `file-change` sees the new state. Runs from a
+ * timer, where a throw is an uncaught exception that takes the whole panel down:
+ * a failed rebuild is logged and the previous index kept.
+ */
+export function flushFileEvents(events: FileEvent[]): void {
+  try {
+    rebuildIndex();
+  } catch (err) {
+    console.error("[watcher] rebuildIndex failed:", err);
+  }
+  for (const { event, path } of events) {
+    broadcast({ type: "file-change", event, path });
+  }
+}
+
 export function setupFileWatcher(): void {
   const { projectsDir, watchDebounceMs, ignorePatterns, agentRegistryPath } = getConfig();
 
@@ -243,14 +289,16 @@ export function setupFileWatcher(): void {
     awaitWriteFinish: { stabilityThreshold: watchDebounceMs },
   });
 
-  watcher.on("all", (event, path) => {
-    rebuildIndex();
-    broadcast({ type: "file-change", event, path });
-  });
+  watcher.on("all", coalesceFileEvents(INDEX_REBUILD_DELAY_MS, flushFileEvents));
+  // An `error` with no listener is an uncaught exception on an EventEmitter.
+  watcher.on("error", (err) => console.error("[watcher] projects watcher error:", err));
 
   console.log(`File watcher started on ${projectsDir}`);
 
-  chokidar.watch(agentRegistryPath, { ignoreInitial: true }).on("all", () => {
-    broadcast({ type: "agent-change" });
-  });
+  chokidar
+    .watch(agentRegistryPath, { ignoreInitial: true })
+    .on("all", () => {
+      broadcast({ type: "agent-change" });
+    })
+    .on("error", (err) => console.error("[watcher] agent registry watcher error:", err));
 }
