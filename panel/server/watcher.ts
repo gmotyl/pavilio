@@ -236,6 +236,8 @@ export function broadcast(data: Record<string, unknown>): void {
 
 /** Quiet period after the last file event before the index is rebuilt. */
 export const INDEX_REBUILD_DELAY_MS = 100;
+/** Longest a batch may wait while events keep arriving inside the quiet period. */
+export const INDEX_REBUILD_MAX_WAIT_MS = 500;
 
 type FileEvent = { event: string; path: string };
 
@@ -244,22 +246,32 @@ type FileEvent = { event: string; path: string };
  * quiet for `delayMs`. A full index walk per event made an agent's bulk write
  * or `rm -rf` re-walk the whole projects tree hundreds of times; batched, it is
  * walked once per burst.
+ *
+ * `maxWaitMs` bounds the wait: an agent writing steadily anywhere in the tree
+ * would otherwise keep resetting the quiet period, and no project would see a
+ * refresh until it stopped.
  */
 export function coalesceFileEvents(
   delayMs: number,
+  maxWaitMs: number,
   flush: (events: FileEvent[]) => void,
 ): (event: string, path: string) => void {
   let pending: FileEvent[] = [];
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  let maxTimer: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    if (quietTimer) clearTimeout(quietTimer);
+    if (maxTimer) clearTimeout(maxTimer);
+    quietTimer = maxTimer = null;
+    const batch = pending;
+    pending = [];
+    flush(batch);
+  };
   return (event, path) => {
     pending.push({ event, path });
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = null;
-      const batch = pending;
-      pending = [];
-      flush(batch);
-    }, delayMs);
+    if (quietTimer) clearTimeout(quietTimer);
+    quietTimer = setTimeout(fire, delayMs);
+    if (!maxTimer) maxTimer = setTimeout(fire, maxWaitMs);
   };
 }
 
@@ -289,7 +301,10 @@ export function setupFileWatcher(): void {
     awaitWriteFinish: { stabilityThreshold: watchDebounceMs },
   });
 
-  watcher.on("all", coalesceFileEvents(INDEX_REBUILD_DELAY_MS, flushFileEvents));
+  watcher.on(
+    "all",
+    coalesceFileEvents(INDEX_REBUILD_DELAY_MS, INDEX_REBUILD_MAX_WAIT_MS, flushFileEvents),
+  );
   // An `error` with no listener is an uncaught exception on an EventEmitter.
   watcher.on("error", (err) => console.error("[watcher] projects watcher error:", err));
 

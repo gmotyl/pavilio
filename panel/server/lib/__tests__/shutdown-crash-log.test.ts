@@ -6,13 +6,16 @@ vi.mock("../preferences-store.js", () => ({ flushPreferences: () => flushPrefere
 type Handler = (arg: unknown) => void;
 
 // The real process handlers would outlive the test and swallow vitest's own
-// failures, so process.on is captured instead of called.
+// failures, so process.on is captured instead of called. Timers are fake: the
+// handler's 1 s fallback exit would otherwise fire after teardown has restored
+// the real process.exit, and kill the test worker.
 describe("installCrashLog", () => {
   let handlers: Map<string, Handler>;
   let exit: ReturnType<typeof vi.spyOn>;
   let error: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
+    vi.useFakeTimers();
     vi.resetModules();
     flushPreferences.mockClear();
     handlers = new Map();
@@ -25,7 +28,12 @@ describe("installCrashLog", () => {
     const { installCrashLog } = await import("../shutdown");
     installCrashLog();
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    // Cleared before process.exit is restored, so no fallback can reach it.
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it("logs an uncaught exception with a timestamp, flushes, and exits 1", async () => {
     const err = new Error("ENOENT: scandir");
@@ -47,5 +55,15 @@ describe("installCrashLog", () => {
       "boom",
     );
     await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+  });
+
+  it("exits after the timeout when the preference flush hangs", async () => {
+    flushPreferences.mockImplementationOnce(() => new Promise(() => {}));
+    handlers.get("uncaughtException")!(new Error("boom"));
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });

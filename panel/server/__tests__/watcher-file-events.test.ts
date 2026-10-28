@@ -19,7 +19,7 @@ describe("coalesceFileEvents", () => {
 
   it("hands a burst over as one batch once the tree is quiet", () => {
     const flush = vi.fn();
-    const push = coalesceFileEvents(100, flush);
+    const push = coalesceFileEvents(100, 500, flush);
 
     push("unlink", "a/1.md");
     vi.advanceTimersByTime(60);
@@ -39,7 +39,7 @@ describe("coalesceFileEvents", () => {
 
   it("starts a fresh batch after a flush", () => {
     const flush = vi.fn();
-    const push = coalesceFileEvents(100, flush);
+    const push = coalesceFileEvents(100, 500, flush);
 
     push("add", "a.md");
     vi.advanceTimersByTime(100);
@@ -48,6 +48,25 @@ describe("coalesceFileEvents", () => {
 
     expect(flush).toHaveBeenCalledTimes(2);
     expect(flush).toHaveBeenLastCalledWith([{ event: "change", path: "b.md" }]);
+  });
+
+  it("flushes after the max wait even while events keep arriving", () => {
+    const flush = vi.fn();
+    const push = coalesceFileEvents(100, 500, flush);
+
+    // An event every 50 ms never leaves the 100 ms quiet period.
+    for (let t = 0; t < 500; t += 50) {
+      push("change", `f${t}.md`);
+      vi.advanceTimersByTime(50);
+    }
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(flush.mock.calls[0]![0]).toHaveLength(10);
+
+    // The stream goes on: the next batch is bounded the same way.
+    push("change", "late.md");
+    vi.advanceTimersByTime(100);
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(flush).toHaveBeenLastCalledWith([{ event: "change", path: "late.md" }]);
   });
 });
 
