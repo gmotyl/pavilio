@@ -102,17 +102,22 @@ export function useEngineInfo(): EngineInfoState {
   const [engines, setEngines] = useState<Readonly<Record<string, EngineInfo>> | null>(null);
   const [failed, setFailed] = useState(false);
   const mounted = useRef(true);
+  // Refreshes overlap (the mount fetch, then one after a key save); only the
+  // latest one's answer or failure is applied, whatever order they land in.
+  const latest = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = ++latest.current;
+    const current = () => mounted.current && seq === latest.current;
     try {
       const res = await fetch("/api/speech/engines");
       const body: unknown = res.ok ? await res.json() : null;
-      if (!mounted.current) return;
+      if (!current()) return;
       if (!Array.isArray(body)) throw new Error("not a list");
       setEngines(Object.fromEntries(body.filter(isEngineInfo).map((info) => [info.id, info])));
       setFailed(false);
     } catch {
-      if (mounted.current) setFailed(true);
+      if (current()) setFailed(true);
     }
   }, []);
 
