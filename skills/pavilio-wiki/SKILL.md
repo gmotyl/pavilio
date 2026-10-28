@@ -293,11 +293,19 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
    projects included. `text` + `details` together are the finding: pass both to the prefilter
    and the page writers (step 7 clears the sub-lines with the bullet). None → release, report
    "no candidates", stop.
-3. **Prefilter + cluster** — cheap writers (`writerModel`, inputs inline, ≤150 items per chunk)
-   drop what is not generic (business or client claims, project-specific facts), merge duplicates
-   across projects into clusters, and give each cluster a subject (tool / library / platform /
-   technique) and a count: distinct origin source pages. Every item id ends in exactly one cluster
-   or the dropped list — check that before going on.
+3. **Prefilter + cluster** — this is the harvest's own work, not a question for the user. Split
+   `items` into chunks of ≤150 (by project, any number of chunks) and spawn one `cluster_writer`
+   per chunk (`agents/cluster_writer.md`, § Writers; ≤10 in parallel), passing the chunk inline
+   and the existing `knowledge` page slugs. Writers drop what is not generic, merge duplicates
+   into clusters and give each a subject and slug. With more than one chunk, merge clusters that
+   share a `slug` across receipts. No subagent tool in this harness → do the same work inline,
+   chunk by chunk. A receipt that is not JSON → re-run that chunk once → still failing: release
+   the lock and stop.
+   The orchestrator then computes each cluster's count — distinct origin `source` pages of its
+   items (an item with `source` null counts as its own origin) — and checks that every item id
+   ends in exactly one cluster or the dropped list; a missing id goes to a cluster of one.
+   Steps 1–3 run without stopping: no progress report, no question, no threshold table before
+   step 4.
 4. **Pick** —
    - *Manual (default):* numbered clusters grouped by subject, pages of ~30 (`text`, count,
      origin projects). The user replies with numbers or ranges (`3, 7, 12-15`), `next` for the
