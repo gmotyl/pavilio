@@ -130,6 +130,24 @@ describe("secrets store", () => {
     );
   });
 
+  it("a hand-edited duplicate key is removed and replaced everywhere", async () => {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      secretsFile(),
+      "ELEVENLABS_API_KEY=el-1\nCARTESIA_API_KEY=ca-1\nELEVENLABS_API_KEY=el-old\nCARTESIA_API_KEY=ca-old\n",
+      { mode: 0o600 },
+    );
+    const { resolveKey, writeKeys } = await import("../secrets");
+
+    await writeKeys({ ELEVENLABS_API_KEY: null, CARTESIA_API_KEY: "ca-2" });
+
+    // The replacement takes the first occurrence's place; the later ones go.
+    expect(readFileSync(secretsFile(), "utf8")).toBe("CARTESIA_API_KEY=ca-2\n");
+    expect(resolveKey("ELEVENLABS_API_KEY")).toEqual({ source: "none" });
+    expect(resolveKey("CARTESIA_API_KEY")).toEqual({ value: "ca-2", source: "file" });
+  });
+
   it("overlapping saves and deletes all persist", async () => {
     const { resolveKey, writeKeys } = await import("../secrets");
     await writeKeys({ SPEECHIFY_API_KEY: "sp-1" });

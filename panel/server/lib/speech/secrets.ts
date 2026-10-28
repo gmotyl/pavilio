@@ -105,20 +105,24 @@ async function applyEntries(defined: [string, string | null | undefined][]): Pro
   const file = secretsFile();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  const pending = new Map(defined);
+  const changes = new Map(defined);
+  const placed = new Set<string>();
   const lines: string[] = [];
   for (const line of readLines(file)) {
     const name = LINE.exec(line)?.[1];
-    if (name === undefined || !pending.has(name)) {
+    if (name === undefined || !changes.has(name)) {
       lines.push(line);
       continue;
     }
-    const value = pending.get(name);
-    pending.delete(name);
-    if (typeof value === "string") lines.push(`${name}=${value}`);
+    // A hand-edited file may repeat a key: the new value takes the first
+    // occurrence's place and every later one is dropped, so a removed key
+    // cannot survive in a duplicate line.
+    const value = changes.get(name);
+    if (typeof value === "string" && !placed.has(name)) lines.push(`${name}=${value}`);
+    placed.add(name);
   }
-  for (const [name, value] of pending) {
-    if (typeof value === "string") lines.push(`${name}=${value}`);
+  for (const [name, value] of changes) {
+    if (typeof value === "string" && !placed.has(name)) lines.push(`${name}=${value}`);
   }
 
   const temp = join(dir, `.secrets.env.${randomBytes(6).toString("hex")}.tmp`);
