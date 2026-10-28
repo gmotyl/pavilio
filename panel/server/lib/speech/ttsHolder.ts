@@ -58,7 +58,15 @@ function configFrom(
   // server down with it: configure Azure keyless instead (status `no-key`).
   const region = key("AZURE_SPEECH_REGION")?.toLowerCase();
   const azureKey = key(KEYED_ENGINES.azure);
-  const azure = azureKey && region && AZURE_REGION.test(region) ? { apiKey: azureKey, region } : {};
+  const regionOk = !!region && AZURE_REGION.test(region);
+  if (azureKey && !regionOk) {
+    // Names the variable only: neither the key nor the region value is logged.
+    console.warn(
+      `[speech] ${KEYED_ENGINES.azure} is set but AZURE_SPEECH_REGION is missing or not a ` +
+        `region id (e.g. "westeurope"): Azure stays off until it is fixed.`,
+    );
+  }
+  const azure = azureKey && regionOk ? { apiKey: azureKey, region } : {};
 
   return {
     engines: {

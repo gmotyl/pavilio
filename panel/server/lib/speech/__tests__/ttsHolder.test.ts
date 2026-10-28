@@ -58,4 +58,33 @@ describe("server Tts holder", () => {
     expect(configs[1]!.engines.azure?.apiKey).toBeUndefined();
     expect(noRegion.engineStatus("azure")).toEqual({ state: "no-key" });
   });
+
+  it("warns once, naming only the variable, when the azure region is unusable", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      createTtsHolder({
+        createTts,
+        resolveKey: keys({ AZURE_SPEECH_KEY: "secret-az-key", AZURE_SPEECH_REGION: "West Europe!" }),
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]![0]);
+      expect(message).toContain("AZURE_SPEECH_REGION");
+      expect(message).not.toContain("secret-az-key");
+      expect(message).not.toContain("West Europe!");
+
+      // A missing region warns too; a usable one, or no key at all, does not.
+      warn.mockClear();
+      createTtsHolder({ createTts, resolveKey: keys({ AZURE_SPEECH_KEY: "secret-az-key" }) });
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockClear();
+      createTtsHolder({
+        createTts,
+        resolveKey: keys({ AZURE_SPEECH_KEY: "secret-az-key", AZURE_SPEECH_REGION: "westeurope" }),
+      });
+      createTtsHolder({ createTts, resolveKey: keys({ AZURE_SPEECH_REGION: "nope!" }) });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

@@ -106,7 +106,9 @@ function fakeTransport(): { transport: Transport; opened: () => number } {
 function loadApp(): { app: Express; opened: () => number } {
   const { transport, opened } = fakeTransport();
   const app = express();
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport }));
+  // A keyless holder, so the test never reads the real ~/.panel/secrets.env or env keys.
+  const holder = createTtsHolder({ transport, resolveKey: () => ({ source: "none" }) });
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder }));
   app.use(express.json());
   return { app, opened };
 }
