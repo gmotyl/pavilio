@@ -114,11 +114,11 @@ describe("LauncherSettings", () => {
       await screen.findByRole("heading", { level: 1, name: "Settings" }),
     ).toBeInTheDocument();
 
-    // The editor sits on the same surface as the voice picker and the switch.
+    // The editor sits on the same surface as the engine picker and the switch.
     const section = screen.getByRole("heading", { level: 2, name: "Speech" }).closest("section");
     expect(section).not.toBeNull();
     const scope = within(section!);
-    expect(scope.getByRole("combobox", { name: "Default voice" })).toBeInTheDocument();
+    expect(scope.getByRole("combobox", { name: "Default engine" })).toBeInTheDocument();
     expect(
       scope.getByRole("checkbox", { name: "Open the answer pane on a new answer" }),
     ).toBeInTheDocument();
