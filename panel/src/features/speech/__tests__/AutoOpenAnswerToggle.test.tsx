@@ -103,7 +103,7 @@ describe("AutoOpenAnswerToggle", () => {
     expect(screen.queryByText(/switch/i)).toBeNull();
   });
 
-  it("sits in the Settings page's Speech section, under the voice", async () => {
+  it("sits in the Settings page's Speech section, under the engine picker", async () => {
     stubFetch({}, []);
 
     render(<AgentSettings />);
@@ -112,9 +112,9 @@ describe("AutoOpenAnswerToggle", () => {
     const heading = screen.getByRole("heading", { level: 2, name: "Speech" });
     const section = heading.closest("section");
     expect(section).not.toBeNull();
-    const voice = within(section!).getByRole("combobox", { name: "Default voice" });
+    const engine = within(section!).getByRole("combobox", { name: "Default engine" });
     const box = within(section!).getByRole("checkbox", { name: LABEL });
-    // Under the voice: the picker comes first in document order.
-    expect(voice.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Under the engine picker: it comes first in document order.
+    expect(engine.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

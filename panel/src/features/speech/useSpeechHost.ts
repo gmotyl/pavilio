@@ -738,6 +738,7 @@ export function useSpeechHost({
       // synthesis nobody ever plays.
       synthesizeSpeech(first.text, {
         voice: voiceForRef.current(utterance.sessionId),
+        lang: first.lang,
         tier: "warm",
         signal,
       })
@@ -787,7 +788,7 @@ export function useSpeechHost({
 
       for (let index = 1; index < units.length; index += 1) {
         const key = `${id}#${index}`;
-        const { text } = units[index];
+        const { text, lang } = units[index];
         if (preloadedRef.current.has(key)) {
           // The synth cache is an LRU: a unit requested earlier may have been
           // evicted since, and Play would then pay for it. Requested but cold
@@ -795,7 +796,7 @@ export function useSpeechHost({
           // flight counts as held) -> ask again.
           const evicted =
             preloadStartedRef.current.has(key) &&
-            !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId) });
+            !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId), lang });
           if (!evicted) continue;
           preloadStartedRef.current.delete(key);
         }
@@ -807,7 +808,7 @@ export function useSpeechHost({
         const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
         const voice = voiceForRef.current(sessionId);
-        synthesizeSpeech(text, { voice, tier: "preload", signal }).catch(
+        synthesizeSpeech(text, { voice, lang, tier: "preload", signal }).catch(
           (error: unknown) => {
             // Called off: whoever aborted already forgot the unit, and a late
             // rejection must not touch a fresh controller's bookkeeping.

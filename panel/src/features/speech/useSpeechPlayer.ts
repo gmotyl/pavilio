@@ -102,14 +102,17 @@ export interface SpeechProgress {
 const NO_UNIT_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
 /**
- * Whether two slices are the same utterance's units. Text, not identity: the
- * host rebuilds the array on a re-prepare, and what the durations below are
- * measurements OF is the audio, which is keyed on the text.
+ * Whether two slices are the same utterance's units. Text and language, not
+ * identity: the host rebuilds the array on a re-prepare, and what the
+ * durations below are measurements OF is the audio, which is synthesized from
+ * the text in the unit's language.
  */
 function sameUnits(left: readonly SpeechUnit[] | undefined, right: readonly SpeechUnit[]): boolean {
   if (left === right) return true;
   if (!left || left.length !== right.length) return false;
-  return left.every((unit, index) => unit.text === right[index].text);
+  return left.every(
+    (unit, index) => unit.text === right[index].text && unit.lang === right[index].lang,
+  );
 }
 
 export interface SpeechPlayerOptions {
@@ -308,7 +311,7 @@ async function loadUnit(
     // The voice is always explicit: `synth.ts` keeps a private
     // `DEFAULT_VOICE = "en-GB-RyanNeural"` from motyl, so an omitted voice
     // silently overrides the panel's default voice.
-    const buffer = await synthesizeSpeech(units[index].text, { voice });
+    const buffer = await synthesizeSpeech(units[index].text, { voice, lang: units[index].lang });
     // `toSpeechBlob` copies the cached buffer. Wrapping it by hand would hand
     // the same ArrayBuffer out twice and detach it on the second playback.
     const url = URL.createObjectURL(toSpeechBlob(buffer));
@@ -354,7 +357,7 @@ function cascadeWarm(
 ): void {
   const { signal } = run.cascade;
   for (let index = from; index < end; index += 1) {
-    synthesizeSpeech(units[index].text, { voice, tier: "run", signal }).catch(() => {
+    synthesizeSpeech(units[index].text, { voice, lang: units[index].lang, tier: "run", signal }).catch(() => {
       // Best-effort: the unit is synthesized for real when the ladder reaches
       // it, and that is where a failure gets reported.
     });

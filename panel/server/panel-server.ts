@@ -39,6 +39,8 @@ import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
 import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import { createTtsHandler } from "./routes/tts.js";
+import { createTtsHolder } from "./lib/speech/ttsHolder.js";
+import { createSpeechEnginesRouter } from "./routes/speechEngines.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
@@ -192,7 +194,10 @@ export async function startPanel(
   // mounts below. `app.all` rather than a path-scoped `app.use`: `use` strips
   // the mount path from `req.path`, and both gates only 401 paths that start
   // with `/api/`, so under `use` they would wave every request through.
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler());
+  // One anytts instance for the whole server, built from the secrets store;
+  // the speech engine routes rebuild it when a key changes.
+  const ttsHolder = createTtsHolder();
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ holder: ttsHolder }));
 
   app.use(express.json());
   app.use(mobileAuthMiddleware);
@@ -225,6 +230,7 @@ export async function startPanel(
   app.use("/api/system", systemRouter);
   app.use("/api", preferencesRouter);
   app.use("/api/speech", speechRouter);
+  app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder }));
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 

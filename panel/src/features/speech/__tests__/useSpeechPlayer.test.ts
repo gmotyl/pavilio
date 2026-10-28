@@ -40,8 +40,12 @@ const synth = vi.hoisted(() => {
   let timeline: string[] = [];
   let requests: Array<{ text: string; voice: string | undefined }> = [];
   /** Every call, cache hits included, with the tier and signal it was made on. */
-  let calls: Array<{ text: string; tier: string | undefined; signal: AbortSignal | undefined }> =
-    [];
+  let calls: Array<{
+    text: string;
+    lang?: string;
+    tier: string | undefined;
+    signal: AbortSignal | undefined;
+  }> = [];
   let prefetches: Array<{ text: string; voice: string | undefined }> = [];
   let blobbed: ArrayBuffer[] = [];
 
@@ -76,9 +80,9 @@ const synth = vi.hoisted(() => {
   return {
     synthesizeSpeech: (
       text: string,
-      options: { voice?: string; tier?: string; signal?: AbortSignal } = {},
+      options: { voice?: string; lang?: string; tier?: string; signal?: AbortSignal } = {},
     ): Promise<ArrayBuffer> => {
-      calls.push({ text, tier: options.tier, signal: options.signal });
+      calls.push({ text, lang: options.lang, tier: options.tier, signal: options.signal });
       const key = `${options.voice ?? ""}::${text}`;
       const cached = cache.get(key);
       // A hit is a *recorded* non-request: the caller is served what is already
@@ -191,7 +195,7 @@ import { useSpeechPlayer } from "../useSpeechPlayer";
 import { voiceForSession } from "../../terminal/sessionVoice";
 import type { SpeechUnit } from "../types";
 import { refreshSessions } from "../../terminal/sessionStore";
-import { DEFAULT_SPEECH_VOICE, setProjectVoice, setStoredVoice } from "../voices";
+import { DEFAULT_SPEECH_VOICE, setEngineVoice, setProjectVoice } from "../voices";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length, source: text }));
@@ -817,7 +821,7 @@ describe("useSpeechPlayer", () => {
   });
 
   it("resumes at fromUnit", async () => {
-    setStoredVoice("en-US-EmmaMultilingualNeural");
+    setEngineVoice("edge", "en-US-EmmaMultilingualNeural");
     const onError = vi.fn();
     const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
 
@@ -1555,6 +1559,28 @@ describe("useSpeechPlayer", () => {
       [1, 7.25],
     ]);
     expect(result.current.progress).toEqual({ unitIndex: 1, unitTime: 0, unitDuration: 7.25 });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("the same text in another language is a new utterance", async () => {
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
+    const inLang = (lang: "en" | "pl"): SpeechUnit[] =>
+      manyUnits(3).map((unit) => ({ ...unit, lang }));
+
+    await startPlay(result.current, "cell-a", inLang("en"));
+    await loadDuration(12.5);
+    expect(result.current.unitDurations.get(0)).toBe(12.5);
+
+    // Synthesis depends on the language, so the English unit's measured
+    // length says nothing about the Polish audio.
+    await startPlay(result.current, "cell-a", inLang("pl"));
+    expect(result.current.unitDurations.get(0)).toBeUndefined();
+
+    // A jump restarts from the remembered units — the Polish ones.
+    synth.calls.length = 0;
+    await settle(() => result.current.jumpToUnit("cell-a", 2));
+    expect(synth.calls.find((call) => call.text === "unit-2")?.lang).toBe("pl");
     expect(onError).not.toHaveBeenCalled();
   });
 

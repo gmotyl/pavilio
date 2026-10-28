@@ -76,6 +76,82 @@ function isFilled(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
 
+/** The string-valued entries of `value`, built by `fromEntries` so a `__proto__` key stays an entry. */
+function stringEntries(value: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+}
+
+/**
+ * `speech.voice`, migrated on read. It used to be ONE voice id, stored as its
+ * own text (the codec was `str`); that id was always an Edge voice, so it reads
+ * as `{ edge: id }`. A record keeps its string entries. Every other shape is an
+ * old id that merely looks like JSON (`"true"`, `"240"`), and reads the same
+ * way. Whether an id is in its engine's catalog is `voices.ts`' check — the
+ * registry cannot import anytts — so a stale id arrives intact and is dropped
+ * there.
+ */
+const engineVoices: PreferenceCodec<EngineVoices> = {
+  parse(raw) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      return { edge: raw };
+    }
+    if (isRecord(parsed)) return stringEntries(parsed);
+    return { edge: typeof parsed === "string" ? parsed : raw };
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
+/**
+ * `speech.voiceByProject`, migrated on read: an entry that is a single voice id
+ * (the old `{ project: id }`) reads as `{ project: { edge: id } }`; an entry
+ * that is a record keeps its string entries; anything else is dropped. A
+ * document that is not a record at all throws, so the store answers `{}`.
+ */
+const projectEngineVoices: PreferenceCodec<Record<string, EngineVoices>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a record: ${raw}`);
+    const entries: [string, EngineVoices][] = [];
+    for (const [project, voices] of Object.entries(parsed)) {
+      if (typeof voices === "string") entries.push([project, { edge: voices }]);
+      else if (isRecord(voices)) entries.push([project, stringEntries(voices)]);
+    }
+    return Object.fromEntries(entries);
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
+/** A stored cascade entry, or `null`: a non-blank engine id and a boolean `on`. */
+function toCascadeEntry(value: unknown): CascadeEntry | null {
+  if (!isRecord(value) || !isFilled(value.id) || typeof value.on !== "boolean") return null;
+  return { id: value.id, on: value.on };
+}
+
+/** Engine id → pronunciation on/off; a record whose non-boolean entries are dropped. */
+const enginePronunciation: PreferenceCodec<Record<string, boolean>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a record: ${raw}`);
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+      ),
+    );
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
 /**
  * A stored launcher, rebuilt from its known fields, or `null` when it is not
  * one: the name and the command are required non-blank strings (a pill with no
@@ -161,6 +237,31 @@ export const DEFAULT_TASK_PROMPT =
  * voices.ts then adds no cycle.
  */
 export const DEFAULT_SPEECH_VOICE = "fr-FR-VivienneMultilingualNeural";
+
+/** Engine id → voice id: one voice per engine (`speech.voice`, and each project's entry). */
+export type EngineVoices = Record<string, string>;
+
+/** One engine in the cascade order, and whether it is *In cascade*. */
+export interface CascadeEntry {
+  id: string;
+  on: boolean;
+}
+
+/**
+ * The cascade's member engines in the order a fresh workspace tries them.
+ *
+ * A COPY of the server's `CASCADE_ORDER` (`server/lib/speech/ttsHolder.ts`):
+ * the browser cannot import server code, and the registry imports nothing at
+ * runtime from the features above it. `voices.cascade.test.ts` reads the
+ * server file and fails when the two drift apart.
+ */
+export const DEFAULT_CASCADE_ORDER: readonly string[] = [
+  "elevenlabs",
+  "cartesia",
+  "speechify",
+  "azure",
+  "edge",
+];
 
 /**
  * The answer pane's height when nothing has been dragged: taller than any
@@ -637,18 +738,22 @@ export const preferences = {
 
   // ── Speech ───────────────────────────────────────────────────────────────
   /**
-   * Typed `string`: the voice list is anytts' catalog, which a codec would
-   * have to duplicate, and `voices.ts` already resolves an id outside the
-   * engine's catalog onto the engine default at the boundary. The default lives here and `voices.ts`
-   * imports it — upward, from the lower layer — so there is one copy. The
-   * other direction is what would close a cycle once voices.ts reads the
-   * registry.
+   * The default voice of each engine — `engine → voice id`; an engine with no
+   * entry speaks with its catalog default. The codec checks the SHAPE only and
+   * migrates the old single Edge voice (`engineVoices` above): the voice list
+   * is anytts' catalog, which a codec would have to duplicate, and `voices.ts`
+   * drops an id outside its engine's catalog at the boundary. The Edge default
+   * lives here and `voices.ts` imports it — upward, from the lower layer — so
+   * there is one copy. The other direction is what would close a cycle once
+   * voices.ts reads the registry.
+   *
+   * Treat the default as frozen: `readPreference` hands it back BY REFERENCE.
    */
-  speechVoice: definePreference({
-    key: "speech.voice", // was: panel-speech-voice
+  speechVoice: definePreference<EngineVoices>({
+    key: "speech.voice", // was: panel-speech-voice (one Edge voice id, migrated on read)
     scope: "global",
-    default: DEFAULT_SPEECH_VOICE,
-    codec: str,
+    default: { edge: DEFAULT_SPEECH_VOICE },
+    codec: engineVoices,
     portable: true,
   }),
   /**
@@ -679,17 +784,44 @@ export const preferences = {
     portable: false,
   }),
   /**
-   * Each project's own voice — `project → voice id`; a project that follows
-   * the default voice has no entry. Portable, unlike `speech.modes`: the keys
-   * are project names, which mean the same thing on every machine. The codec
-   * is plain `json` for the reason `speech.voice`'s is `str` — `voices.ts`
-   * drops a stale id on the way out.
+   * Each project's own voices — `project → engine → voice id`; a project, or
+   * an engine within it, that follows the default voice has no entry.
+   * Portable, unlike `speech.modes`: the keys are project and engine names,
+   * which mean the same thing on every machine. The codec checks the shape and
+   * migrates the old `project → Edge voice id` (`projectEngineVoices` above),
+   * for the reason `speech.voice`'s does — `voices.ts` drops a stale id on the
+   * way out.
    */
-  speechVoiceByProject: definePreference<Record<string, string>>({
-    key: "speech.voiceByProject", // was: nothing — per-project voices are new
+  speechVoiceByProject: definePreference<Record<string, EngineVoices>>({
+    key: "speech.voiceByProject", // was: project → one Edge voice id (migrated on read)
     scope: "global",
     default: {},
-    codec: json<Record<string, string>>(),
+    codec: projectEngineVoices,
+    portable: true,
+  }),
+  /**
+   * The cascade's member engines in the order they are tried, each *In
+   * cascade* or not. The default is every engine, on, in the server's order.
+   * Unknown ids and missing engines are `voices.ts`' to repair, against the
+   * engine list it owns. Treat the default as frozen, like the launchers'.
+   */
+  speechCascadeOrder: definePreference<CascadeEntry[]>({
+    key: "speech.cascadeOrder", // was: nothing — the cascade is new
+    scope: "global",
+    default: DEFAULT_CASCADE_ORDER.map((id) => ({ id, on: true })),
+    codec: listOf(toCascadeEntry),
+    portable: true,
+  }),
+  /**
+   * Whether anytts applies its pronunciation rules per engine —
+   * `engine → boolean`. An engine with no entry keeps anytts' own default
+   * (Edge on, the others off), so the empty record is the default.
+   */
+  speechPronunciationByEngine: definePreference<Record<string, boolean>>({
+    key: "speech.pronunciationByEngine", // was: nothing — the panel used to respell itself
+    scope: "global",
+    default: {},
+    codec: enginePronunciation,
     portable: true,
   }),
   /**

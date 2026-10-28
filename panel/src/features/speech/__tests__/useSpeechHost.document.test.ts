@@ -103,7 +103,8 @@ describe("useSpeechHost — page speech", () => {
   it("speakDocument prepares with the page's own language", async () => {
     // Polish by its diacritics. One Polish vote never switches a channel tally
     // on (it takes two), so a tally-prepared page would be read as English.
-    const text = "Zażółć gęślą jaźń: zrób deploy i build na `main` w `src/app.ts`.";
+    // `user_id` is labelled in the page's language ("zmienna" / "variable").
+    const text = "Zażółć gęślą jaźń: zrób deploy i build na `main` w `src/app.ts` z `user_id`.";
     const polish = prepare(text, { language: "pl" }).units.map((unit) => unit.text);
     const english = prepare(text, { language: "en" }).units.map((unit) => unit.text);
     expect(polish).not.toEqual(english);
