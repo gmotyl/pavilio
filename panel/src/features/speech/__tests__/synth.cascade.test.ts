@@ -98,6 +98,9 @@ describe("cascade requests through the speech seam", () => {
       azure: voices.catalogDefaultVoice("azure"),
       edge: ANDREW,
     };
+    // `toEqual` treats an undefined property as absent: a member whose default
+    // went missing would pass silently without this guard.
+    expect(Object.values(expectedVoices).every(Boolean)).toBe(true);
     const order = ["elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
@@ -168,6 +171,15 @@ describe("cascade requests through the speech seam", () => {
     synth.speechCacheState("Zrobiłem deploy.", { voice, lang: "pl" });
     expect(lib.configs).toHaveLength(3);
     expect(lastConfig().engines.edge).toMatchObject({ mode: "relay", pronunciation: false });
+
+    // The effect, not just the flag: through the relay, Polish text reaches the
+    // server as written with the switch off, and respelled with it on.
+    await synth.synthesizeSpeech("Zrobiłem deploy.", { voice, lang: "pl" });
+    expect(relayed.at(-1)?.body.text).toBe("Zrobiłem deploy.");
+
+    voices.setEnginePronunciation("edge", true);
+    await synth.synthesizeSpeech("Zrobiłem deploy.", { voice, lang: "pl" });
+    expect(relayed.at(-1)?.body.text).toBe("Zrobiłem diploj.");
   });
 
   it("a keyed engine always uses the relay", async () => {
