@@ -129,4 +129,22 @@ describe("secrets store", () => {
       "# keys\nELEVENLABS_API_KEY=el-2\nAZURE_SPEECH_REGION=westeurope\n",
     );
   });
+
+  it("overlapping saves and deletes all persist", async () => {
+    const { resolveKey, writeKeys } = await import("../secrets");
+    await writeKeys({ SPEECHIFY_API_KEY: "sp-1" });
+
+    // Not awaited one by one: each call starts while the previous one is mid-write.
+    await Promise.all([
+      writeKeys({ ELEVENLABS_API_KEY: "el-1" }),
+      writeKeys({ CARTESIA_API_KEY: "ca-1" }),
+      writeKeys({ SPEECHIFY_API_KEY: null }),
+      writeKeys({ AZURE_SPEECH_REGION: "westeurope" }),
+    ]);
+
+    expect(readFileSync(secretsFile(), "utf8")).toBe(
+      "ELEVENLABS_API_KEY=el-1\nCARTESIA_API_KEY=ca-1\nAZURE_SPEECH_REGION=westeurope\n",
+    );
+    expect(resolveKey("SPEECHIFY_API_KEY")).toEqual({ source: "none" });
+  });
 });

@@ -90,6 +90,17 @@ export async function writeKeys(entries: Partial<Record<KeyVar, string | null>>)
     }
   }
 
+  // One read-modify-write at a time: an overlapping call would read the file
+  // before this one's rename and then write its own snapshot over it.
+  const run = writeQueue.then(() => applyEntries(defined));
+  writeQueue = run.catch(() => undefined);
+  return run;
+}
+
+/** The tail of the serialized writes; never rejects, so a failed write does not block the next. */
+let writeQueue: Promise<void> = Promise.resolve();
+
+async function applyEntries(defined: [string, string | null | undefined][]): Promise<void> {
   const dir = stateDir();
   const file = secretsFile();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
