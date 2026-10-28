@@ -93,7 +93,7 @@ export function EngineSettings() {
   const rootRef = useRef<HTMLDivElement>(null);
   const width = usePaneWidth(rootRef);
   const narrow = width > 0 && width < SPEECH_ROWS_NARROW_BELOW;
-  const { engines, refresh } = useEngineInfo();
+  const { engines, failed, refresh } = useEngineInfo();
   // Subscriptions: each value below is read through `voices.ts`, which repairs
   // and catalog-checks it; the hooks are here so a write re-renders the rows.
   usePreference(preferences.speechCascadeOrder);
@@ -131,6 +131,21 @@ export function EngineSettings() {
         picked directly. Multilingual voices read both Polish and English; a single-language voice
         reads every answer in its own language.
       </p>
+      {failed && (
+        <div
+          role="alert"
+          data-testid="engine-status-error"
+          className="flex items-center flex-wrap gap-2 text-xs mt-3 px-3 py-2 rounded"
+          style={{ border: "1px solid var(--red)", color: "var(--text-primary)" }}
+        >
+          <span style={{ flex: 1, minWidth: 0 }}>
+            Could not load engine status from the panel server. Keys can still be saved.
+          </span>
+          <button type="button" data-testid="engine-status-retry" className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => void refresh()}>
+            Retry
+          </button>
+        </div>
+      )}
       <ol className="mt-3 grid gap-2.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {order.map((entry, index) => (
           <EngineRow
@@ -142,6 +157,7 @@ export function EngineSettings() {
             last={index === order.length - 1}
             narrow={narrow}
             info={engines?.[entry.id]}
+            unavailable={failed && !engines?.[entry.id]}
             voice={voices[entry.id] ?? catalogDefaultVoice(entry.id) ?? ""}
             pronunciation={pronunciation[entry.id] ?? entry.id === "edge"}
             inCascade={entry.on}
@@ -173,6 +189,8 @@ interface EngineRowProps {
   last: boolean;
   narrow: boolean;
   info: EngineInfo | undefined;
+  /** The engines list failed to load and has no entry for this row. */
+  unavailable: boolean;
   voice: string;
   pronunciation: boolean;
   inCascade: boolean;
@@ -231,20 +249,20 @@ function EngineRow(props: EngineRowProps) {
             color: chip ? CHIP_COLORS[chip.tone] : "var(--text-tertiary)",
           }}
         >
-          {chip ? chip.text : "checking…"}
+          {chip ? chip.text : props.unavailable ? "status unavailable" : "checking…"}
         </span>
         <span className="flex gap-1">
           {props.first ? (
             <span aria-hidden="true" style={{ width: 26 }} />
           ) : (
-            <button type="button" data-testid={`engine-move-up-${id}`} aria-label="Move up" className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => props.onMove(-1)}>
+            <button type="button" data-testid={`engine-move-up-${id}`} aria-label={`Move ${label} up`} className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => props.onMove(-1)}>
               ↑
             </button>
           )}
           {props.last ? (
             <span aria-hidden="true" style={{ width: 26 }} />
           ) : (
-            <button type="button" data-testid={`engine-move-down-${id}`} aria-label="Move down" className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => props.onMove(1)}>
+            <button type="button" data-testid={`engine-move-down-${id}`} aria-label={`Move ${label} down`} className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => props.onMove(1)}>
               ↓
             </button>
           )}
@@ -260,7 +278,7 @@ function EngineRow(props: EngineRowProps) {
           minWidth: 0,
         }}
       >
-        {keyed && <KeyCell id={id} label={label} info={info} onKeyChanged={props.onKeyChanged} />}
+        {keyed && <KeyCell id={id} label={label} info={info} unavailable={props.unavailable} onKeyChanged={props.onKeyChanged} />}
         <div style={{ minWidth: 0 }}>
           <label htmlFor={voiceId} className={CELL_LABEL_CLASS} style={MUTED}>
             Voice
@@ -321,23 +339,27 @@ interface KeyCellProps {
   id: string;
   label: string;
   info: EngineInfo | undefined;
+  unavailable: boolean;
   onKeyChanged: () => Promise<void>;
 }
 
 /**
  * The API key: "set •••• 3f9a" with Change and Remove; a password input with
  * Save; or "from environment" naming the variable that wins. Azure adds its
- * Region, sent with the key. A failed request leaves the row as it was — the
+ * Region, sent with the key. When the engines list could not be loaded the
+ * key's source is unknown, so the cell offers the input: the server refuses
+ * (409) when an environment variable wins, and that shows inline. A failed request leaves the row as it was — the
  * typed key stays in the input — and says why inline.
  */
-function KeyCell({ id, label, info, onKeyChanged }: KeyCellProps) {
+function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
   const [editing, setEditing] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [region, setRegion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const source = info?.keySource;
-  const showInput = source === "none" || (source === "file" && editing);
+  const showInput =
+    source === "none" || (source === "file" && editing) || (source === undefined && unavailable);
   const keyInputId = `speech-key-${id}`;
   const regionId = `speech-region-${id}`;
 
@@ -381,7 +403,7 @@ function KeyCell({ id, label, info, onKeyChanged }: KeyCellProps) {
             API key
           </span>
         )}
-        {source === undefined && (
+        {source === undefined && !unavailable && (
           <span className="text-xs" style={MUTED}>
             …
           </span>
@@ -402,10 +424,10 @@ function KeyCell({ id, label, info, onKeyChanged }: KeyCellProps) {
             <code className="text-xs px-2 py-1 rounded" style={{ background: "var(--bg-base)", border: "1px solid var(--border-subtle)" }}>
               {info?.keyLast4 ? `set •••• ${info.keyLast4}` : "set"}
             </code>
-            <button type="button" data-testid={`engine-key-change-${id}`} className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => setEditing(true)} disabled={busy}>
+            <button type="button" data-testid={`engine-key-change-${id}`} aria-label={`Change ${label} key`} className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => setEditing(true)} disabled={busy}>
               Change
             </button>
-            <button type="button" data-testid={`engine-key-remove-${id}`} className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => void remove()} disabled={busy}>
+            <button type="button" data-testid={`engine-key-remove-${id}`} aria-label={`Remove ${label} key`} className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => void remove()} disabled={busy}>
               Remove
             </button>
           </div>
@@ -421,14 +443,14 @@ function KeyCell({ id, label, info, onKeyChanged }: KeyCellProps) {
             <input
               id={keyInputId}
               type="password"
-              autoComplete="off"
+              autoComplete="new-password"
               placeholder={`Paste ${label} API key`}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               className={CONTROL_CLASS}
               style={{ ...CONTROL_STYLE, width: "auto", flex: "1 1 10rem" }}
             />
-            <button type="submit" data-testid={`engine-key-save-${id}`} className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={busy || apiKey.trim() === ""}>
+            <button type="submit" data-testid={`engine-key-save-${id}`} aria-label={`Save ${label} key`} className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={busy || apiKey.trim() === ""}>
               Save
             </button>
             {editing && (

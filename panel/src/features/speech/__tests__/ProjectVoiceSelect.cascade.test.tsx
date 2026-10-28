@@ -167,6 +167,23 @@ describe("ProjectVoiceSelect under the cascade", () => {
     }
   });
 
+  it("a failed status fetch greys no member", async () => {
+    const fetchMock = stubFetch({ "/api/speech/engines": () => new Response("boom", { status: 500 }) }, null);
+    render(<ProjectVoiceSelect project="p" />);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/speech/engines"))).toBe(true),
+    );
+    // Let the failed answer land before asserting nothing changed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(rowIds().length).toBeGreaterThan(0);
+    for (const id of rowIds()) {
+      expect(row(id)).toHaveAttribute("data-skipped", "false");
+      expect(rowSelect(id)).toBeEnabled();
+      expect(within(row(id)).queryByTestId("project-voice-skipped")).toBeNull();
+    }
+  });
+
   it("a single engine shows one select", () => {
     setStoredEngine("edge");
     const fetchMock = stubFetch({}, null);

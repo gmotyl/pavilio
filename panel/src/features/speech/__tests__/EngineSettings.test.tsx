@@ -129,13 +129,13 @@ describe("EngineSettings", () => {
     rowIds().forEach((id, index) => {
       expect(within(row(id)).getByTestId("engine-position")).toHaveTextContent(String(index + 1));
     });
-    expect(within(row("edge")).queryByRole("button", { name: "Move up" })).toBeNull();
-    expect(within(row("edge")).getByRole("button", { name: "Move down" })).toBeInTheDocument();
-    expect(within(row("speechify")).getByRole("button", { name: "Move up" })).toBeInTheDocument();
-    expect(within(row("speechify")).queryByRole("button", { name: "Move down" })).toBeNull();
+    expect(within(row("edge")).queryByRole("button", { name: `Move ${LABELS.get("edge")} up` })).toBeNull();
+    expect(within(row("edge")).getByRole("button", { name: `Move ${LABELS.get("edge")} down` })).toBeInTheDocument();
+    expect(within(row("speechify")).getByRole("button", { name: `Move ${LABELS.get("speechify")} up` })).toBeInTheDocument();
+    expect(within(row("speechify")).queryByRole("button", { name: `Move ${LABELS.get("speechify")} down` })).toBeNull();
     for (const id of ["azure", "elevenlabs", "cartesia"]) {
-      expect(within(row(id)).getByRole("button", { name: "Move up" })).toBeInTheDocument();
-      expect(within(row(id)).getByRole("button", { name: "Move down" })).toBeInTheDocument();
+      expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} up` })).toBeInTheDocument();
+      expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} down` })).toBeInTheDocument();
     }
   });
 
@@ -144,7 +144,7 @@ describe("EngineSettings", () => {
     await renderLoaded();
     expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge"]);
 
-    await user.click(within(row("elevenlabs")).getByRole("button", { name: "Move down" }));
+    await user.click(within(row("elevenlabs")).getByRole("button", { name: `Move ${LABELS.get("elevenlabs")} down` }));
 
     expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge"]);
     expect(readPreference(preferences.speechCascadeOrder).map((entry) => entry.id)).toEqual([
@@ -155,8 +155,8 @@ describe("EngineSettings", () => {
       "edge",
     ]);
     // The first row now has no ↑, and the moved one does.
-    expect(within(row("cartesia")).queryByRole("button", { name: "Move up" })).toBeNull();
-    expect(within(row("elevenlabs")).getByRole("button", { name: "Move up" })).toBeInTheDocument();
+    expect(within(row("cartesia")).queryByRole("button", { name: `Move ${LABELS.get("cartesia")} up` })).toBeNull();
+    expect(within(row("elevenlabs")).getByRole("button", { name: `Move ${LABELS.get("elevenlabs")} up` })).toBeInTheDocument();
   });
 
   it("each row shows status, voice, pronunciation and in-cascade", async () => {
@@ -232,21 +232,23 @@ describe("EngineSettings", () => {
 
     const file = within(row("elevenlabs"));
     expect(file.getByText("set •••• 3f9a")).toBeInTheDocument();
-    expect(file.getByRole("button", { name: "Change" })).toBeInTheDocument();
-    expect(file.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    expect(file.getByRole("button", { name: `Change ${LABELS.get("elevenlabs")} key` })).toBeInTheDocument();
+    expect(file.getByRole("button", { name: `Remove ${LABELS.get("elevenlabs")} key` })).toBeInTheDocument();
     expect(file.queryByLabelText("API key")).toBeNull();
 
     const none = within(row("speechify"));
     const input = none.getByLabelText("API key") as HTMLInputElement;
     expect(input.type).toBe("password");
-    expect(none.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    // A fresh secret: the browser must not autofill a saved site password.
+    expect(input).toHaveAttribute("autocomplete", "new-password");
+    expect(none.getByRole("button", { name: `Save ${LABELS.get("speechify")} key` })).toBeInTheDocument();
 
     const env = within(row("cartesia"));
     expect(env.getByText("from environment")).toBeInTheDocument();
     expect(env.getByText("CARTESIA_API_KEY")).toBeInTheDocument();
-    expect(env.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(env.queryByRole("button", { name: "Change" })).toBeNull();
-    expect(env.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(env.queryByRole("button", { name: /^Save / })).toBeNull();
+    expect(env.queryByRole("button", { name: /^Change / })).toBeNull();
+    expect(env.queryByRole("button", { name: /^Remove / })).toBeNull();
   });
 
   it("azure has region and edge has no key cell", async () => {
@@ -344,7 +346,7 @@ describe("EngineSettings", () => {
     await waitFor(() => expect(within(row("speechify")).getByTestId("engine-status")).toHaveTextContent("no key"));
 
     await user.type(within(row("speechify")).getByLabelText("API key"), "sk-speechify-secret");
-    await user.click(within(row("speechify")).getByRole("button", { name: "Save" }));
+    await user.click(within(row("speechify")).getByRole("button", { name: `Save ${LABELS.get("speechify")} key` }));
 
     const alert = await within(row("speechify")).findByRole("alert");
     expect(alert).toHaveTextContent("could not save the key");
@@ -383,15 +385,72 @@ describe("EngineSettings", () => {
     render(<EngineSettings />);
     await waitFor(() => expect(within(row("azure")).getByTestId("engine-status")).toHaveTextContent("bad key"));
 
-    await user.click(within(row("azure")).getByRole("button", { name: "Change" }));
+    await user.click(within(row("azure")).getByRole("button", { name: `Change ${LABELS.get("azure")} key` }));
     await user.type(within(row("azure")).getByLabelText("API key"), "azure-secret-key-0042");
     const region = within(row("azure")).getByLabelText("Region");
     await user.clear(region);
     await user.type(region, "northeurope");
-    await user.click(within(row("azure")).getByRole("button", { name: "Save" }));
+    await user.click(within(row("azure")).getByRole("button", { name: `Save ${LABELS.get("azure")} key` }));
 
     await waitFor(() => expect(within(row("azure")).getByText("set •••• 0042")).toBeInTheDocument());
     expect(within(row("azure")).getByTestId("engine-status")).toHaveTextContent("ready");
     expect(within(row("azure")).queryByLabelText("API key")).toBeNull();
+  });
+
+  it("a failed status fetch shows an error with retry", async () => {
+    const user = userEvent.setup();
+    let up = false;
+    stubFetch(
+      {
+        "/api/speech/engines": () =>
+          up ? jsonResponse(mockupEngines()) : jsonResponse({ error: "unauthorized" }, { status: 401 }),
+      },
+      null,
+    );
+    render(<EngineSettings />);
+
+    const alert = await screen.findByTestId("engine-status-error");
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent(/could not load engine status/i);
+    for (const id of rowIds()) {
+      expect(within(row(id)).getByTestId("engine-status")).toHaveTextContent("status unavailable");
+      // Unknown is not keyless: no row is greyed on a failed fetch.
+      expect(row(id)).toHaveAttribute("data-skipped", "false");
+    }
+
+    up = true;
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.queryByTestId("engine-status-error")).toBeNull());
+    expect(within(row("elevenlabs")).getByTestId("engine-status")).toHaveTextContent("ready");
+    expect(within(row("elevenlabs")).getByText("set •••• 3f9a")).toBeInTheDocument();
+  });
+
+  it("key cells stay usable when the status fetch failed", async () => {
+    const user = userEvent.setup();
+    stubFetch(
+      {
+        "/api/speech/keys/cartesia": () =>
+          jsonResponse({ error: "CARTESIA_API_KEY is set on the server" }, { status: 409 }),
+        "/api/speech/engines": () => new Response("boom", { status: 500 }),
+      },
+      null,
+    );
+    render(<EngineSettings />);
+    await screen.findByTestId("engine-status-error");
+
+    for (const id of ["elevenlabs", "cartesia", "speechify", "azure"]) {
+      const scope = within(row(id));
+      expect(scope.getByLabelText("API key")).toHaveAttribute("type", "password");
+      expect(scope.getByRole("button", { name: `Save ${LABELS.get(id)} key` })).toBeInTheDocument();
+    }
+    expect(within(row("azure")).getByLabelText("Region")).toBeEnabled();
+
+    await user.type(within(row("cartesia")).getByLabelText("API key"), "sk-cartesia");
+    await user.click(within(row("cartesia")).getByRole("button", { name: `Save ${LABELS.get("cartesia")} key` }));
+
+    const error = await within(row("cartesia")).findByRole("alert");
+    expect(error).toHaveTextContent("CARTESIA_API_KEY is set on the server");
+    expect(within(row("cartesia")).getByLabelText("API key")).toHaveValue("sk-cartesia");
   });
 });
