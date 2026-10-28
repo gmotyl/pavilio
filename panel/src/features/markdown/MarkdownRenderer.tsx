@@ -145,11 +145,20 @@ function quoteSource(node: HastLike | undefined, source: string): string {
   const end = node?.position?.end?.offset;
   const slice = typeof start === "number" && typeof end === "number" ? source.slice(start, end) : "";
   if (!slice.startsWith(">")) return hastText(node).trim();
+  // The slice starts at this quote's own marker, but its later lines still
+  // carry every enclosing quote's marker too: count them from what precedes
+  // the start on its line, and take those off before this quote's own.
+  const lineStart = source.lastIndexOf("\n", start! - 1) + 1;
+  const ancestors = (source.slice(lineStart, start).match(/>/g) ?? []).length;
+  const continuation = new RegExp(`^(?:[ \\t]*> ?){0,${ancestors}}[ \\t]*> ?`);
   return slice
     .split("\n")
-    .map((line) => line.replace(/^[ \t]*> ?/, ""))
+    .map((line, i) => line.replace(i === 0 ? /^> ?/ : continuation, ""))
     .join("\n")
-    .trim();
+    // Boundary blank lines only: leading spaces can be Markdown (an indented
+    // code block), so the first line keeps its indentation.
+    .replace(/^(?:[ \t]*\r?\n)+/, "")
+    .trimEnd();
 }
 
 /**

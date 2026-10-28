@@ -76,6 +76,29 @@ describe("MarkdownRenderer blockquote copy", () => {
     expect(await copiedFrom(buttons[1]!)).toBe("outer\n\n> inner");
   });
 
+  it("a multiline inner quote copies without its ancestors' markers", async () => {
+    renderMd("> > first\n> > second\n");
+
+    // The inner button sits inside the outer quote, so it comes first.
+    const [inner] = screen.getAllByLabelText("Copy quote");
+    expect(await copiedFrom(inner!)).toBe("first\nsecond");
+  });
+
+  it("an inner quote keeps its own child quote's markers", async () => {
+    renderMd("> > first\n> >\n> > > child\n");
+
+    // Buttons follow their quotes: child, inner, outer.
+    const buttons = screen.getAllByLabelText("Copy quote");
+    expect(buttons).toHaveLength(3);
+    expect(await copiedFrom(buttons[1]!)).toBe("first\n\n> child");
+  });
+
+  it("a quote that opens with an indented code block keeps its indentation", async () => {
+    renderMd(">     const x = 1;\n>     const y = 2;\n");
+
+    expect(await copiedFrom(screen.getByLabelText("Copy quote"))).toBe("    const x = 1;\n    const y = 2;");
+  });
+
   it("a raw HTML blockquote copies its text, not its tags", async () => {
     renderMd("<blockquote>plain <b>words</b></blockquote>\n");
 
