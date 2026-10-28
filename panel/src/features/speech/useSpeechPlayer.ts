@@ -102,14 +102,17 @@ export interface SpeechProgress {
 const NO_UNIT_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
 
 /**
- * Whether two slices are the same utterance's units. Text, not identity: the
- * host rebuilds the array on a re-prepare, and what the durations below are
- * measurements OF is the audio, which is keyed on the text.
+ * Whether two slices are the same utterance's units. Text and language, not
+ * identity: the host rebuilds the array on a re-prepare, and what the
+ * durations below are measurements OF is the audio, which is synthesized from
+ * the text in the unit's language.
  */
 function sameUnits(left: readonly SpeechUnit[] | undefined, right: readonly SpeechUnit[]): boolean {
   if (left === right) return true;
   if (!left || left.length !== right.length) return false;
-  return left.every((unit, index) => unit.text === right[index].text);
+  return left.every(
+    (unit, index) => unit.text === right[index].text && unit.lang === right[index].lang,
+  );
 }
 
 export interface SpeechPlayerOptions {
