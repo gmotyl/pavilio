@@ -234,6 +234,64 @@ export function broadcast(data: Record<string, unknown>): void {
   });
 }
 
+/** Quiet period after the last file event before the index is rebuilt. */
+export const INDEX_REBUILD_DELAY_MS = 100;
+/** Longest a batch may wait while events keep arriving inside the quiet period. */
+export const INDEX_REBUILD_MAX_WAIT_MS = 500;
+
+type FileEvent = { event: string; path: string };
+
+/**
+ * Collect file events and hand them over in one batch once the tree has been
+ * quiet for `delayMs`. A full index walk per event made an agent's bulk write
+ * or `rm -rf` re-walk the whole projects tree hundreds of times; batched, it is
+ * walked once per burst.
+ *
+ * `maxWaitMs` bounds the wait: an agent writing steadily anywhere in the tree
+ * would otherwise keep resetting the quiet period, and no project would see a
+ * refresh until it stopped.
+ */
+export function coalesceFileEvents(
+  delayMs: number,
+  maxWaitMs: number,
+  flush: (events: FileEvent[]) => void,
+): (event: string, path: string) => void {
+  let pending: FileEvent[] = [];
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  let maxTimer: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    if (quietTimer) clearTimeout(quietTimer);
+    if (maxTimer) clearTimeout(maxTimer);
+    quietTimer = maxTimer = null;
+    const batch = pending;
+    pending = [];
+    flush(batch);
+  };
+  return (event, path) => {
+    pending.push({ event, path });
+    if (quietTimer) clearTimeout(quietTimer);
+    quietTimer = setTimeout(fire, delayMs);
+    if (!maxTimer) maxTimer = setTimeout(fire, maxWaitMs);
+  };
+}
+
+/**
+ * Rebuild the index, then broadcast every event of the batch — rebuild first, so
+ * a client refetching the index on `file-change` sees the new state. Runs from a
+ * timer, where a throw is an uncaught exception that takes the whole panel down:
+ * a failed rebuild is logged and the previous index kept.
+ */
+export function flushFileEvents(events: FileEvent[]): void {
+  try {
+    rebuildIndex();
+  } catch (err) {
+    console.error("[watcher] rebuildIndex failed:", err);
+  }
+  for (const { event, path } of events) {
+    broadcast({ type: "file-change", event, path });
+  }
+}
+
 export function setupFileWatcher(): void {
   const { projectsDir, watchDebounceMs, ignorePatterns, agentRegistryPath } = getConfig();
 
@@ -243,14 +301,19 @@ export function setupFileWatcher(): void {
     awaitWriteFinish: { stabilityThreshold: watchDebounceMs },
   });
 
-  watcher.on("all", (event, path) => {
-    rebuildIndex();
-    broadcast({ type: "file-change", event, path });
-  });
+  watcher.on(
+    "all",
+    coalesceFileEvents(INDEX_REBUILD_DELAY_MS, INDEX_REBUILD_MAX_WAIT_MS, flushFileEvents),
+  );
+  // An `error` with no listener is an uncaught exception on an EventEmitter.
+  watcher.on("error", (err) => console.error("[watcher] projects watcher error:", err));
 
   console.log(`File watcher started on ${projectsDir}`);
 
-  chokidar.watch(agentRegistryPath, { ignoreInitial: true }).on("all", () => {
-    broadcast({ type: "agent-change" });
-  });
+  chokidar
+    .watch(agentRegistryPath, { ignoreInitial: true })
+    .on("all", () => {
+      broadcast({ type: "agent-change" });
+    })
+    .on("error", (err) => console.error("[watcher] agent registry watcher error:", err));
 }

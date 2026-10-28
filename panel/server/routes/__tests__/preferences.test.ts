@@ -350,10 +350,11 @@ describe("boot wiring", () => {
       const startPanel = vi.fn(async () => undefined);
       const findFreePort = vi.fn(async () => 24678);
       const installPreferenceFlush = vi.fn();
+      const installCrashLog = vi.fn();
       const viteClose = vi.fn(async () => undefined);
 
       vi.doMock("../../panel-server.js", () => ({ startPanel, findFreePort }));
-      vi.doMock("../../lib/shutdown.js", () => ({ installPreferenceFlush }));
+      vi.doMock("../../lib/shutdown.js", () => ({ installPreferenceFlush, installCrashLog }));
       vi.doMock("vite", () => ({
         createServer: vi.fn(async () => ({ middlewares: vi.fn(), close: viteClose })),
       }));
@@ -368,6 +369,8 @@ describe("boot wiring", () => {
         // An entry may install the flush after an await; what matters is that
         // it installs it, and that startPanel really was the thing it ran.
         await vi.waitFor(() => expect(installPreferenceFlush).toHaveBeenCalled());
+        // The crash log is what dates a panel death in .panel.log.
+        expect(installCrashLog).toHaveBeenCalled();
         await vi.waitFor(() => expect(startPanel).toHaveBeenCalled());
         expect(exit).not.toHaveBeenCalled();
       } finally {

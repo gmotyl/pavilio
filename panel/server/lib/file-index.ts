@@ -23,9 +23,24 @@ function isIndexable(name: string, inMockups: boolean): boolean {
   return inMockups && MOCKUP_IMAGE_EXTS.some((ext) => lower.endsWith(ext));
 }
 
+// A path listed by readdir can be gone by the time it is read: an agent's
+// `rm -rf` of a project runs while the watcher is still rebuilding the index for
+// files written moments before. Those paths are skipped; anything else (EACCES,
+// EMFILE) is a real fault and still throws.
+function isVanished(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 function walk(dir: string, projectsDir: string, inMockups = false): FileEntry[] {
   const entries: FileEntry[] = [];
-  const items = readdirSync(dir, { withFileTypes: true });
+  let items;
+  try {
+    items = readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    if (isVanished(err)) return entries;
+    throw err;
+  }
 
   for (const item of items) {
     const fullPath = join(dir, item.name);
@@ -42,7 +57,13 @@ function walk(dir: string, projectsDir: string, inMockups = false): FileEntry[] 
       const segs = rel.split("/");
       const archived = segs[0] === "archived";
       const project = archived ? (segs[1] ?? "archived") : segs[0];
-      const stat = statSync(fullPath);
+      let stat;
+      try {
+        stat = statSync(fullPath);
+      } catch (err) {
+        if (isVanished(err)) continue;
+        throw err;
+      }
       entries.push({
         relativePath: rel,
         absolutePath: fullPath,
