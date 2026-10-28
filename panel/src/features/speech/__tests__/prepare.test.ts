@@ -437,9 +437,9 @@ describe("prepare", () => {
     expect(units.map((unit) => unit.text).join(" ")).toContain("A later heading");
   });
   it.each<[lang: "pl" | "en", words: string[]]>([
-    // `blok HTML` reaches the voice as `blok ejcz-ti-em-el`: the substitution
+    // `blok HTML` reaches the voice as `blok ejcz ti em el`: the substitution
     // lands first and the pronunciation map then does its job on the acronym.
-    ["pl", ["blok kodu", "tabela", "blok ejcz-ti-em-el", "obrazek", "link", "wyrażenie"]],
+    ["pl", ["blok kodu", "tabela", "blok ejcz ti em el", "obrazek", "link", "wyrażenie"]],
     ["en", ["code block", "table", "HTML block", "image", "link", "expression"]],
   ])("speaks every sentinel in the session language (%s)", (lang, words) => {
     const text = spoken(everySentinelResponse, lang);
@@ -526,12 +526,12 @@ describe("prepare", () => {
   it("substitutes a sentinel before the pronunciation map can mangle it", () => {
     // The collision is real and verified against the map, not invented: the
     // stem map holds `code → koud` and the acronym map holds
-    // `html → ejcz-ti-em-el`, and neither treats `⟦` as anything but a word
+    // `html → ejcz ti em el`, and neither treats `⟦` as anything but a word
     // boundary. Run the map first and the sentinel is no longer a sentinel —
     // a Polish session then says the literal "⟦koud⟧" out loud, which is what
     // it did before this commit.
     expect(applyPronunciation("⟦code⟧", "pl")).toBe("⟦koud⟧");
-    expect(applyPronunciation("⟦html⟧", "pl")).toBe("⟦ejcz-ti-em-el⟧");
+    expect(applyPronunciation("⟦html⟧", "pl")).toBe("⟦ejcz ti em el⟧");
     // The token stage is ordered the same way: the acronym table matches `html`
     // only as a STANDALONE word and `_` is a word character to it, so
     // `HTML_PARSER` is invisible to the map until the split (see the token table).
@@ -549,7 +549,7 @@ describe("prepare", () => {
     ["an underscored identifier is spoken as its words (en)", "Regex HEADING_LINE_RE tutaj.\n", "en", "Regex variable heading line re tutaj."],
     ["an underscored identifier is spoken as its words (pl)", "Regex HEADING_LINE_RE tutaj.\n", "pl", "Regex zmienna heading line re tutaj."],
     // `strip.ts` has already unwrapped short inline code.
-    ["a backticked identifier arrives bare and is labelled", "Stała `user_id` tutaj.\n", "pl", "Stała zmienna user id tutaj."],
+    ["a backticked identifier arrives bare and is labelled", "Stała `user_id` tutaj.\n", "pl", "Stała zmienna user aj di tutaj."],
     ["a hash is named, not spelled (en)", "The tag points at 3f9a2b1c7d today.\n", "en", "The tag points at hash today."],
     ["a hash is named, not spelled (pl)", "Skrót 3f9a2b1c7d jest tutaj.\n", "pl", "Skrót hash jest tutaj."],
     // A digest prefix is part of the token — else "sha256 colon hash".
@@ -567,7 +567,7 @@ describe("prepare", () => {
     // Capitalisation is not a word boundary: splitting it ruins `TypeScript` and `GitHub`.
     ["camel case is not split", "We use useSpeechHost with TypeScript and GitHub.\n", "en", "We use useSpeechHost with TypeScript and GitHub."],
     // The pronunciation map runs after the split, so the acronym is finally said.
-    ["the map runs after the split: HTML_PARSER (pl)", "Zmieniamy HTML_PARSER dzisiaj.\n", "pl", "Zmieniamy zmienna ejcz-ti-em-el parser dzisiaj."],
+    ["the map runs after the split: HTML_PARSER (pl)", "Zmieniamy HTML_PARSER dzisiaj.\n", "pl", "Zmieniamy zmienna ejcz ti em el parser dzisiaj."],
     ["the English branch never runs the map: HTML_PARSER (en)", "We change HTML_PARSER today.\n", "en", "We change variable html parser today."],
     // `strip.ts` runs first and its path rule is destructive in both directions.
     ["a hash that is a path's last segment is still named", "Zobacz `.git/objects/ab/cdef1234567890` tutaj.\n", "pl", "Zobacz hash tutaj."],

@@ -205,10 +205,10 @@ function tidyAroundPlaceholder(text: string): string {
  *
  * This MUST run before {@link applyPronunciation}, and the reason is concrete
  * rather than stylistic: the Polish maps contain `code → koud` and the acronym
- * `html → ejcz-ti-em-el`, and `⟦` is a word boundary to both. Applied first,
+ * `html → ejcz ti em el`, and `⟦` is a word boundary to both. Applied first,
  * the map turns `⟦code⟧` into `⟦koud⟧` — no longer a sentinel, so nothing here
  * recognises it, and the voice spells the brackets out. Substituting first also
- * leaves the map a useful job: `blok HTML` then becomes `blok ejcz-ti-em-el`,
+ * leaves the map a useful job: `blok HTML` then becomes `blok ejcz ti em el`,
  * which is the acronym said correctly.
  *
  * Returning `text` itself when nothing matched is not an optimisation — it is

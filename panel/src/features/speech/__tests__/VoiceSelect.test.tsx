@@ -7,6 +7,7 @@ import { VoiceSelect } from "../VoiceSelect";
 import { listEngines, listVoices, type VoiceInfo } from "anytts";
 import { groupVoices } from "../voiceGroups";
 import { DEFAULT_SPEECH_VOICE, getStoredVoice, setStoredVoice } from "../voices";
+import { speechEngines } from "../engines";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
 import { readPreference } from "../../../preferences/store";
@@ -152,7 +153,8 @@ describe("VoiceSelect", () => {
     // one anytts lists but the seam does not configure is never offered.
     const engine = engineSelect();
     const engines = within(engine).getAllByRole("option") as HTMLOptionElement[];
-    const offered = listEngines().filter((e) => e.id !== UNCONFIGURED_ENGINE);
+    const configured = speechEngines();
+    const offered = listEngines().filter((e) => configured.includes(e.id));
     expect(engines.map((option) => option.value)).toEqual(offered.map((e) => e.id));
     expect(engines.map((option) => option.textContent)).toEqual(offered.map((e) => e.label));
     expect(engines.map((option) => option.value)).not.toContain(UNCONFIGURED_ENGINE);

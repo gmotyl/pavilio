@@ -12,6 +12,9 @@ const ALERT_BY_KIND: Record<TtsErrorKind, string> = {
   network: NOT_RESPONDING,
   "no-audio": "Speech stopped — the service returned no audio for this text.",
   "unknown-voice": "Speech stopped — the chosen voice is unavailable, pick another in Settings.",
+  "quota-exhausted": "Speech stopped — the speech service quota is used up.",
+  unauthorized: "Speech stopped — the speech service rejected the API key.",
+  "rate-limited": "Speech stopped — the speech service is limiting requests, try again shortly.",
 };
 
 const GENERIC_ALERT = "Speech stopped — the voice could not be synthesized.";
