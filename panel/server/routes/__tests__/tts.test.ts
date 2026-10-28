@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
-import type { EdgeEngineOptions } from "anytts";
+import type { EdgeEngineOptions, SynthesisRequest, SynthesisResult, Tts } from "anytts";
 
 // `lib/auth.ts` reads PANEL_TOKEN once, at module load, so the token has to be
 // in the environment before that module is imported (vi.hoisted runs first).
@@ -17,6 +17,7 @@ const { TOKEN, previousToken } = vi.hoisted(() => {
 import { authMiddleware } from "../../lib/auth";
 import { mobileAuthMiddleware } from "../../middleware/mobile-auth";
 import { createTtsHandler } from "../tts";
+import { createTtsHolder, type TtsHolder } from "../../lib/speech/ttsHolder";
 
 afterAll(() => {
   if (previousToken === undefined) delete process.env.PANEL_TOKEN;
@@ -186,5 +187,102 @@ describe("/api/tts relay", () => {
     // both gates only 401 paths that start with `/api/`, so they would let
     // every request through.
     expect(mount![1]).not.toBe("use");
+  });
+});
+
+/** A `Tts` stand-in: `synthesize` answers with this instance's `name` as the engine. */
+function fakeTts(name: string, pending?: Promise<void>): Tts & { synthesize: ReturnType<typeof vi.fn> } {
+  const synthesize = vi.fn(async (req: SynthesisRequest): Promise<SynthesisResult> => {
+    await pending;
+    return { bytes: new Uint8Array(AUDIO).buffer, mime: "audio/mpeg", engine: name, voice: req.voice ?? "v" };
+  });
+  return {
+    synthesize,
+    prefetch: () => {},
+    isCached: () => false,
+    state: () => "cold",
+    subscribe: () => () => {},
+    restartStalled: () => false,
+    engineStatus: () => ({ state: "ready" }),
+  } as Tts & { synthesize: ReturnType<typeof vi.fn> };
+}
+
+/** The production mount over a holder whose instances come from `instances`, in order. */
+function loadHolderApp(instances: Tts[]): { app: Express; holder: TtsHolder; opened: () => number } {
+  const { transport, opened } = fakeTransport();
+  const queue = [...instances];
+  const holder = createTtsHolder({ createTts: () => queue.shift()!, resolveKey: () => ({ source: "none" }) });
+  const app = express();
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder }));
+  app.use(express.json());
+  return { app, holder, opened };
+}
+
+const CASCADE_BODY = { engine: "cascade", text: "Hello.", lang: "en" };
+
+describe("/api/tts over the Tts holder", () => {
+  it("rebuild swaps the instance for the next request", async () => {
+    const first = fakeTts("first");
+    const second = fakeTts("second");
+    const { app, holder } = loadHolderApp([first, second]);
+
+    const before = await request(app).post("/api/tts").set("Cookie", COOKIE).send(CASCADE_BODY);
+    expect(before.status).toBe(200);
+    expect(before.headers["x-anytts-engine"]).toBe("first");
+
+    holder.rebuild();
+
+    const after = await request(app).post("/api/tts").set("Cookie", COOKIE).send(CASCADE_BODY);
+    expect(after.status).toBe(200);
+    expect(after.headers["x-anytts-engine"]).toBe("second");
+    expect(first.synthesize).toHaveBeenCalledTimes(1);
+    expect(second.synthesize).toHaveBeenCalledTimes(1);
+    expect(second.synthesize.mock.calls[0]![0]).toMatchObject({ engine: "cascade", text: "Hello.", lang: "en" });
+  });
+
+  it("an in-flight request finishes on the old instance", async () => {
+    let release!: () => void;
+    const first = fakeTts("first", new Promise<void>((r) => (release = r)));
+    const second = fakeTts("second");
+    const { app, holder } = loadHolderApp([first, second]);
+
+    const inFlight = request(app).post("/api/tts").set("Cookie", COOKIE).send(CASCADE_BODY).then((r) => r);
+    await vi.waitFor(() => expect(first.synthesize).toHaveBeenCalledTimes(1));
+
+    holder.rebuild();
+    const next = await request(app).post("/api/tts").set("Cookie", COOKIE).send(CASCADE_BODY);
+    expect(next.headers["x-anytts-engine"]).toBe("second");
+
+    release();
+    const old = await inFlight;
+    expect(old.status).toBe(200);
+    expect(old.headers["x-anytts-engine"]).toBe("first");
+    expect(second.synthesize).toHaveBeenCalledTimes(1);
+  });
+
+  it("edge requests are unchanged", async () => {
+    const tts = fakeTts("first");
+    const { app, opened } = loadHolderApp([tts]);
+
+    const res = await request(app)
+      .post("/api/tts")
+      .set("Cookie", COOKIE)
+      .send({ text: "Hello there.", voice: VOICE })
+      .buffer(true)
+      .parse((r, done) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => chunks.push(c));
+        r.on("end", () => done(null, Buffer.concat(chunks)));
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("audio/mpeg");
+    expect([...(res.body as Buffer)]).toEqual(AUDIO);
+    expect(opened()).toBe(1);
+    expect(tts.synthesize).not.toHaveBeenCalled();
+
+    const unauthenticated = await request(app).post("/api/tts").send(CASCADE_BODY);
+    expect(unauthenticated.status).toBe(401);
+    expect(tts.synthesize).not.toHaveBeenCalled();
   });
 });
