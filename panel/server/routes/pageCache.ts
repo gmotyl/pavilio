@@ -107,6 +107,10 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
         res.status(400).json({ error: "body must be non-empty audio bytes" });
         return;
       }
+      // A client that aborted mid-body never reaches here — the raw parser
+      // errors instead. One that hung up after its body arrived (a clear's
+      // abort racing the last byte) is dropped too: it no longer wants the write.
+      if (req.socket?.destroyed) return;
       const got = await attempt(res, () => store.write(req.params.page, req.params.unit, body, docKey));
       if (got) res.status(204).end();
     },
@@ -127,10 +131,17 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
     if (got) res.status(204).end();
   });
 
-  // Turns the raw parser's over-limit throw into JSON instead of express's HTML error page.
+  // Turns the raw parser's over-limit throw into JSON instead of express's HTML
+  // error page, and ends a PUT the client aborted mid-body quietly: nothing was
+  // written, and nobody is listening for an answer.
   router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
-    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+    const type = (err as { type?: string } | null)?.type;
+    if (type === "entity.too.large") {
       res.status(413).json({ error: "unit too large", limit: MAX_UNIT_BYTES });
+      return;
+    }
+    if (type === "request.aborted") {
+      res.end();
       return;
     }
     next(err);

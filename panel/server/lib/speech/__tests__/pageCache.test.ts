@@ -106,6 +106,27 @@ describe("page cache store", () => {
     expect(await store.totals()).toEqual({ pages: 0, units: 0, bytes: 0 });
   });
 
+  it("wipe asked for while a write is queued runs after it and leaves nothing behind", async () => {
+    const store = createPageCacheStore({ root });
+    const write = store.write(PAGE, U1, Buffer.from("late"), DOC_KEY);
+    const wiped = store.wipe();
+    await Promise.all([write, wiped]);
+
+    expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
+    expect(await wiped).toEqual({ pages: 1, units: 1, bytes: 4 });
+  });
+
+  it("a write asked for during a wipe lands after it", async () => {
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("old"), DOC_KEY);
+    const wiped = store.wipe();
+    const write = store.write(OTHER_PAGE, U2, Buffer.from("new"), DOC_KEY);
+    await Promise.all([wiped, write]);
+
+    expect(readdirSync(root)).toEqual([OTHER_PAGE]);
+    expect(await store.read(OTHER_PAGE, U2)).toEqual(Buffer.from("new"));
+  });
+
   it("a non-hex id is rejected before touching disk", async () => {
     const store = createPageCacheStore({ root });
     const bad = ["../etc", hex("A"), hex("a").slice(1), `${hex("a")}0`, "", hex("g")];

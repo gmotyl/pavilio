@@ -80,15 +80,17 @@ const listeners = new Set<() => void>();
 /** `generation\0url` → the disk fetch in flight: its bytes, or `null` for a miss. */
 const fetching = new Map<string, Promise<ArrayBuffer | null>>();
 /**
- * `generation\0url` → the upload in flight: its page, and a promise that
- * settles (never rejects) when the PUT does. Keyed so a unit synthesized twice
- * uploads once; kept so a clear or a wipe can wait for it before deleting.
+ * `generation\0url` → the upload in flight: its page, a promise that settles
+ * (never rejects) when the PUT does, and the controller that aborts it. Keyed
+ * so a unit synthesized twice uploads once; kept so a clear or a wipe can wait
+ * for it — or abort it — before deleting.
  */
-const uploading = new Map<string, { docKey: string; settled: Promise<void> }>();
+const uploading = new Map<string, { docKey: string; settled: Promise<void>; controller: AbortController }>();
 /**
- * How long a clear or a wipe waits for uploads in flight before sending its
- * DELETE. A PUT landing after the DELETE would recreate the page on disk; the
- * PUTs are local and quick, so this only bounds a stuck one.
+ * How long a clear or a wipe waits for uploads in flight before aborting the
+ * rest and sending its DELETE. A PUT landing after the DELETE would recreate
+ * the page on disk; the PUTs are local and quick, so this only bounds a stuck
+ * one — and an aborted PUT never finishes its body, so the server never writes it.
  */
 const UPLOAD_SETTLE_CAP_MS = 5_000;
 
@@ -350,16 +352,24 @@ async function upload(
   const key = `${gen}\0${url}`;
   // Another caller's upload of this unit is out, or has landed already.
   if (uploading.has(key) || inHand.get(docKey)?.has(hash)) return;
-  const put = send(url, {
-    method: "PUT",
-    // The server parses JSON bodies globally; audio must not look like JSON.
-    // The doc key is percent-encoded: a header value must be Latin-1, and
-    // page paths may be anything.
-    headers: { "Content-Type": SPEECH_AUDIO_MIME_TYPE, "x-doc-key": encodeURIComponent(docKey) },
-    body: bytes,
-  });
+  const controller = new AbortController();
+  // Raced against its own signal too, so an abort settles the upload promptly
+  // even if the fetch underneath is slow to honour it.
+  const put = untilAborted(
+    send(url, {
+      method: "PUT",
+      // The server parses JSON bodies globally; audio must not look like JSON.
+      // The doc key is percent-encoded: a header value must be Latin-1, and
+      // page paths may be anything.
+      headers: { "Content-Type": SPEECH_AUDIO_MIME_TYPE, "x-doc-key": encodeURIComponent(docKey) },
+      body: bytes,
+      signal: controller.signal,
+    }),
+    controller.signal,
+  );
   uploading.set(key, {
     docKey,
+    controller,
     settled: put.then(
       () => undefined,
       () => undefined,
@@ -368,6 +378,8 @@ async function upload(
   try {
     await put;
   } catch (err) {
+    // Aborted by a clear or a wipe: expected, nothing to warn about.
+    if (controller.signal.aborted) return;
     const kind = err instanceof Error && / answered (\d+)$/.exec(err.message)?.[1];
     warnOnce(kind ? `http ${kind}` : "network", err);
     return;
@@ -381,20 +393,25 @@ async function upload(
 
 /**
  * Settles once every upload in flight — for the page, or for every page when
- * `docKey` is omitted — has landed or failed, or after
- * {@link UPLOAD_SETTLE_CAP_MS}, whichever comes first. Waits; never aborts.
+ * `docKey` is omitted — has landed or failed. One still out after
+ * {@link UPLOAD_SETTLE_CAP_MS} is aborted, and its abort waited for: its body
+ * never completes, so the server never writes it, and the DELETE that follows
+ * cannot be overtaken by it.
  */
 async function uploadsSettled(docKey?: string): Promise<void> {
-  const pending = [...uploading.values()]
-    .filter((flight) => docKey === undefined || flight.docKey === docKey)
-    .map((flight) => flight.settled);
-  if (pending.length === 0) return;
+  const flights = [...uploading.values()].filter((flight) => docKey === undefined || flight.docKey === docKey);
+  if (flights.length === 0) return;
+  const all = Promise.all(flights.map((flight) => flight.settled));
   let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([
-    Promise.all(pending),
-    new Promise<void>((resolve) => (timer = setTimeout(resolve, UPLOAD_SETTLE_CAP_MS))),
+  const capped = await Promise.race([
+    all.then(() => false),
+    new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), UPLOAD_SETTLE_CAP_MS))),
   ]);
   clearTimeout(timer);
+  if (!capped) return;
+  // Aborting a flight that has landed meanwhile is a no-op.
+  for (const flight of flights) flight.controller.abort();
+  await all;
 }
 
 function warnOnce(kind: string, err: unknown): void {
@@ -439,8 +456,8 @@ export function pageCachedShare(
 
 /**
  * Drops the page from disk and from memory. Uploads already out for the page
- * are waited for (up to {@link UPLOAD_SETTLE_CAP_MS}) before the DELETE, so
- * none can land after it. The local state is emptied and
+ * are waited for (up to {@link UPLOAD_SETTLE_CAP_MS}, then aborted) before the
+ * DELETE, so none can land after it. The local state is emptied and
  * the in-memory speech cache rebuilt even when the server call fails, so the
  * next Play cannot answer from memory; the failure still rejects, with its
  * reason, for the caller to alert — as does an origin that cannot hash, which

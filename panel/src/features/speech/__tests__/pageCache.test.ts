@@ -575,14 +575,25 @@ describe("clear and wipe", () => {
     expect(order).toEqual(["put landed", "delete sent"]);
   });
 
-  it("clearPage stops waiting on a stuck upload after its cap", async () => {
+  it("clearPage aborts a stuck upload after its cap, before sending the delete", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const u = unit("Stuck upload.");
       const hash = await sha256(u.text);
+      const order: string[] = [];
       const fetchMock = stubFetch({
-        [`PUT ${BASE}/${page}/${hash}`]: () => new Promise<Response>(() => {}),
-        [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 204 }),
+        // Never answers on its own; only its signal ends it, as a real fetch would.
+        [`PUT ${BASE}/${page}/${hash}`]: (init) =>
+          new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              order.push("put aborted");
+              reject(new DOMException("aborted", "AbortError"));
+            });
+          }),
+        [`DELETE ${BASE}/${page}`]: () => {
+          order.push("delete sent");
+          return new Response(null, { status: 204 });
+        },
       });
 
       await pageAudio(DOC, u, {});
@@ -593,7 +604,35 @@ describe("clear and wipe", () => {
       await vi.advanceTimersByTimeAsync(5_000);
       await cleared;
 
+      expect(order).toEqual(["put aborted", "delete sent"]);
       expect(calls(fetchMock, "DELETE")).toEqual([`${BASE}/${page}`]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("wipeCache aborts a stuck upload after its cap, even one whose fetch ignores the signal", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const u = unit("Stuck while wiped.");
+      const hash = await sha256(u.text);
+      let putSignal: AbortSignal | undefined;
+      const fetchMock = stubFetch({
+        [`PUT ${BASE}/${page}/${hash}`]: (init) => {
+          putSignal = init?.signal ?? undefined;
+          return new Promise<Response>(() => {});
+        },
+        [`DELETE ${BASE}`]: () => Response.json({ pages: 0, units: 0, bytes: 0 }),
+      });
+
+      await pageAudio(DOC, u, {});
+      await vi.advanceTimersByTimeAsync(0);
+      const wiped = wipeCache();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await wiped;
+
+      expect(putSignal?.aborted).toBe(true);
+      expect(calls(fetchMock, "DELETE")).toEqual([BASE]);
     } finally {
       vi.useRealTimers();
     }

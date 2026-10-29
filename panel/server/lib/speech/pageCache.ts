@@ -72,9 +72,15 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
    * that would recreate the folder under it.
    */
   const chains = new Map<string, Promise<void>>();
+  /**
+   * Settles when the last wipe asked for has run. Every page's mutations wait
+   * for it, so a write asked for after a wipe cannot interleave with its
+   * removal — and a wipe waits for every page's queue before it starts.
+   */
+  let wiping: Promise<void> = Promise.resolve();
 
   function serial<T>(page: string, work: () => Promise<T>): Promise<T> {
-    const next = (chains.get(page) ?? Promise.resolve()).then(work);
+    const next = Promise.all([chains.get(page), wiping]).then(work);
     const tail = next.then(
       () => undefined,
       () => undefined,
@@ -164,11 +170,20 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
     },
 
     async wipe() {
-      const freed = await totals();
-      for (const name of await entries(root)) {
-        await rm(join(root, name), { recursive: true, force: true });
-      }
-      return freed;
+      // Taken before `wiping` is replaced, so it holds only work asked for before this wipe.
+      const before = Promise.all([...chains.values(), wiping]);
+      const run = before.then(async () => {
+        const freed = await totals();
+        for (const name of await entries(root)) {
+          await rm(join(root, name), { recursive: true, force: true });
+        }
+        return freed;
+      });
+      wiping = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
     },
   };
 }

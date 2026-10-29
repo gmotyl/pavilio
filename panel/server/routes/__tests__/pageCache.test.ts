@@ -4,6 +4,9 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { connect } from "node:net";
 import request from "supertest";
 
 // `lib/auth.ts` reads PANEL_TOKEN once, at module load, so the token has to be
@@ -167,6 +170,37 @@ describe("/api/speech/page-cache", () => {
 
     // Exactly 5 MB is still accepted.
     expect((await put(app, PAGE, UNIT, Buffer.alloc(5 * 1024 * 1024, 1))).status).toBe(204);
+  });
+
+  it("a put aborted mid-body never writes", async () => {
+    const store = createPageCacheStore({ root });
+    const write = vi.spyOn(store, "write");
+    const app = express();
+    app.use(express.json());
+    app.use(mobileAuthMiddleware);
+    app.use(authMiddleware);
+    app.use(BASE, createPageCacheRouter({ store }));
+    const server = createServer(app);
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const socket = connect(port, "127.0.0.1");
+      await new Promise<void>((done) => socket.once("connect", done));
+      // Announces 100 bytes, sends 8, then hangs up — as a client abort does.
+      socket.write(
+        `PUT ${BASE}/${PAGE}/${UNIT} HTTP/1.1\r\nHost: localhost\r\nCookie: ${COOKIE}\r\n` +
+          `Content-Type: audio/mpeg\r\nx-doc-key: ${encodeURIComponent(DOC_KEY)}\r\nContent-Length: 100\r\n\r\n`,
+      );
+      socket.write(MP3);
+      await new Promise((done) => setTimeout(done, 50));
+      socket.destroy();
+      await new Promise((done) => setTimeout(done, 100));
+
+      expect(write).not.toHaveBeenCalled();
+      expect(await store.totals()).toEqual({ pages: 0, units: 0, bytes: 0 });
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
   });
 
   it("prune deletes units not in keep", async () => {
