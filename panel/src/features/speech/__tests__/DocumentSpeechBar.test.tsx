@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { makeSpeech, resetSpeechHarness, selectSynth, synth, synthMock } from "./speech.harness";
 import type { AnswerWaitingPort, SpeechHost } from "../useSpeechHost";
 import type { SpeechUnit } from "../types";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
+import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 
 /**
  * The host is stubbed, NOT `usePanelSpeech`: the bar is required to read the
@@ -13,6 +14,42 @@ import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
  * is swapped; the two document-wide hooks it runs are stubbed out.
  */
 const stub = vi.hoisted(() => ({ host: null as SpeechHost | null }));
+
+/**
+ * The page cache the bar reads its share from, made writable: `share` is what
+ * `pageCachedShare` answers for any key, `changed()` is the module announcing
+ * an upload landed. Everything else in `pageCache` stays real, so the segment
+ * states keep reading it as they do in production.
+ */
+const cache = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    share: { cached: 0, bytes: 0 },
+    listeners,
+    changed: () => {
+      for (const listener of [...listeners]) listener();
+    },
+    clearPage: null as unknown as import("vitest").Mock<(docKey: string) => Promise<void>>,
+  };
+});
+
+vi.mock("../pageCache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../pageCache")>();
+  cache.clearPage = vi.fn(async (_docKey: string) => {});
+  return {
+    ...actual,
+    pageCachedShare: () => cache.share,
+    clearPage: (docKey: string) => cache.clearPage(docKey),
+    subscribePageCache: (listener: () => void) => {
+      cache.listeners.add(listener);
+      const unsubscribe = actual.subscribePageCache(listener);
+      return () => {
+        cache.listeners.delete(listener);
+        unsubscribe();
+      };
+    },
+  };
+});
 
 vi.mock("../synth", () => synthMock());
 vi.mock("../useSpeechHost", () => {
@@ -24,6 +61,7 @@ vi.mock("../useSpeechKeys", () => ({ useSpeechKeys: () => {} }));
 
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import { DocumentSpeechBar } from "../DocumentSpeechBar";
+import { SpeechControlBar } from "../../terminal/SpeechControlBar";
 
 const KEY = "doc:pavilio/wiki/page.md";
 
@@ -71,8 +109,15 @@ function renderBar(overrides: Partial<SpeechHost>) {
 
 afterEach(() => {
   stub.host = null;
+  cache.share = { cached: 0, bytes: 0 };
+  cache.clearPage.mockReset();
+  cache.clearPage.mockImplementation(async () => {});
+  __resetAlertsForTests();
   resetSpeechHarness();
 });
+
+const clearButton = () => screen.queryByTestId(`speech-bar-clear-cache-${KEY}`);
+const cachedLabel = () => screen.queryByTestId(`speech-bar-cached-${KEY}`);
 
 describe("DocumentSpeechBar", () => {
   it("renders only play/pause and the scrubber", () => {
@@ -155,5 +200,112 @@ describe("DocumentSpeechBar", () => {
     const play = screen.getByTestId(`speech-bar-playpause-${KEY}`) as HTMLButtonElement;
     expect(play.disabled).toBe(true);
     expect(play.getAttribute("aria-label")).toBe("Nothing to speak yet");
+  });
+
+  it("bar shows play, scrubber, cached share, clear cache in order", () => {
+    cache.share = { cached: 4, bytes: 212 * 1024 };
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(6) });
+
+    const row = screen.getByTestId(`document-speech-bar-${KEY}`);
+    const order = [
+      screen.getByTestId(`speech-bar-playpause-${KEY}`),
+      screen.getByTestId(`speech-bar-scrubber-${KEY}`),
+      cachedLabel()!,
+      clearButton()!,
+    ];
+    // Mockup check — bar order: each control follows the one before it.
+    for (let i = 1; i < order.length; i++) {
+      expect(row.contains(order[i])).toBe(true);
+      expect(
+        order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    expect(cachedLabel()!.textContent).toBe("4 of 6 cached · 212 KB");
+    expect(clearButton()!.textContent).toBe("Clear cache");
+
+    // The label follows the cache as uploads land.
+    cache.share = { cached: 5, bytes: 1.25 * 1024 * 1024 };
+    act(() => cache.changed());
+    expect(cachedLabel()!.textContent).toBe("5 of 6 cached · 1.3 MB");
+  });
+
+  it("clear cache is hidden when nothing is cached", () => {
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    // Mockup check — Clear cache only with cache.
+    expect(clearButton()).toBeNull();
+    expect(cachedLabel()!.textContent).toBe("0 of 3 cached");
+
+    cache.share = { cached: 1, bytes: 2048 };
+    act(() => cache.changed());
+    expect(clearButton()).not.toBeNull();
+  });
+
+  it("clear cache stops the run and clears the page", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    renderBar({
+      stateFor: () => "speaking",
+      unitsFor: () => unitList(3),
+      progressFor: () => PLAYING_FIRST,
+    });
+
+    fireEvent.click(clearButton()!);
+    expect(stub.host?.onStop).toHaveBeenCalledWith(KEY);
+    expect(cache.clearPage).toHaveBeenCalledWith(KEY);
+    await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? false).toBe(false));
+    expect(getAlertsSnapshot()).toHaveLength(0);
+  });
+
+  it("a failed clear raises the alert", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    cache.clearPage.mockImplementation(async () => {
+      throw new Error("DELETE answered 500");
+    });
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    fireEvent.click(clearButton()!);
+    // Not playing: nothing to stop, and a cell that speaks must not be silenced.
+    expect(stub.host?.onStop).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(getAlertsSnapshot().map(({ kind, title }) => ({ kind, title }))).toEqual([
+        { kind: "error", title: "Couldn't clear the cache: DELETE answered 500" },
+      ]),
+    );
+  });
+
+  it("scrubber segments still jump", () => {
+    cache.share = { cached: 3, bytes: 9000 };
+    renderBar({
+      stateFor: () => "speaking",
+      unitsFor: () => unitList(3),
+      progressFor: () => PLAYING_FIRST,
+    });
+
+    // Mockup check — segments stay clickable beside the cache controls.
+    expect(clearButton()).not.toBeNull();
+    fireEvent.click(screen.getByTestId(`speech-bar-segment-${KEY}-1`));
+    expect(stub.host?.onJumpToUnit).toHaveBeenCalledWith(KEY, 1);
+    expect(cache.clearPage).not.toHaveBeenCalled();
+  });
+
+  it("the cell bar has no cache controls", () => {
+    const CELL = "cell-a";
+    // Whatever the cache would say, the cell bar never asks it.
+    cache.share = { cached: 3, bytes: 9000 };
+    render(
+      <SpeechControlBar
+        sessionId={CELL}
+        speech={makeSpeech({ stateFor: () => "ready", unitsFor: () => unitList(3) })}
+        answerOpen={false}
+        onToggleAnswer={() => {}}
+        send={() => true}
+      />,
+    );
+
+    expect(screen.getByTestId(`speech-bar-scrubber-${CELL}`)).toBeTruthy();
+    expect(screen.queryByTestId(`speech-bar-cached-${CELL}`)).toBeNull();
+    expect(screen.queryByTestId(`speech-bar-clear-cache-${CELL}`)).toBeNull();
+    expect(screen.queryByText(/cached/)).toBeNull();
+    expect(screen.queryByText("Clear cache")).toBeNull();
   });
 });

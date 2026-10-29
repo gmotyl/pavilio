@@ -1,9 +1,52 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { alerts } from "../alerts/store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { clearPage, pageCachedShare, subscribePageCache } from "./pageCache";
+import type { CellSpeechState } from "./types";
 import { SpeechTransport } from "./SpeechTransport";
 import { usePanelSpeech } from "./SpeechHostProvider";
 import { voiceForDocKey } from "./voices";
+
+/**
+ * A byte count as people read it: "512 B", "340 KB", "1.2 MB". Kilobytes are
+ * whole, megabytes keep one decimal — the mockup's "212 KB" and "46.3 MB".
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The states in which the page's run holds the element, so Clear cache has a
+ * run to stop. Anything else stops nothing: `onStop` silences whatever plays,
+ * and a cell that barged in on the page must keep speaking.
+ */
+const RUN_HOLDS_ELEMENT: ReadonlySet<CellSpeechState> = new Set([
+  "preparing",
+  "speaking",
+  "stalled",
+  "paused",
+]);
+
+const LABEL_STYLE = {
+  fontSize: 12,
+  color: "var(--text-muted)",
+  whiteSpace: "nowrap",
+  flex: "0 0 auto",
+} as const;
+
+const CLEAR_STYLE = {
+  fontSize: 12,
+  padding: "4px 8px",
+  borderRadius: 6,
+  border: "1px solid var(--border-subtle)",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  whiteSpace: "nowrap",
+  flex: "0 0 auto",
+} as const;
 
 export interface DocumentSpeechBarProps {
   /** The page's speech key, from `docSpeechKey` — `doc:` plus its projects-relative path. */
@@ -11,8 +54,9 @@ export interface DocumentSpeechBarProps {
 }
 
 /**
- * The document speech bar: the shared transport for one page's key, and
- * nothing else. A page is not a terminal cell — it is never armed, has no queue
+ * The document speech bar: the shared transport for one page's key, then the
+ * page audio cache's share of it — "N of M cached · size" — and Clear cache,
+ * in the mockup's order. A page is not a terminal cell — it is never armed, has no queue
  * to step through and no answer pane to open — so the cell bar's mode switch,
  * previous/next, eye button, launchers and hide toggle have no counterpart here.
  *
@@ -20,6 +64,11 @@ export interface DocumentSpeechBarProps {
  * way the cell bar reads a session: the page's run IS an utterance in the
  * host's channel, so play, pause, resume and a segment jump are the host's
  * ordinary actions on that key.
+ *
+ * The cache controls are the page's alone: a cell's answers are never cached
+ * on disk, so the cell bar (which shares only the transport) has neither.
+ * Clear cache shows only while some unit is cached; the label is read through
+ * `subscribePageCache`, so it moves as uploads land.
  *
  * The `.speech-bar` / `.speech-bar-row` wrapper is the cell bar's, reused for
  * the flex row the transport's stylesheet expects.
@@ -45,6 +94,29 @@ export function DocumentSpeechBar({ docKey }: DocumentSpeechBarProps) {
   usePreference(preferences.speechVoiceByProject);
   const voice = voiceForDocKey(docKey);
 
+  // One string snapshot, so `useSyncExternalStore` sees an unchanged share as
+  // equal — `pageCachedShare` answers a fresh object on every call.
+  const shareKey = useSyncExternalStore(subscribePageCache, () => {
+    const { cached, bytes } = pageCachedShare(docKey, units);
+    return `${cached}:${bytes}`;
+  });
+  const [cached, bytes] = shareKey.split(":").map(Number);
+  const [clearing, setClearing] = useState(false);
+
+  const clearCache = async (): Promise<void> => {
+    // The run goes first, so nothing it plays or warms lands after the clear.
+    if (RUN_HOLDS_ELEMENT.has(state)) speech.onStop(docKey);
+    setClearing(true);
+    try {
+      await clearPage(docKey);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      alerts.error(`Couldn't clear the cache: ${reason}`);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div className="speech-bar" data-testid={`document-speech-bar-${docKey}`}>
       <div className="speech-bar-row">
@@ -61,6 +133,25 @@ export function DocumentSpeechBar({ docKey }: DocumentSpeechBarProps) {
           onJumpToUnit={(index) => speech.onJumpToUnit(docKey, index)}
           onSeekWithinUnit={(seconds) => speech.onSeekWithinUnit(docKey, seconds)}
         />
+        {units.length > 0 && (
+          <span data-testid={`speech-bar-cached-${docKey}`} style={LABEL_STYLE}>
+            {cached > 0
+              ? `${cached} of ${units.length} cached · ${formatBytes(bytes)}`
+              : `0 of ${units.length} cached`}
+          </span>
+        )}
+        {cached > 0 && (
+          <button
+            type="button"
+            data-testid={`speech-bar-clear-cache-${docKey}`}
+            title="Delete this page's cached audio"
+            disabled={clearing}
+            onClick={() => void clearCache()}
+            style={{ ...CLEAR_STYLE, opacity: clearing ? 0.6 : 1 }}
+          >
+            Clear cache
+          </button>
+        )}
       </div>
     </div>
   );
