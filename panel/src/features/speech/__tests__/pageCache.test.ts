@@ -267,6 +267,65 @@ describe("pageAudio", () => {
     expect(synth.synthesizeSpeech).not.toHaveBeenCalled();
   });
 
+  it("a stalled disk fetch times out into a synthesis", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const u = unit("Stalled server.");
+      const hash = await sha256(u.text);
+      const fetchMock = stubFetch({
+        // Never answers, and ignores any signal: only a deadline gets past it.
+        [`GET ${BASE}/${page}/${hash}`]: () => new Promise<Response>(() => {}),
+        [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 503 }),
+      });
+
+      let done = false;
+      const audio = pageAudio(DOC, u, {}).finally(() => (done = true));
+      // Hashing resolves on a real task, so wait for the GET before the clock moves.
+      await vi.waitFor(() => expect(calls(fetchMock, "GET")).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(audio).resolves.toBeInstanceOf(ArrayBuffer);
+      expect(synth.synthesizeSpeech).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The timed-out flight is gone: a later ask starts its own GET rather
+      // than joining the stalled one forever. (The upload failed, so the unit
+      // is not in hand.)
+      const again = pageAudio(DOC, u, {});
+      await vi.waitFor(() => expect(calls(fetchMock, "GET")).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(4_000);
+      await expect(again).resolves.toBeInstanceOf(ArrayBuffer);
+      expect(calls(fetchMock, "GET")).toEqual([`${BASE}/${page}/${hash}`, `${BASE}/${page}/${hash}`]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a body that stalls after the headers times out too", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const u = unit("Stalled body.");
+      const hash = await sha256(u.text);
+      const fetchMock = stubFetch({
+        // Headers arrive, the body never does.
+        [`GET ${BASE}/${page}/${hash}`]: () => new Response(new ReadableStream({ start() {} })),
+        [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 204 }),
+      });
+
+      const audio = pageAudio(DOC, u, {});
+      await vi.waitFor(() => expect(calls(fetchMock, "GET")).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      await expect(audio).resolves.toBeInstanceOf(ArrayBuffer);
+      expect(synth.synthesizeSpeech).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("an aborted caller stops waiting on a shared fetch", async () => {
     const u = unit("Called off.");
     const hash = await sha256(u.text);

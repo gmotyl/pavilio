@@ -92,6 +92,13 @@ const uploading = new Map<string, { docKey: string; settled: Promise<void> }>();
  */
 const UPLOAD_SETTLE_CAP_MS = 5_000;
 
+/**
+ * How long a unit's disk fetch — request and body — may take before it counts
+ * as a miss and the unit is synthesized instead. The server is local, so a
+ * fetch this slow is a stalled server, and playback must not stall with it.
+ */
+const DISK_FETCH_TIMEOUT_MS = 4_000;
+
 const NO_HASHING = "page cache unavailable: crypto.subtle needs a secure context (https or localhost)";
 
 /** The text's SHA-256 hex, or `null` when this origin cannot hash (warned once). */
@@ -280,7 +287,8 @@ export async function pageAudio(
 
 /**
  * The unit's bytes from disk, or `null` for a miss of any kind (network, 404,
- * 503, empty body). Shared by every caller asking in the same generation, so
+ * 503, empty body, or no answer within {@link DISK_FETCH_TIMEOUT_MS} — the
+ * flight is then dropped, so a later ask starts afresh). Shared by every caller asking in the same generation, so
  * it carries no caller's signal: a local GET is cheap to let finish, and each
  * caller stops waiting on its own signal instead ({@link untilAborted}).
  */
@@ -289,8 +297,21 @@ function diskFetch(docKey: string, gen: string, url: string, hash: string): Prom
   const inFlight = fetching.get(key);
   if (inFlight) return inFlight;
   const flight = (async (): Promise<ArrayBuffer | null> => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Raced as well as aborted: the deadline holds even against a fetch that
+    // ignores its signal.
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`GET ${url} timed out`));
+      }, DISK_FETCH_TIMEOUT_MS);
+    });
     try {
-      const bytes = await (await send(url)).arrayBuffer();
+      const bytes = await Promise.race([
+        send(url, { signal: controller.signal }).then((res) => res.arrayBuffer()),
+        deadline,
+      ]);
       if (bytes.byteLength === 0) return null;
       if (gen === generation(docKey)) {
         record(docKey, hash, bytes);
@@ -300,6 +321,7 @@ function diskFetch(docKey: string, gen: string, url: string, hash: string): Prom
     } catch {
       return null;
     } finally {
+      clearTimeout(timer);
       fetching.delete(key);
     }
   })();
