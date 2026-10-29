@@ -348,6 +348,28 @@ describe("useSpeechHost — page speech", () => {
     expect(played).toEqual([`blob:${units[4]}`, `blob:${units[5]}`]);
   });
 
+  it("a page run started mid-page warms its start unit, not unit 0", async () => {
+    const text = response(6, "Page");
+    const units = unitsOf(text);
+    synth.hold(units[4]);
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: 4 }));
+
+    // The warm is the start unit's, and the key is red until that one lands.
+    expect(synth.requests[0]).toMatchObject({ text: units[4], tier: "warm" });
+    expect(host().preparingSessionIds.has(PAGE)).toBe(true);
+    await settle(() => synth.release(units[4]));
+    expect(host().preparingSessionIds.has(PAGE)).toBe(false);
+    expect(requestedTexts()).not.toContain(units[0]);
+
+    // Clamped as the run's index is: past the end warms the last unit.
+    synth.reset();
+    await settle(() => host().stopDocument(PAGE));
+    await settle(() => host().speakDocument({ key: PAGE, text: response(3, "Late"), startUnit: 99 }));
+    expect(synth.requests[0]).toMatchObject({ text: unitsOf(response(3, "Late"))[2], tier: "warm" });
+  });
+
   it("speakDocument clamps an out-of-range startUnit", async () => {
     const text = response(3, "Page");
     const units = unitsOf(text);

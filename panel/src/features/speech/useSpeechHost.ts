@@ -718,15 +718,19 @@ export function useSpeechHost({
     [abortPreloads],
   );
 
-  /** Unit 0 of an arriving utterance, on anytts' `warm` tier, once. */
+  /**
+   * Unit 0 of an arriving utterance, on anytts' `warm` tier, once — or, for a
+   * page run started mid-page, the unit it starts at (`start`, already
+   * clamped into the units): that is the one the click waits on.
+   */
   const warmFirstUnit = useCallback(
-    (utterance: Utterance, units: readonly SpeechUnit[]): void => {
+    (utterance: Utterance, units: readonly SpeechUnit[], start = 0): void => {
       if (warmedRef.current.has(utterance.id)) return;
       // Marked before the synthesis, not after: a second render must not start
       // a second warm of the same utterance while the first is in flight.
       warmedRef.current.add(utterance.id);
 
-      const first = units[0];
+      const first = units[start];
       if (!first) return;
 
       // Its own controller, never the preloads': see `UtteranceSynthesis`.
@@ -1186,13 +1190,17 @@ export function useSpeechHost({
       void loadPageList(key)
         .then(() => prunePage(key, units))
         .catch(() => {});
-      // A local utterance is never warmed on arrival, so its unit 0 is warmed
-      // here — the same warm the click then finds in flight, and the same red
-      // until it lands.
-      warmFirstUnit(utterance, units);
-      // `speakUtterance` clamps the index into the units, as it does a
-      // segment click's; a non-number has no unit to clamp to, so it is 0.
-      speakUtterance(key, utterance, Number.isFinite(startUnit) ? Math.trunc(startUnit) : 0);
+      // A non-number has no unit to clamp to, so it is 0; otherwise clamped
+      // into the units, as `speakUtterance` clamps a segment click's.
+      const start = Math.min(
+        Math.max(Number.isFinite(startUnit) ? Math.trunc(startUnit) : 0, 0),
+        units.length - 1,
+      );
+      // A local utterance is never warmed on arrival, so the unit the run
+      // starts at is warmed here — the same warm the click then finds in
+      // flight, and the same red until it lands.
+      warmFirstUnit(utterance, units, start);
+      speakUtterance(key, utterance, start);
     },
     [
       abortUtterance,
