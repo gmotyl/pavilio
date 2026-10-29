@@ -126,6 +126,18 @@ function tts(): Tts {
   return instance;
 }
 
+/**
+ * Empties the in-memory cache: the instance is let go and a fresh one built
+ * through the same swap a preference change takes in {@link tts} — the library
+ * subscription moves to it and the panel's listeners hear about the empty
+ * cache on a microtask. With no instance yet there is nothing to drop.
+ */
+export function resetSpeechCache(): void {
+  if (!instance) return;
+  instanceBuiltFrom = undefined;
+  tts();
+}
+
 function isBlank(text: string): boolean {
   return !text || !text.trim();
 }
