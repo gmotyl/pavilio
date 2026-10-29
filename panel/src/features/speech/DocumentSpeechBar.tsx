@@ -3,7 +3,7 @@ import { alerts } from "../alerts/store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { formatBytes } from "./formatBytes";
-import { clearPage, pageCachedShare, subscribePageCache } from "./pageCache";
+import { clearPage, loadPageList, pageCachedShare, subscribePageCache } from "./pageCache";
 import { SpeechTransport } from "./SpeechTransport";
 import { usePageSpeech, usePanelSpeech } from "./SpeechHostProvider";
 import { voiceForDocKey } from "./voices";
@@ -98,6 +98,10 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       alerts.error(`Couldn't clear the cache: ${reason}`);
+      // A failed clear still empties the local listing, so the bar would read
+      // 0 cached and hide Clear cache while the audio may still be on disk.
+      // Re-read it: whatever the server still holds brings the retry back.
+      void loadPageList(docKey).catch(() => {});
     } finally {
       setClearing(false);
     }

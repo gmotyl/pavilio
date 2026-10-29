@@ -30,14 +30,17 @@ const cache = vi.hoisted(() => {
       for (const listener of [...listeners]) listener();
     },
     clearPage: null as unknown as import("vitest").Mock<(docKey: string) => Promise<void>>,
+    loadPageList: null as unknown as import("vitest").Mock<(docKey: string) => Promise<void>>,
   };
 });
 
 vi.mock("../pageCache", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../pageCache")>();
   cache.clearPage = vi.fn(async (_docKey: string) => {});
+  cache.loadPageList = vi.fn(async (_docKey: string) => {});
   return {
     ...actual,
+    loadPageList: (docKey: string) => cache.loadPageList(docKey),
     pageCachedShare: () => cache.share,
     clearPage: (docKey: string) => cache.clearPage(docKey),
     subscribePageCache: (listener: () => void) => {
@@ -112,6 +115,8 @@ afterEach(() => {
   cache.share = { cached: 0, bytes: 0 };
   cache.clearPage.mockReset();
   cache.clearPage.mockImplementation(async () => {});
+  cache.loadPageList.mockReset();
+  cache.loadPageList.mockImplementation(async () => {});
   __resetAlertsForTests();
   resetSpeechHarness();
 });
@@ -337,6 +342,39 @@ describe("DocumentSpeechBar", () => {
         { kind: "error", title: "Couldn't clear the cache: DELETE answered 500" },
       ]),
     );
+  });
+
+  it("a failed clear re-reads the listing so Clear cache comes back", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    cache.clearPage.mockImplementation(async () => {
+      // The local listing is emptied whatever the server said.
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+      throw new Error("DELETE answered 500");
+    });
+    // The server still holds the audio: the re-read lists it again.
+    cache.loadPageList.mockImplementation(async () => {
+      cache.share = { cached: 2, bytes: 4096 };
+      cache.changed();
+    });
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    fireEvent.click(clearButton()!);
+
+    await waitFor(() => expect(cache.loadPageList).toHaveBeenCalledWith(KEY));
+    await waitFor(() => expect(clearButton()).not.toBeNull());
+    expect(cachedLabel()?.textContent).toContain("2 of 3 cached");
+  });
+
+  it("a successful clear does not re-read the listing", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    fireEvent.click(clearButton()!);
+    await waitFor(() => expect(cache.clearPage).toHaveBeenCalled());
+    await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? false).toBe(false));
+
+    expect(cache.loadPageList).not.toHaveBeenCalled();
   });
 
   it("scrubber segments still jump", () => {
