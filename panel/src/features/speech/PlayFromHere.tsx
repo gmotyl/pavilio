@@ -309,10 +309,12 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
   // `elementsRef` holds the detached old ones. So any node added or removed
   // under the page re-marks it, once per frame, and only when the speakable
   // blocks are no longer the ones marked: the ▶ layer's own renders, and the
-  // marks' attributes, change nothing here.
+  // marks' attributes, change nothing here. A page with no units (no doc key,
+  // nothing speakable) has nothing to keep marked, so it gets no observer.
+  const hasUnits = units.length > 0;
   useEffect(() => {
     const root = rootRef.current;
-    if (!root || typeof MutationObserver === "undefined") return;
+    if (!hasUnits || !root || typeof MutationObserver === "undefined") return;
     let frame: number | null = null;
     const check = () => {
       frame = null;
@@ -333,7 +335,7 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [mark]);
+  }, [mark, hasUnits]);
 
   // Re-place the buttons when the page changes size: a mermaid diagram that
   // finished rendering, a wider pane, a font that loaded.

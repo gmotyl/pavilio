@@ -393,6 +393,46 @@ describe("PlayFromHere", () => {
     expect(container.querySelector("[data-speak-unit]")).toBeNull();
   });
 
+  it("without a doc key the page is not observed for re-marking", () => {
+    const Real = globalThis.MutationObserver;
+    const observed: Node[] = [];
+    vi.stubGlobal(
+      "MutationObserver",
+      class extends Real {
+        observe(target: Node, options?: MutationObserverInit) {
+          observed.push(target);
+          super.observe(target, options);
+        }
+      },
+    );
+    try {
+      render(<Page noKey />);
+      expect(observed.some((node) => node instanceof Element && node.matches("[data-play-from-here]"))).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("with a doc key the page is observed for re-marking", () => {
+    const Real = globalThis.MutationObserver;
+    const observed: Node[] = [];
+    vi.stubGlobal(
+      "MutationObserver",
+      class extends Real {
+        observe(target: Node, options?: MutationObserverInit) {
+          observed.push(target);
+          super.observe(target, options);
+        }
+      },
+    );
+    try {
+      render(<Page />);
+      expect(observed.some((node) => node instanceof Element && node.matches("[data-play-from-here]"))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("a Polish page starts at the unit the host prepared, not an English packing's", () => {
     // A long Polish paragraph full of images: "obrazek" is longer than
     // "image", so the Polish packing cuts the paragraph where the English one
