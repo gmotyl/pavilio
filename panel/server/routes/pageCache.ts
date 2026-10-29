@@ -110,6 +110,9 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
       // A client that aborted mid-body never reaches here — the raw parser
       // errors instead. One that hung up after its body arrived (a clear's
       // abort racing the last byte) is dropped too: it no longer wants the write.
+      // Both rely on the client's abort closing this upstream socket, so behind
+      // a reverse proxy the proxy must cancel the upstream request on a client
+      // abort (e.g. Caddy h2 → HTTP/1.1), or the write lands after the clear.
       if (req.socket?.destroyed) return;
       const got = await attempt(res, () => store.write(req.params.page, req.params.unit, body, docKey));
       if (got) res.status(204).end();
