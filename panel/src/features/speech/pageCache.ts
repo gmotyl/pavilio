@@ -63,6 +63,13 @@ const hashes = new Map<string, string>();
 const listed = new Map<string, Map<string, number>>();
 /** doc key → unit hash → bytes in hand. */
 const inHand = new Map<string, Map<string, ArrayBuffer>>();
+/**
+ * doc key → unit hash → the sequence number of its last fetch or upload, so a
+ * list that lands can keep what was recorded after it was asked for.
+ */
+const recordedAt = new Map<string, Map<string, number>>();
+/** Ticks once per recorded unit; a list remembers the value it started at. */
+let recordSeq = 0;
 /** doc key → generation, bumped by a clear of that page. */
 const pageGenerations = new Map<string, number>();
 /** Bumped by a wipe, which clears every page at once. */
@@ -120,6 +127,22 @@ function entries<V>(maps: Map<string, Map<string, V>>, docKey: string): Map<stri
   return map;
 }
 
+/** A unit the server now holds and whose bytes are in hand — a fetched hit or a landed upload. */
+function record(docKey: string, hash: string, bytes: ArrayBuffer): void {
+  entries(listed, docKey).set(hash, bytes.byteLength);
+  entries(inHand, docKey).set(hash, bytes);
+  recordSeq += 1;
+  entries(recordedAt, docKey).set(hash, recordSeq);
+}
+
+/** Forgets everything held for the page (or every page when `docKey` is omitted). */
+function forget(docKey?: string): void {
+  for (const map of [listed, inHand, recordedAt]) {
+    if (docKey === undefined) map.clear();
+    else map.delete(docKey);
+  }
+}
+
 /**
  * Tells subscribers the answers changed. Iterates a snapshot and logs a
  * throwing listener instead of re-throwing — the same round `synth.ts` runs.
@@ -152,10 +175,12 @@ async function send(url: string, init?: RequestInit): Promise<Response> {
 /**
  * Fills the page's listed units from the server. A failed list leaves the
  * page with nothing cached: playback then synthesizes as if there were no
- * cache.
+ * cache. A unit fetched or uploaded while the list was out is kept, with its
+ * bytes: the server's snapshot may predate it.
  */
 export async function loadPageList(docKey: string): Promise<void> {
   const gen = generation(docKey);
+  const startedAt = recordSeq;
   const page = await sha256Hex(docKey);
   if (page === null) return;
   let units: Map<string, number>;
@@ -166,6 +191,11 @@ export async function loadPageList(docKey: string): Promise<void> {
     units = new Map();
   }
   if (gen !== generation(docKey)) return;
+  const current = listed.get(docKey);
+  for (const [hash, seq] of recordedAt.get(docKey) ?? []) {
+    const size = current?.get(hash);
+    if (seq > startedAt && size !== undefined) units.set(hash, size);
+  }
   listed.set(docKey, units);
   // Bytes in hand for a unit the server no longer holds would read `ready` for a miss.
   const held = inHand.get(docKey);
@@ -209,7 +239,7 @@ export async function prunePage(docKey: string, units: readonly SpeechUnit[]): P
   }
   if (gen !== generation(docKey)) return;
   const kept = new Set(keep);
-  for (const map of [listed.get(docKey), inHand.get(docKey)]) {
+  for (const map of [listed.get(docKey), inHand.get(docKey), recordedAt.get(docKey)]) {
     if (map) for (const hash of map.keys()) if (!kept.has(hash)) map.delete(hash);
   }
   notify();
@@ -263,8 +293,7 @@ function diskFetch(docKey: string, gen: string, url: string, hash: string): Prom
       const bytes = await (await send(url)).arrayBuffer();
       if (bytes.byteLength === 0) return null;
       if (gen === generation(docKey)) {
-        entries(listed, docKey).set(hash, bytes.byteLength);
-        entries(inHand, docKey).set(hash, bytes);
+        record(docKey, hash, bytes);
         notify();
       }
       return bytes;
@@ -324,8 +353,7 @@ async function upload(
     uploading.delete(key);
   }
   if (gen !== generation(docKey)) return;
-  entries(listed, docKey).set(hash, bytes.byteLength);
-  entries(inHand, docKey).set(hash, bytes);
+  record(docKey, hash, bytes);
   notify();
 }
 
@@ -398,8 +426,7 @@ export function pageCachedShare(
  */
 export async function clearPage(docKey: string): Promise<void> {
   pageGenerations.set(docKey, (pageGenerations.get(docKey) ?? 0) + 1);
-  listed.delete(docKey);
-  inHand.delete(docKey);
+  forget(docKey);
   try {
     const page = await sha256Hex(docKey);
     if (page === null) throw new Error(NO_HASHING);
@@ -410,8 +437,7 @@ export async function clearPage(docKey: string): Promise<void> {
   } finally {
     // Again after the await: work that started meanwhile is dropped too.
     pageGenerations.set(docKey, (pageGenerations.get(docKey) ?? 0) + 1);
-    listed.delete(docKey);
-    inHand.delete(docKey);
+    forget(docKey);
     resetSpeechCache();
     notify();
   }
@@ -429,15 +455,13 @@ export async function cacheTotals(): Promise<PageCacheTotals> {
  */
 export async function wipeCache(): Promise<PageCacheTotals> {
   globalGeneration += 1;
-  listed.clear();
-  inHand.clear();
+  forget();
   try {
     await uploadsSettled();
     return toTotals(await (await send(BASE_URL, { method: "DELETE" })).json());
   } finally {
     globalGeneration += 1;
-    listed.clear();
-    inHand.clear();
+    forget();
     resetSpeechCache();
     notify();
   }
@@ -454,8 +478,8 @@ function toTotals(body: unknown): PageCacheTotals {
 /** Test-only: forgets every page, hash, warning and listener. */
 export function __resetPageCacheForTests(): void {
   hashes.clear();
-  listed.clear();
-  inHand.clear();
+  forget();
+  recordSeq = 0;
   pageGenerations.clear();
   globalGeneration = 0;
   warnedKinds.clear();

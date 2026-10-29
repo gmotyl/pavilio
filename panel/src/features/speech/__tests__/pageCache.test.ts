@@ -337,6 +337,32 @@ describe("unit state and share", () => {
     expect(pageCachedShare(DOC, [kept, fresh])).toEqual({ cached: 1, bytes: 100 });
   });
 
+  it("a unit recorded while the list is out survives the list landing", async () => {
+    const uploaded = unit("Uploaded meanwhile.");
+    const fetched = unit("Fetched meanwhile.");
+    const [hu, hf] = await Promise.all([sha256(uploaded.text), sha256(fetched.text)]);
+    let answerList: (res: Response) => void = () => {};
+    stubFetch({
+      [`GET ${BASE}/${page}`]: () => new Promise<Response>((resolve) => (answerList = resolve)),
+      [`PUT ${BASE}/${page}/${hu}`]: () => new Response(null, { status: 204 }),
+      [`GET ${BASE}/${page}/${hf}`]: () => new Response(new Uint8Array([7, 7, 7])),
+    });
+
+    const listing = loadPageList(DOC);
+    await settle();
+    await pageAudio(DOC, uploaded, {});
+    await pageAudio(DOC, fetched, {});
+    await settle();
+    expect(pageUnitState(DOC, uploaded)).toBe("ready");
+    // The snapshot was taken before either landed, so it names neither.
+    answerList(Response.json({ units: [] }));
+    await listing;
+
+    expect(pageUnitState(DOC, uploaded)).toBe("ready");
+    expect(pageUnitState(DOC, fetched)).toBe("ready");
+    expect(pageCachedShare(DOC, [uploaded, fetched])).toEqual({ cached: 2, bytes: 5 });
+  });
+
   it("a failed list leaves the page with nothing cached", async () => {
     const u = unit("Anything.");
     stubFetch({
