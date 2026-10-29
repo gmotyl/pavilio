@@ -51,6 +51,8 @@ const CLEAR_STYLE = {
 export interface DocumentSpeechBarProps {
   /** The page's speech key, from `docSpeechKey` — `doc:` plus its projects-relative path. */
   docKey: string;
+  /** The unit a hovered block of the page would start at (`PlayFromHere`): its segment is outlined. */
+  hintUnit?: number | null;
 }
 
 /**
@@ -73,7 +75,7 @@ export interface DocumentSpeechBarProps {
  * The `.speech-bar` / `.speech-bar-row` wrapper is the cell bar's, reused for
  * the flex row the transport's stylesheet expects.
  */
-export function DocumentSpeechBar({ docKey }: DocumentSpeechBarProps) {
+export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBarProps) {
   const speech = usePanelSpeech();
   const state = speech.stateFor(docKey);
   const units = speech.unitsFor(docKey);
@@ -132,6 +134,7 @@ export function DocumentSpeechBar({ docKey }: DocumentSpeechBarProps) {
           onResume={() => speech.onResume(docKey)}
           onJumpToUnit={(index) => speech.onJumpToUnit(docKey, index)}
           onSeekWithinUnit={(seconds) => speech.onSeekWithinUnit(docKey, seconds)}
+          hintUnit={hintUnit}
         />
         {units.length > 0 && (
           <span data-testid={`speech-bar-cached-${docKey}`} style={LABEL_STYLE}>

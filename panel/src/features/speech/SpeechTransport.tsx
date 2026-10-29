@@ -58,6 +58,12 @@ export interface SpeechTransportProps {
    * stylesheet and tests keyed on it — is unchanged by the extraction.
    */
   between?: ReactNode;
+  /**
+   * The unit a press elsewhere would land on — the page's hovered block
+   * (`PlayFromHere`). Its segment is outlined (`data-hint`); the segment stays
+   * clickable as any other. Omitted, nothing is outlined.
+   */
+  hintUnit?: number | null;
 }
 
 /**
@@ -182,6 +188,7 @@ export function SpeechTransport({
   pulse = false,
   pending = false,
   between,
+  hintUnit = null,
 }: SpeechTransportProps) {
   // Told, not asked. The transport reads the cache during render, and progress
   // was its only other re-render trigger — which bounds staleness to ~250ms
@@ -340,6 +347,7 @@ export function SpeechTransport({
               title={`Unit ${index + 1} of ${units.length}`}
               data-testid={`speech-bar-segment-${id}-${index}`}
               data-segment={segment}
+              data-hint={index === hintUnit ? "1" : undefined}
               className="speech-bar-seg"
               style={{ width: `${width}%` }}
               onMouseDown={(e) => {

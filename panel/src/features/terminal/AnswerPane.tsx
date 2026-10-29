@@ -26,7 +26,7 @@ import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { voiceForSession } from "./sessionVoice";
 import { type UnitToBlocks, alignToSegments, layoutRail, matchableBlocks } from "./layoutRail";
-import { matchUnitsToBlocks } from "./matchUnitsToBlocks";
+import { matchUnitsToBlocks } from "../speech/matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
 
 export interface AnswerPaneProps {
