@@ -216,38 +216,84 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
     );
   }, []);
 
+  /**
+   * Finds the rendered blocks, matches them to units and marks them. `reset`
+   * (a new text) also clears the hover, focus and tap state; a re-mark of the
+   * same text keeps them, its blocks sit at the same indices.
+   */
+  const mark = useCallback(
+    (reset: boolean) => {
+      const root = rootRef.current;
+      if (!root) return;
+      for (const el of Array.from(root.querySelectorAll(`[${INDEX_ATTR}]`))) {
+        // The ▶ buttons carry the index too; they are React's, not ours.
+        if (el.closest("[data-play-from-here-layer]")) continue;
+        el.removeAttribute(INDEX_ATTR);
+        el.removeAttribute(UNIT_ATTR);
+        el.removeAttribute(HOVER_ATTR);
+      }
+      if (reset) {
+        setHovered(null);
+        setFocused(null);
+        setRevealed(null);
+      }
+      if (units.length === 0) {
+        elementsRef.current = [];
+        setMarks([]);
+        return;
+      }
+      const elements = speakableBlocks(root);
+      const firstUnits = firstUnitsOfBlocks(units, elements.map(ownText));
+      elementsRef.current = elements;
+      const next: Mark[] = [];
+      elements.forEach((el, index) => {
+        const unit = firstUnits[index];
+        if (unit === null) return;
+        el.setAttribute(INDEX_ATTR, String(index));
+        el.setAttribute(UNIT_ATTR, String(unit));
+        next.push({ index, unit, top: 0, left: 0 });
+      });
+      setMarks(next);
+      measure();
+    },
+    [units, measure],
+  );
+
   // Mark the blocks when the text (and so the units) changes. A layout effect:
   // the markdown under it has committed, and the ▶ is placed before paint.
-  useLayoutEffect(() => {
+  useLayoutEffect(() => mark(true), [mark]);
+
+  // The markdown can replace a subtree without its text changing — a component
+  // identity changing under react-markdown (the wiki-link check resolving)
+  // remounts a blockquote, a list — and the new nodes carry no marks while
+  // `elementsRef` holds the detached old ones. So any node added or removed
+  // under the page re-marks it, once per frame, and only when the speakable
+  // blocks are no longer the ones marked: the ▶ layer's own renders, and the
+  // marks' attributes, change nothing here.
+  useEffect(() => {
     const root = rootRef.current;
-    if (!root) return;
-    for (const el of Array.from(root.querySelectorAll(`[${INDEX_ATTR}]`))) {
-      el.removeAttribute(INDEX_ATTR);
-      el.removeAttribute(UNIT_ATTR);
-      el.removeAttribute(HOVER_ATTR);
-    }
-    setHovered(null);
-    setFocused(null);
-    setRevealed(null);
-    if (units.length === 0) {
-      elementsRef.current = [];
-      setMarks([]);
-      return;
-    }
-    const elements = speakableBlocks(root);
-    const firstUnits = firstUnitsOfBlocks(units, elements.map(ownText));
-    elementsRef.current = elements;
-    const next: Mark[] = [];
-    elements.forEach((el, index) => {
-      const unit = firstUnits[index];
-      if (unit === null) return;
-      el.setAttribute(INDEX_ATTR, String(index));
-      el.setAttribute(UNIT_ATTR, String(unit));
-      next.push({ index, unit, top: 0, left: 0 });
+    if (!root || typeof MutationObserver === "undefined") return;
+    let frame: number | null = null;
+    const check = () => {
+      frame = null;
+      const current = speakableBlocks(root);
+      const marked = elementsRef.current;
+      const same = current.length === marked.length && current.every((el, i) => el === marked[i]);
+      if (!same) mark(false);
+    };
+    const observer = new MutationObserver((records) => {
+      if (frame !== null) return;
+      const outsideLayer = records.some(
+        (record) => !(record.target instanceof Element && record.target.closest("[data-play-from-here-layer]")),
+      );
+      if (outsideLayer) frame = requestAnimationFrame(check);
     });
-    setMarks(next);
-    measure();
-  }, [units, measure]);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [mark]);
 
   // Re-place the buttons when the page changes size: a mermaid diagram that
   // finished rendering, a wider pane, a font that loaded.

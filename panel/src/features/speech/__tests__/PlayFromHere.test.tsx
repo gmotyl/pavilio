@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { makeSpeech, synthMock } from "./speech.harness";
@@ -414,6 +414,28 @@ describe("PlayFromHere", () => {
       text: polish,
       startUnit: headingOf(hostUnits),
     });
+  });
+
+  it("blocks the markdown remounts with the same text get their play button back", async () => {
+    const { container } = render(<Page />);
+    const old = block(container, "The second example paragraph");
+    const unit = old.getAttribute("data-speak-unit");
+    expect(unit).not.toBeNull();
+
+    // What a remount does (a component identity changing under react-markdown):
+    // the same text, fresh nodes, none of the marks.
+    const fresh = old.cloneNode(true) as HTMLElement;
+    for (const attr of ["data-speak-index", "data-speak-unit", "data-speak-hover"]) fresh.removeAttribute(attr);
+    act(() => old.replaceWith(fresh));
+
+    await waitFor(() => expect(fresh).toHaveAttribute("data-speak-unit", unit!));
+    const play = playOf(container, fresh);
+    expect(play).not.toBeNull();
+    fireEvent.mouseOver(fresh);
+    expect(play).toHaveAttribute("data-shown");
+    expect(fresh).toHaveAttribute("data-speak-hover");
+    fireEvent.click(play!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text: PAGE, startUnit: Number(unit) });
   });
 
   it("a new text remaps the blocks", () => {
