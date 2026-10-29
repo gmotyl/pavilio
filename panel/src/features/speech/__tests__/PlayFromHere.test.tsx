@@ -382,6 +382,40 @@ describe("PlayFromHere", () => {
     expect(container.querySelector("[data-speak-unit]")).toBeNull();
   });
 
+  it("a Polish page starts at the unit the host prepared, not an English packing's", () => {
+    // A long Polish paragraph full of images: "obrazek" is longer than
+    // "image", so the Polish packing cuts the paragraph where the English one
+    // does not, and every block after it moves by one unit.
+    const images = Array.from({ length: 38 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+    const polish = [
+      "# Tytuł strony",
+      "",
+      `To jest długi akapit o tym, jak działa nasz system i dlaczego warto go poznać. ${images} Następnie opisujemy, co się dzieje dalej w tej części dokumentu, żeby było jasne. Kolejne zdanie jest tutaj, aby akapit był wystarczająco długi.`,
+      "",
+      "## Następny nagłówek",
+      "",
+      "Krótki akapit po nagłówku.",
+      "",
+    ].join("\n");
+    // What the host prepares: the page's own vote picks Polish.
+    const hostUnits = prepare(pageSpeechText(polish), { language: "pl", blockBounded: true }).units;
+    const englishUnits = prepare(pageSpeechText(polish), { blockBounded: true }).units;
+    const headingOf = (units: typeof hostUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
+    expect(headingOf(hostUnits)).not.toBe(headingOf(englishUnits));
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? hostUnits : []) });
+
+    const { container } = render(<Page text={polish} />);
+    const heading = block(container, "Następny nagłówek");
+    expect(heading).toHaveAttribute("data-speak-unit", String(headingOf(hostUnits)));
+    fireEvent.mouseOver(heading);
+    fireEvent.click(playOf(container, heading)!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({
+      key: KEY,
+      text: polish,
+      startUnit: headingOf(hostUnits),
+    });
+  });
+
   it("a new text remaps the blocks", () => {
     const { container, rerender } = render(<Page />);
     expect(screen.getAllByRole("button", { name: "Play from here" }).length).toBeGreaterThan(2);

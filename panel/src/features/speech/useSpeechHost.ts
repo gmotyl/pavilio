@@ -61,9 +61,8 @@ import { alerts } from "../alerts/store";
 import { createAutoplayQueue, type AutoplayQueue } from "./autoplayQueue";
 import { isDocSpeechKey } from "./docKey";
 import { speechFailureAlert } from "./failureAlert";
-import { voteLanguage } from "./language";
 import { prepare } from "./prepare";
-import { pageSpeechText } from "./pageText";
+import { pageSpeechText, preparePageText } from "./pageText";
 import { loadPageList, pageUnitState, prunePage } from "./pageCache";
 import { isSpeechSynthesized } from "./synth";
 import { unitAudio } from "./unitAudio";
@@ -619,7 +618,9 @@ export function useSpeechHost({
       // page is dropped.
       const known = pageLanguagesRef.current.get(utterance.id);
       if (known) return known;
-      const language = voteLanguage(utterance.text);
+      // The page's own preparation picks it, so the language a page plays in
+      // is the one every other reader of the page prepared it in.
+      const { language } = preparePageText(utterance.text);
       pageLanguagesRef.current.set(utterance.id, language);
       return language;
     },
@@ -647,12 +648,13 @@ export function useSpeechHost({
       const cached = preparedRef.current.get(utterance.id);
       if (cached) return cached;
 
-      // A page (`doc:` key) packs block-bounded, so it can be started at any
-      // block; an answer packs as it always has.
-      const prepared = prepare(utterance.text, {
-        language,
-        blockBounded: isDocSpeechKey(utterance.sessionId),
-      });
+      // A page (`doc:` key) is prepared the one way every page is — block-
+      // bounded, in its own vote's language (`preparePageText`) — so the units
+      // the bar and play-from-here index are these units. An answer packs in
+      // its session's language, as it always has.
+      const prepared = isDocSpeechKey(utterance.sessionId)
+        ? preparePageText(utterance.text)
+        : prepare(utterance.text, { language });
       preparedRef.current.set(utterance.id, prepared);
       return prepared;
     },

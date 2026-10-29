@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { pageHasSpeech, pageSpeechText } from "../pageText";
+import { pageHasSpeech, pageSpeechText, preparePage, preparePageText } from "../pageText";
+import { prepare } from "../prepare";
 
 describe("pageSpeechText", () => {
   it("drops a leading frontmatter block", () => {
@@ -27,5 +28,23 @@ describe("pageHasSpeech", () => {
     expect(pageHasSpeech("```ts\nconst x = 1;\n```")).toBe(false);
     expect(pageHasSpeech("---\ntitle: X\n---\n")).toBe(false);
     expect(pageHasSpeech("---\ntitle: X\n---\n# Hello")).toBe(true);
+  });
+});
+
+describe("preparePage", () => {
+  it("prepares a page block-bounded in its own vote's language, frontmatter dropped", () => {
+    const polish = "---\ntitle: X\n---\n# Zażółć\n\nKod: `const x = 1;` i ![zdjęcie](a.png) dalej.";
+    const prepared = preparePage(polish);
+    expect(prepared.language).toBe("pl");
+    expect(prepared.units).toEqual(
+      prepare(pageSpeechText(polish), { language: "pl", blockBounded: true }).units,
+    );
+    expect(preparePage("# Hello\n\nPlain English.").language).toBe("en");
+  });
+
+  it("is memoised on the stripped text", () => {
+    const text = "# Memo\n\nOne paragraph to prepare once.";
+    expect(preparePageText(text)).toBe(preparePageText(text));
+    expect(preparePage(`---\ntitle: Y\n---\n${text}`)).toBe(preparePageText(text));
   });
 });

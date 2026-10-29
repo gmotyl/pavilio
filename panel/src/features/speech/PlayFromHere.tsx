@@ -11,8 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { blockMatchStrength, normalizeForMatch } from "./matchUnitsToBlocks";
-import { pageSpeechText } from "./pageText";
-import { prepare } from "./prepare";
+import { preparePage } from "./pageText";
 import type { SpeechUnit } from "./types";
 
 /*
@@ -193,13 +192,10 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
   const [focused, setFocused] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<number | null>(null);
 
-  // Prepared as the host prepares a page — block-bounded, frontmatter dropped —
-  // so a unit index here is the same unit in the bar. Language only picks the
-  // pronunciation map, which `source` is taken before.
-  const units = useMemo(
-    () => (docKey ? prepare(pageSpeechText(text), { blockBounded: true }).units : []),
-    [docKey, text],
-  );
+  // Prepared by the one page preparation the host plays from (`preparePage`:
+  // frontmatter dropped, block-bounded, in the page's own language), so a unit
+  // index here is the same unit in the bar and in the run.
+  const units = useMemo(() => (docKey ? preparePage(text).units : []), [docKey, text]);
 
   const measure = useCallback(() => {
     const root = rootRef.current;
