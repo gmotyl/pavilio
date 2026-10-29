@@ -86,7 +86,8 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
   const [clearing, setClearing] = useState(false);
   // The page whose last clear failed: its listing was emptied locally, and if
   // the re-read failed as well, 0 cached would hide the retry while the audio
-  // may still be on disk. Held until a clear succeeds or a listing shows data.
+  // may still be on disk. Held until a clear succeeds, a listing shows data,
+  // or the re-read succeeds — then its count, even 0, is the server's word.
   const [clearFailedKey, setClearFailedKey] = useState<string | null>(null);
   const clearFailed = clearFailedKey === docKey;
   useEffect(() => {
@@ -111,8 +112,13 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
       alerts.error(`Couldn't clear the cache: ${reason}`);
       // A failed clear still empties the local listing, so the bar would read
       // 0 cached and hide Clear cache while the audio may still be on disk.
-      // Re-read it: whatever the server still holds brings the retry back.
-      void loadPageList(docKey).catch(() => {});
+      // Re-read it: whatever the server still holds brings the retry back,
+      // and a listing actually read settles the state, whatever its count.
+      void loadPageList(docKey)
+        .then((read) => {
+          if (read) setClearFailedKey((key) => (key === docKey ? null : key));
+        })
+        .catch(() => {});
     } finally {
       setClearing(false);
     }

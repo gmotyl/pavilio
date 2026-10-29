@@ -195,7 +195,7 @@ export const pageCache = {
     (_docKey: string, unit: SpeechUnit, options?: Parameters<typeof tieredSynth.synthesizeSpeech>[1]) =>
       current().synthesizeSpeech(unit.text, options),
   ),
-  loadPageList: vi.fn(async (_docKey: string): Promise<void> => {}),
+  loadPageList: vi.fn(async (_docKey: string): Promise<boolean> => true),
   prunePage: vi.fn(
     async (_docKey: string, _units: readonly SpeechUnit[], _options?: { isCurrent?: () => boolean }): Promise<void> => {},
   ),

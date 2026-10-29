@@ -30,14 +30,14 @@ const cache = vi.hoisted(() => {
       for (const listener of [...listeners]) listener();
     },
     clearPage: null as unknown as import("vitest").Mock<(docKey: string) => Promise<void>>,
-    loadPageList: null as unknown as import("vitest").Mock<(docKey: string) => Promise<void>>,
+    loadPageList: null as unknown as import("vitest").Mock<(docKey: string) => Promise<boolean>>,
   };
 });
 
 vi.mock("../pageCache", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../pageCache")>();
   cache.clearPage = vi.fn(async (_docKey: string) => {});
-  cache.loadPageList = vi.fn(async (_docKey: string) => {});
+  cache.loadPageList = vi.fn(async (_docKey: string) => false);
   return {
     ...actual,
     loadPageList: (docKey: string) => cache.loadPageList(docKey),
@@ -116,7 +116,7 @@ afterEach(() => {
   cache.clearPage.mockReset();
   cache.clearPage.mockImplementation(async () => {});
   cache.loadPageList.mockReset();
-  cache.loadPageList.mockImplementation(async () => {});
+  cache.loadPageList.mockImplementation(async () => false);
   __resetAlertsForTests();
   resetSpeechHarness();
 });
@@ -356,6 +356,7 @@ describe("DocumentSpeechBar", () => {
     cache.loadPageList.mockImplementation(async () => {
       cache.share = { cached: 2, bytes: 4096 };
       cache.changed();
+      return true;
     });
     renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
 
@@ -373,10 +374,12 @@ describe("DocumentSpeechBar", () => {
       cache.changed();
       throw new Error("DELETE answered 500");
     });
-    // The re-read failed too: `loadPageList` swallows it and lists nothing.
+    // The re-read failed too: `loadPageList` swallows it, lists nothing and
+    // answers that it read nothing.
     cache.loadPageList.mockImplementation(async () => {
       cache.share = { cached: 0, bytes: 0 };
       cache.changed();
+      return false;
     });
     renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
 
@@ -393,6 +396,28 @@ describe("DocumentSpeechBar", () => {
     expect(cachedLabel()?.textContent).toBe("0 of 3 cached");
   });
 
+  it("a failed clear whose re-read succeeds with an empty listing stops reading as unknown", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    cache.clearPage.mockImplementationOnce(async () => {
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+      throw new Error("DELETE answered 500");
+    });
+    // The server answered, and holds nothing for the page.
+    cache.loadPageList.mockImplementation(async () => {
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+      return true;
+    });
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    fireEvent.click(clearButton()!);
+    await waitFor(() => expect(cache.loadPageList).toHaveBeenCalledWith(KEY));
+
+    await waitFor(() => expect(cachedLabel()?.textContent).toBe("0 of 3 cached"));
+    expect(clearButton()).toBeNull();
+  });
+
   it("a failed clear stops reading as unknown once a listing comes back with data", async () => {
     cache.share = { cached: 2, bytes: 4096 };
     cache.clearPage.mockImplementationOnce(async () => {
@@ -400,7 +425,7 @@ describe("DocumentSpeechBar", () => {
       cache.changed();
       throw new Error("DELETE answered 500");
     });
-    cache.loadPageList.mockImplementation(async () => {});
+    cache.loadPageList.mockImplementation(async () => false);
     renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
 
     fireEvent.click(clearButton()!);

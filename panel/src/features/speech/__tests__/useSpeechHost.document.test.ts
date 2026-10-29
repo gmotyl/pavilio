@@ -427,7 +427,7 @@ describe("useSpeechHost — page speech", () => {
     const newer = response(3, "New");
     let landOlderList: () => void = () => {};
     pageCache.loadPageList.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (landOlderList = resolve)),
+      () => new Promise<boolean>((resolve) => (landOlderList = () => resolve(true))),
     );
     const host = renderHost();
 

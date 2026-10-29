@@ -472,11 +472,33 @@ describe("unit state and share", () => {
       [`POST ${BASE}/${page}/prune`]: () => new Response(null, { status: 503 }),
     });
 
-    await expect(loadPageList(DOC)).resolves.toBeUndefined();
+    // Never rejects, but says the listing was not read.
+    await expect(loadPageList(DOC)).resolves.toBe(false);
     await expect(prunePage(DOC, [u])).resolves.toBeUndefined();
 
     expect(pageUnitState(DOC, u)).toBeUndefined();
     expect(pageCachedShare(DOC, [u])).toEqual({ cached: 0, bytes: 0 });
+  });
+
+  it("an empty listing the server answered resolves as read", async () => {
+    stubFetch({ [`GET ${BASE}/${page}`]: () => Response.json({ units: [] }) });
+
+    await expect(loadPageList(DOC)).resolves.toBe(true);
+  });
+
+  it("a listing that lands after a clear resolves as not read", async () => {
+    let answerList: (res: Response) => void = () => {};
+    stubFetch({
+      [`GET ${BASE}/${page}`]: () => new Promise<Response>((resolve) => (answerList = resolve)),
+      [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 204 }),
+    });
+
+    const listing = loadPageList(DOC);
+    await settle();
+    await clearPage(DOC);
+    answerList(Response.json({ units: [] }));
+
+    await expect(listing).resolves.toBe(false);
   });
 });
 
@@ -493,7 +515,7 @@ describe("without crypto.subtle (plain-http origin)", () => {
     const a = unit("First.");
     const b = unit("Second.");
 
-    await expect(loadPageList(DOC)).resolves.toBeUndefined();
+    await expect(loadPageList(DOC)).resolves.toBe(false);
     await expect(prunePage(DOC, [a, b])).resolves.toBeUndefined();
     const bytes = await pageAudio(DOC, a, { voice: "v" });
     await expect(pageAudio(DOC, b, { voice: "v" })).resolves.toBeInstanceOf(ArrayBuffer);

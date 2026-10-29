@@ -186,20 +186,28 @@ async function send(url: string, init?: RequestInit): Promise<Response> {
  * page with nothing cached: playback then synthesizes as if there were no
  * cache. A unit fetched or uploaded while the list was out is kept, with its
  * bytes: the server's snapshot may predate it.
+ *
+ * Never rejects. Resolves `true` when the server's listing was read and
+ * applied — an empty one included — and `false` when it was not: no hash to
+ * name the page, a failed or malformed GET, or a clear or wipe that landed
+ * while the list was out (its listing is discarded).
  */
-export async function loadPageList(docKey: string): Promise<void> {
+export async function loadPageList(docKey: string): Promise<boolean> {
   const gen = generation(docKey);
   const startedAt = recordSeq;
   const page = await sha256Hex(docKey);
-  if (page === null) return;
+  if (page === null) return false;
   let units: Map<string, number>;
+  let read: boolean;
   try {
     const body: unknown = await (await send(`${BASE_URL}/${page}`)).json();
     units = new Map(listedUnits(body));
+    read = true;
   } catch {
     units = new Map();
+    read = false;
   }
-  if (gen !== generation(docKey)) return;
+  if (gen !== generation(docKey)) return false;
   const current = listed.get(docKey);
   for (const [hash, seq] of recordedAt.get(docKey) ?? []) {
     const size = current?.get(hash);
@@ -210,6 +218,7 @@ export async function loadPageList(docKey: string): Promise<void> {
   const held = inHand.get(docKey);
   if (held) for (const hash of held.keys()) if (!units.has(hash)) held.delete(hash);
   notify();
+  return read;
 }
 
 function listedUnits(body: unknown): [string, number][] {
