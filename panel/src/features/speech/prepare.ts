@@ -496,6 +496,13 @@ function toUnits(packed: readonly Packed[], lang: "pl" | "en"): SpeechUnit[] {
 const QUOTE_SEPARATOR_RE = /^ {0,3}>[>\s]*$/;
 /** A setext underline: the paragraph lines above it render as one heading. */
 const SETEXT_UNDERLINE_RE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+/** A line's blockquote prefix, nested ones included (`> `, `> > `). */
+const QUOTE_PREFIX_RE = /^(?: {0,3}> ?)+/;
+
+/** The line inside its blockquote container: what markdown parses as the quoted block's line. */
+function unquote(line: string): string {
+  return line.replace(QUOTE_PREFIX_RE, "");
+}
 
 /**
  * One block of a page, as {@link splitBlockLines} cuts it: its `source` (what
@@ -519,26 +526,31 @@ interface PageBlock {
  *   and its speech, so a short heading still matches its rendered text;
  * - a blockquote line holding only `>` — the quoted paragraphs on either side
  *   render as two `<p>`; the separator itself speaks nothing and is dropped.
+ * Headings are recognised inside a blockquote too, after its `>` prefix: a
+ * quoted heading keeps the prefix in its source (the matcher ignores `>` and
+ * `#`) but is spoken as its bare text.
  * Block-bounded packing only: answers pack exactly as they always have.
  */
 function splitBlockLines(paragraph: string): PageBlock[] {
   const blocks: PageBlock[] = [];
   let run: string[] = [];
-  const push = (text: string, heading: boolean): void => {
-    if (text) blocks.push({ source: text, spoken: text, heading });
+  const push = (source: string, spoken: string, heading: boolean): void => {
+    if (source) blocks.push({ source, spoken, heading });
   };
   const flush = (heading = false): void => {
-    push(run.join("\n").trim(), heading);
+    const source = run.join("\n").trim();
+    // A paragraph keeps its quote markers as ever; a heading speaks bare.
+    push(source, heading ? run.map(unquote).join("\n").trim() : source, heading);
     run = [];
   };
 
   for (const line of paragraph.split("\n")) {
-    if (HEADING_LINE_RE.test(line)) {
+    if (QUOTE_SEPARATOR_RE.test(line)) {
       flush();
-      push(line.trim(), true);
-    } else if (QUOTE_SEPARATOR_RE.test(line)) {
+    } else if (HEADING_LINE_RE.test(unquote(line))) {
       flush();
-    } else if (SETEXT_UNDERLINE_RE.test(line) && run.length > 0) {
+      push(line.trim(), unquote(line).trim(), true);
+    } else if (SETEXT_UNDERLINE_RE.test(unquote(line)) && run.length > 0) {
       flush(true);
     } else {
       run.push(line);

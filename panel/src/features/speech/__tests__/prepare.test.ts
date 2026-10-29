@@ -845,6 +845,30 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
+  it("block-bounded: a quoted ATX heading is a block of its own, spoken without its markers", () => {
+    const { units } = prepare(["> ## Quoted Heading", "> Quoted prose under it."].join("\n"), {
+      blockBounded: true,
+    });
+
+    expect(units.map((unit) => [unit.source, unit.text, unit.block])).toEqual([
+      ["> ## Quoted Heading", "Quoted Heading", 0],
+      ["> Quoted prose under it.", "> Quoted prose under it.", 1],
+    ]);
+  });
+
+  it("block-bounded: a quoted setext heading is a block of its own, its underline dropped", () => {
+    for (const underline of ["> =====", "> -----"]) {
+      const { units } = prepare(["> Quoted Title", underline, "> Quoted prose under it."].join("\n"), {
+        blockBounded: true,
+      });
+
+      expect(units.map((unit) => [unit.source, unit.text, unit.block]), underline).toEqual([
+        ["> Quoted Title", "Quoted Title", 0],
+        ["> Quoted prose under it.", "> Quoted prose under it.", 1],
+      ]);
+    }
+  });
+
   it("answers keep today's packing", () => {
     const repeated = "This sentence exists to push the paragraph past the ceiling.";
     const answer = [

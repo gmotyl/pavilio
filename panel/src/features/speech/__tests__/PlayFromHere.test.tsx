@@ -525,6 +525,23 @@ describe("PlayFromHere", () => {
     }
   });
 
+  it("a quoted heading and the quoted prose under it each get a play button", () => {
+    for (const text of [
+      "> ## Quoted\n> Quoted prose right under the quoted heading.\n",
+      "> Quoted\n> =====\n> Quoted prose right under the quoted heading.\n",
+    ]) {
+      const { container, unmount } = render(<Page text={text} />);
+
+      const heading = block(container, "Quoted");
+      const body = block(container, "Quoted prose right under");
+      expect(heading.tagName, text).toMatch(/^H[12]$/);
+      expect(playOf(container, heading), text).not.toBeNull();
+      expect(playOf(container, body), text).not.toBeNull();
+      expect(body.getAttribute("data-speak-unit"), text).not.toBe(heading.getAttribute("data-speak-unit"));
+      unmount();
+    }
+  });
+
   it("a new text remaps the blocks", () => {
     const { container, rerender } = render(<Page />);
     expect(screen.getAllByRole("button", { name: "Play from here" }).length).toBeGreaterThan(2);
