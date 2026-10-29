@@ -399,6 +399,7 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
             <button
               key={mark.index}
               type="button"
+              data-testid={`play-from-here-${mark.index}`}
               className="play-from-here"
               aria-label="Play from here"
               title="Play from here"
