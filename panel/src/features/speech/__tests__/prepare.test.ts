@@ -810,6 +810,30 @@ describe("prepare with blockBounded (pages)", () => {
     ]);
   });
 
+  it("block-bounded: a two-paragraph blockquote is two blocks", () => {
+    const page = ["> The first quoted paragraph.", ">", "> The second quoted paragraph."].join("\n");
+
+    const { units } = prepare(page, { blockBounded: true });
+
+    expect(units.map((unit) => unit.block)).toEqual([0, 1]);
+    expect(units[0].source).toContain("first quoted paragraph");
+    expect(units[0].source).not.toContain("second");
+    expect(units[1].source).toContain("second quoted paragraph");
+  });
+
+  it("block-bounded: a setext heading followed directly by prose is two blocks", () => {
+    for (const underline of ["=====", "-----"]) {
+      const page = ["The Title", underline, "Body prose right under the title."].join("\n");
+
+      const { units } = prepare(page, { blockBounded: true });
+
+      expect(units.map((unit) => unit.block), underline).toEqual([0, 1]);
+      expect(units[0].source, underline).toContain("The Title");
+      expect(units[0].source, underline).not.toContain("Body");
+      expect(units[1].source, underline).toBe("Body prose right under the title.");
+    }
+  });
+
   it("answers keep today's packing", () => {
     const repeated = "This sentence exists to push the paragraph past the ceiling.";
     const answer = [

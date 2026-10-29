@@ -489,6 +489,28 @@ describe("PlayFromHere", () => {
     expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text: PAGE, startUnit: Number(unit) });
   });
 
+  it("each paragraph of a blockquote gets its own play button", () => {
+    const text = "> The first quoted paragraph here.\n>\n> The second quoted paragraph here.\n";
+    const { container } = render(<Page text={text} />);
+
+    const first = block(container, "The first quoted paragraph");
+    const second = block(container, "The second quoted paragraph");
+    expect(playOf(container, first)).not.toBeNull();
+    expect(playOf(container, second)).not.toBeNull();
+    expect(second.getAttribute("data-speak-unit")).not.toBe(first.getAttribute("data-speak-unit"));
+  });
+
+  it("a setext heading and the prose right under it each get a play button", () => {
+    const text = "Setext Title Here\n=================\nBody prose right under the title.\n";
+    const { container } = render(<Page text={text} />);
+
+    const heading = block(container, "Setext Title Here");
+    const body = block(container, "Body prose right under");
+    expect(playOf(container, heading)).not.toBeNull();
+    expect(playOf(container, body)).not.toBeNull();
+    expect(body.getAttribute("data-speak-unit")).not.toBe(heading.getAttribute("data-speak-unit"));
+  });
+
   it("a new text remaps the blocks", () => {
     const { container, rerender } = render(<Page />);
     expect(screen.getAllByRole("button", { name: "Play from here" }).length).toBeGreaterThan(2);
