@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { alerts } from "../alerts/store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
@@ -47,8 +47,9 @@ export interface DocumentSpeechBarProps {
  *
  * The cache controls are the page's alone: a cell's answers are never cached
  * on disk, so the cell bar (which shares only the transport) has neither.
- * Clear cache shows only while some unit is cached; the label is read through
- * `subscribePageCache`, so it moves as uploads land.
+ * Clear cache shows only while some unit is cached — or after a failed clear,
+ * whose emptied listing no longer says what is on disk; the label is read
+ * through `subscribePageCache`, so it moves as uploads land.
  *
  * The `.speech-bar` / `.speech-bar-row` wrapper is the cell bar's, reused for
  * the flex row the transport's stylesheet expects.
@@ -83,6 +84,14 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
   });
   const [cached, bytes] = shareKey.split(":").map(Number);
   const [clearing, setClearing] = useState(false);
+  // The page whose last clear failed: its listing was emptied locally, and if
+  // the re-read failed as well, 0 cached would hide the retry while the audio
+  // may still be on disk. Held until a clear succeeds or a listing shows data.
+  const [clearFailedKey, setClearFailedKey] = useState<string | null>(null);
+  const clearFailed = clearFailedKey === docKey;
+  useEffect(() => {
+    if (cached > 0) setClearFailedKey((key) => (key === docKey ? null : key));
+  }, [cached, docKey]);
 
   const clearCache = async (): Promise<void> => {
     // The run goes first, so nothing it plays or warms lands after the clear.
@@ -95,7 +104,9 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
     setClearing(true);
     try {
       await clearPage(docKey);
+      setClearFailedKey(null);
     } catch (err) {
+      setClearFailedKey(docKey);
       const reason = err instanceof Error ? err.message : String(err);
       alerts.error(`Couldn't clear the cache: ${reason}`);
       // A failed clear still empties the local listing, so the bar would read
@@ -128,10 +139,12 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
           <span data-testid={`speech-bar-cached-${docKey}`} style={LABEL_STYLE}>
             {cached > 0
               ? `${cached} of ${units.length} cached · ${formatBytes(bytes)}`
-              : `0 of ${units.length} cached`}
+              : clearFailed
+                ? "cache state unknown"
+                : `0 of ${units.length} cached`}
           </span>
         )}
-        {cached > 0 && (
+        {(cached > 0 || clearFailed) && (
           <button
             type="button"
             data-testid={`speech-bar-clear-cache-${docKey}`}

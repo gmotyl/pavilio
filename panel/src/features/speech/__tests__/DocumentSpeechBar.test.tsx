@@ -366,6 +366,61 @@ describe("DocumentSpeechBar", () => {
     expect(cachedLabel()?.textContent).toContain("2 of 3 cached");
   });
 
+  it("a failed clear whose re-read also fails keeps Clear cache until a clear succeeds", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    cache.clearPage.mockImplementationOnce(async () => {
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+      throw new Error("DELETE answered 500");
+    });
+    // The re-read failed too: `loadPageList` swallows it and lists nothing.
+    cache.loadPageList.mockImplementation(async () => {
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+    });
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    fireEvent.click(clearButton()!);
+    await waitFor(() => expect(cache.loadPageList).toHaveBeenCalledWith(KEY));
+    await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? true).toBe(false));
+
+    // The audio may still be on disk: the retry stays, and the label says so.
+    expect(clearButton()).not.toBeNull();
+    expect(cachedLabel()?.textContent).toContain("cache state unknown");
+
+    fireEvent.click(clearButton()!);
+    await waitFor(() => expect(clearButton()).toBeNull());
+    expect(cachedLabel()?.textContent).toBe("0 of 3 cached");
+  });
+
+  it("a failed clear stops reading as unknown once a listing comes back with data", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    cache.clearPage.mockImplementationOnce(async () => {
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+      throw new Error("DELETE answered 500");
+    });
+    cache.loadPageList.mockImplementation(async () => {});
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+
+    fireEvent.click(clearButton()!);
+    await waitFor(() => expect(cachedLabel()?.textContent).toContain("cache state unknown"));
+
+    // A later listing (the next Play) lists the page again.
+    act(() => {
+      cache.share = { cached: 1, bytes: 2048 };
+      cache.changed();
+    });
+    expect(cachedLabel()?.textContent).toContain("1 of 3 cached");
+    // …and then a listing that is truly empty hides Clear cache again.
+    act(() => {
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
+    });
+    expect(clearButton()).toBeNull();
+    expect(cachedLabel()?.textContent).toBe("0 of 3 cached");
+  });
+
   it("a successful clear does not re-read the listing", async () => {
     cache.share = { cached: 2, bytes: 4096 };
     renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
