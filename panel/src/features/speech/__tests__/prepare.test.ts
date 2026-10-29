@@ -834,6 +834,17 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
+  it("block-bounded: a setext heading's underline is neither spoken nor in its source", () => {
+    for (const underline of ["=====", "-----"]) {
+      const { units } = prepare(["Title", underline, "Body"].join("\n"), { blockBounded: true });
+
+      expect(units.map((unit) => [unit.source, unit.text, unit.block]), underline).toEqual([
+        ["Title", "Title", 0],
+        ["Body", "Body", 1],
+      ]);
+    }
+  });
+
   it("answers keep today's packing", () => {
     const repeated = "This sentence exists to push the paragraph past the ceiling.";
     const answer = [

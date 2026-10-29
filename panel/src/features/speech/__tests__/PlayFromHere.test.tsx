@@ -511,6 +511,20 @@ describe("PlayFromHere", () => {
     expect(body.getAttribute("data-speak-unit")).not.toBe(heading.getAttribute("data-speak-unit"));
   });
 
+  it("a short setext heading gets its own play button", () => {
+    for (const underline of ["=====", "-----"]) {
+      const text = `Title\n${underline}\nBody prose right under the short title.\n`;
+      const { container, unmount } = render(<Page text={text} />);
+
+      const heading = block(container, "Title");
+      const body = block(container, "Body prose right under");
+      expect(playOf(container, heading), underline).not.toBeNull();
+      expect(playOf(container, body), underline).not.toBeNull();
+      expect(body.getAttribute("data-speak-unit"), underline).not.toBe(heading.getAttribute("data-speak-unit"));
+      unmount();
+    }
+  });
+
   it("a new text remaps the blocks", () => {
     const { container, rerender } = render(<Page />);
     expect(screen.getAllByRole("button", { name: "Play from here" }).length).toBeGreaterThan(2);

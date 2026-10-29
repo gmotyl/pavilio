@@ -497,10 +497,16 @@ const QUOTE_SEPARATOR_RE = /^ {0,3}>[>\s]*$/;
 /** A setext underline: the paragraph lines above it render as one heading. */
 const SETEXT_UNDERLINE_RE = /^ {0,3}(?:=+|-+)[ \t]*$/;
 
-/** A block that is a setext heading: text lines closed by an underline. */
-function isSetextHeading(block: string): boolean {
-  const lines = block.split("\n");
-  return lines.length > 1 && SETEXT_UNDERLINE_RE.test(lines[lines.length - 1]);
+/**
+ * One block of a page, as {@link splitBlockLines} cuts it: its `source` (what
+ * the viewer text-matches against the rendered block) and what is `spoken`,
+ * which differ only for a setext heading, whose underline is structure — not
+ * text the renderer shows or the voice should read.
+ */
+interface PageBlock {
+  source: string;
+  spoken: string;
+  heading: boolean;
 }
 
 /**
@@ -508,30 +514,32 @@ function isSetextHeading(block: string): boolean {
  * `strip.ts` keeps in one paragraph (there is no blank line between them):
  * - an ATX heading line — a heading may interrupt a paragraph, and the text
  *   right under it is a block of its own, so each heading line stands alone;
- * - a setext underline — the lines above it, with it, are the heading, and
- *   what follows is a new block;
+ * - a setext underline — the lines above it are the heading, and what follows
+ *   is a new block; the underline itself is dropped from the heading's source
+ *   and its speech, so a short heading still matches its rendered text;
  * - a blockquote line holding only `>` — the quoted paragraphs on either side
  *   render as two `<p>`; the separator itself speaks nothing and is dropped.
  * Block-bounded packing only: answers pack exactly as they always have.
  */
-function splitBlockLines(paragraph: string): string[] {
-  const blocks: string[] = [];
+function splitBlockLines(paragraph: string): PageBlock[] {
+  const blocks: PageBlock[] = [];
   let run: string[] = [];
-  const flush = (): void => {
-    const text = run.join("\n").trim();
-    if (text) blocks.push(text);
+  const push = (text: string, heading: boolean): void => {
+    if (text) blocks.push({ source: text, spoken: text, heading });
+  };
+  const flush = (heading = false): void => {
+    push(run.join("\n").trim(), heading);
     run = [];
   };
 
   for (const line of paragraph.split("\n")) {
     if (HEADING_LINE_RE.test(line)) {
       flush();
-      blocks.push(line.trim());
+      push(line.trim(), true);
     } else if (QUOTE_SEPARATOR_RE.test(line)) {
       flush();
     } else if (SETEXT_UNDERLINE_RE.test(line) && run.length > 0) {
-      run.push(line);
-      flush();
+      flush(true);
     } else {
       run.push(line);
     }
@@ -575,13 +583,15 @@ function prepareBlocks(paragraphs: readonly string[], language: "pl" | "en"): Pa
   let opening = true;
 
   for (const block of blocks) {
-    const spoken = speak(block, language);
-    if (!spoken) continue;
+    const text = toSpokenText(block.spoken, language);
+    if (!text) continue;
+    const spoken: Packed = { source: block.source, text };
 
     // The first block that is neither a heading nor a placeholder is the body's
     // first paragraph — the one the fast start comes from, unless it is a TLDR.
-    const leading = HEADING_LINE_RE.test(block) || isSetextHeading(block) || SENTINEL_ONLY_RE.test(block);
-    const fastStart = opening && !leading && !TLDR_PARAGRAPH_RE.test(block) ? takeFastStart(spoken, []) : null;
+    const leading = block.heading || SENTINEL_ONLY_RE.test(block.source);
+    const fastStart =
+      opening && !leading && !TLDR_PARAGRAPH_RE.test(block.source) ? takeFastStart(spoken, []) : null;
     if (!leading) opening = false;
 
     const pieces = fastStart ? [fastStart.unit, ...packBody(fastStart.body)] : packBody([spoken]);
