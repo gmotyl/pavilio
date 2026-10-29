@@ -313,7 +313,14 @@ async function loadUnit(
     // The voice is always explicit: `synth.ts` keeps a private
     // `DEFAULT_VOICE = "en-GB-RyanNeural"` from motyl, so an omitted voice
     // silently overrides the panel's default voice.
-    const buffer = await unitAudio(run.sessionId, units[index], { voice, lang: units[index].lang });
+    //
+    // The run's signal, as the cascade carries it: a stopped or barged-in run
+    // stops waiting on a unit's cache fetch instead of hanging the ladder.
+    const buffer = await unitAudio(run.sessionId, units[index], {
+      voice,
+      lang: units[index].lang,
+      signal: run.cascade.signal,
+    });
     // `toSpeechBlob` copies the cached buffer. Wrapping it by hand would hand
     // the same ArrayBuffer out twice and detach it on the second playback.
     const url = URL.createObjectURL(toSpeechBlob(buffer));

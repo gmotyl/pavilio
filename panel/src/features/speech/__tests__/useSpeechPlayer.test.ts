@@ -886,6 +886,34 @@ describe("useSpeechPlayer", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("stopping a doc run while its unit's cache fetch is pending settles the run", async () => {
+    const DOC = "doc:p/wiki/stalled.md";
+    // Like the real `pageAudio`: a stalled disk fetch that only the caller's
+    // signal can get the caller past.
+    pageCache.pageAudio.mockImplementationOnce(
+      (_docKey: string, _unit: { text: string }, options?: unknown) =>
+        new Promise<ArrayBuffer>((_, reject) => {
+          const signal = (options as { signal?: AbortSignal } | undefined)?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
+
+    let settled = false;
+    await act(async () => {
+      void result.current.play(DOC, units("unit-0", "unit-1")).finally(() => (settled = true));
+      await drain();
+    });
+    expect(settled).toBe(false);
+
+    await settle(() => result.current.stop());
+
+    expect(settled).toBe(true);
+    expect(played).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("an answer run never touches the page cache", async () => {
     const { result } = renderHook(() => useSpeechPlayer({ voiceFor: voiceForSession }));
 
