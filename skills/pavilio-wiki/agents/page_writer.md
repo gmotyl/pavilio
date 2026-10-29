@@ -51,7 +51,15 @@ One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity p
   change) is not a contradiction: state what holds now with its citation, and keep the earlier
   version as dated history ("until 2026-10-15, …") with its own. Report nothing.
 - Two sources that disagree with no later word settling it: keep both claims with their citations
-  and report it under `contradictions`.
+  and report it under `contradictions`. A contradiction is a question only a person or the code can
+  answer — report it only when, after your edit, a reader of the page still cannot tell which claim
+  holds now. Report nothing when:
+  - you stated what holds now (a later design, ADR, spec, shipped PR or execute record settled it);
+  - the claims are reconcilable (different scope, different surface, one more detailed than the
+    other) — write the reconciled statement instead;
+  - the disagreement is about wording, a figure that was refined, or a plan that was never built.
+  Between two dated sources, the later decision record (ADR, design, spec, shipped change) wins
+  over an earlier one and over progress notes and context snapshots.
 - The slug's name used by a source for something else (one word, two meanings): keep the page on
   its own meaning, say the other use in one sentence under a `Terminology` note, and report it
   under `collisions` — never merge the other meaning's claims into the page.

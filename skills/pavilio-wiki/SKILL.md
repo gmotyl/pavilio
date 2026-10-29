@@ -225,7 +225,11 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 11. **Log** — append the ingest entry (`PAGES.md § log.md`); append every `generic:` finding under
     `## Knowledge candidates` in `wiki/open-questions.md`, every `contradictions` item under
     `## Gaps`, and every `collisions` item under `## Gaps` prefixed `Term collision:` (one word,
-    two meanings — a glossary `_Avoid_` note or a rename settles it).
+    two meanings — a glossary `_Avoid_` note or a rename settles it). Before appending a
+    contradiction, drop it when its own text says it was settled, superseded, reconciled or that
+    the page states what holds now (`agents/page_writer.md` reports only open ones), and when
+    `## Gaps` already has an item on the same question — append the new page's link to that item
+    instead of adding a second one. `## Gaps` is read by a person; every item must need one.
 12. **Commit** — `git add projects/<p>/wiki` and commit `<p>: wiki ingest <n> records` right away;
     nothing else from the working tree.
 13. **Release** — `scripts/wiki lock release <p> --session <id>`, also on every early stop after

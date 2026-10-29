@@ -174,7 +174,8 @@ skip the step when none are pending.
    2. **Page writers** as `pavilio-wiki SKILL.md § 4. Ingest § Sequence` says (≤10 in parallel,
       ≤12 sources per writer, the verifying backlog re-run), refreshing the lock between groups.
    3. **Index**; a log entry headed `ingest (migrate)` with the pages line and `waiting:`;
-      contradictions and collisions into `open-questions.md`; commit
+      contradictions and collisions into `open-questions.md`, filtered and deduped as
+      `pavilio-wiki SKILL.md § 4. Ingest` step 11 says; commit
       `<p>: wiki migrate pages <f>/<total flushes> (<n> pages)`.
 6. Errors follow `pavilio-wiki SKILL.md § 4. Ingest § Errors`: a failed record is not ledgered and
    comes back on resume; `index` exit 1 stops the run after releasing the lock. On a resume, run a
