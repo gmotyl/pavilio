@@ -2,21 +2,12 @@ import { useState, useSyncExternalStore } from "react";
 import { alerts } from "../alerts/store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
+import { formatBytes } from "./formatBytes";
 import { clearPage, pageCachedShare, subscribePageCache } from "./pageCache";
 import type { CellSpeechState } from "./types";
 import { SpeechTransport } from "./SpeechTransport";
 import { usePanelSpeech } from "./SpeechHostProvider";
 import { voiceForDocKey } from "./voices";
-
-/**
- * A byte count as people read it: "512 B", "340 KB", "1.2 MB". Kilobytes are
- * whole, megabytes keep one decimal — the mockup's "212 KB" and "46.3 MB".
- */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 /**
  * The states in which the page's run holds the element, so Clear cache has a
@@ -107,6 +98,9 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
 
   const clearCache = async (): Promise<void> => {
     // The run goes first, so nothing it plays or warms lands after the clear.
+    // `onStop`, not `stopDocument`: the latter also forgets the page — its
+    // utterance, preparation and units — which would empty this very bar's
+    // scrubber. Clearing the cache stops the audio; the page stays loaded.
     if (RUN_HOLDS_ELEMENT.has(state)) speech.onStop(docKey);
     setClearing(true);
     try {
