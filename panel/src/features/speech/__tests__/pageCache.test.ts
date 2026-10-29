@@ -389,6 +389,93 @@ describe("clear and wipe", () => {
     expect(listener).toHaveBeenCalled();
   });
 
+  it("clearPage waits for an upload in flight before sending the delete", async () => {
+    const u = unit("Uploading while cleared.");
+    const hash = await sha256(u.text);
+    const order: string[] = [];
+    let landPut: () => void = () => {};
+    stubFetch({
+      [`PUT ${BASE}/${page}/${hash}`]: () =>
+        new Promise<Response>((resolve) => {
+          order.push("put sent");
+          landPut = () => {
+            order.push("put landed");
+            resolve(new Response(null, { status: 204 }));
+          };
+        }),
+      [`DELETE ${BASE}/${page}`]: () => {
+        order.push("delete sent");
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    await pageAudio(DOC, u, {});
+    await settle();
+    const cleared = clearPage(DOC);
+    await settle();
+    // The delete must not overtake the PUT, or the PUT recreates the page on disk.
+    expect(order).toEqual(["put sent"]);
+    landPut();
+    await cleared;
+
+    expect(order).toEqual(["put sent", "put landed", "delete sent"]);
+    expect(pageUnitState(DOC, u)).toBeUndefined();
+  });
+
+  it("wipeCache waits for every upload in flight before sending the delete", async () => {
+    const u = unit("Uploading while wiped.");
+    const hash = await sha256(u.text);
+    const order: string[] = [];
+    let landPut: () => void = () => {};
+    stubFetch({
+      [`PUT ${BASE}/${page}/${hash}`]: () =>
+        new Promise<Response>((resolve) => {
+          landPut = () => {
+            order.push("put landed");
+            resolve(new Response(null, { status: 204 }));
+          };
+        }),
+      [`DELETE ${BASE}`]: () => {
+        order.push("delete sent");
+        return Response.json({ pages: 1, units: 1, bytes: 2 });
+      },
+    });
+
+    await pageAudio(DOC, u, {});
+    await settle();
+    const wiped = wipeCache();
+    await settle();
+    expect(order).toEqual([]);
+    landPut();
+    await wiped;
+
+    expect(order).toEqual(["put landed", "delete sent"]);
+  });
+
+  it("clearPage stops waiting on a stuck upload after its cap", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const u = unit("Stuck upload.");
+      const hash = await sha256(u.text);
+      const fetchMock = stubFetch({
+        [`PUT ${BASE}/${page}/${hash}`]: () => new Promise<Response>(() => {}),
+        [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 204 }),
+      });
+
+      await pageAudio(DOC, u, {});
+      await vi.advanceTimersByTimeAsync(0);
+      const cleared = clearPage(DOC);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls(fetchMock, "DELETE")).toEqual([]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await cleared;
+
+      expect(calls(fetchMock, "DELETE")).toEqual([`${BASE}/${page}`]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("wipeCache empties every page and resets the speech cache", async () => {
     const other = "doc:pavilio/other.md";
     const otherPage = await sha256(other);

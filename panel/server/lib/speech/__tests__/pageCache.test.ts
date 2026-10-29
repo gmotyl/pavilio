@@ -85,6 +85,15 @@ describe("page cache store", () => {
     await store.clearPage(PAGE);
   });
 
+  it("a clear asked for while a write is out runs after it, so nothing is recreated", async () => {
+    const store = createPageCacheStore({ root });
+    const write = store.write(PAGE, U1, Buffer.from("late"), DOC_KEY);
+    const clear = store.clearPage(PAGE);
+    await Promise.all([write, clear]);
+
+    expect(existsSync(join(root, PAGE))).toBe(false);
+  });
+
   it("wipe returns freed totals and empties the root", async () => {
     const store = createPageCacheStore({ root });
     await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY);

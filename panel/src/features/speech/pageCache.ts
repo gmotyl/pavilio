@@ -72,8 +72,18 @@ const warnedKinds = new Set<string>();
 const listeners = new Set<() => void>();
 /** `generation\0url` → the disk fetch in flight: its bytes, or `null` for a miss. */
 const fetching = new Map<string, Promise<ArrayBuffer | null>>();
-/** `generation\0url` of every upload in flight, so a unit synthesized twice uploads once. */
-const uploading = new Set<string>();
+/**
+ * `generation\0url` → the upload in flight: its page, and a promise that
+ * settles (never rejects) when the PUT does. Keyed so a unit synthesized twice
+ * uploads once; kept so a clear or a wipe can wait for it before deleting.
+ */
+const uploading = new Map<string, { docKey: string; settled: Promise<void> }>();
+/**
+ * How long a clear or a wipe waits for uploads in flight before sending its
+ * DELETE. A PUT landing after the DELETE would recreate the page on disk; the
+ * PUTs are local and quick, so this only bounds a stuck one.
+ */
+const UPLOAD_SETTLE_CAP_MS = 5_000;
 
 const NO_HASHING = "page cache unavailable: crypto.subtle needs a secure context (https or localhost)";
 
@@ -283,16 +293,23 @@ async function upload(
   const key = `${gen}\0${url}`;
   // Another caller's upload of this unit is out, or has landed already.
   if (uploading.has(key) || inHand.get(docKey)?.has(hash)) return;
-  uploading.add(key);
+  const put = send(url, {
+    method: "PUT",
+    // The server parses JSON bodies globally; audio must not look like JSON.
+    // The doc key is percent-encoded: a header value must be Latin-1, and
+    // page paths may be anything.
+    headers: { "Content-Type": SPEECH_AUDIO_MIME_TYPE, "x-doc-key": encodeURIComponent(docKey) },
+    body: bytes,
+  });
+  uploading.set(key, {
+    docKey,
+    settled: put.then(
+      () => undefined,
+      () => undefined,
+    ),
+  });
   try {
-    await send(url, {
-      method: "PUT",
-      // The server parses JSON bodies globally; audio must not look like JSON.
-      // The doc key is percent-encoded: a header value must be Latin-1, and
-      // page paths may be anything.
-      headers: { "Content-Type": SPEECH_AUDIO_MIME_TYPE, "x-doc-key": encodeURIComponent(docKey) },
-      body: bytes,
-    });
+    await put;
   } catch (err) {
     const kind = err instanceof Error && / answered (\d+)$/.exec(err.message)?.[1];
     warnOnce(kind ? `http ${kind}` : "network", err);
@@ -304,6 +321,24 @@ async function upload(
   entries(listed, docKey).set(hash, bytes.byteLength);
   entries(inHand, docKey).set(hash, bytes);
   notify();
+}
+
+/**
+ * Settles once every upload in flight — for the page, or for every page when
+ * `docKey` is omitted — has landed or failed, or after
+ * {@link UPLOAD_SETTLE_CAP_MS}, whichever comes first. Waits; never aborts.
+ */
+async function uploadsSettled(docKey?: string): Promise<void> {
+  const pending = [...uploading.values()]
+    .filter((flight) => docKey === undefined || flight.docKey === docKey)
+    .map((flight) => flight.settled);
+  if (pending.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.all(pending),
+    new Promise<void>((resolve) => (timer = setTimeout(resolve, UPLOAD_SETTLE_CAP_MS))),
+  ]);
+  clearTimeout(timer);
 }
 
 function warnOnce(kind: string, err: unknown): void {
@@ -347,7 +382,9 @@ export function pageCachedShare(
 }
 
 /**
- * Drops the page from disk and from memory. The local state is emptied and
+ * Drops the page from disk and from memory. Uploads already out for the page
+ * are waited for (up to {@link UPLOAD_SETTLE_CAP_MS}) before the DELETE, so
+ * none can land after it. The local state is emptied and
  * the in-memory speech cache rebuilt even when the server call fails, so the
  * next Play cannot answer from memory; the failure still rejects, with its
  * reason, for the caller to alert — as does an origin that cannot hash, which
@@ -360,6 +397,9 @@ export async function clearPage(docKey: string): Promise<void> {
   try {
     const page = await sha256Hex(docKey);
     if (page === null) throw new Error(NO_HASHING);
+    // The bump above stops new uploads; one already out must land before the
+    // DELETE, or it would recreate the page on disk.
+    await uploadsSettled(docKey);
     await send(`${BASE_URL}/${page}`, { method: "DELETE" });
   } finally {
     // Again after the await: work that started meanwhile is dropped too.
@@ -386,6 +426,7 @@ export async function wipeCache(): Promise<PageCacheTotals> {
   listed.clear();
   inHand.clear();
   try {
+    await uploadsSettled();
     return toTotals(await (await send(BASE_URL, { method: "DELETE" })).json());
   } finally {
     globalGeneration += 1;

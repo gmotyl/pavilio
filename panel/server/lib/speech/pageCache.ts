@@ -66,6 +66,25 @@ async function writeAtomic(file: string, data: Buffer | string): Promise<void> {
 export function createPageCacheStore(opts: { root?: string } = {}): PageCacheStore {
   const root = opts.root ?? join(homedir(), PAGE_CACHE_DIR);
   const pageDir = (page: string) => join(root, page);
+  /**
+   * page → the tail of its mutation chain. A write, a prune and a clear of the
+   * same page run one after another, so a clear never interleaves with a write
+   * that would recreate the folder under it.
+   */
+  const chains = new Map<string, Promise<void>>();
+
+  function serial<T>(page: string, work: () => Promise<T>): Promise<T> {
+    const next = (chains.get(page) ?? Promise.resolve()).then(work);
+    const tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    chains.set(page, tail);
+    void tail.then(() => {
+      if (chains.get(page) === tail) chains.delete(page);
+    });
+    return next;
+  }
 
   async function list(page: string): Promise<{ hash: string; bytes: number }[]> {
     checkId("page", page);
@@ -116,28 +135,32 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
       checkId("page", page);
       checkId("unit", unit);
       const dir = pageDir(page);
-      await mkdir(dir, { recursive: true });
-      await writeAtomic(join(dir, "page.json"), JSON.stringify({ docKey }));
-      await writeAtomic(join(dir, `${unit}.mp3`), bytes);
+      await serial(page, async () => {
+        await mkdir(dir, { recursive: true });
+        await writeAtomic(join(dir, "page.json"), JSON.stringify({ docKey }));
+        await writeAtomic(join(dir, `${unit}.mp3`), bytes);
+      });
     },
 
     async prune(page, keep) {
       checkId("page", page);
       const kept = new Set(keep);
       const dir = pageDir(page);
-      let removed = 0;
-      for (const name of await entries(dir)) {
-        const hash = UNIT_FILE.exec(name)?.[1];
-        if (!hash || kept.has(hash)) continue;
-        await rm(join(dir, name), { force: true });
-        removed += 1;
-      }
-      return removed;
+      return serial(page, async () => {
+        let removed = 0;
+        for (const name of await entries(dir)) {
+          const hash = UNIT_FILE.exec(name)?.[1];
+          if (!hash || kept.has(hash)) continue;
+          await rm(join(dir, name), { force: true });
+          removed += 1;
+        }
+        return removed;
+      });
     },
 
     async clearPage(page) {
       checkId("page", page);
-      await rm(pageDir(page), { recursive: true, force: true });
+      await serial(page, () => rm(pageDir(page), { recursive: true, force: true }));
     },
 
     async wipe() {
