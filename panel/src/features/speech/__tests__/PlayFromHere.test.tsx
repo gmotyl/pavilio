@@ -356,6 +356,17 @@ describe("PlayFromHere", () => {
     expect(stub.host!.stopDocument).not.toHaveBeenCalled();
   });
 
+  it("a tapped-open play button hides when the pointer leaves the page", () => {
+    const { container } = render(<Page />);
+    const item = block(container, "second outer item here");
+    const play = playOf(container, item)!;
+    fireEvent.click(item);
+    expect(play).toHaveAttribute("data-shown");
+    fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
+    expect(play).not.toHaveAttribute("data-shown");
+    expect(item).not.toHaveAttribute("data-speak-hover");
+  });
+
   it("a tap reveals the play button on touch", () => {
     const { container } = render(<Page />);
     const item = block(container, "second outer item here");

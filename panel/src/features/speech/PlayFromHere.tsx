@@ -107,33 +107,63 @@ function ownText(el: HTMLElement): string {
 }
 
 /**
+ * How many units past the cursor a block's partial match is looked for. A
+ * partial match (`blockMatchStrength` above 0) needs a substring test per unit,
+ * so scanning to the page's end for every block would make a page of thousands
+ * of blocks quadratic. The units between two matched blocks are those of
+ * rendered blocks that matched nothing, so the window only has to outlast a run
+ * of those. An exact match is found however far it is: it is looked up.
+ */
+export const SCAN_WINDOW = 128;
+
+/**
  * For each rendered block, the first unit of the prepared block it is, or null.
  *
  * Matched in page order with a moving cursor: each block is looked for among
  * the units after the last matched block's, so a repeated `## Example` lands on
- * its own unit rather than the first one with that text. Among the units from
- * the cursor on, the strongest match wins (`blockMatchStrength`), the earliest
- * on a tie. A match snaps to the first unit of its prepared block — a block cut
- * into several units starts at the first. An unmatched rendered block (a code
- * block, raw HTML, a paragraph that opens and closes with an inline transform)
- * leaves the cursor where it was.
+ * its own unit rather than the first one with that text. From the cursor on, a
+ * unit that IS the block wins (the earliest one, looked up by text); otherwise
+ * the strongest match within {@link SCAN_WINDOW} units (`blockMatchStrength`),
+ * the earliest on a tie. A match snaps to the first unit of its prepared block
+ * — a block cut into several units starts at the first. An unmatched rendered
+ * block (a code block, raw HTML, a paragraph that opens and closes with an
+ * inline transform) leaves the cursor where it was.
  */
 export function firstUnitsOfBlocks(
   units: readonly SpeechUnit[],
   blockTexts: readonly string[],
 ): (number | null)[] {
   const sources = units.map((unit) => normalizeForMatch(unit.source));
+  // Each source's unit indices, ascending: the exact lookup.
+  const bySource = new Map<string, number[]>();
+  sources.forEach((source, i) => {
+    if (source.length === 0) return;
+    const list = bySource.get(source);
+    if (list) list.push(i);
+    else bySource.set(source, [i]);
+  });
+  // Each prepared block's first unit and the unit after its last.
+  const blockStart = new Map<number, number>();
+  const blockEnd = new Map<number, number>();
+  units.forEach((unit, i) => {
+    if (unit.block === undefined) return;
+    if (!blockStart.has(unit.block)) blockStart.set(unit.block, i);
+    blockEnd.set(unit.block, i + 1);
+  });
+
   let cursor = 0;
   return blockTexts.map((text) => {
     const block = normalizeForMatch(text);
-    let hit: number | null = null;
-    let best = Infinity;
-    for (let i = cursor; i < units.length; i++) {
-      const strength = blockMatchStrength(block, sources[i]);
-      if (strength !== null && strength < best) {
-        best = strength;
-        hit = i;
-        if (strength === 0) break;
+    let hit: number | null = firstAtOrAfter(bySource.get(block), cursor);
+    if (hit === null) {
+      let best = Infinity;
+      const limit = Math.min(units.length, cursor + SCAN_WINDOW);
+      for (let i = cursor; i < limit; i++) {
+        const strength = blockMatchStrength(block, sources[i]);
+        if (strength !== null && strength < best) {
+          best = strength;
+          hit = i;
+        }
       }
     }
     if (hit === null) return null;
@@ -142,12 +172,22 @@ export function firstUnitsOfBlocks(
       cursor = hit + 1;
       return hit;
     }
-    const first = units.findIndex((unit) => unit.block === blockIndex);
-    let end = first;
-    while (end < units.length && units[end].block === blockIndex) end++;
-    cursor = Math.max(cursor, end);
-    return first;
+    cursor = Math.max(cursor, blockEnd.get(blockIndex) ?? hit + 1);
+    return blockStart.get(blockIndex) ?? hit;
   });
+}
+
+/** The first of the ascending `indices` at or after `from`, or null. */
+function firstAtOrAfter(indices: readonly number[] | undefined, from: number): number | null {
+  if (!indices) return null;
+  let lo = 0;
+  let hi = indices.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (indices[mid] < from) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < indices.length ? indices[lo] : null;
 }
 
 // ── the component ────────────────────────────────────────────────────────────
@@ -328,7 +368,12 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
   }, [docKey]);
 
   const onMouseOver = (event: MouseEvent) => setHovered(indexAt(event.target));
-  const onMouseLeave = () => setHovered(null);
+  // Leaving the page also drops a tap's reveal: a ▶ left shown (and its
+  // segment outlined) after the pointer has gone elsewhere is stale.
+  const onMouseLeave = () => {
+    setHovered(null);
+    setRevealed(null);
+  };
   // A tap has no hover to reveal the ▶ with: the tap itself reveals it, and a
   // hidden ▶ takes no pointer, so the first tap lands on the block. A mouse
   // click on a block does the same, harmlessly — the ▶ is already shown.
