@@ -39,10 +39,35 @@ import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessionTransport";
 import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
-import type { GridSpeech, Utterance } from "./types";
+import type { CellSpeechState, GridSpeech, Utterance } from "./types";
+
+/**
+ * The states in which a key's run holds the element, so there is a run to
+ * stop. Anything else stops nothing: `onStop` silences whatever plays, and a
+ * cell that barged in on a page must keep speaking.
+ */
+export const RUN_HOLDS_ELEMENT: ReadonlySet<CellSpeechState> = new Set([
+  "preparing",
+  "speaking",
+  "stalled",
+  "paused",
+]);
+
+/**
+ * {@link PageSpeech} as the provider publishes it: the host's pair, plus what
+ * only the provider can answer because only it keeps the open-page record.
+ */
+export interface PanelPageSpeech extends PageSpeech {
+  /**
+   * Stops whichever open page's run holds the element — a cache wipe's first
+   * step, so nothing the run plays or warms lands after it. `onStop`, not
+   * `stopDocument`: the page stays loaded, only its audio stops.
+   */
+  stopPageRuns(): void;
+}
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
-const PageSpeechContext = createContext<PageSpeech | null>(null);
+const PageSpeechContext = createContext<PanelPageSpeech | null>(null);
 
 /**
  * Where the focused cell is read from. The provider combines it with the route
@@ -238,12 +263,12 @@ export function SpeechHostProvider({
   // LAYOUT effect, not a passive one: a page calls these from its own effects,
   // and a child's passive effect runs before its parent's, so a passive mirror
   // would hand it the host of the render before.
-  const { speakDocument, stopDocument } = speech;
-  const pageHostRef = useRef({ speakDocument, stopDocument });
+  const { speakDocument, stopDocument, stateFor, onStop } = speech;
+  const pageHostRef = useRef({ speakDocument, stopDocument, stateFor, onStop });
   useLayoutEffect(() => {
-    pageHostRef.current = { speakDocument, stopDocument };
-  }, [speakDocument, stopDocument]);
-  const [pageSpeech] = useState<PageSpeech>(() => ({
+    pageHostRef.current = { speakDocument, stopDocument, stateFor, onStop };
+  }, [speakDocument, stopDocument, stateFor, onStop]);
+  const [pageSpeech] = useState<PanelPageSpeech>(() => ({
     speakDocument: (input) => {
       openPagesRef.current.add(input.key);
       pageHostRef.current.speakDocument(input);
@@ -251,6 +276,12 @@ export function SpeechHostProvider({
     stopDocument: (key) => {
       pageHostRef.current.stopDocument(key);
       openPagesRef.current.delete(key);
+    },
+    stopPageRuns: () => {
+      const host = pageHostRef.current;
+      for (const key of openPagesRef.current) {
+        if (RUN_HOLDS_ELEMENT.has(host.stateFor(key))) host.onStop(key);
+      }
     },
   }));
 
@@ -287,7 +318,7 @@ export function usePanelSpeech(): GridSpeech {
  * Page speech from the panel's one host. Throws without a provider, for the
  * same reason {@link usePanelSpeech} does.
  */
-export function usePageSpeech(): PageSpeech {
+export function usePageSpeech(): PanelPageSpeech {
   const pageSpeech = useContext(PageSpeechContext);
 
   if (!pageSpeech) {
@@ -299,6 +330,17 @@ export function usePageSpeech(): PageSpeech {
   }
 
   return pageSpeech;
+}
+
+const NO_PAGE_RUNS = (): void => {};
+
+/**
+ * {@link PanelPageSpeech.stopPageRuns} for Settings, the one caller that does
+ * not throw without a provider: Settings is not a speaking surface, and with
+ * no host above it there is no page run to stop. (Its suites mount it bare.)
+ */
+export function useStopPageRuns(): () => void {
+  return useContext(PageSpeechContext)?.stopPageRuns ?? NO_PAGE_RUNS;
 }
 
 export default SpeechHostProvider;

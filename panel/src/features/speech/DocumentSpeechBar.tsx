@@ -4,22 +4,9 @@ import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { formatBytes } from "./formatBytes";
 import { clearPage, pageCachedShare, subscribePageCache } from "./pageCache";
-import type { CellSpeechState } from "./types";
 import { SpeechTransport } from "./SpeechTransport";
-import { usePanelSpeech } from "./SpeechHostProvider";
+import { RUN_HOLDS_ELEMENT, usePanelSpeech } from "./SpeechHostProvider";
 import { voiceForDocKey } from "./voices";
-
-/**
- * The states in which the page's run holds the element, so Clear cache has a
- * run to stop. Anything else stops nothing: `onStop` silences whatever plays,
- * and a cell that barged in on the page must keep speaking.
- */
-const RUN_HOLDS_ELEMENT: ReadonlySet<CellSpeechState> = new Set([
-  "preparing",
-  "speaking",
-  "stalled",
-  "paused",
-]);
 
 const LABEL_STYLE = {
   fontSize: 12,

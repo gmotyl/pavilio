@@ -5,6 +5,7 @@ import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 import { VoiceSelect } from "../speech/VoiceSelect";
 import { EngineSettings } from "../speech/EngineSettings";
 import { AutoOpenAnswerToggle } from "../speech/AutoOpenAnswerToggle";
+import { PageCacheSettings } from "../speech/PageCacheSettings";
 import { NotificationsToggle } from "../notifications/NotificationsToggle";
 import { LauncherSettings } from "./LauncherSettings";
 import { DefaultObjectiveSettings } from "./DefaultObjectiveSettings";
@@ -625,6 +626,9 @@ export default function AgentSettings() {
         </div>
         <div className="mt-4">
           <AutoOpenAnswerToggle />
+        </div>
+        <div className="mt-4">
+          <PageCacheSettings />
         </div>
         <div className="mt-4">
           <NotificationsToggle />
