@@ -443,6 +443,26 @@ describe("useSpeechHost — page speech", () => {
     expect(units.map((unit) => unit.text)).toEqual(unitsOf(newer));
   });
 
+  it("a prune already out for an older revision is told it is no longer current", async () => {
+    const older = response(3, "Old");
+    const newer = response(3, "New");
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text: older }));
+    // The older revision's prune started (its list landed) and is still out.
+    expect(pageCache.prunePage).toHaveBeenCalledTimes(1);
+    const olderOptions = pageCache.prunePage.mock.calls[0][2] as { isCurrent?: () => boolean } | undefined;
+    expect(olderOptions?.isCurrent?.()).toBe(true);
+
+    await settle(() => host().speakDocument({ key: PAGE, text: newer }));
+
+    // Replaced: the older prune re-checks before its POST and before deleting
+    // locally, so it stands down instead of pruning the newer revision's units.
+    expect(olderOptions?.isCurrent?.()).toBe(false);
+    const newerOptions = pageCache.prunePage.mock.calls[1][2] as { isCurrent?: () => boolean } | undefined;
+    expect(newerOptions?.isCurrent?.()).toBe(true);
+  });
+
   it("a page plays as today when the page cache is unreachable", async () => {
     pageCache.loadPageList.mockRejectedValueOnce(new Error("GET answered 503"));
     const text = response(2, "Page");

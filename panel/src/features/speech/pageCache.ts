@@ -228,12 +228,27 @@ function listedUnits(body: unknown): [string, number][] {
  * locally. Hashes every unit on the way, which is what lets the synchronous
  * readers answer for them. A failed prune is ignored: the orphans wait for the
  * next Play.
+ *
+ * `isCurrent` says whether `units` are still the page's: it is asked again
+ * after hashing (before the POST) and after the POST (before anything is
+ * deleted locally), so a revision replaced meanwhile never prunes the units of
+ * the one that replaced it.
  */
-export async function prunePage(docKey: string, units: readonly SpeechUnit[]): Promise<void> {
+export async function prunePage(
+  docKey: string,
+  units: readonly SpeechUnit[],
+  options: { isCurrent?: () => boolean } = {},
+): Promise<void> {
+  const isCurrent = options.isCurrent ?? (() => true);
   const gen = generation(docKey);
   const page = await sha256Hex(docKey);
   const hashed = await Promise.all(units.map((unit) => sha256Hex(unit.text)));
   if (page === null || hashed.some((hash) => hash === null)) return;
+  // The hashes are memoized either way, so the readers answer for these units.
+  if (!isCurrent()) {
+    notify();
+    return;
+  }
   const keep = hashed as string[];
   try {
     await send(`${BASE_URL}/${page}/prune`, {
@@ -246,7 +261,7 @@ export async function prunePage(docKey: string, units: readonly SpeechUnit[]): P
     notify();
     return;
   }
-  if (gen !== generation(docKey)) return;
+  if (gen !== generation(docKey) || !isCurrent()) return;
   const kept = new Set(keep);
   for (const map of [listed.get(docKey), inHand.get(docKey), recordedAt.get(docKey)]) {
     if (map) for (const hash of map.keys()) if (!kept.has(hash)) map.delete(hash);

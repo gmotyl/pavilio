@@ -196,7 +196,9 @@ export const pageCache = {
       current().synthesizeSpeech(unit.text, options),
   ),
   loadPageList: vi.fn(async (_docKey: string): Promise<void> => {}),
-  prunePage: vi.fn(async (_docKey: string, _units: readonly SpeechUnit[]): Promise<void> => {}),
+  prunePage: vi.fn(
+    async (_docKey: string, _units: readonly SpeechUnit[], _options?: { isCurrent?: () => boolean }): Promise<void> => {},
+  ),
   pageUnitState: vi.fn((_docKey: string, _unit: SpeechUnit): "warming" | "ready" | undefined => undefined),
   pageCachedShare: vi.fn((_docKey: string, _units: readonly SpeechUnit[]) => ({ cached: 0, bytes: 0 })),
   subscribePageCache: vi.fn((_listener: () => void) => () => {}),

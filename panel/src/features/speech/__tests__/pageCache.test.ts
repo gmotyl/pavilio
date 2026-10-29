@@ -422,6 +422,49 @@ describe("unit state and share", () => {
     expect(pageCachedShare(DOC, [uploaded, fetched])).toEqual({ cached: 2, bytes: 5 });
   });
 
+  it("a prune no longer current once hashed sends no POST", async () => {
+    const u = unit("Older revision unit.");
+    const fetchMock = stubFetch({
+      [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
+    });
+
+    let current = true;
+    const pruning = prunePage(DOC, [u], { isCurrent: () => current });
+    // Superseded while it hashes.
+    current = false;
+    await pruning;
+
+    expect(calls(fetchMock, "POST")).toEqual([]);
+  });
+
+  it("a prune superseded while its POST is out deletes nothing locally", async () => {
+    const older = unit("Older revision unit.");
+    const newer = unit("Newer revision unit.");
+    const hn = await sha256(newer.text);
+    let answerPrune: (res: Response) => void = () => {};
+    let prunes = 0;
+    stubFetch({
+      [`GET ${BASE}/${page}`]: () => Response.json({ units: [{ hash: hn, bytes: 4 }] }),
+      // The newer revision's prune answers at once; the older one's hangs.
+      [`POST ${BASE}/${page}/prune`]: () =>
+        (prunes += 1) === 1
+          ? Response.json({ removed: 0 })
+          : new Promise<Response>((resolve) => (answerPrune = resolve)),
+    });
+    await loadPageList(DOC);
+    await prunePage(DOC, [newer]);
+    expect(pageCachedShare(DOC, [newer])).toEqual({ cached: 1, bytes: 4 });
+
+    let current = true;
+    const pruning = prunePage(DOC, [older], { isCurrent: () => current });
+    await settle();
+    current = false;
+    answerPrune(Response.json({ removed: 0 }));
+    await pruning;
+
+    expect(pageCachedShare(DOC, [newer])).toEqual({ cached: 1, bytes: 4 });
+  });
+
   it("a failed list leaves the page with nothing cached", async () => {
     const u = unit("Anything.");
     stubFetch({

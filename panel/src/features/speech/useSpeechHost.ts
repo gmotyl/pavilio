@@ -1193,11 +1193,14 @@ export function useSpeechHost({
       // The prune runs only while this revision is still the page's
       // utterance: a delayed list of an older revision, landing after the
       // page was edited and replayed, would otherwise keep only the old units
-      // and delete the newer revision's audio.
+      // and delete the newer revision's audio. Checked before the prune starts
+      // and handed to it, which checks again before its POST and before it
+      // deletes anything locally.
+      const isCurrent = (): boolean => pageUtterancesRef.current.get(key) === utterance.id;
       void loadPageList(key)
         .then(() => {
-          if (pageUtterancesRef.current.get(key) !== utterance.id) return;
-          return prunePage(key, units);
+          if (!isCurrent()) return;
+          return prunePage(key, units, { isCurrent });
         })
         .catch(() => {});
       // A non-number has no unit to clamp to, so it is 0; otherwise clamped
