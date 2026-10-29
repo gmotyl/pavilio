@@ -1,0 +1,130 @@
+import express, { Router, type NextFunction, type Request, type Response } from "express";
+import { createPageCacheStore, HASH_RE, type PageCacheStore } from "../lib/speech/pageCache.js";
+
+/**
+ * The page audio cache, mounted at /api/speech/page-cache:
+ *
+ *   GET    /                 totals { pages, units, bytes }
+ *   DELETE /                 wipe the whole cache → the freed totals
+ *   GET    /:page            { units: [{ hash, bytes }] }, empty for an unknown page
+ *   GET    /:page/:unit      the MP3 (audio/mpeg) | 404
+ *   PUT    /:page/:unit      raw body (≤ 5 MB, else 413), header x-doc-key → 204
+ *   POST   /:page/prune      { keep: string[] } → { removed }
+ *   DELETE /:page            remove the page folder → 204
+ *
+ * `:page` and `:unit` must be 64 lowercase hex chars, else 400, so no request
+ * can address a path outside the root. Any filesystem failure (typically a
+ * root that cannot be created) answers 503, which the browser treats as "no
+ * cache", and logs one warning until an operation succeeds again.
+ */
+
+export const MAX_UNIT_BYTES = "5mb";
+
+export interface PageCacheRouterOptions {
+  /** Default: the store at `~/.pavilio/speech-cache`; tests pass one on a temp root. */
+  store?: PageCacheStore;
+}
+
+export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Router {
+  const store = options.store ?? createPageCacheStore();
+  const router = Router();
+  let warned = false;
+
+  /** Runs a store call; answers 400 / 503 itself and returns undefined on failure. */
+  async function attempt<T>(res: Response, run: () => Promise<T>): Promise<{ value: T } | undefined> {
+    try {
+      const value = await run();
+      warned = false;
+      return { value };
+    } catch (error) {
+      if (error instanceof RangeError) {
+        res.status(400).json({ error: error.message });
+        return undefined;
+      }
+      if (!warned) {
+        warned = true;
+        console.warn("[speech] page cache unavailable:", (error as Error)?.message ?? error);
+      }
+      res.status(503).json({ error: "page cache unavailable" });
+      return undefined;
+    }
+  }
+
+  const checkId = (_req: Request, res: Response, next: NextFunction, id: string) => {
+    if (HASH_RE.test(id)) return next();
+    res.status(400).json({ error: "ids must be 64 lowercase hex chars" });
+  };
+  router.param("page", checkId);
+  router.param("unit", checkId);
+
+  router.get("/", async (_req, res) => {
+    const got = await attempt(res, () => store.totals());
+    if (got) res.json(got.value);
+  });
+
+  router.delete("/", async (_req, res) => {
+    const got = await attempt(res, () => store.wipe());
+    if (got) res.json(got.value);
+  });
+
+  router.get("/:page", async (req, res) => {
+    const got = await attempt(res, () => store.list(req.params.page));
+    if (got) res.json({ units: got.value });
+  });
+
+  router.get("/:page/:unit", async (req, res) => {
+    const got = await attempt(res, () => store.read(req.params.page, req.params.unit));
+    if (!got) return;
+    if (!got.value) {
+      res.status(404).json({ error: "not cached" });
+      return;
+    }
+    res.type("audio/mpeg").send(got.value);
+  });
+
+  router.put(
+    "/:page/:unit",
+    // Any content type is taken as raw bytes (audio/mpeg, application/octet-stream, …).
+    express.raw({ type: () => true, limit: MAX_UNIT_BYTES }),
+    async (req, res) => {
+      const docKey = req.get("x-doc-key");
+      if (!docKey || !docKey.trim()) {
+        res.status(400).json({ error: "x-doc-key header is required" });
+        return;
+      }
+      const body: unknown = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        res.status(400).json({ error: "body must be non-empty audio bytes" });
+        return;
+      }
+      const got = await attempt(res, () => store.write(req.params.page, req.params.unit, body, docKey));
+      if (got) res.status(204).end();
+    },
+  );
+
+  router.post("/:page/prune", async (req, res) => {
+    const keep = (req.body as { keep?: unknown } | undefined)?.keep;
+    if (!Array.isArray(keep) || !keep.every((h) => typeof h === "string")) {
+      res.status(400).json({ error: "keep must be an array of unit hashes" });
+      return;
+    }
+    const got = await attempt(res, () => store.prune(req.params.page, keep as string[]));
+    if (got) res.json({ removed: got.value });
+  });
+
+  router.delete("/:page", async (req, res) => {
+    const got = await attempt(res, () => store.clearPage(req.params.page));
+    if (got) res.status(204).end();
+  });
+
+  // Turns the raw parser's over-limit throw into JSON instead of express's HTML error page.
+  router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if ((err as { type?: string } | null)?.type === "entity.too.large") {
+      res.status(413).json({ error: "unit too large", limit: MAX_UNIT_BYTES });
+      return;
+    }
+    next(err);
+  });
+
+  return router;
+}

@@ -41,6 +41,7 @@ import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import { createTtsHandler } from "./routes/tts.js";
 import { createTtsHolder } from "./lib/speech/ttsHolder.js";
 import { createSpeechEnginesRouter } from "./routes/speechEngines.js";
+import { createPageCacheRouter } from "./routes/pageCache.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
@@ -231,6 +232,8 @@ export async function startPanel(
   app.use("/api", preferencesRouter);
   app.use("/api/speech", speechRouter);
   app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder }));
+  // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
+  app.use("/api/speech/page-cache", createPageCacheRouter());
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
 
