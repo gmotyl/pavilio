@@ -1189,8 +1189,16 @@ export function useSpeechHost({
       // and `pageAudio` asks the server per unit anyway. Both swallow their own
       // failures — an unreachable cache plays the page as if there were none,
       // and raises nothing.
+      //
+      // The prune runs only while this revision is still the page's
+      // utterance: a delayed list of an older revision, landing after the
+      // page was edited and replayed, would otherwise keep only the old units
+      // and delete the newer revision's audio.
       void loadPageList(key)
-        .then(() => prunePage(key, units))
+        .then(() => {
+          if (pageUtterancesRef.current.get(key) !== utterance.id) return;
+          return prunePage(key, units);
+        })
         .catch(() => {});
       // A non-number has no unit to clamp to, so it is 0; otherwise clamped
       // into the units, as `speakUtterance` clamps a segment click's.

@@ -422,6 +422,27 @@ describe("useSpeechHost — page speech", () => {
     );
   });
 
+  it("a delayed list of an older revision does not prune the newer revision", async () => {
+    const older = response(3, "Old");
+    const newer = response(3, "New");
+    let landOlderList: () => void = () => {};
+    pageCache.loadPageList.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (landOlderList = resolve)),
+    );
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text: older }));
+    // The page was edited and replayed while the older revision's list was out.
+    await settle(() => host().speakDocument({ key: PAGE, text: newer }));
+    await settle(() => landOlderList());
+
+    // Only the current revision prunes: the older chain pruning with its own
+    // units would delete the newer revision's audio.
+    expect(pageCache.prunePage).toHaveBeenCalledTimes(1);
+    const [, units] = pageCache.prunePage.mock.calls[0];
+    expect(units.map((unit) => unit.text)).toEqual(unitsOf(newer));
+  });
+
   it("a page plays as today when the page cache is unreachable", async () => {
     pageCache.loadPageList.mockRejectedValueOnce(new Error("GET answered 503"));
     const text = response(2, "Page");
