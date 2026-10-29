@@ -184,6 +184,67 @@ describe("pageAudio", () => {
     expect(pageUnitState(DOC, u)).toBeUndefined();
   });
 
+  it("concurrent calls for one unit share its fetch and its upload", async () => {
+    const u = unit("Asked twice.");
+    const hash = await sha256(u.text);
+    const misses: Array<() => void> = [];
+    const fetchMock = stubFetch({
+      // Held open, so the second call is asked for while the first is still out.
+      [`GET ${BASE}/${page}/${hash}`]: () =>
+        new Promise<Response>((resolve) => misses.push(() => resolve(new Response(null, { status: 404 })))),
+      [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 204 }),
+    });
+
+    // The lookahead warm and the ladder ask for the same unit at once.
+    const first = pageAudio(DOC, u, {});
+    const second = pageAudio(DOC, u, {});
+    await settle();
+    for (const miss of misses) miss();
+    const [a, b] = await Promise.all([first, second]);
+    await settle();
+
+    expect(a).toBeInstanceOf(ArrayBuffer);
+    expect(b).toBeInstanceOf(ArrayBuffer);
+    expect(calls(fetchMock, "GET")).toEqual([`${BASE}/${page}/${hash}`]);
+    expect(calls(fetchMock, "PUT")).toEqual([`${BASE}/${page}/${hash}`]);
+  });
+
+  it("a fetch in flight is not shared across a clear", async () => {
+    const u = unit("Cleared mid-fetch.");
+    const hash = await sha256(u.text);
+    const answers: Array<(res: Response) => void> = [];
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () => new Promise<Response>((resolve) => answers.push(resolve)),
+      [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 204 }),
+    });
+
+    const before = pageAudio(DOC, u, {});
+    await settle();
+    await clearPage(DOC);
+    const after = pageAudio(DOC, u, {});
+    await settle();
+
+    expect(calls(fetchMock, "GET")).toEqual([`${BASE}/${page}/${hash}`, `${BASE}/${page}/${hash}`]);
+    for (const answer of answers) answer(new Response(new Uint8Array([1])));
+    await Promise.all([before, after]);
+  });
+
+  it("an aborted caller stops waiting on a shared fetch", async () => {
+    const u = unit("Called off.");
+    const hash = await sha256(u.text);
+    stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () => new Promise<Response>(() => {}),
+    });
+    const controller = new AbortController();
+
+    const audio = pageAudio(DOC, u, { signal: controller.signal });
+    await settle();
+    controller.abort();
+
+    await expect(audio).rejects.toMatchObject({ name: "AbortError" });
+    expect(synth.synthesizeSpeech).not.toHaveBeenCalled();
+  });
+
   it("a fetch landing after wipeCache does not mark the unit ready", async () => {
     const u = unit("Slow fetch.");
     const hash = await sha256(u.text);

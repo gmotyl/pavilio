@@ -27,6 +27,13 @@
  * neither uploaded nor recorded. Every scope carries a generation — one per
  * page plus one global — taken when the work starts and checked before
  * anything lands.
+ *
+ * Concurrent asks for one unit (the run's lookahead warm and its ladder, a
+ * preload and a Play) share one disk fetch and one upload: both are keyed by
+ * generation and URL, so a clear or a wipe never hands a flight from before it
+ * to a caller after it. The synthesis itself is not shared here — each caller
+ * asks `synth.ts` on its own tier and signal, which is what lets a run promote
+ * a unit a preload queued, and the library dedupes the flight.
  */
 import { resetSpeechCache, synthesizeSpeech, SPEECH_AUDIO_MIME_TYPE, type SpeechSynthesisOptions } from "./synth";
 import type { SpeechCacheState } from "./synth";
@@ -54,6 +61,10 @@ let globalGeneration = 0;
 /** Upload failure kinds already warned about, so a broken server warns once per kind. */
 const warnedKinds = new Set<string>();
 const listeners = new Set<() => void>();
+/** `generation\0url` → the disk fetch in flight: its bytes, or `null` for a miss. */
+const fetching = new Map<string, Promise<ArrayBuffer | null>>();
+/** `generation\0url` of every upload in flight, so a unit synthesized twice uploads once. */
+const uploading = new Set<string>();
 
 async function sha256Hex(text: string): Promise<string> {
   const known = hashes.get(text);
@@ -187,25 +198,53 @@ export async function pageAudio(
   if (held) return held;
 
   const url = `${BASE_URL}/${page}/${hash}`;
-  try {
-    const res = await send(url, { signal: options.signal });
-    const bytes = await res.arrayBuffer();
-    if (bytes.byteLength > 0) {
+  const cached = await untilAborted(diskFetch(docKey, gen, url, hash), options.signal);
+  if (cached) return cached;
+
+  const bytes = await synthesizeSpeech(unit.text, options);
+  if (gen === generation(docKey)) void upload(docKey, gen, url, hash, bytes);
+  return bytes;
+}
+
+/**
+ * The unit's bytes from disk, or `null` for a miss of any kind (network, 404,
+ * 503, empty body). Shared by every caller asking in the same generation, so
+ * it carries no caller's signal: a local GET is cheap to let finish, and each
+ * caller stops waiting on its own signal instead ({@link untilAborted}).
+ */
+function diskFetch(docKey: string, gen: string, url: string, hash: string): Promise<ArrayBuffer | null> {
+  const key = `${gen}\0${url}`;
+  const inFlight = fetching.get(key);
+  if (inFlight) return inFlight;
+  const flight = (async (): Promise<ArrayBuffer | null> => {
+    try {
+      const bytes = await (await send(url)).arrayBuffer();
+      if (bytes.byteLength === 0) return null;
       if (gen === generation(docKey)) {
         entries(listed, docKey).set(hash, bytes.byteLength);
         entries(inHand, docKey).set(hash, bytes);
         notify();
       }
       return bytes;
+    } catch {
+      return null;
+    } finally {
+      fetching.delete(key);
     }
-  } catch {
-    // Any failure is a miss — unless the caller gave up, which synthesis would only repeat.
-    if (options.signal?.aborted) throw options.signal.reason;
-  }
+  })();
+  fetching.set(key, flight);
+  return flight;
+}
 
-  const bytes = await synthesizeSpeech(unit.text, options);
-  if (gen === generation(docKey)) void upload(docKey, gen, url, hash, bytes);
-  return bytes;
+/** `work`, unless `signal` aborts first — then its reason, as `fetch` would reject. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 async function upload(
@@ -215,6 +254,10 @@ async function upload(
   hash: string,
   bytes: ArrayBuffer,
 ): Promise<void> {
+  const key = `${gen}\0${url}`;
+  // Another caller's upload of this unit is out, or has landed already.
+  if (uploading.has(key) || inHand.get(docKey)?.has(hash)) return;
+  uploading.add(key);
   try {
     await send(url, {
       method: "PUT",
@@ -228,6 +271,8 @@ async function upload(
     const kind = err instanceof Error && / answered (\d+)$/.exec(err.message)?.[1];
     warnOnce(kind ? `http ${kind}` : "network", err);
     return;
+  } finally {
+    uploading.delete(key);
   }
   if (gen !== generation(docKey)) return;
   entries(listed, docKey).set(hash, bytes.byteLength);
@@ -339,4 +384,6 @@ export function __resetPageCacheForTests(): void {
   globalGeneration = 0;
   warnedKinds.clear();
   listeners.clear();
+  fetching.clear();
+  uploading.clear();
 }
