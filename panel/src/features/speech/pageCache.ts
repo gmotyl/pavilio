@@ -218,7 +218,9 @@ export async function prunePage(docKey: string, units: readonly SpeechUnit[]): P
 /**
  * The unit's audio: from disk when the server holds it, otherwise synthesized
  * and uploaded in the background. A fetch failure of any kind (network, 404,
- * 503, empty body) is a miss; an upload failure never rejects. Like
+ * 503, empty body) is a miss; an upload failure never rejects. A miss that
+ * lands after the page was cleared (or the cache wiped) rejects with an
+ * `AbortError` instead of synthesizing — the clear stopped that run. Like
  * `synthesizeSpeech`, the buffer may be handed out again — wrap it with
  * `toSpeechBlob` (which copies) and never detach or transfer it.
  */
@@ -236,6 +238,10 @@ export async function pageAudio(
   const url = `${BASE_URL}/${page}/${hash}`;
   const cached = await untilAborted(diskFetch(docKey, gen, url, hash), options.signal);
   if (cached) return cached;
+  // A clear or a wipe landed while the GET was out: the run that asked was
+  // stopped by it, and synthesizing now would refill the speech cache the
+  // clear just rebuilt.
+  if (gen !== generation(docKey)) throw new DOMException("page cache cleared while fetching", "AbortError");
 
   const bytes = await synthesizeSpeech(unit.text, options);
   if (gen === generation(docKey)) void upload(docKey, gen, url, hash, bytes);

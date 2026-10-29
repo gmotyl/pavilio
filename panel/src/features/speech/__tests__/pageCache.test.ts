@@ -229,6 +229,44 @@ describe("pageAudio", () => {
     await Promise.all([before, after]);
   });
 
+  it("a miss landing after clearPage does not synthesize", async () => {
+    const u = unit("Missed after clear.");
+    const hash = await sha256(u.text);
+    let answer: (res: Response) => void = () => {};
+    stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () => new Promise<Response>((resolve) => (answer = resolve)),
+      [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 204 }),
+    });
+
+    const audio = pageAudio(DOC, u, {});
+    await settle();
+    await clearPage(DOC);
+    answer(new Response(null, { status: 404 }));
+
+    // The run that asked was stopped by the clear; synthesizing now would
+    // refill the speech cache the clear just rebuilt.
+    await expect(audio).rejects.toMatchObject({ name: "AbortError" });
+    expect(synth.synthesizeSpeech).not.toHaveBeenCalled();
+  });
+
+  it("a miss landing after wipeCache does not synthesize", async () => {
+    const u = unit("Missed after wipe.");
+    const hash = await sha256(u.text);
+    let answer: (res: Response) => void = () => {};
+    stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () => new Promise<Response>((resolve) => (answer = resolve)),
+      [`DELETE ${BASE}`]: () => Response.json({ pages: 0, units: 0, bytes: 0 }),
+    });
+
+    const audio = pageAudio(DOC, u, {});
+    await settle();
+    await wipeCache();
+    answer(new Response(null, { status: 404 }));
+
+    await expect(audio).rejects.toMatchObject({ name: "AbortError" });
+    expect(synth.synthesizeSpeech).not.toHaveBeenCalled();
+  });
+
   it("an aborted caller stops waiting on a shared fetch", async () => {
     const u = unit("Called off.");
     const hash = await sha256(u.text);
