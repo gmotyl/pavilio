@@ -5,7 +5,7 @@ import { usePreference } from "../../preferences/usePreference";
 import { formatBytes } from "./formatBytes";
 import { clearPage, pageCachedShare, subscribePageCache } from "./pageCache";
 import { SpeechTransport } from "./SpeechTransport";
-import { RUN_HOLDS_ELEMENT, usePanelSpeech } from "./SpeechHostProvider";
+import { usePageSpeech, usePanelSpeech } from "./SpeechHostProvider";
 import { voiceForDocKey } from "./voices";
 
 const LABEL_STYLE = {
@@ -55,6 +55,7 @@ export interface DocumentSpeechBarProps {
  */
 export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBarProps) {
   const speech = usePanelSpeech();
+  const pageSpeech = usePageSpeech();
   const state = speech.stateFor(docKey);
   const units = speech.unitsFor(docKey);
   // External stores, not fields — see the cell bar for why the playhead is.
@@ -85,10 +86,12 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
 
   const clearCache = async (): Promise<void> => {
     // The run goes first, so nothing it plays or warms lands after the clear.
-    // `onStop`, not `stopDocument`: the latter also forgets the page — its
+    // A stop, not `stopDocument`: the latter also forgets the page — its
     // utterance, preparation and units — which would empty this very bar's
     // scrubber. Clearing the cache stops the audio; the page stays loaded.
-    if (RUN_HOLDS_ELEMENT.has(state)) speech.onStop(docKey);
+    // Only when the page's run owns the player: an answer playing while the
+    // page merely warms keeps speaking.
+    pageSpeech.stopPageRun(docKey);
     setClearing(true);
     try {
       await clearPage(docKey);

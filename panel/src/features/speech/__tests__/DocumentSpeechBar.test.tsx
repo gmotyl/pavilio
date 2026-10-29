@@ -59,7 +59,7 @@ vi.mock("../useSpeechHost", () => {
 vi.mock("../useMediaSessionTransport", () => ({ useMediaSessionTransport: () => {} }));
 vi.mock("../useSpeechKeys", () => ({ useSpeechKeys: () => {} }));
 
-import { SpeechHostProvider } from "../SpeechHostProvider";
+import { SpeechHostProvider, usePageSpeech } from "../SpeechHostProvider";
 import { DocumentSpeechBar } from "../DocumentSpeechBar";
 import { SpeechControlBar } from "../../terminal/SpeechControlBar";
 
@@ -245,6 +245,7 @@ describe("DocumentSpeechBar", () => {
     cache.share = { cached: 2, bytes: 4096 };
     renderBar({
       stateFor: () => "speaking",
+      speakingSessionId: KEY,
       unitsFor: () => unitList(3),
       progressFor: () => PLAYING_FIRST,
     });
@@ -254,6 +255,71 @@ describe("DocumentSpeechBar", () => {
     expect(cache.clearPage).toHaveBeenCalledWith(KEY);
     await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? false).toBe(false));
     expect(getAlertsSnapshot()).toHaveLength(0);
+  });
+
+  it("clear cache on a page that is only warming does not stop the answer playing", async () => {
+    cache.share = { cached: 2, bytes: 4096 };
+    // The page's first unit is warming in the background ("preparing") while
+    // a terminal answer owns the player.
+    renderBar({
+      stateFor: (key) => (key === KEY ? "preparing" : "speaking"),
+      speakingSessionId: "cell-a",
+      unitsFor: () => unitList(3),
+    });
+
+    fireEvent.click(clearButton()!);
+
+    expect(stub.host?.onStop).not.toHaveBeenCalled();
+    expect(cache.clearPage).toHaveBeenCalledWith(KEY);
+    await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? false).toBe(false));
+  });
+
+  it("stopPageRuns stops only an open page that owns the player", () => {
+    const OTHER = "doc:pavilio/wiki/other.md";
+    stub.host = makeSpeech({
+      // Both pages read as holding the element; only OTHER's run owns it.
+      stateFor: (key) => (key === KEY ? "preparing" : "speaking"),
+      speakingSessionId: OTHER,
+    });
+    let pages: ReturnType<typeof usePageSpeech> | null = null;
+    function Probe() {
+      pages = usePageSpeech();
+      return null;
+    }
+    render(
+      <Host>
+        <Probe />
+      </Host>,
+    );
+    act(() => {
+      pages!.speakDocument({ key: KEY, text: "Page one." });
+      pages!.speakDocument({ key: OTHER, text: "Page two." });
+    });
+
+    act(() => pages!.stopPageRuns());
+    expect(stub.host.onStop).toHaveBeenCalledTimes(1);
+    expect(stub.host.onStop).toHaveBeenCalledWith(OTHER);
+  });
+
+  it("stopPageRuns leaves an answer playing while a page only warms", () => {
+    stub.host = makeSpeech({
+      stateFor: (key) => (key === KEY ? "preparing" : "speaking"),
+      speakingSessionId: "cell-a",
+    });
+    let pages: ReturnType<typeof usePageSpeech> | null = null;
+    function Probe() {
+      pages = usePageSpeech();
+      return null;
+    }
+    render(
+      <Host>
+        <Probe />
+      </Host>,
+    );
+    act(() => pages!.speakDocument({ key: KEY, text: "Page one." }));
+
+    act(() => pages!.stopPageRuns());
+    expect(stub.host.onStop).not.toHaveBeenCalled();
   });
 
   it("a failed clear raises the alert", async () => {

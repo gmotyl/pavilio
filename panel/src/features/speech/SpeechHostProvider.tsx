@@ -39,19 +39,7 @@ import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessionTransport";
 import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
-import type { CellSpeechState, GridSpeech, Utterance } from "./types";
-
-/**
- * The states in which a key's run holds the element, so there is a run to
- * stop. Anything else stops nothing: `onStop` silences whatever plays, and a
- * cell that barged in on a page must keep speaking.
- */
-export const RUN_HOLDS_ELEMENT: ReadonlySet<CellSpeechState> = new Set([
-  "preparing",
-  "speaking",
-  "stalled",
-  "paused",
-]);
+import type { GridSpeech, Utterance } from "./types";
 
 /**
  * {@link PageSpeech} as the provider publishes it: the host's pair, plus what
@@ -59,8 +47,17 @@ export const RUN_HOLDS_ELEMENT: ReadonlySet<CellSpeechState> = new Set([
  */
 export interface PanelPageSpeech extends PageSpeech {
   /**
-   * Stops whichever open page's run holds the element — a cache wipe's first
-   * step, so nothing the run plays or warms lands after it. `onStop`, not
+   * Stops the page's run if — and only if — it owns the player: the host's
+   * speaking session is this key. A clear's first step, so nothing the run
+   * plays or warms lands after it. Ownership, not the key's state: a page's
+   * first unit warming in the background reads `preparing` while an answer
+   * owns the player, and `onStop` silences whatever plays.
+   */
+  stopPageRun(key: string): void;
+  /**
+   * Stops the open page whose run owns the player, if any — a cache wipe's
+   * first step, so nothing the run plays or warms lands after it. An answer
+   * owning the player keeps speaking. `onStop`, not
    * `stopDocument`: the page stays loaded, only its audio stops.
    */
   stopPageRuns(): void;
@@ -263,11 +260,11 @@ export function SpeechHostProvider({
   // LAYOUT effect, not a passive one: a page calls these from its own effects,
   // and a child's passive effect runs before its parent's, so a passive mirror
   // would hand it the host of the render before.
-  const { speakDocument, stopDocument, stateFor, onStop } = speech;
-  const pageHostRef = useRef({ speakDocument, stopDocument, stateFor, onStop });
+  const { speakDocument, stopDocument, onStop, speakingSessionId } = speech;
+  const pageHostRef = useRef({ speakDocument, stopDocument, onStop, speakingSessionId });
   useLayoutEffect(() => {
-    pageHostRef.current = { speakDocument, stopDocument, stateFor, onStop };
-  }, [speakDocument, stopDocument, stateFor, onStop]);
+    pageHostRef.current = { speakDocument, stopDocument, onStop, speakingSessionId };
+  }, [speakDocument, stopDocument, onStop, speakingSessionId]);
   const [pageSpeech] = useState<PanelPageSpeech>(() => ({
     speakDocument: (input) => {
       openPagesRef.current.add(input.key);
@@ -277,11 +274,14 @@ export function SpeechHostProvider({
       pageHostRef.current.stopDocument(key);
       openPagesRef.current.delete(key);
     },
+    stopPageRun: (key) => {
+      const host = pageHostRef.current;
+      if (host.speakingSessionId === key) host.onStop(key);
+    },
     stopPageRuns: () => {
       const host = pageHostRef.current;
-      for (const key of openPagesRef.current) {
-        if (RUN_HOLDS_ELEMENT.has(host.stateFor(key))) host.onStop(key);
-      }
+      const owner = host.speakingSessionId;
+      if (owner !== null && openPagesRef.current.has(owner)) host.onStop(owner);
     },
   }));
 

@@ -159,7 +159,11 @@ describe("PageCacheSettings", () => {
     const idle = "doc:pavilio/wiki/idle.md";
     const onStop = vi.fn();
     mount(
-      { stateFor: (key: string) => (key === playing ? "speaking" : "ready"), onStop },
+      {
+        stateFor: (key: string) => (key === playing ? "speaking" : "ready"),
+        speakingSessionId: playing,
+        onStop,
+      },
       [playing, idle],
     );
     await screen.findByText("38 pages · 1,204 units · 46.3 MB");
