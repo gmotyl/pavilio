@@ -1,0 +1,342 @@
+/**
+ * The browser side of the page audio cache: a page's units, once synthesized,
+ * are kept on the panel server (`/api/speech/page-cache`) so the next Play of
+ * the same page answers from disk instead of the engine.
+ *
+ * This module sits beside the seam and never builds an anytts instance —
+ * `synth.ts` stays the only synthesizer. A page is addressed by the SHA-256
+ * hex of its doc key, a unit by the SHA-256 hex of its `text`.
+ *
+ * Two things are kept per page, keyed by the doc key itself:
+ * - the *listed* units — what the server holds (hash → size), from the list
+ *   fetch, a fetched hit or a landed upload;
+ * - the units *in hand* — their bytes, fetched or uploaded this session.
+ * A listed unit is `warming` until its bytes are in hand, then `ready`. Both
+ * are dropped when the page is cleared or the cache wiped, so bytes are held
+ * no longer than the page's cache lives.
+ *
+ * Hashing is async (`crypto.subtle`) but {@link pageUnitState} and
+ * {@link pageCachedShare} are read on render, so they are synchronous: each
+ * text's hash is memoized once computed, and a unit whose text has not been
+ * hashed yet reads as unknown (not cached). {@link prunePage} hashes every
+ * current unit, and the page run calls it right after {@link loadPageList},
+ * so from then on the page's units answer synchronously.
+ *
+ * Clearing races in-flight work: a synthesis or fetch that lands after its
+ * page was cleared (or the cache wiped) still answers its caller, but is
+ * neither uploaded nor recorded. Every scope carries a generation — one per
+ * page plus one global — taken when the work starts and checked before
+ * anything lands.
+ */
+import { resetSpeechCache, synthesizeSpeech, SPEECH_AUDIO_MIME_TYPE, type SpeechSynthesisOptions } from "./synth";
+import type { SpeechCacheState } from "./synth";
+import type { SpeechUnit } from "./types";
+
+/** What the server reports for the whole cache — and what a wipe freed. */
+export interface PageCacheTotals {
+  pages: number;
+  units: number;
+  bytes: number;
+}
+
+const BASE_URL = "/api/speech/page-cache";
+
+/** text (or doc key) → its SHA-256 hex. Content-derived, so never invalidated. */
+const hashes = new Map<string, string>();
+/** doc key → unit hash → size on disk. */
+const listed = new Map<string, Map<string, number>>();
+/** doc key → unit hash → bytes in hand. */
+const inHand = new Map<string, Map<string, ArrayBuffer>>();
+/** doc key → generation, bumped by a clear of that page. */
+const pageGenerations = new Map<string, number>();
+/** Bumped by a wipe, which clears every page at once. */
+let globalGeneration = 0;
+/** Upload failure kinds already warned about, so a broken server warns once per kind. */
+const warnedKinds = new Set<string>();
+const listeners = new Set<() => void>();
+
+async function sha256Hex(text: string): Promise<string> {
+  const known = hashes.get(text);
+  if (known) return known;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  hashes.set(text, hex);
+  return hex;
+}
+
+function generation(docKey: string): string {
+  return `${globalGeneration}:${pageGenerations.get(docKey) ?? 0}`;
+}
+
+function entries<V>(maps: Map<string, Map<string, V>>, docKey: string): Map<string, V> {
+  let map = maps.get(docKey);
+  if (!map) {
+    map = new Map();
+    maps.set(docKey, map);
+  }
+  return map;
+}
+
+/**
+ * Tells subscribers the answers changed. Iterates a snapshot and logs a
+ * throwing listener instead of re-throwing — the same round `synth.ts` runs.
+ */
+function notify(): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener();
+    } catch (err) {
+      console.error("[speech] page cache listener threw; continuing the round", err);
+    }
+  }
+}
+
+/** Subscribes to page cache changes; returns the unsubscribe. */
+export function subscribePageCache(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** A failed response as an error naming its status, or the thrown error as is. */
+async function send(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${url} answered ${res.status}`);
+  return res;
+}
+
+/**
+ * Fills the page's listed units from the server. A failed list leaves the
+ * page with nothing cached: playback then synthesizes as if there were no
+ * cache.
+ */
+export async function loadPageList(docKey: string): Promise<void> {
+  const gen = generation(docKey);
+  const page = await sha256Hex(docKey);
+  let units: Map<string, number>;
+  try {
+    const body: unknown = await (await send(`${BASE_URL}/${page}`)).json();
+    units = new Map(listedUnits(body));
+  } catch {
+    units = new Map();
+  }
+  if (gen !== generation(docKey)) return;
+  listed.set(docKey, units);
+  // Bytes in hand for a unit the server no longer holds would read `ready` for a miss.
+  const held = inHand.get(docKey);
+  if (held) for (const hash of held.keys()) if (!units.has(hash)) held.delete(hash);
+  notify();
+}
+
+function listedUnits(body: unknown): [string, number][] {
+  const units = (body as { units?: unknown } | null)?.units;
+  if (!Array.isArray(units)) throw new Error("not a unit list");
+  return units
+    .filter(
+      (u): u is { hash: string; bytes: number } =>
+        typeof u?.hash === "string" && typeof u?.bytes === "number",
+    )
+    .map((u) => [u.hash, u.bytes]);
+}
+
+/**
+ * Tells the server to keep only the page's current units, and mirrors that
+ * locally. Hashes every unit on the way, which is what lets the synchronous
+ * readers answer for them. A failed prune is ignored: the orphans wait for the
+ * next Play.
+ */
+export async function prunePage(docKey: string, units: readonly SpeechUnit[]): Promise<void> {
+  const gen = generation(docKey);
+  const page = await sha256Hex(docKey);
+  const keep = await Promise.all(units.map((unit) => sha256Hex(unit.text)));
+  try {
+    await send(`${BASE_URL}/${page}/prune`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keep }),
+    });
+  } catch {
+    // The unit hashes are memoized either way, so the readers still answer.
+    notify();
+    return;
+  }
+  if (gen !== generation(docKey)) return;
+  const kept = new Set(keep);
+  for (const map of [listed.get(docKey), inHand.get(docKey)]) {
+    if (map) for (const hash of map.keys()) if (!kept.has(hash)) map.delete(hash);
+  }
+  notify();
+}
+
+/**
+ * The unit's audio: from disk when the server holds it, otherwise synthesized
+ * and uploaded in the background. A fetch failure of any kind (network, 404,
+ * 503, empty body) is a miss; an upload failure never rejects. Like
+ * `synthesizeSpeech`, the buffer may be handed out again — wrap it with
+ * `toSpeechBlob` (which copies) and never detach or transfer it.
+ */
+export async function pageAudio(
+  docKey: string,
+  unit: SpeechUnit,
+  options: SpeechSynthesisOptions,
+): Promise<ArrayBuffer> {
+  const gen = generation(docKey);
+  const [page, hash] = await Promise.all([sha256Hex(docKey), sha256Hex(unit.text)]);
+  const held = inHand.get(docKey)?.get(hash);
+  if (held) return held;
+
+  const url = `${BASE_URL}/${page}/${hash}`;
+  try {
+    const res = await send(url, { signal: options.signal });
+    const bytes = await res.arrayBuffer();
+    if (bytes.byteLength > 0) {
+      if (gen === generation(docKey)) {
+        entries(listed, docKey).set(hash, bytes.byteLength);
+        entries(inHand, docKey).set(hash, bytes);
+        notify();
+      }
+      return bytes;
+    }
+  } catch {
+    // Any failure is a miss — unless the caller gave up, which synthesis would only repeat.
+    if (options.signal?.aborted) throw options.signal.reason;
+  }
+
+  const bytes = await synthesizeSpeech(unit.text, options);
+  if (gen === generation(docKey)) void upload(docKey, gen, url, hash, bytes);
+  return bytes;
+}
+
+async function upload(
+  docKey: string,
+  gen: string,
+  url: string,
+  hash: string,
+  bytes: ArrayBuffer,
+): Promise<void> {
+  try {
+    await send(url, {
+      method: "PUT",
+      // The server parses JSON bodies globally; audio must not look like JSON.
+      // The doc key is percent-encoded: a header value must be Latin-1, and
+      // page paths may be anything.
+      headers: { "Content-Type": SPEECH_AUDIO_MIME_TYPE, "x-doc-key": encodeURIComponent(docKey) },
+      body: bytes,
+    });
+  } catch (err) {
+    const kind = err instanceof Error && / answered (\d+)$/.exec(err.message)?.[1];
+    warnOnce(kind ? `http ${kind}` : "network", err);
+    return;
+  }
+  if (gen !== generation(docKey)) return;
+  entries(listed, docKey).set(hash, bytes.byteLength);
+  entries(inHand, docKey).set(hash, bytes);
+  notify();
+}
+
+function warnOnce(kind: string, err: unknown): void {
+  if (warnedKinds.has(kind)) return;
+  warnedKinds.add(kind);
+  console.warn(`[speech] page cache upload failed (${kind}); playback is unaffected`, err);
+}
+
+/**
+ * Where the unit stands on disk: `ready` with its bytes in hand, `warming`
+ * while listed but not yet fetched, `undefined` when it is not on disk (or its
+ * text has not been hashed yet) — then ask `speechCacheState`. `cold` is part
+ * of the shared vocabulary but never answered here: a unit not on disk is the
+ * synthesizer's to describe.
+ */
+export function pageUnitState(docKey: string, unit: SpeechUnit): SpeechCacheState | undefined {
+  const hash = hashes.get(unit.text);
+  if (!hash) return undefined;
+  if (inHand.get(docKey)?.has(hash)) return "ready";
+  if (listed.get(docKey)?.has(hash)) return "warming";
+  return undefined;
+}
+
+/** How many of `units` the server holds for the page, and their size — the bar's "N of M cached · size". */
+export function pageCachedShare(
+  docKey: string,
+  units: readonly SpeechUnit[],
+): { cached: number; bytes: number } {
+  const onDisk = listed.get(docKey);
+  let cached = 0;
+  let bytes = 0;
+  if (!onDisk) return { cached, bytes };
+  for (const unit of units) {
+    const hash = hashes.get(unit.text);
+    const size = hash === undefined ? undefined : onDisk.get(hash);
+    if (size === undefined) continue;
+    cached += 1;
+    bytes += size;
+  }
+  return { cached, bytes };
+}
+
+/**
+ * Drops the page from disk and from memory. The local state is emptied and
+ * the in-memory speech cache rebuilt even when the server call fails, so the
+ * next Play cannot answer from memory; the failure still rejects, with its
+ * reason, for the caller to alert.
+ */
+export async function clearPage(docKey: string): Promise<void> {
+  pageGenerations.set(docKey, (pageGenerations.get(docKey) ?? 0) + 1);
+  listed.delete(docKey);
+  inHand.delete(docKey);
+  try {
+    await send(`${BASE_URL}/${await sha256Hex(docKey)}`, { method: "DELETE" });
+  } finally {
+    // Again after the await: work that started meanwhile is dropped too.
+    pageGenerations.set(docKey, (pageGenerations.get(docKey) ?? 0) + 1);
+    listed.delete(docKey);
+    inHand.delete(docKey);
+    resetSpeechCache();
+    notify();
+  }
+}
+
+/** The whole cache's totals; rejects when the server cannot say. */
+export async function cacheTotals(): Promise<PageCacheTotals> {
+  return toTotals(await (await send(BASE_URL)).json());
+}
+
+/**
+ * Empties the whole cache, on disk and in memory, and resolves to what it
+ * freed. Like {@link clearPage}, memory is emptied and the speech cache
+ * rebuilt even when the server call fails.
+ */
+export async function wipeCache(): Promise<PageCacheTotals> {
+  globalGeneration += 1;
+  listed.clear();
+  inHand.clear();
+  try {
+    return toTotals(await (await send(BASE_URL, { method: "DELETE" })).json());
+  } finally {
+    globalGeneration += 1;
+    listed.clear();
+    inHand.clear();
+    resetSpeechCache();
+    notify();
+  }
+}
+
+function toTotals(body: unknown): PageCacheTotals {
+  const t = body as Partial<PageCacheTotals> | null;
+  if (typeof t?.pages !== "number" || typeof t.units !== "number" || typeof t.bytes !== "number") {
+    throw new Error("page cache totals malformed");
+  }
+  return { pages: t.pages, units: t.units, bytes: t.bytes };
+}
+
+/** Test-only: forgets every page, hash, warning and listener. */
+export function __resetPageCacheForTests(): void {
+  hashes.clear();
+  listed.clear();
+  inHand.clear();
+  pageGenerations.clear();
+  globalGeneration = 0;
+  warnedKinds.clear();
+  listeners.clear();
+}
