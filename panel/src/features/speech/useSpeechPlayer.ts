@@ -18,7 +18,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { synthesizeSpeech, toSpeechBlob } from "./synth";
+import { toSpeechBlob } from "./synth";
+import { unitAudio } from "./unitAudio";
 import type { SpeechUnit } from "./types";
 
 /**
@@ -296,7 +297,8 @@ function hasLoadedUnit(element: HTMLAudioElement): boolean {
 }
 
 /**
- * Synthesizes one unit and wraps it in an object URL. Failures resolve as
+ * Synthesizes one unit — a page's through its audio cache, see `unitAudio` —
+ * and wraps it in an object URL. Failures resolve as
  * `{ error }` rather than rejecting, so the caller decides between skipping the
  * unit and stopping the run, and a lookahead started for a run that is
  * afterwards abandoned cannot become an unhandled rejection.
@@ -311,7 +313,7 @@ async function loadUnit(
     // The voice is always explicit: `synth.ts` keeps a private
     // `DEFAULT_VOICE = "en-GB-RyanNeural"` from motyl, so an omitted voice
     // silently overrides the panel's default voice.
-    const buffer = await synthesizeSpeech(units[index].text, { voice, lang: units[index].lang });
+    const buffer = await unitAudio(run.sessionId, units[index], { voice, lang: units[index].lang });
     // `toSpeechBlob` copies the cached buffer. Wrapping it by hand would hand
     // the same ArrayBuffer out twice and detach it on the second playback.
     const url = URL.createObjectURL(toSpeechBlob(buffer));
@@ -357,7 +359,9 @@ function cascadeWarm(
 ): void {
   const { signal } = run.cascade;
   for (let index = from; index < end; index += 1) {
-    synthesizeSpeech(units[index].text, { voice, lang: units[index].lang, tier: "run", signal }).catch(() => {
+    // A page's units through its audio cache (`unitAudio`): one on disk is
+    // fetched rather than synthesized, and the ladder then finds it in hand.
+    unitAudio(run.sessionId, units[index], { voice, lang: units[index].lang, tier: "run", signal }).catch(() => {
       // Best-effort: the unit is synthesized for real when the ladder reaches
       // it, and that is where a failure gets reported.
     });

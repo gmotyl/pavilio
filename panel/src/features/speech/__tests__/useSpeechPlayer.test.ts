@@ -189,6 +189,24 @@ vi.mock("../synth", () => ({
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 }));
 
+/**
+ * The page audio cache, mocked: a doc-key run gets its bytes from `pageAudio`,
+ * which here answers from disk — the same buffer the fake synthesizer would
+ * build, without ever asking it. An answer run must never reach it.
+ */
+const pageCache = vi.hoisted(() => ({
+  pageAudio: vi.fn(
+    async (_docKey: string, unit: { text: string }, _options?: unknown): Promise<ArrayBuffer> =>
+      unitBuffer(unit.text),
+  ),
+}));
+/** Late-bound: `synth` is hoisted alongside, and only read once a test runs. */
+function unitBuffer(text: string): ArrayBuffer {
+  return synth.bufferFor(text);
+}
+
+vi.mock("../pageCache", () => ({ pageAudio: pageCache.pageAudio }));
+
 import { drain, settle } from "./speech.harness";
 import type { SpeechPlaybackError, SpeechPlayer } from "../useSpeechPlayer";
 import { useSpeechPlayer } from "../useSpeechPlayer";
@@ -326,6 +344,7 @@ const inOrder = (urls: readonly string[]): string[] => [...urls].sort();
 
 beforeEach(() => {
   synth.reset();
+  pageCache.pageAudio.mockClear();
   elements.length = 0;
   played.length = 0;
   createdUrls.length = 0;
@@ -838,6 +857,45 @@ describe("useSpeechPlayer", () => {
 
     await endCurrentUnit();
     expect(played).toEqual(["blob:unit-2", "blob:unit-3"]);
+  });
+
+  it("a doc run loads units through pageAudio", async () => {
+    const DOC = "doc:p/wiki/page.md";
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSpeechPlayer({ onError, voiceFor: voiceForSession }));
+    const page = units("unit-0", "unit-1", "unit-2");
+
+    await startPlay(result.current, DOC, page);
+    await endCurrentUnit();
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1", "blob:unit-2"]);
+    // Every unit — the ladder's and the lookahead warm's — comes from the page
+    // cache, keyed by the doc key, in the run's voice and on the run tier's
+    // signal where it has one; the synthesizer itself is never asked.
+    const asked = pageCache.pageAudio.mock.calls;
+    expect(new Set(asked.map(([key]) => key))).toEqual(new Set([DOC]));
+    expect(new Set(asked.map(([, unit]) => unit.text))).toEqual(
+      new Set(["unit-0", "unit-1", "unit-2"]),
+    );
+    for (const [, , options] of asked) {
+      expect(options).toMatchObject({ voice: voiceForSession(DOC) });
+    }
+    expect(synth.calls).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("an answer run never touches the page cache", async () => {
+    const { result } = renderHook(() => useSpeechPlayer({ voiceFor: voiceForSession }));
+
+    await startPlay(result.current, "cell-a", units("unit-0", "unit-1", "unit-2"));
+    await endCurrentUnit();
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    expect(played).toEqual(["blob:unit-0", "blob:unit-1", "blob:unit-2"]);
+    expect(pageCache.pageAudio).not.toHaveBeenCalled();
   });
 
   it("reports a refused start instead of failing silently", async () => {

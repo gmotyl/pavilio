@@ -64,7 +64,9 @@ import { speechFailureAlert } from "./failureAlert";
 import { voteLanguage } from "./language";
 import { prepare } from "./prepare";
 import { pageSpeechText } from "./pageText";
-import { isSpeechSynthesized, synthesizeSpeech } from "./synth";
+import { loadPageList, pageUnitState, prunePage } from "./pageCache";
+import { isSpeechSynthesized } from "./synth";
+import { unitAudio } from "./unitAudio";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
@@ -167,8 +169,13 @@ export interface PageSpeech {
    * (`pageSpeechText`) — as its key's one utterance (id = that text's hash)
    * and starts it: unit 0 is asked for at once, the key is preparing until it
    * is in hand, and whatever else was speaking is barged in on.
+   *
+   * `startUnit` starts the run there instead of at unit 0 — the ▶ on a page
+   * block. Clamped into the page's units (a non-number reads as 0), as a
+   * segment click is. With the page already playing it is a jump: the same
+   * utterance restarts at that unit, as a segment click restarts it.
    */
-  speakDocument(input: { key: string; text: string }): void;
+  speakDocument(input: { key: string; text: string; startUnit?: number }): void;
   /** Stops the page's run, if it holds the element, and forgets the page. */
   stopDocument(key: string): void;
 }
@@ -732,16 +739,20 @@ export function useSpeechHost({
       // waiting in a queue is a cell waiting for its audio.
       setPreparing(utterance.sessionId, true);
 
-      // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
-      // whole point here — it is what says when the cell stops being red — and
-      // a fire-and-forget warm cannot be reported on. The failure is swallowed
-      // exactly as `prefetchSpeech` swallows it.
+      // `unitAudio` (a `synthesizeSpeech` underneath) rather than
+      // `prefetchSpeech`: the promise is the whole point here — it is what says
+      // when the cell stops being red — and a fire-and-forget warm cannot be
+      // reported on. The failure is swallowed exactly as `prefetchSpeech`
+      // swallows it.
       //
       // The voice is the one the click will use — the session's, through its
       // project, from the same `voiceFor` `useSpeechPlayer` reads. The
       // cache keys on voice + text, so warming with any other one is a
       // synthesis nobody ever plays.
-      synthesizeSpeech(first.text, {
+      //
+      // A page's unit 0 goes through its audio cache (`unitAudio`), so one on
+      // disk is fetched rather than synthesized.
+      unitAudio(utterance.sessionId, first, {
         voice: voiceForRef.current(utterance.sessionId),
         lang: first.lang,
         tier: "warm",
@@ -793,14 +804,18 @@ export function useSpeechHost({
 
       for (let index = 1; index < units.length; index += 1) {
         const key = `${id}#${index}`;
-        const { text, lang } = units[index];
+        const unit = units[index];
+        const { text, lang } = unit;
         if (preloadedRef.current.has(key)) {
           // The synth cache is an LRU: a unit requested earlier may have been
           // evicted since, and Play would then pay for it. Requested but cold
           // now (`isSpeechSynthesized` is `speechCacheState !== "cold"`, so in
           // flight counts as held) -> ask again.
+          // A page's unit whose bytes the page cache holds is not evicted,
+          // whatever the synth LRU did.
           const evicted =
             preloadStartedRef.current.has(key) &&
+            !(isDocSpeechKey(sessionId) && pageUnitState(sessionId, unit) === "ready") &&
             !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId), lang });
           if (!evicted) continue;
           preloadStartedRef.current.delete(key);
@@ -813,7 +828,7 @@ export function useSpeechHost({
         const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
         const voice = voiceForRef.current(sessionId);
-        synthesizeSpeech(text, { voice, lang, tier: "preload", signal }).catch(
+        unitAudio(sessionId, unit, { voice, lang, tier: "preload", signal }).catch(
           (error: unknown) => {
             // Called off: whoever aborted already forgot the unit, and a late
             // rejection must not touch a fresh controller's bookkeeping.
@@ -1122,7 +1137,7 @@ export function useSpeechHost({
   }, []);
 
   const speakDocument = useCallback(
-    ({ key, text: source }: { key: string; text: string }): void => {
+    ({ key, text: source, startUnit = 0 }: { key: string; text: string; startUnit?: number }): void => {
       // The page's source as its surface loaded it; what is spoken — and
       // hashed into the id — is that source without its frontmatter.
       const text = pageSpeechText(source);
@@ -1161,11 +1176,23 @@ export function useSpeechHost({
         }
         return;
       }
+      // The page's cached units, then its orphans dropped: listed first, so
+      // the prune mirrors what the list loaded, and the prune hashes every
+      // unit, which is what lets the bar read their state synchronously. In
+      // the background, never awaited: unit 0 must not wait on two round trips,
+      // and `pageAudio` asks the server per unit anyway. Both swallow their own
+      // failures — an unreachable cache plays the page as if there were none,
+      // and raises nothing.
+      void loadPageList(key)
+        .then(() => prunePage(key, units))
+        .catch(() => {});
       // A local utterance is never warmed on arrival, so its unit 0 is warmed
       // here — the same warm the click then finds in flight, and the same red
       // until it lands.
       warmFirstUnit(utterance, units);
-      speakUtterance(key, utterance);
+      // `speakUtterance` clamps the index into the units, as it does a
+      // segment click's; a non-number has no unit to clamp to, so it is 0.
+      speakUtterance(key, utterance, Number.isFinite(startUnit) ? Math.trunc(startUnit) : 0);
     },
     [
       abortUtterance,
