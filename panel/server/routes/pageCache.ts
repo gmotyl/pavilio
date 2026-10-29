@@ -8,7 +8,8 @@ import { createPageCacheStore, HASH_RE, type PageCacheStore } from "../lib/speec
  *   DELETE /                 wipe the whole cache → the freed totals
  *   GET    /:page            { units: [{ hash, bytes }] }, empty for an unknown page
  *   GET    /:page/:unit      the MP3 (audio/mpeg) | 404
- *   PUT    /:page/:unit      raw body (≤ 5 MB, else 413), header x-doc-key → 204
+ *   PUT    /:page/:unit      raw body (≤ 5 MB, else 413), header x-doc-key
+ *                            (percent-encoded; malformed → 400) → 204
  *   POST   /:page/prune      { keep: string[] } → { removed }
  *   DELETE /:page            remove the page folder → 204
  *
@@ -87,9 +88,18 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
     // Any content type is taken as raw bytes (audio/mpeg, application/octet-stream, …).
     express.raw({ type: () => true, limit: MAX_UNIT_BYTES }),
     async (req, res) => {
-      const docKey = req.get("x-doc-key");
-      if (!docKey || !docKey.trim()) {
+      const rawDocKey = req.get("x-doc-key");
+      if (!rawDocKey || !rawDocKey.trim()) {
         res.status(400).json({ error: "x-doc-key header is required" });
+        return;
+      }
+      // The browser sends the key percent-encoded (fetch rejects non-Latin-1
+      // header values), so page.json stores the decoded, real doc key.
+      let docKey: string;
+      try {
+        docKey = decodeURIComponent(rawDocKey);
+      } catch {
+        res.status(400).json({ error: "x-doc-key must be a percent-encoded string" });
         return;
       }
       const body: unknown = req.body;

@@ -109,6 +109,18 @@ describe("/api/speech/page-cache", () => {
     expect(octet.status).toBe(204);
   });
 
+  it("an encoded doc key is stored decoded", async () => {
+    // The browser percent-encodes x-doc-key, since fetch rejects non-Latin-1 header values.
+    const app = loadApp();
+    const docKey = "doc:notatki/żółw.md";
+    expect((await put(app, PAGE, UNIT, MP3, encodeURIComponent(docKey))).status).toBe(204);
+    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toEqual({ docKey });
+
+    // A malformed escape is refused and nothing is written.
+    expect((await put(app, PAGE, OTHER, MP3, "doc%E0%A4%A")).status).toBe(400);
+    expect(await totals(app)).toEqual({ pages: 1, units: 1, bytes: MP3.length });
+  });
+
   it("get of an absent unit is 404", async () => {
     const app = loadApp();
     expect((await request(app).get(`${BASE}/${PAGE}/${UNIT}`).set("Cookie", COOKIE)).status).toBe(404);
