@@ -18,7 +18,8 @@ export function pageSpeechText(source: string): string {
 /**
  * Whether a page's source prepares to at least one unit. Language only picks
  * the pronunciation map, which never empties a unit, so the default is asked.
+ * Prepared block-bounded, as the host prepares every page.
  */
 export function pageHasSpeech(source: string): boolean {
-  return prepare(pageSpeechText(source)).units.length > 0;
+  return prepare(pageSpeechText(source), { blockBounded: true }).units.length > 0;
 }

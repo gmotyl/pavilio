@@ -640,7 +640,12 @@ export function useSpeechHost({
       const cached = preparedRef.current.get(utterance.id);
       if (cached) return cached;
 
-      const prepared = prepare(utterance.text, { language });
+      // A page (`doc:` key) packs block-bounded, so it can be started at any
+      // block; an answer packs as it always has.
+      const prepared = prepare(utterance.text, {
+        language,
+        blockBounded: isDocSpeechKey(utterance.sessionId),
+      });
       preparedRef.current.set(utterance.id, prepared);
       return prepared;
     },
