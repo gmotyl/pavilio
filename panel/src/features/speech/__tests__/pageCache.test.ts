@@ -314,6 +314,60 @@ describe("unit state and share", () => {
   });
 });
 
+describe("without crypto.subtle (plain-http origin)", () => {
+  /** An insecure context: `crypto` exists, `crypto.subtle` does not. */
+  function stubInsecureContext(): void {
+    vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  }
+
+  it("a page unit still plays via synthesis", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = stubFetch({});
+    stubInsecureContext();
+    const a = unit("First.");
+    const b = unit("Second.");
+
+    await expect(loadPageList(DOC)).resolves.toBeUndefined();
+    await expect(prunePage(DOC, [a, b])).resolves.toBeUndefined();
+    const bytes = await pageAudio(DOC, a, { voice: "v" });
+    await expect(pageAudio(DOC, b, { voice: "v" })).resolves.toBeInstanceOf(ArrayBuffer);
+    await settle();
+
+    expect(Array.from(new Uint8Array(bytes))).toEqual([9, 9]);
+    expect(synth.synthesizeSpeech).toHaveBeenCalledTimes(2);
+    expect(synth.synthesizeSpeech).toHaveBeenCalledWith(a.text, { voice: "v" });
+    // The cache steps aside entirely: no list, no prune, no fetch, no upload.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(pageUnitState(DOC, a)).toBeUndefined();
+    expect(pageCachedShare(DOC, [a, b])).toEqual({ cached: 0, bytes: 0 });
+  });
+
+  it("clearPage resets the speech cache and rejects with the reason", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = stubFetch({});
+    stubInsecureContext();
+
+    await expect(clearPage(DOC)).rejects.toThrow(/secure context/);
+
+    expect(synth.resetSpeechCache).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("wipeCache still works", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = stubFetch({
+      [`DELETE ${BASE}`]: () => Response.json({ pages: 1, units: 2, bytes: 6 }),
+    });
+    stubInsecureContext();
+
+    await expect(wipeCache()).resolves.toEqual({ pages: 1, units: 2, bytes: 6 });
+
+    expect(calls(fetchMock, "DELETE")).toEqual([BASE]);
+    expect(synth.resetSpeechCache).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("clear and wipe", () => {
   it("clearPage resets the speech cache even when the delete fails", async () => {
     const u = unit("Cached.");

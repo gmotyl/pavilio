@@ -22,6 +22,15 @@
  * current unit, and the page run calls it right after {@link loadPageList},
  * so from then on the page's units answer synchronously.
  *
+ * Hashing needs `crypto.subtle`, which exists only in a secure context
+ * (https or localhost) — the panel also serves plain http on the LAN, where it
+ * is missing. Without a hash the cache steps aside rather than break playback:
+ * {@link pageAudio} synthesizes straight through (no fetch, no upload),
+ * {@link loadPageList} and {@link prunePage} resolve without a request, the
+ * synchronous readers report nothing cached, and {@link clearPage} — which
+ * cannot name the page on disk — rebuilds the speech cache and rejects with
+ * the reason. {@link wipeCache} needs no hash and works as ever. It warns once.
+ *
  * Clearing races in-flight work: a synthesis or fetch that lands after its
  * page was cleared (or the cache wiped) still answers its caller, but is
  * neither uploaded nor recorded. Every scope carries a generation — one per
@@ -66,13 +75,26 @@ const fetching = new Map<string, Promise<ArrayBuffer | null>>();
 /** `generation\0url` of every upload in flight, so a unit synthesized twice uploads once. */
 const uploading = new Set<string>();
 
-async function sha256Hex(text: string): Promise<string> {
+const NO_HASHING = "page cache unavailable: crypto.subtle needs a secure context (https or localhost)";
+
+/** The text's SHA-256 hex, or `null` when this origin cannot hash (warned once). */
+async function sha256Hex(text: string): Promise<string | null> {
   const known = hashes.get(text);
   if (known) return known;
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-  hashes.set(text, hex);
-  return hex;
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) throw new Error(NO_HASHING);
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(text));
+    const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+    hashes.set(text, hex);
+    return hex;
+  } catch (err) {
+    if (!warnedKinds.has("hashing")) {
+      warnedKinds.add("hashing");
+      console.warn("[speech] page cache off: cannot hash on this origin; pages synthesize as usual", err);
+    }
+    return null;
+  }
 }
 
 function generation(docKey: string): string {
@@ -125,6 +147,7 @@ async function send(url: string, init?: RequestInit): Promise<Response> {
 export async function loadPageList(docKey: string): Promise<void> {
   const gen = generation(docKey);
   const page = await sha256Hex(docKey);
+  if (page === null) return;
   let units: Map<string, number>;
   try {
     const body: unknown = await (await send(`${BASE_URL}/${page}`)).json();
@@ -160,7 +183,9 @@ function listedUnits(body: unknown): [string, number][] {
 export async function prunePage(docKey: string, units: readonly SpeechUnit[]): Promise<void> {
   const gen = generation(docKey);
   const page = await sha256Hex(docKey);
-  const keep = await Promise.all(units.map((unit) => sha256Hex(unit.text)));
+  const hashed = await Promise.all(units.map((unit) => sha256Hex(unit.text)));
+  if (page === null || hashed.some((hash) => hash === null)) return;
+  const keep = hashed as string[];
   try {
     await send(`${BASE_URL}/${page}/prune`, {
       method: "POST",
@@ -194,6 +219,7 @@ export async function pageAudio(
 ): Promise<ArrayBuffer> {
   const gen = generation(docKey);
   const [page, hash] = await Promise.all([sha256Hex(docKey), sha256Hex(unit.text)]);
+  if (page === null || hash === null) return synthesizeSpeech(unit.text, options);
   const held = inHand.get(docKey)?.get(hash);
   if (held) return held;
 
@@ -324,14 +350,17 @@ export function pageCachedShare(
  * Drops the page from disk and from memory. The local state is emptied and
  * the in-memory speech cache rebuilt even when the server call fails, so the
  * next Play cannot answer from memory; the failure still rejects, with its
- * reason, for the caller to alert.
+ * reason, for the caller to alert — as does an origin that cannot hash, which
+ * cannot name the page on disk.
  */
 export async function clearPage(docKey: string): Promise<void> {
   pageGenerations.set(docKey, (pageGenerations.get(docKey) ?? 0) + 1);
   listed.delete(docKey);
   inHand.delete(docKey);
   try {
-    await send(`${BASE_URL}/${await sha256Hex(docKey)}`, { method: "DELETE" });
+    const page = await sha256Hex(docKey);
+    if (page === null) throw new Error(NO_HASHING);
+    await send(`${BASE_URL}/${page}`, { method: "DELETE" });
   } finally {
     // Again after the await: work that started meanwhile is dropped too.
     pageGenerations.set(docKey, (pageGenerations.get(docKey) ?? 0) + 1);
