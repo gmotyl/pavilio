@@ -15,7 +15,7 @@ import { preparePage } from "./pageText";
 import type { SpeechUnit } from "./types";
 
 /*
- * Play from here: a round ▶ over the left edge of every speakable block of a
+ * Play from here: a round ▶ beside the left edge of every speakable block of a
  * page (headings, paragraphs, list items), shown on hover, focus or a tap,
  * that starts the page's run at that block's first unit.
  *
@@ -23,8 +23,10 @@ import type { SpeechUnit } from "./types";
  * after react-markdown has rendered them, marked with data attributes (which
  * React leaves alone, as the answer pane's marks), and the buttons live in an
  * absolutely positioned layer over the page — never inside a block, so no
- * block's padding, margin or text moves (the agreed deviation from the
- * mockup's gutter: the ▶ covers the start of the text instead).
+ * block's padding, margin or text moves. No room is reserved for them (a
+ * narrow phone keeps its width): a ▶ sits left of its block's text, over the
+ * page's padding or a list marker, as far as the nearest clipping box allows,
+ * and covers the start of the text only when there is no room at all.
  *
  * The bar is not here: the toolbar (`ViewerActions`) owns it, in the
  * breadcrumb slot — another subtree. So a press and a hover cross over through
@@ -195,6 +197,32 @@ function firstAtOrAfter(indices: readonly number[] | undefined, from: number): n
 /** The ▶'s diameter, px — the answer pane's Play. */
 const BUTTON_SIZE = 22;
 
+/** Space between a ▶ and the text it sits left of, px. */
+const GAP = 4;
+
+/**
+ * Where a ▶ goes, px from the page's left: left of its block's text (`text`)
+ * when there is room, no further left than the clipping box allows (`clip`),
+ * and over the start of the text when there is no room at all.
+ */
+export function playButtonLeft(text: number, clip: number): number {
+  return Math.max(text - BUTTON_SIZE - GAP, Math.min(clip, text));
+}
+
+/**
+ * The left edge, in viewport px, a ▶ may reach before it is cut off: the
+ * padding edge of the nearest ancestor that clips horizontally, or the
+ * viewport's.
+ */
+function clipLeft(root: HTMLElement): number {
+  for (let el = root.parentElement; el; el = el.parentElement) {
+    if (getComputedStyle(el).overflowX !== "visible") {
+      return el.getBoundingClientRect().left + el.clientLeft;
+    }
+  }
+  return 0;
+}
+
 interface Mark {
   /** Rendered block index — the ▶ and its block share it as `data-speak-index`. */
   index: number;
@@ -205,7 +233,6 @@ interface Mark {
 
 const INDEX_ATTR = "data-speak-index";
 const UNIT_ATTR = "data-speak-unit";
-const HOVER_ATTR = "data-speak-hover";
 
 /** The rendered block index an event happened over: a marked block, or its ▶. */
 function indexAt(target: EventTarget | null): number | null {
@@ -241,6 +268,7 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
     const root = rootRef.current;
     if (!root) return;
     const origin = root.getBoundingClientRect();
+    const minLeft = clipLeft(root) - origin.left;
     setMarks((current) =>
       current.map((mark) => {
         const el = elementsRef.current[mark.index];
@@ -250,7 +278,7 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
         const lineHeight =
           parseFloat(style.lineHeight) || (parseFloat(style.fontSize) || 16) * 1.5;
         const top = rect.top - origin.top + Math.max(0, (lineHeight - BUTTON_SIZE) / 2);
-        const left = rect.left - origin.left - 4;
+        const left = playButtonLeft(rect.left - origin.left, minLeft);
         return top === mark.top && left === mark.left ? mark : { ...mark, top, left };
       }),
     );
@@ -270,7 +298,6 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
         if (el.closest("[data-play-from-here-layer]")) continue;
         el.removeAttribute(INDEX_ATTR);
         el.removeAttribute(UNIT_ATTR);
-        el.removeAttribute(HOVER_ATTR);
       }
       if (reset) {
         setHovered(null);
@@ -349,15 +376,6 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
 
   const active = hovered ?? focused ?? revealed;
   const activeUnit = active === null ? null : (marks.find((m) => m.index === active)?.unit ?? null);
-
-  // The highlight is an attribute on the block itself, so its background is
-  // the block's own box — no wrapper, nothing that moves.
-  useLayoutEffect(() => {
-    const el = active === null ? undefined : elementsRef.current[active];
-    if (!el) return;
-    el.setAttribute(HOVER_ATTR, "");
-    return () => el.removeAttribute(HOVER_ATTR);
-  }, [active, marks]);
 
   // The bar outlines the segment the jump would land on.
   useEffect(() => {
