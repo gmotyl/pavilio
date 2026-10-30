@@ -201,6 +201,12 @@ const BUTTON_SIZE = 22;
 const GAP = 4;
 
 /**
+ * How long a ▶ stays after the pointer leaves its block, ms: long enough to
+ * cross the gap to a ▶ that sits outside the block (and the page's box).
+ */
+const LEAVE_GRACE = 300;
+
+/**
  * Where a ▶ goes, px from the page's left: left of its block's text (`text`)
  * when there is room, no further left than the clipping box allows (`clip`),
  * and over the start of the text when there is no room at all.
@@ -387,13 +393,42 @@ export function PlayFromHere({ docKey, text, children }: PlayFromHereProps) {
     return () => setHint(docKey, null);
   }, [docKey]);
 
-  const onMouseOver = (event: MouseEvent) => setHovered(indexAt(event.target));
+  // A ▶ sits left of its block's text, often outside the block and the page's
+  // box. On the way to it the pointer crosses an unmarked container or leaves
+  // the page, so neither drops the ▶ at once: it goes after `LEAVE_GRACE`,
+  // unless the pointer reaches a block or a ▶ first (the ▶ is the page's
+  // descendant, so its mouseover lands here too).
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelLeave = () => {
+    if (leaveTimer.current === null) return;
+    clearTimeout(leaveTimer.current);
+    leaveTimer.current = null;
+  };
+  const leaveLater = (drop: () => void) => {
+    cancelLeave();
+    leaveTimer.current = setTimeout(() => {
+      leaveTimer.current = null;
+      drop();
+    }, LEAVE_GRACE);
+  };
+  useEffect(() => cancelLeave, []);
+
+  const onMouseOver = (event: MouseEvent) => {
+    const index = indexAt(event.target);
+    if (index === null) {
+      leaveLater(() => setHovered(null));
+      return;
+    }
+    cancelLeave();
+    setHovered(index);
+  };
   // Leaving the page also drops a tap's reveal: a ▶ left shown (and its
   // segment outlined) after the pointer has gone elsewhere is stale.
-  const onMouseLeave = () => {
-    setHovered(null);
-    setRevealed(null);
-  };
+  const onMouseLeave = () =>
+    leaveLater(() => {
+      setHovered(null);
+      setRevealed(null);
+    });
   // A tap has no hover to reveal the ▶ with: the tap itself reveals it, and a
   // hidden ▶ takes no pointer, so the first tap lands on the block. A mouse
   // click on a block does the same, harmlessly — the ▶ is already shown.

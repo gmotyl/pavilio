@@ -171,7 +171,7 @@ afterEach(() => {
 });
 
 describe("PlayFromHere", () => {
-  it("hover shows the play button without shifting the block", () => {
+  it("hover shows the play button without shifting the block", async () => {
     const { container } = render(<Page />);
     const para = block(container, "The first example paragraph");
     const play = playOf(container, para)!;
@@ -212,7 +212,38 @@ describe("PlayFromHere", () => {
     fireEvent.mouseOver(play);
     expect(play).toHaveAttribute("data-shown");
     fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
-    expect(play).not.toHaveAttribute("data-shown");
+    await waitFor(() => expect(play).not.toHaveAttribute("data-shown"));
+  });
+
+  it("the play button stays reachable across the gap between a block and its button", async () => {
+    const { container } = render(<Page />);
+    const root = container.querySelector<HTMLElement>("[data-play-from-here]")!;
+    const para = block(container, "The first example paragraph");
+    const play = playOf(container, para)!;
+
+    fireEvent.mouseOver(para);
+    expect(play).toHaveAttribute("data-shown");
+    // On the way left: over an unmarked container, then out of the page box
+    // (the ▶ sits outside it when the page has room on the left).
+    fireEvent.mouseOver(root);
+    fireEvent.mouseLeave(root);
+    expect(play).toHaveAttribute("data-shown");
+    // Arriving on the ▶ keeps it, and it can be pressed.
+    fireEvent.mouseOver(play);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(play).toHaveAttribute("data-shown");
+    fireEvent.click(play);
+    expect(stub.host!.speakDocument).toHaveBeenCalled();
+  });
+
+  it("the play button hides once the pointer has really left", async () => {
+    const { container } = render(<Page />);
+    const root = container.querySelector<HTMLElement>("[data-play-from-here]")!;
+    const para = block(container, "The first example paragraph");
+    const play = playOf(container, para)!;
+    fireEvent.mouseOver(para);
+    fireEvent.mouseOver(root);
+    await waitFor(() => expect(play).not.toHaveAttribute("data-shown"));
   });
 
   it("shows the play button when focused", () => {
@@ -304,7 +335,7 @@ describe("PlayFromHere", () => {
     expect(playOf(container, both)).toBeNull();
   });
 
-  it("hovering a block outlines its scrubber segment", () => {
+  it("hovering a block outlines its scrubber segment", async () => {
     const { container } = render(<Page />);
     fireEvent.click(screen.getByTestId("file-viewer-play"));
     expect(bar()).not.toBeNull();
@@ -318,7 +349,7 @@ describe("PlayFromHere", () => {
     expect(container.querySelectorAll("[data-hint]")).toHaveLength(1);
 
     fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
-    expect(segment(unit)).not.toHaveAttribute("data-hint");
+    await waitFor(() => expect(segment(unit)).not.toHaveAttribute("data-hint"));
 
     // The segments stay clickable as today.
     fireEvent.click(segment(2));
@@ -356,14 +387,14 @@ describe("PlayFromHere", () => {
     expect(stub.host!.stopDocument).not.toHaveBeenCalled();
   });
 
-  it("a tapped-open play button hides when the pointer leaves the page", () => {
+  it("a tapped-open play button hides when the pointer leaves the page", async () => {
     const { container } = render(<Page />);
     const item = block(container, "second outer item here");
     const play = playOf(container, item)!;
     fireEvent.click(item);
     expect(play).toHaveAttribute("data-shown");
     fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
-    expect(play).not.toHaveAttribute("data-shown");
+    await waitFor(() => expect(play).not.toHaveAttribute("data-shown"));
   });
 
   it("a tap reveals the play button on touch", () => {
