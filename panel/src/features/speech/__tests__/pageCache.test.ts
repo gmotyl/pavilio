@@ -40,12 +40,20 @@ async function sha256(text: string): Promise<string> {
 
 type Handler = (init: RequestInit | undefined) => Response | Promise<Response>;
 
-/** Routes `METHOD path` to a handler; anything unrouted answers 404. */
+/** The epoch every stubbed miss answers unless a test routes its own. */
+const EPOCH = "boot.0.0";
+
+/** A unit miss as the server answers it: 404, carrying the page's epoch. */
+function miss(epoch = EPOCH): Response {
+  return new Response(null, { status: 404, headers: { "x-cache-epoch": epoch } });
+}
+
+/** Routes `METHOD path` to a handler; anything unrouted answers a {@link miss}. */
 function stubFetch(routes: Record<string, Handler>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const handler = routes[`${init?.method ?? "GET"} ${url}`];
-    return handler ? handler(init) : new Response(null, { status: 404 });
+    return handler ? handler(init) : miss();
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -115,6 +123,54 @@ describe("pageAudio", () => {
     expect(pageCachedShare(DOC, [u])).toEqual({ cached: 1, bytes: 2 });
     expect(pageUnitState(DOC, u)).toBe("ready");
     expect(listener).toHaveBeenCalled();
+  });
+
+  it("the upload sends back the epoch its miss answered", async () => {
+    const u = unit("Fenced upload.");
+    const hash = await sha256(u.text);
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () => miss("boot.3.7"),
+      [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 204 }),
+    });
+
+    await pageAudio(DOC, u, {});
+    await settle();
+
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(new Headers(put?.[1]?.headers).get("x-cache-epoch")).toBe("boot.3.7");
+  });
+
+  it("an upload the server fences off (409) is dropped quietly", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const u = unit("Cleared on the server meanwhile.");
+    const hash = await sha256(u.text);
+    const fetchMock = stubFetch({
+      [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 409 }),
+    });
+
+    await expect(pageAudio(DOC, u, {})).resolves.toBeInstanceOf(ArrayBuffer);
+    await settle();
+
+    expect(calls(fetchMock, "PUT")).toEqual([`${BASE}/${page}/${hash}`]);
+    expect(pageCachedShare(DOC, [u])).toEqual({ cached: 0, bytes: 0 });
+    expect(pageUnitState(DOC, u)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("a miss that named no epoch is synthesized but not uploaded", async () => {
+    const u = unit("Server down.");
+    const hash = await sha256(u.text);
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+
+    await expect(pageAudio(DOC, u, {})).resolves.toBeInstanceOf(ArrayBuffer);
+    await settle();
+
+    expect(synth.synthesizeSpeech).toHaveBeenCalledTimes(1);
+    expect(calls(fetchMock, "PUT")).toEqual([]);
   });
 
   it("a failed fetch falls back to synthesis", async () => {
@@ -191,7 +247,7 @@ describe("pageAudio", () => {
     const fetchMock = stubFetch({
       // Held open, so the second call is asked for while the first is still out.
       [`GET ${BASE}/${page}/${hash}`]: () =>
-        new Promise<Response>((resolve) => misses.push(() => resolve(new Response(null, { status: 404 })))),
+        new Promise<Response>((resolve) => misses.push(() => resolve(miss()))),
       [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 204 }),
     });
 

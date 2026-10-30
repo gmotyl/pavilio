@@ -42,6 +42,8 @@ function reply(status: number, body?: ArrayBuffer | unknown): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    // Every page-cache answer names the page's epoch, as the server's GETs do.
+    headers: new Headers({ "x-cache-epoch": "boot.0.0" }),
     json: async () => body,
     arrayBuffer: async () => (body instanceof ArrayBuffer ? body : new ArrayBuffer(0)),
   } as Response;
@@ -66,6 +68,7 @@ function stubServer() {
     if (method === "GET" && unit === undefined) {
       return reply(200, {
         units: [...(units ?? new Map()).entries()].map(([hash, bytes]) => ({ hash, bytes: bytes.byteLength })),
+        seq: units?.size ?? 0,
       });
     }
     if (method === "GET") {

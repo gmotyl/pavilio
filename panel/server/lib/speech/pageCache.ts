@@ -19,10 +19,28 @@ export interface PageCacheTotals {
   bytes: number;
 }
 
+/**
+ * A write whose epoch is no longer the page's: a clear of the page or a wipe
+ * was asked for after the writer read its epoch. Nothing was written.
+ */
+export class PageCacheEpochError extends Error {
+  constructor(page: string) {
+    super(`page cache: page ${page} was cleared since its epoch was read`);
+    this.name = "PageCacheEpochError";
+  }
+}
+
 export interface PageCacheStore {
+  /**
+   * The page's current epoch: an opaque token that changes the moment a clear
+   * of the page or a wipe is asked for, and with every restart. A writer reads
+   * it before it starts (the GET that missed) and hands it to {@link write}.
+   */
+  epoch(page: string): string;
   list(page: string): Promise<{ hash: string; bytes: number }[]>;
   read(page: string, unit: string): Promise<Buffer | undefined>;
-  write(page: string, unit: string, bytes: Buffer, docKey: string): Promise<void>;
+  /** Rejects with {@link PageCacheEpochError}, writing nothing, when `epoch` is no longer the page's. */
+  write(page: string, unit: string, bytes: Buffer, docKey: string, epoch: string): Promise<void>;
   prune(page: string, keep: readonly string[]): Promise<number>; // files removed
   clearPage(page: string): Promise<void>;
   totals(): Promise<PageCacheTotals>;
@@ -78,6 +96,20 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
    * removal — and a wipe waits for every page's queue before it starts.
    */
   let wiping: Promise<void> = Promise.resolve();
+  /**
+   * The fence against a write that outlives a clear: a PUT body still in
+   * flight when DELETE answered (a proxy holding it, a slow client) carries
+   * the epoch read before the clear, so it is refused instead of recreating
+   * the cleared audio. Both counters move when the clear or wipe is *asked
+   * for*, not when it runs, so a write already queued behind it is refused
+   * too. In memory only: `bootId` makes every token from before a restart
+   * stale, so the counters never need persisting.
+   */
+  const bootId = randomBytes(6).toString("hex");
+  let wipes = 0;
+  /** page → clears asked for since the last wipe. */
+  const clears = new Map<string, number>();
+  const epoch = (page: string) => `${bootId}.${wipes}.${clears.get(page) ?? 0}`;
 
   function serial<T>(page: string, work: () => Promise<T>): Promise<T> {
     const next = Promise.all([chains.get(page), wiping]).then(work);
@@ -123,6 +155,7 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
   }
 
   return {
+    epoch,
     list,
     totals,
 
@@ -137,11 +170,14 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
       }
     },
 
-    async write(page, unit, bytes, docKey) {
+    async write(page, unit, bytes, docKey, writerEpoch) {
       checkId("page", page);
       checkId("unit", unit);
       const dir = pageDir(page);
       await serial(page, async () => {
+        // Checked on its turn, not on arrival: a clear asked for while this
+        // write waited in the queue has moved the epoch on by now.
+        if (writerEpoch !== epoch(page)) throw new PageCacheEpochError(page);
         await mkdir(dir, { recursive: true });
         await writeAtomic(join(dir, "page.json"), JSON.stringify({ docKey }));
         await writeAtomic(join(dir, `${unit}.mp3`), bytes);
@@ -166,10 +202,14 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
 
     async clearPage(page) {
       checkId("page", page);
+      clears.set(page, (clears.get(page) ?? 0) + 1);
       await serial(page, () => rm(pageDir(page), { recursive: true, force: true }));
     },
 
     async wipe() {
+      // Every page's epoch moves at once; the per-page counts start over under the new wipe count.
+      wipes += 1;
+      clears.clear();
       // Taken before `wiping` is replaced, so it holds only work asked for before this wipe.
       const before = Promise.all([...chains.values(), wiping]);
       const run = before.then(async () => {

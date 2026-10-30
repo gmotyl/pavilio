@@ -19,7 +19,7 @@ const { TOKEN, previousToken } = vi.hoisted(() => {
 
 import { authMiddleware } from "../../lib/auth";
 import { mobileAuthMiddleware } from "../../middleware/mobile-auth";
-import { createPageCacheStore } from "../../lib/speech/pageCache";
+import { createPageCacheStore, type PageCacheStore } from "../../lib/speech/pageCache";
 import { createPageCacheRouter } from "../pageCache";
 
 afterAll(() => {
@@ -48,23 +48,36 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** The store behind the last {@link loadApp}, so {@link put} can name its current epoch. */
+let currentStore: PageCacheStore;
+
 /** Mirrors the production mount: the speech JSON parser, then the global parser and both auth gates. */
 function loadApp(cacheRoot = root): Express {
   const app = express();
+  currentStore = createPageCacheStore({ root: cacheRoot });
   app.use("/api/speech", express.json({ limit: "64kb" }));
   app.use(express.json());
   app.use(mobileAuthMiddleware);
   app.use(authMiddleware);
-  app.use(BASE, createPageCacheRouter({ store: createPageCacheStore({ root: cacheRoot }) }));
+  app.use(BASE, createPageCacheRouter({ store: currentStore }));
   return app;
 }
 
-function put(app: Express, page: string, unit: string, body: Buffer, docKey: string | null = DOC_KEY) {
+/** A PUT carrying the page's current epoch unless `epoch` says otherwise (`null` omits the header). */
+function put(
+  app: Express,
+  page: string,
+  unit: string,
+  body: Buffer,
+  docKey: string | null = DOC_KEY,
+  epoch: string | null = currentStore.epoch(page),
+) {
   const req = request(app)
     .put(`${BASE}/${page}/${unit}`)
     .set("Cookie", COOKIE)
     .set("Content-Type", "audio/mpeg");
   if (docKey !== null) req.set("x-doc-key", docKey);
+  if (epoch !== null) req.set("x-cache-epoch", epoch);
   return req.send(body);
 }
 
@@ -107,6 +120,7 @@ describe("/api/speech/page-cache", () => {
       .put(`${BASE}/${PAGE}/${OTHER}`)
       .set("Cookie", COOKIE)
       .set("x-doc-key", DOC_KEY)
+      .set("x-cache-epoch", currentStore.epoch(PAGE))
       .set("Content-Type", "application/octet-stream")
       .send(MP3);
     expect(octet.status).toBe(204);
@@ -150,7 +164,8 @@ describe("/api/speech/page-cache", () => {
       expect((await request(app).delete(`${BASE}/${id}`).set("Cookie", COOKIE)).status, id).toBe(400);
     }
 
-    // A PUT without a docKey, or without a body, is refused too.
+    // A PUT without a docKey, an epoch or a body is refused too.
+    expect((await put(app, PAGE, UNIT, MP3, DOC_KEY, null)).status).toBe(400);
     expect((await put(app, PAGE, UNIT, MP3, null)).status).toBe(400);
     expect((await put(app, PAGE, UNIT, MP3, "")).status).toBe(400);
     expect((await put(app, PAGE, UNIT, Buffer.alloc(0))).status).toBe(400);
@@ -202,6 +217,79 @@ describe("/api/speech/page-cache", () => {
       await new Promise<void>((done) => server.close(() => done()));
     }
   });
+
+  it("every unit and listing GET carries the current epoch", async () => {
+    const app = loadApp();
+    const miss = await request(app).get(`${BASE}/${PAGE}/${UNIT}`).set("Cookie", COOKIE);
+    expect(miss.status).toBe(404);
+    const epoch = miss.headers["x-cache-epoch"];
+    expect(epoch).toBe(currentStore.epoch(PAGE));
+
+    expect((await put(app, PAGE, UNIT, MP3, DOC_KEY, epoch)).status).toBe(204);
+    const hit = await request(app).get(`${BASE}/${PAGE}/${UNIT}`).set("Cookie", COOKIE);
+    expect(hit.status).toBe(200);
+    expect(hit.headers["x-cache-epoch"]).toBe(epoch);
+    const list = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
+    expect(list.headers["x-cache-epoch"]).toBe(epoch);
+
+    // A clear moves the page to a new epoch; the old one now answers 409 and writes nothing.
+    expect((await request(app).delete(`${BASE}/${PAGE}`).set("Cookie", COOKIE)).status).toBe(204);
+    const after = await request(app).get(`${BASE}/${PAGE}/${UNIT}`).set("Cookie", COOKIE);
+    expect(after.headers["x-cache-epoch"]).not.toBe(epoch);
+    expect((await put(app, PAGE, UNIT, MP3, DOC_KEY, epoch)).status).toBe(409);
+    expect(await totals(app)).toEqual({ pages: 0, units: 0, bytes: 0 });
+  });
+
+  for (const fence of ["clear", "wipe"] as const) {
+    it(`a put whose body completes after a ${fence} answered is refused with 409`, async () => {
+      const store = createPageCacheStore({ root });
+      const app = express();
+      app.use(express.json());
+      app.use(mobileAuthMiddleware);
+      app.use(authMiddleware);
+      app.use(BASE, createPageCacheRouter({ store }));
+      const server = createServer(app);
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+      try {
+        const { port } = server.address() as AddressInfo;
+        const miss = await request(server).get(`${BASE}/${PAGE}/${UNIT}`).set("Cookie", COOKIE);
+        const epoch = String(miss.headers["x-cache-epoch"]);
+
+        // The PUT's headers and half its body are out — a proxy holding the
+        // upload, or a slow body — when the clear (or wipe) lands.
+        const socket = connect(port, "127.0.0.1");
+        await new Promise<void>((done) => socket.once("connect", done));
+        const answer = new Promise<string>((done) => {
+          let text = "";
+          socket.on("data", (c: Buffer) => {
+            text += c.toString("latin1");
+            if (text.includes("\r\n\r\n")) done(text);
+          });
+        });
+        socket.write(
+          `PUT ${BASE}/${PAGE}/${UNIT} HTTP/1.1\r\nHost: localhost\r\nCookie: ${COOKIE}\r\n` +
+            `Content-Type: audio/mpeg\r\nx-doc-key: ${encodeURIComponent(DOC_KEY)}\r\n` +
+            `x-cache-epoch: ${epoch}\r\nContent-Length: ${MP3.length}\r\nConnection: close\r\n\r\n`,
+        );
+        socket.write(MP3.subarray(0, 4));
+        await new Promise((done) => setTimeout(done, 50));
+
+        const deleted = await request(server)
+          .delete(fence === "clear" ? `${BASE}/${PAGE}` : BASE)
+          .set("Cookie", COOKIE);
+        expect(deleted.status).toBeLessThan(300);
+
+        // The rest of the body arrives after the delete answered.
+        socket.write(MP3.subarray(4));
+        expect(await answer).toMatch(/^HTTP\/1\.1 409 /);
+        socket.destroy();
+
+        expect(await store.totals()).toEqual({ pages: 0, units: 0, bytes: 0 });
+      } finally {
+        await new Promise<void>((done) => server.close(() => done()));
+      }
+    });
+  }
 
   it("prune deletes units not in keep", async () => {
     const app = loadApp();

@@ -1,5 +1,5 @@
 import express, { Router, type NextFunction, type Request, type Response } from "express";
-import { createPageCacheStore, HASH_RE, type PageCacheStore } from "../lib/speech/pageCache.js";
+import { createPageCacheStore, HASH_RE, PageCacheEpochError, type PageCacheStore } from "../lib/speech/pageCache.js";
 
 /**
  * The page audio cache, mounted at /api/speech/page-cache:
@@ -8,18 +8,24 @@ import { createPageCacheStore, HASH_RE, type PageCacheStore } from "../lib/speec
  *   DELETE /                 wipe the whole cache → the freed totals
  *   GET    /:page            { units: [{ hash, bytes }] }, empty for an unknown page
  *   GET    /:page/:unit      the MP3 (audio/mpeg) | 404
- *   PUT    /:page/:unit      raw body (≤ 5 MB, else 413), header x-doc-key
- *                            (percent-encoded; malformed → 400) → 204
+ *   PUT    /:page/:unit      raw body (≤ 5 MB, else 413), headers x-doc-key
+ *                            (percent-encoded; malformed → 400) and
+ *                            x-cache-epoch (missing → 400) → 204, or 409 when
+ *                            the page was cleared (or the cache wiped) since
+ *                            that epoch was read — nothing is written
  *   POST   /:page/prune      { keep: string[] } → { removed }
  *   DELETE /:page            remove the page folder → 204
  *
  * `:page` and `:unit` must be 64 lowercase hex chars, else 400, so no request
- * can address a path outside the root. Any filesystem failure (typically a
+ * can address a path outside the root. Both GETs of a page answer its current
+ * epoch in `x-cache-epoch`; the client keeps the one from the GET that missed
+ * and sends it back on the PUT. Any filesystem failure (typically a
  * root that cannot be created) answers 503, which the browser treats as "no
  * cache", and logs one warning until an operation succeeds again.
  */
 
 export const MAX_UNIT_BYTES = "5mb";
+export const EPOCH_HEADER = "x-cache-epoch";
 
 export interface PageCacheRouterOptions {
   /** Default: the store at `~/.pavilio/speech-cache`; tests pass one on a temp root. */
@@ -38,6 +44,10 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
       warned = false;
       return { value };
     } catch (error) {
+      if (error instanceof PageCacheEpochError) {
+        res.status(409).json({ error: "page cleared since the epoch was read" });
+        return undefined;
+      }
       if (error instanceof RangeError) {
         res.status(400).json({ error: error.message });
         return undefined;
@@ -68,12 +78,17 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
     if (got) res.json(got.value);
   });
 
+  /** Read before the store call, so a clear landing meanwhile leaves the answer with a stale epoch. */
+  const sendEpoch = (req: Request, res: Response) => res.set(EPOCH_HEADER, store.epoch(req.params.page as string));
+
   router.get("/:page", async (req, res) => {
+    sendEpoch(req, res);
     const got = await attempt(res, () => store.list(req.params.page));
     if (got) res.json({ units: got.value });
   });
 
   router.get("/:page/:unit", async (req, res) => {
+    sendEpoch(req, res);
     const got = await attempt(res, () => store.read(req.params.page, req.params.unit));
     if (!got) return;
     if (!got.value) {
@@ -102,19 +117,24 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
         res.status(400).json({ error: "x-doc-key must be a percent-encoded string" });
         return;
       }
+      const epoch = req.get(EPOCH_HEADER);
+      if (!epoch) {
+        res.status(400).json({ error: `${EPOCH_HEADER} header is required` });
+        return;
+      }
       const body: unknown = req.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
         res.status(400).json({ error: "body must be non-empty audio bytes" });
         return;
       }
       // A client that aborted mid-body never reaches here — the raw parser
-      // errors instead. One that hung up after its body arrived (a clear's
-      // abort racing the last byte) is dropped too: it no longer wants the write.
-      // Both rely on the client's abort closing this upstream socket, so behind
-      // a reverse proxy the proxy must cancel the upstream request on a client
-      // abort (e.g. Caddy h2 → HTTP/1.1), or the write lands after the clear.
+      // errors instead — and one that hung up after its body arrived no longer
+      // wants the write. Those only save work: correctness does not depend on
+      // the abort reaching this socket (a reverse proxy may keep the upstream
+      // request going). A body that completes after a clear or a wipe was asked
+      // for carries the epoch from before it, and the store refuses it (409).
       if (req.socket?.destroyed) return;
-      const got = await attempt(res, () => store.write(req.params.page, req.params.unit, body, docKey));
+      const got = await attempt(res, () => store.write(req.params.page, req.params.unit, body, docKey, epoch));
       if (got) res.status(204).end();
     },
   );

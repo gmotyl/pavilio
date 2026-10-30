@@ -37,6 +37,12 @@
  * page plus one global — taken when the work starts and checked before
  * anything lands.
  *
+ * A clear's local abort of an upload is not proof the server dropped it (a
+ * proxy may keep the upstream request going), so the server fences writes
+ * itself: every unit GET answers the page's epoch, the upload sends back the
+ * one its miss answered, and a PUT whose epoch a clear or a wipe has moved on
+ * is refused with 409 — a dropped upload, never an error.
+ *
  * Concurrent asks for one unit (the run's lookahead warm and its ladder, a
  * preload and a Play) share one disk fetch and one upload: both are keyed by
  * generation and URL, so a clear or a wipe never hands a flight from before it
@@ -56,6 +62,14 @@ export interface PageCacheTotals {
 }
 
 const BASE_URL = "/api/speech/page-cache";
+/** The page's epoch: answered by every unit GET, sent back on the PUT. */
+const EPOCH_HEADER = "x-cache-epoch";
+
+/** A disk fetch's answer: the bytes for a hit, and the epoch the server answered (if any). */
+interface DiskAnswer {
+  bytes: ArrayBuffer | null;
+  epoch: string | null;
+}
 
 /** text (or doc key) → its SHA-256 hex. Content-derived, so never invalidated. */
 const hashes = new Map<string, string>();
@@ -77,8 +91,8 @@ let globalGeneration = 0;
 /** Upload failure kinds already warned about, so a broken server warns once per kind. */
 const warnedKinds = new Set<string>();
 const listeners = new Set<() => void>();
-/** `generation\0url` → the disk fetch in flight: its bytes, or `null` for a miss. */
-const fetching = new Map<string, Promise<ArrayBuffer | null>>();
+/** `generation\0url` → the disk fetch in flight: its bytes (`null` for a miss) and the page's epoch. */
+const fetching = new Map<string, Promise<DiskAnswer>>();
 /**
  * `generation\0url` → the upload in flight: its page, a promise that settles
  * (never rejects) when the PUT does, and the controller that aborts it. Keyed
@@ -88,9 +102,9 @@ const fetching = new Map<string, Promise<ArrayBuffer | null>>();
 const uploading = new Map<string, { docKey: string; settled: Promise<void>; controller: AbortController }>();
 /**
  * How long a clear or a wipe waits for uploads in flight before aborting the
- * rest and sending its DELETE. A PUT landing after the DELETE would recreate
- * the page on disk; the PUTs are local and quick, so this only bounds a stuck
- * one — and an aborted PUT never finishes its body, so the server never writes it.
+ * rest and sending its DELETE. The PUTs are local and quick, so this only
+ * bounds a stuck one; one that still lands after the DELETE is refused by the
+ * server's epoch fence.
  */
 const UPLOAD_SETTLE_CAP_MS = 5_000;
 
@@ -299,7 +313,7 @@ export async function pageAudio(
   if (held) return held;
 
   const url = `${BASE_URL}/${page}/${hash}`;
-  const cached = await untilAborted(diskFetch(docKey, gen, url, hash), options.signal);
+  const { bytes: cached, epoch } = await untilAborted(diskFetch(docKey, gen, url, hash), options.signal);
   if (cached) return cached;
   // A clear or a wipe landed while the GET was out: the run that asked was
   // stopped by it, and synthesizing now would refill the speech cache the
@@ -307,22 +321,24 @@ export async function pageAudio(
   if (gen !== generation(docKey)) throw new DOMException("page cache cleared while fetching", "AbortError");
 
   const bytes = await synthesizeSpeech(unit.text, options);
-  if (gen === generation(docKey)) void upload(docKey, gen, url, hash, bytes);
+  // No epoch (the GET failed outright): the server would refuse the PUT, so skip it.
+  if (gen === generation(docKey) && epoch) void upload(docKey, gen, url, hash, bytes, epoch);
   return bytes;
 }
 
 /**
  * The unit's bytes from disk, or `null` for a miss of any kind (network, 404,
  * 503, empty body, or no answer within {@link DISK_FETCH_TIMEOUT_MS} — the
- * flight is then dropped, so a later ask starts afresh). Shared by every caller asking in the same generation, so
+ * flight is then dropped, so a later ask starts afresh), with the epoch the
+ * server answered — `null` when it never answered. Shared by every caller asking in the same generation, so
  * it carries no caller's signal: a local GET is cheap to let finish, and each
  * caller stops waiting on its own signal instead ({@link untilAborted}).
  */
-function diskFetch(docKey: string, gen: string, url: string, hash: string): Promise<ArrayBuffer | null> {
+function diskFetch(docKey: string, gen: string, url: string, hash: string): Promise<DiskAnswer> {
   const key = `${gen}\0${url}`;
   const inFlight = fetching.get(key);
   if (inFlight) return inFlight;
-  const flight = (async (): Promise<ArrayBuffer | null> => {
+  const flight = (async (): Promise<DiskAnswer> => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Raced as well as aborted: the deadline holds even against a fetch that
@@ -333,19 +349,24 @@ function diskFetch(docKey: string, gen: string, url: string, hash: string): Prom
         reject(new Error(`GET ${url} timed out`));
       }, DISK_FETCH_TIMEOUT_MS);
     });
+    let epoch: string | null = null;
     try {
       const bytes = await Promise.race([
-        send(url, { signal: controller.signal }).then((res) => res.arrayBuffer()),
+        fetch(url, { signal: controller.signal }).then((res) => {
+          epoch = res.headers.get(EPOCH_HEADER);
+          if (!res.ok) throw new Error(`GET ${url} answered ${res.status}`);
+          return res.arrayBuffer();
+        }),
         deadline,
       ]);
-      if (bytes.byteLength === 0) return null;
+      if (bytes.byteLength === 0) return { bytes: null, epoch };
       if (gen === generation(docKey)) {
         record(docKey, hash, bytes);
         notify();
       }
-      return bytes;
+      return { bytes, epoch };
     } catch {
-      return null;
+      return { bytes: null, epoch };
     } finally {
       clearTimeout(timer);
       fetching.delete(key);
@@ -372,6 +393,7 @@ async function upload(
   url: string,
   hash: string,
   bytes: ArrayBuffer,
+  epoch: string,
 ): Promise<void> {
   const key = `${gen}\0${url}`;
   // Another caller's upload of this unit is out, or has landed already.
@@ -384,8 +406,13 @@ async function upload(
       method: "PUT",
       // The server parses JSON bodies globally; audio must not look like JSON.
       // The doc key is percent-encoded: a header value must be Latin-1, and
-      // page paths may be anything.
-      headers: { "Content-Type": SPEECH_AUDIO_MIME_TYPE, "x-doc-key": encodeURIComponent(docKey) },
+      // page paths may be anything. The epoch fences the write off server-side
+      // should a clear or a wipe be asked for before the body lands.
+      headers: {
+        "Content-Type": SPEECH_AUDIO_MIME_TYPE,
+        "x-doc-key": encodeURIComponent(docKey),
+        [EPOCH_HEADER]: epoch,
+      },
       body: bytes,
       signal: controller.signal,
     }),
@@ -405,6 +432,8 @@ async function upload(
     // Aborted by a clear or a wipe: expected, nothing to warn about.
     if (controller.signal.aborted) return;
     const kind = err instanceof Error && / answered (\d+)$/.exec(err.message)?.[1];
+    // Fenced off by a clear or a wipe on the server: as expected as an abort.
+    if (kind === "409") return;
     warnOnce(kind ? `http ${kind}` : "network", err);
     return;
   } finally {
@@ -418,9 +447,10 @@ async function upload(
 /**
  * Settles once every upload in flight — for the page, or for every page when
  * `docKey` is omitted — has landed or failed. One still out after
- * {@link UPLOAD_SETTLE_CAP_MS} is aborted, and its abort waited for: its body
- * never completes, so the server never writes it, and the DELETE that follows
- * cannot be overtaken by it.
+ * {@link UPLOAD_SETTLE_CAP_MS} is aborted, and its abort waited for. That
+ * usually stops the body short, but the server does not rely on it: a body
+ * that still lands after the DELETE carries the epoch from before it and is
+ * refused (409).
  */
 async function uploadsSettled(docKey?: string): Promise<void> {
   const flights = [...uploading.values()].filter((flight) => docKey === undefined || flight.docKey === docKey);
@@ -481,7 +511,7 @@ export function pageCachedShare(
 /**
  * Drops the page from disk and from memory. Uploads already out for the page
  * are waited for (up to {@link UPLOAD_SETTLE_CAP_MS}, then aborted) before the
- * DELETE, so none can land after it. The local state is emptied and
+ * DELETE, and the server's epoch fence refuses any that still lands after it. The local state is emptied and
  * the in-memory speech cache rebuilt even when the server call fails, so the
  * next Play cannot answer from memory; the failure still rejects, with its
  * reason, for the caller to alert — as does an origin that cannot hash, which
@@ -493,8 +523,8 @@ export async function clearPage(docKey: string): Promise<void> {
   try {
     const page = await sha256Hex(docKey);
     if (page === null) throw new Error(NO_HASHING);
-    // The bump above stops new uploads; one already out must land before the
-    // DELETE, or it would recreate the page on disk.
+    // The bump above stops new uploads; one already out is given the chance to
+    // land before the DELETE (the server fences off any that lands after it).
     await uploadsSettled(docKey);
     await send(`${BASE_URL}/${page}`, { method: "DELETE" });
   } finally {
