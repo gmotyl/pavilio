@@ -2560,10 +2560,12 @@ input[type="checkbox"] {
 }
 
 /* Play from here: the page's ▶ layer. Over the page, transparent to the
-   pointer; each ▶ sits on its block's left edge, over the start of the text —
-   no gutter, so no block's padding, margin or text moves (agreed deviation from
-   the mockup). Hidden and pointer-transparent until its block is hovered,
-   focused or tapped, so a first tap on touch lands on the block, not the ▶. */
+   pointer; each ▶ sits left of its block's text when the page has room there
+   (its padding, a list marker), over the start of the text otherwise — no
+   gutter is reserved, so nothing moves and a phone keeps its width. Hidden
+   and pointer-transparent until its block is hovered, focused or tapped, so a
+   first tap on touch lands on the block, not the ▶. Only the ▶ shows: the
+   block itself is not highlighted. */
 .play-from-here-layer {
   position: absolute;
   inset: 0;
@@ -2607,10 +2609,3 @@ input[type="checkbox"] {
   outline-offset: 1px;
 }
 
-/* The hovered block's highlight: background plus a spread shadow in the same
-   colour, so it reaches past the text without a pixel of padding. */
-[data-speak-hover] {
-  background: var(--bg-hover);
-  box-shadow: 0 0 0 4px var(--bg-hover);
-  border-radius: 4px;
-}

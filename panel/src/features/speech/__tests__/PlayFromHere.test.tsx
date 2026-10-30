@@ -29,7 +29,7 @@ vi.mock("../../markdown/MermaidDiagram", () => ({
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import ViewerActions from "../../projects/ViewerActions";
 import MarkdownRenderer from "../../markdown/MarkdownRenderer";
-import { PlayFromHere } from "../PlayFromHere";
+import { PlayFromHere, playButtonLeft } from "../PlayFromHere";
 import { prepare } from "../prepare";
 import { pageSpeechText } from "../pageText";
 
@@ -171,7 +171,7 @@ afterEach(() => {
 });
 
 describe("PlayFromHere", () => {
-  it("hover shows the play button without shifting the block", () => {
+  it("hover shows the play button without shifting the block", async () => {
     const { container } = render(<Page />);
     const para = block(container, "The first example paragraph");
     const play = playOf(container, para)!;
@@ -196,7 +196,8 @@ describe("PlayFromHere", () => {
     fireEvent.mouseOver(para);
 
     expect(play).toHaveAttribute("data-shown");
-    expect(para).toHaveAttribute("data-speak-hover");
+    // Only the ▶ shows: the block itself is not highlighted.
+    expect(para).not.toHaveAttribute("data-speak-hover");
     const after = getComputedStyle(para);
     expect({
       padding: after.padding,
@@ -211,8 +212,38 @@ describe("PlayFromHere", () => {
     fireEvent.mouseOver(play);
     expect(play).toHaveAttribute("data-shown");
     fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
-    expect(play).not.toHaveAttribute("data-shown");
-    expect(para).not.toHaveAttribute("data-speak-hover");
+    await waitFor(() => expect(play).not.toHaveAttribute("data-shown"));
+  });
+
+  it("the play button stays reachable across the gap between a block and its button", async () => {
+    const { container } = render(<Page />);
+    const root = container.querySelector<HTMLElement>("[data-play-from-here]")!;
+    const para = block(container, "The first example paragraph");
+    const play = playOf(container, para)!;
+
+    fireEvent.mouseOver(para);
+    expect(play).toHaveAttribute("data-shown");
+    // On the way left: over an unmarked container, then out of the page box
+    // (the ▶ sits outside it when the page has room on the left).
+    fireEvent.mouseOver(root);
+    fireEvent.mouseLeave(root);
+    expect(play).toHaveAttribute("data-shown");
+    // Arriving on the ▶ keeps it, and it can be pressed.
+    fireEvent.mouseOver(play);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(play).toHaveAttribute("data-shown");
+    fireEvent.click(play);
+    expect(stub.host!.speakDocument).toHaveBeenCalled();
+  });
+
+  it("the play button hides once the pointer has really left", async () => {
+    const { container } = render(<Page />);
+    const root = container.querySelector<HTMLElement>("[data-play-from-here]")!;
+    const para = block(container, "The first example paragraph");
+    const play = playOf(container, para)!;
+    fireEvent.mouseOver(para);
+    fireEvent.mouseOver(root);
+    await waitFor(() => expect(play).not.toHaveAttribute("data-shown"));
   });
 
   it("shows the play button when focused", () => {
@@ -221,10 +252,10 @@ describe("PlayFromHere", () => {
     const play = playOf(container, heading)!;
     fireEvent.focus(play);
     expect(play).toHaveAttribute("data-shown");
-    expect(heading).toHaveAttribute("data-speak-hover");
     fireEvent.blur(play);
-    expect(heading).not.toHaveAttribute("data-speak-hover");
+    expect(play).not.toHaveAttribute("data-shown");
   });
+
 
   it("every heading, paragraph and list item gets a play button", () => {
     const { container } = render(<Page />);
@@ -304,7 +335,7 @@ describe("PlayFromHere", () => {
     expect(playOf(container, both)).toBeNull();
   });
 
-  it("hovering a block outlines its scrubber segment", () => {
+  it("hovering a block outlines its scrubber segment", async () => {
     const { container } = render(<Page />);
     fireEvent.click(screen.getByTestId("file-viewer-play"));
     expect(bar()).not.toBeNull();
@@ -318,7 +349,7 @@ describe("PlayFromHere", () => {
     expect(container.querySelectorAll("[data-hint]")).toHaveLength(1);
 
     fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
-    expect(segment(unit)).not.toHaveAttribute("data-hint");
+    await waitFor(() => expect(segment(unit)).not.toHaveAttribute("data-hint"));
 
     // The segments stay clickable as today.
     fireEvent.click(segment(2));
@@ -356,15 +387,14 @@ describe("PlayFromHere", () => {
     expect(stub.host!.stopDocument).not.toHaveBeenCalled();
   });
 
-  it("a tapped-open play button hides when the pointer leaves the page", () => {
+  it("a tapped-open play button hides when the pointer leaves the page", async () => {
     const { container } = render(<Page />);
     const item = block(container, "second outer item here");
     const play = playOf(container, item)!;
     fireEvent.click(item);
     expect(play).toHaveAttribute("data-shown");
     fireEvent.mouseLeave(container.querySelector("[data-play-from-here]")!);
-    expect(play).not.toHaveAttribute("data-shown");
-    expect(item).not.toHaveAttribute("data-speak-hover");
+    await waitFor(() => expect(play).not.toHaveAttribute("data-shown"));
   });
 
   it("a tap reveals the play button on touch", () => {
@@ -476,7 +506,7 @@ describe("PlayFromHere", () => {
     // What a remount does (a component identity changing under react-markdown):
     // the same text, fresh nodes, none of the marks.
     const fresh = old.cloneNode(true) as HTMLElement;
-    for (const attr of ["data-speak-index", "data-speak-unit", "data-speak-hover"]) fresh.removeAttribute(attr);
+    for (const attr of ["data-speak-index", "data-speak-unit"]) fresh.removeAttribute(attr);
     act(() => old.replaceWith(fresh));
 
     await waitFor(() => expect(fresh).toHaveAttribute("data-speak-unit", unit!));
@@ -484,7 +514,6 @@ describe("PlayFromHere", () => {
     expect(play).not.toBeNull();
     fireEvent.mouseOver(fresh);
     expect(play).toHaveAttribute("data-shown");
-    expect(fresh).toHaveAttribute("data-speak-hover");
     fireEvent.click(play!);
     expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text: PAGE, startUnit: Number(unit) });
   });
@@ -550,5 +579,24 @@ describe("PlayFromHere", () => {
     });
     expect(screen.getAllByRole("button", { name: "Play from here" })).toHaveLength(2);
     expect(block(container, "Only paragraph")).toHaveAttribute("data-speak-unit", "1");
+  });
+});
+
+describe("playButtonLeft", () => {
+  // Positions relative to the page: the text starts at `text`, the nearest
+  // clipping box lets a ▶ reach `clip`. The ▶ is 22px wide, 4px off the text.
+  it("sits left of the text when there is room", () => {
+    expect(playButtonLeft(0, -40)).toBe(-26);
+    expect(playButtonLeft(24, -10)).toBe(-2);
+  });
+
+  it("goes only as far left as the clipping box allows", () => {
+    expect(playButtonLeft(0, -10)).toBe(-10);
+    expect(playButtonLeft(24, 0)).toBe(0);
+  });
+
+  it("falls back onto the start of the text when there is no room", () => {
+    expect(playButtonLeft(0, 0)).toBe(0);
+    expect(playButtonLeft(0, 8)).toBe(0);
   });
 });
