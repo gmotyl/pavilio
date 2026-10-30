@@ -48,6 +48,11 @@ function miss(epoch = EPOCH): Response {
   return new Response(null, { status: 404, headers: { "x-cache-epoch": epoch } });
 }
 
+/** A page listing as the server answers it: units, the page's write seq, and its epoch. */
+function pageListing(units: { hash: string; bytes: number }[], seq = 1, epoch = EPOCH): Response {
+  return Response.json({ units, seq }, { headers: { "x-cache-epoch": epoch } });
+}
+
 /** Routes `METHOD path` to a handler; anything unrouted answers a {@link miss}. */
 function stubFetch(routes: Record<string, Handler>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -423,7 +428,7 @@ describe("unit state and share", () => {
     const u = unit("Listed unit.");
     const hash = await sha256(u.text);
     stubFetch({
-      [`GET ${BASE}/${page}`]: () => Response.json({ units: [{ hash, bytes: 3 }] }),
+      [`GET ${BASE}/${page}`]: () => pageListing([{ hash, bytes: 3 }]),
       [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
       [`GET ${BASE}/${page}/${hash}`]: () => new Response(new Uint8Array([1, 2, 3])),
     });
@@ -442,7 +447,7 @@ describe("unit state and share", () => {
     const [hk, hg] = await Promise.all([sha256(kept.text), sha256("Edited away.")]);
     stubFetch({
       [`GET ${BASE}/${page}`]: () =>
-        Response.json({ units: [{ hash: hk, bytes: 100 }, { hash: hg, bytes: 50 }] }),
+        pageListing([{ hash: hk, bytes: 100 }, { hash: hg, bytes: 50 }]),
       [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 1 }),
     });
 
@@ -470,7 +475,7 @@ describe("unit state and share", () => {
     await settle();
     expect(pageUnitState(DOC, uploaded)).toBe("ready");
     // The snapshot was taken before either landed, so it names neither.
-    answerList(Response.json({ units: [] }));
+    answerList(pageListing([]));
     await listing;
 
     expect(pageUnitState(DOC, uploaded)).toBe("ready");
@@ -478,11 +483,70 @@ describe("unit state and share", () => {
     expect(pageCachedShare(DOC, [uploaded, fetched])).toEqual({ cached: 2, bytes: 5 });
   });
 
+  it("a prune sends the seq and epoch of the listing it saw", async () => {
+    const kept = unit("Kept unit.");
+    const uploaded = unit("Uploaded after the listing.");
+    const hu = await sha256(uploaded.text);
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}`]: () => pageListing([], 4, "boot.1.2"),
+      [`PUT ${BASE}/${page}/${hu}`]: () => new Response(null, { status: 204 }),
+      [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
+    });
+
+    await loadPageList(DOC);
+    // A landed upload moves the server's seq on, but this client has not listed it.
+    await pageAudio(DOC, uploaded, {});
+    await settle();
+    await prunePage(DOC, [kept]);
+
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ keep: [await sha256(kept.text)], seq: 4 });
+    expect(new Headers(post?.[1]?.headers).get("x-cache-epoch")).toBe("boot.1.2");
+  });
+
+  it("a prune takes the listing it saw at entry, not one that lands while it hashes", async () => {
+    let seq = 4;
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}`]: () => pageListing([], seq),
+      [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
+    });
+    await loadPageList(DOC);
+
+    seq = 9;
+    const pruning = prunePage(DOC, [unit("Revision A.")]);
+    await loadPageList(DOC);
+    await pruning;
+
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body)).seq).toBe(4);
+  });
+
+  it("without a listing read, a prune leaves the server alone", async () => {
+    const u = unit("Never listed.");
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}`]: () => pageListing([], 2),
+      [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 204 }),
+      [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
+    });
+
+    await prunePage(DOC, [u]);
+    expect(calls(fetchMock, "POST")).toEqual([]);
+    // A clear forgets the listing it had, too.
+    await loadPageList(DOC);
+    await clearPage(DOC);
+    await prunePage(DOC, [u]);
+    expect(calls(fetchMock, "POST")).toEqual([]);
+    // The hashes are memoized either way.
+    expect(pageUnitState(DOC, u)).toBeUndefined();
+  });
+
   it("a prune no longer current once hashed sends no POST", async () => {
     const u = unit("Older revision unit.");
     const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}`]: () => pageListing([]),
       [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
     });
+    await loadPageList(DOC);
 
     let current = true;
     const pruning = prunePage(DOC, [u], { isCurrent: () => current });
@@ -500,7 +564,7 @@ describe("unit state and share", () => {
     let answerPrune: (res: Response) => void = () => {};
     let prunes = 0;
     stubFetch({
-      [`GET ${BASE}/${page}`]: () => Response.json({ units: [{ hash: hn, bytes: 4 }] }),
+      [`GET ${BASE}/${page}`]: () => pageListing([{ hash: hn, bytes: 4 }]),
       // The newer revision's prune answers at once; the older one's hangs.
       [`POST ${BASE}/${page}/prune`]: () =>
         (prunes += 1) === 1
@@ -537,7 +601,7 @@ describe("unit state and share", () => {
   });
 
   it("an empty listing the server answered resolves as read", async () => {
-    stubFetch({ [`GET ${BASE}/${page}`]: () => Response.json({ units: [] }) });
+    stubFetch({ [`GET ${BASE}/${page}`]: () => pageListing([]) });
 
     await expect(loadPageList(DOC)).resolves.toBe(true);
   });
@@ -552,7 +616,7 @@ describe("unit state and share", () => {
     const listing = loadPageList(DOC);
     await settle();
     await clearPage(DOC);
-    answerList(Response.json({ units: [] }));
+    answerList(pageListing([]));
 
     await expect(listing).resolves.toBe(false);
   });
@@ -617,7 +681,7 @@ describe("clear and wipe", () => {
     const u = unit("Cached.");
     const hash = await sha256(u.text);
     stubFetch({
-      [`GET ${BASE}/${page}`]: () => Response.json({ units: [{ hash, bytes: 3 }] }),
+      [`GET ${BASE}/${page}`]: () => pageListing([{ hash, bytes: 3 }]),
       [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
       [`DELETE ${BASE}/${page}`]: () => new Response(null, { status: 503 }),
     });
@@ -765,8 +829,8 @@ describe("clear and wipe", () => {
     const u = unit("Shared text.");
     const hash = await sha256(u.text);
     const fetchMock = stubFetch({
-      [`GET ${BASE}/${page}`]: () => Response.json({ units: [{ hash, bytes: 3 }] }),
-      [`GET ${BASE}/${otherPage}`]: () => Response.json({ units: [{ hash, bytes: 3 }] }),
+      [`GET ${BASE}/${page}`]: () => pageListing([{ hash, bytes: 3 }]),
+      [`GET ${BASE}/${otherPage}`]: () => pageListing([{ hash, bytes: 3 }]),
       [`POST ${BASE}/${page}/prune`]: () => Response.json({ removed: 0 }),
       [`DELETE ${BASE}`]: () => Response.json({ pages: 2, units: 2, bytes: 6 }),
     });

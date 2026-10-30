@@ -6,14 +6,18 @@ import { createPageCacheStore, HASH_RE, PageCacheEpochError, type PageCacheStore
  *
  *   GET    /                 totals { pages, units, bytes }
  *   DELETE /                 wipe the whole cache → the freed totals
- *   GET    /:page            { units: [{ hash, bytes }] }, empty for an unknown page
+ *   GET    /:page            { units: [{ hash, bytes }], seq } — the page's write
+ *                            sequence; empty and 0 for an unknown page
  *   GET    /:page/:unit      the MP3 (audio/mpeg) | 404
  *   PUT    /:page/:unit      raw body (≤ 5 MB, else 413), headers x-doc-key
  *                            (percent-encoded; malformed → 400) and
  *                            x-cache-epoch (missing → 400) → 204, or 409 when
  *                            the page was cleared (or the cache wiped) since
  *                            that epoch was read — nothing is written
- *   POST   /:page/prune      { keep: string[] } → { removed }
+ *   POST   /:page/prune      { keep: string[], seq } (the listing's seq, a
+ *                            non-negative integer) and header x-cache-epoch
+ *                            (the listing's) → { removed }: only units written
+ *                            at or before seq go; 409 when the epoch is stale
  *   DELETE /:page            remove the page folder → 204
  *
  * `:page` and `:unit` must be 64 lowercase hex chars, else 400, so no request
@@ -84,7 +88,7 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
   router.get("/:page", async (req, res) => {
     sendEpoch(req, res);
     const got = await attempt(res, () => store.list(req.params.page));
-    if (got) res.json({ units: got.value });
+    if (got) res.json(got.value);
   });
 
   router.get("/:page/:unit", async (req, res) => {
@@ -140,12 +144,21 @@ export function createPageCacheRouter(options: PageCacheRouterOptions = {}): Rou
   );
 
   router.post("/:page/prune", async (req, res) => {
-    const keep = (req.body as { keep?: unknown } | undefined)?.keep;
+    const { keep, seq } = (req.body as { keep?: unknown; seq?: unknown } | undefined) ?? {};
     if (!Array.isArray(keep) || !keep.every((h) => typeof h === "string")) {
       res.status(400).json({ error: "keep must be an array of unit hashes" });
       return;
     }
-    const got = await attempt(res, () => store.prune(req.params.page, keep as string[]));
+    if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) {
+      res.status(400).json({ error: "seq must be the listing's sequence number" });
+      return;
+    }
+    const epoch = req.get(EPOCH_HEADER);
+    if (!epoch) {
+      res.status(400).json({ error: `${EPOCH_HEADER} header is required` });
+      return;
+    }
+    const got = await attempt(res, () => store.prune(req.params.page, keep as string[], seq, epoch));
     if (got) res.json({ removed: got.value });
   });
 

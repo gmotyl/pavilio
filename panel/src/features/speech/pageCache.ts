@@ -82,6 +82,12 @@ const inHand = new Map<string, Map<string, ArrayBuffer>>();
  * list that lands can keep what was recorded after it was asked for.
  */
 const recordedAt = new Map<string, Map<string, number>>();
+/**
+ * doc key → the server's write `seq` and epoch from its last listing read in
+ * this generation. A prune names them, so the server removes only units that
+ * listing could have shown; with none recorded, no server prune is sent.
+ */
+const listings = new Map<string, { seq: number; epoch: string }>();
 /** Ticks once per recorded unit; a list remembers the value it started at. */
 let recordSeq = 0;
 /** doc key → generation, bumped by a clear of that page. */
@@ -160,7 +166,7 @@ function record(docKey: string, hash: string, bytes: ArrayBuffer): void {
 
 /** Forgets everything held for the page (or every page when `docKey` is omitted). */
 function forget(docKey?: string): void {
-  for (const map of [listed, inHand, recordedAt]) {
+  for (const map of [listed, inHand, recordedAt, listings]) {
     if (docKey === undefined) map.clear();
     else map.delete(docKey);
   }
@@ -213,15 +219,22 @@ export async function loadPageList(docKey: string): Promise<boolean> {
   if (page === null) return false;
   let units: Map<string, number>;
   let read: boolean;
+  let seen: { seq: number; epoch: string } | undefined;
   try {
-    const body: unknown = await (await send(`${BASE_URL}/${page}`)).json();
+    const res = await send(`${BASE_URL}/${page}`);
+    const body: unknown = await res.json();
     units = new Map(listedUnits(body));
     read = true;
+    const seq = (body as { seq?: unknown }).seq;
+    const epoch = res.headers.get(EPOCH_HEADER);
+    if (typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0 && epoch) seen = { seq, epoch };
   } catch {
     units = new Map();
     read = false;
   }
   if (gen !== generation(docKey)) return false;
+  // A failed listing keeps the last one recorded: it still bounds what a prune may remove.
+  if (seen) listings.set(docKey, seen);
   const current = listed.get(docKey);
   for (const [hash, seq] of recordedAt.get(docKey) ?? []) {
     const size = current?.get(hash);
@@ -252,6 +265,16 @@ function listedUnits(body: unknown): [string, number][] {
  * readers answer for them. A failed prune is ignored: the orphans wait for the
  * next Play.
  *
+ * "Prune only what you saw": the POST names the `seq` and epoch of the last
+ * listing read for the page, taken when the prune starts, and the server
+ * removes only units written at or before that `seq` — so a revision's prune
+ * arriving late never deletes units a newer revision uploaded after it
+ * listed. With no listing recorded (none read yet, or dropped by a clear or
+ * a wipe) no POST is sent; the orphans wait, as after a failed prune. One
+ * edge remains: a unit that existed before revision A's listing and that the
+ * newer revision B reuses (but A does not) is still pruned by A, and B then
+ * synthesizes it again — acceptable for a best-effort cache.
+ *
  * `isCurrent` says whether `units` are still the page's: it is asked again
  * after hashing (before the POST) and after the POST (before anything is
  * deleted locally), so a revision replaced meanwhile never prunes the units of
@@ -264,11 +287,12 @@ export async function prunePage(
 ): Promise<void> {
   const isCurrent = options.isCurrent ?? (() => true);
   const gen = generation(docKey);
+  const seen = listings.get(docKey);
   const page = await sha256Hex(docKey);
   const hashed = await Promise.all(units.map((unit) => sha256Hex(unit.text)));
   if (page === null || hashed.some((hash) => hash === null)) return;
   // The hashes are memoized either way, so the readers answer for these units.
-  if (!isCurrent()) {
+  if (!seen || !isCurrent()) {
     notify();
     return;
   }
@@ -276,8 +300,8 @@ export async function prunePage(
   try {
     await send(`${BASE_URL}/${page}/prune`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keep }),
+      headers: { "Content-Type": "application/json", [EPOCH_HEADER]: seen.epoch },
+      body: JSON.stringify({ keep, seq: seen.seq }),
     });
   } catch {
     // The unit hashes are memoized either way, so the readers still answer.
@@ -573,6 +597,7 @@ export function __resetPageCacheForTests(): void {
   hashes.clear();
   forget();
   recordSeq = 0;
+  listings.clear();
   pageGenerations.clear();
   globalGeneration = 0;
   warnedKinds.clear();

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPageCacheStore, PageCacheEpochError } from "../pageCache";
@@ -49,13 +49,17 @@ describe("page cache store", () => {
     const store = createPageCacheStore({ root });
     await store.write(PAGE, U1, Buffer.from("x"), DOC_KEY, store.epoch(PAGE));
 
-    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toEqual({ docKey: DOC_KEY });
+    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toEqual({
+      docKey: DOC_KEY,
+      seq: 1,
+      units: { [U1]: 1 },
+    });
   });
 
   it("list and totals are empty when the root is missing", async () => {
     const store = createPageCacheStore({ root });
 
-    expect(await store.list(PAGE)).toEqual([]);
+    expect(await store.list(PAGE)).toEqual({ units: [], seq: 0 });
     expect(await store.totals()).toEqual({ pages: 0, units: 0, bytes: 0 });
     expect(existsSync(root)).toBe(false);
   });
@@ -66,11 +70,63 @@ describe("page cache store", () => {
     await store.write(PAGE, U2, Buffer.from("22"), DOC_KEY, store.epoch(PAGE));
     await store.write(PAGE, U3, Buffer.from("333"), DOC_KEY, store.epoch(PAGE));
 
-    expect(await store.prune(PAGE, [U2])).toBe(2);
-    expect(await store.list(PAGE)).toEqual([{ hash: U2, bytes: 2 }]);
-    expect(existsSync(join(root, PAGE, "page.json"))).toBe(true);
+    const { seq } = await store.list(PAGE);
+    expect(seq).toBe(3);
+    expect(await store.prune(PAGE, [U2], seq, store.epoch(PAGE))).toBe(2);
+    expect(await store.list(PAGE)).toEqual({ units: [{ hash: U2, bytes: 2 }], seq: 3 });
+    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8")).units).toEqual({ [U2]: 2 });
     // An unknown page prunes nothing.
-    expect(await store.prune(OTHER_PAGE, [])).toBe(0);
+    expect(await store.prune(OTHER_PAGE, [], 0, store.epoch(OTHER_PAGE))).toBe(0);
+  });
+
+  it("each write takes the page's next sequence number, and it survives a restart", async () => {
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    await store.write(PAGE, U2, Buffer.from("2"), DOC_KEY, store.epoch(PAGE));
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    await store.write(OTHER_PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(OTHER_PAGE));
+
+    const again = createPageCacheStore({ root });
+    expect((await again.list(PAGE)).seq).toBe(3);
+    expect((await again.list(OTHER_PAGE)).seq).toBe(1);
+    await again.write(PAGE, U3, Buffer.from("3"), DOC_KEY, again.epoch(PAGE));
+    expect((await again.list(PAGE)).seq).toBe(4);
+  });
+
+  it("prune spares a unit written after the listing it was based on", async () => {
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    await store.write(PAGE, U2, Buffer.from("2"), DOC_KEY, store.epoch(PAGE));
+    // Revision A lists the page…
+    const seen = await store.list(PAGE);
+    // …then revision B uploads a unit of its own before A's prune runs.
+    await store.write(PAGE, U3, Buffer.from("3"), DOC_KEY, store.epoch(PAGE));
+
+    // A keeps only U1: U2 (seen) goes, U3 (written after A's listing) stays.
+    expect(await store.prune(PAGE, [U1], seen.seq, store.epoch(PAGE))).toBe(1);
+    expect((await store.list(PAGE)).units.map((u) => u.hash).sort()).toEqual([U1, U3]);
+  });
+
+  it("prune is fenced off by a clear asked for after its listing", async () => {
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    const seen = await store.list(PAGE);
+    const epoch = store.epoch(PAGE);
+    await store.clearPage(PAGE);
+    // After the clear the sequence starts over, so the old seq alone would cover B's writes.
+    await store.write(PAGE, U2, Buffer.from("2"), DOC_KEY, store.epoch(PAGE));
+
+    await expect(store.prune(PAGE, [U1], seen.seq, epoch)).rejects.toBeInstanceOf(PageCacheEpochError);
+    expect((await store.list(PAGE)).units.map((u) => u.hash)).toEqual([U2]);
+  });
+
+  it("a unit with no recorded sequence (an older cache) counts as seen", async () => {
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    writeFileSync(join(root, PAGE, "page.json"), JSON.stringify({ docKey: DOC_KEY }));
+
+    expect(await store.list(PAGE)).toEqual({ units: [{ hash: U1, bytes: 1 }], seq: 0 });
+    expect(await store.prune(PAGE, [], 0, store.epoch(PAGE))).toBe(1);
   });
 
   it("clearPage removes the page folder", async () => {
@@ -186,7 +242,7 @@ describe("page cache store", () => {
       await expect(store.read(PAGE, id)).rejects.toThrow(RangeError);
       await expect(store.write(id, U1, Buffer.from("x"), DOC_KEY, store.epoch(id))).rejects.toThrow(RangeError);
       await expect(store.write(PAGE, id, Buffer.from("x"), DOC_KEY, store.epoch(PAGE))).rejects.toThrow(RangeError);
-      await expect(store.prune(id, [])).rejects.toThrow(RangeError);
+      await expect(store.prune(id, [], 0, store.epoch(id))).rejects.toThrow(RangeError);
       await expect(store.clearPage(id)).rejects.toThrow(RangeError);
     }
     expect(existsSync(root)).toBe(false);

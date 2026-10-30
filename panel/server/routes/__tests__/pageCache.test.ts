@@ -108,12 +108,12 @@ describe("/api/speech/page-cache", () => {
     expect(Buffer.compare(res.body as Buffer, MP3)).toBe(0);
 
     // The docKey lands in page.json; no temp file is left behind.
-    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toEqual({ docKey: DOC_KEY });
+    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toMatchObject({ docKey: DOC_KEY });
     expect(readdirSync(join(root, PAGE)).filter((n) => n.includes(".tmp-"))).toEqual([]);
 
     const list = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
     expect(list.status).toBe(200);
-    expect(list.body).toEqual({ units: [{ hash: UNIT, bytes: MP3.length }] });
+    expect(list.body).toEqual({ units: [{ hash: UNIT, bytes: MP3.length }], seq: 1 });
 
     // Any body type is accepted as raw bytes.
     const octet = await request(app)
@@ -131,7 +131,7 @@ describe("/api/speech/page-cache", () => {
     const app = loadApp();
     const docKey = "doc:notatki/żółw.md";
     expect((await put(app, PAGE, UNIT, MP3, encodeURIComponent(docKey))).status).toBe(204);
-    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toEqual({ docKey });
+    expect(JSON.parse(readFileSync(join(root, PAGE, "page.json"), "utf8"))).toMatchObject({ docKey });
 
     // A malformed escape is refused and nothing is written.
     expect((await put(app, PAGE, OTHER, MP3, "doc%E0%A4%A")).status).toBe(400);
@@ -145,7 +145,7 @@ describe("/api/speech/page-cache", () => {
     // An unknown page lists as empty rather than 404.
     const list = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
     expect(list.status).toBe(200);
-    expect(list.body).toEqual({ units: [] });
+    expect(list.body).toEqual({ units: [], seq: 0 });
   });
 
   it("non-hex ids answer 400", async () => {
@@ -169,10 +169,13 @@ describe("/api/speech/page-cache", () => {
     expect((await put(app, PAGE, UNIT, MP3, null)).status).toBe(400);
     expect((await put(app, PAGE, UNIT, MP3, "")).status).toBe(400);
     expect((await put(app, PAGE, UNIT, Buffer.alloc(0))).status).toBe(400);
-    // A prune without a string array is refused.
-    for (const body of [{}, { keep: "x" }, { keep: [1] }]) {
-      expect((await request(app).post(`${BASE}/${PAGE}/prune`).set("Cookie", COOKIE).send(body)).status).toBe(400);
+    // A prune without a string array, a seq or an epoch is refused.
+    const epoch = currentStore.epoch(PAGE);
+    for (const body of [{}, { keep: "x", seq: 0 }, { keep: [1], seq: 0 }, { keep: [] }, { keep: [], seq: -1 }, { keep: [], seq: 1.5 }, { keep: [], seq: "1" }]) {
+      const res = await request(app).post(`${BASE}/${PAGE}/prune`).set("Cookie", COOKIE).set("x-cache-epoch", epoch).send(body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
     }
+    expect((await request(app).post(`${BASE}/${PAGE}/prune`).set("Cookie", COOKIE).send({ keep: [], seq: 0 })).status).toBe(400);
     expect(await totals(app)).toEqual({ pages: 0, units: 0, bytes: 0 });
   });
 
@@ -296,15 +299,48 @@ describe("/api/speech/page-cache", () => {
     await put(app, PAGE, UNIT, MP3);
     await put(app, PAGE, OTHER, MP3);
 
+    const seen = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
     const res = await request(app)
       .post(`${BASE}/${PAGE}/prune`)
       .set("Cookie", COOKIE)
-      .send({ keep: [UNIT] });
+      .set("x-cache-epoch", seen.headers["x-cache-epoch"])
+      .send({ keep: [UNIT], seq: seen.body.seq });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ removed: 1 });
 
     const list = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
-    expect(list.body).toEqual({ units: [{ hash: UNIT, bytes: MP3.length }] });
+    expect(list.body).toEqual({ units: [{ hash: UNIT, bytes: MP3.length }], seq: 2 });
+  });
+
+  it("a prune that reaches the server late leaves the units written after its listing", async () => {
+    const app = loadApp();
+    const page2 = "d".repeat(64);
+    await put(app, PAGE, UNIT, MP3);
+    await put(app, PAGE, OTHER, MP3);
+    // Revision A lists the page and decides to keep only UNIT…
+    const seen = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
+    // …but before its prune arrives, revision B uploads a unit A never saw.
+    await put(app, PAGE, page2, MP3);
+
+    const res = await request(app)
+      .post(`${BASE}/${PAGE}/prune`)
+      .set("Cookie", COOKIE)
+      .set("x-cache-epoch", seen.headers["x-cache-epoch"])
+      .send({ keep: [UNIT], seq: seen.body.seq });
+    expect(res.body).toEqual({ removed: 1 });
+    const list = await request(app).get(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
+    expect((list.body.units as { hash: string }[]).map((u) => u.hash).sort()).toEqual([UNIT, page2]);
+
+    // A prune whose listing predates a clear is refused outright.
+    await request(app).delete(`${BASE}/${PAGE}`).set("Cookie", COOKIE);
+    await put(app, PAGE, OTHER, MP3);
+    const stale = await request(app)
+      .post(`${BASE}/${PAGE}/prune`)
+      .set("Cookie", COOKIE)
+      .set("x-cache-epoch", seen.headers["x-cache-epoch"])
+      .send({ keep: [], seq: seen.body.seq });
+    expect(stale.status).toBe(409);
+    expect(await totals(app)).toEqual({ pages: 1, units: 1, bytes: MP3.length });
   });
 
   it("delete page and wipe report through totals", async () => {
