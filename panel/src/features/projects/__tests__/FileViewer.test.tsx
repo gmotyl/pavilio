@@ -7,6 +7,42 @@ vi.mock("../../markdown/MarkdownRenderer", () => ({
   ),
 }));
 
+// The page's ▶ layer as a probe: which speech key the rendered markdown sits
+// under. `speechKey` stands in for the projects directory the server reports,
+// so a test can give the open page a key.
+let speechKey: string | null = null;
+vi.mock("../docSpeech", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../docSpeech")>();
+  return {
+    ...actual,
+    useDocSpeech: (...args: Parameters<typeof actual.useDocSpeech>) => {
+      const real = actual.useDocSpeech(...args);
+      return speechKey && args[2] ? { key: speechKey, text: args[1] ?? "" } : real;
+    },
+  };
+});
+// The toolbar's speaking half needs the panel's one speech host; these tests
+// are about the page under it, so a keyed page gets no toolbar.
+vi.mock("../ViewerActions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../ViewerActions")>();
+  const Real = actual.default;
+  return {
+    ...actual,
+    default: (props: import("react").ComponentProps<typeof Real>) => (speechKey ? null : <Real {...props} />),
+  };
+});
+vi.mock("../../speech/PlayFromHere", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../speech/PlayFromHere")>();
+  return {
+    ...actual,
+    PlayFromHere: ({ docKey, children }: { docKey?: string; children: import("react").ReactNode }) => (
+      <div data-testid="play-from-here" data-doc-key={docKey ?? ""}>
+        {children}
+      </div>
+    ),
+  };
+});
+
 import FileViewer from "../FileViewer";
 
 const ABSOLUTE = "/p/projects/alokai/notes/foo.md";
@@ -80,5 +116,19 @@ describe("FileViewer copy contents", () => {
     expect(screen.queryByTestId("file-viewer-vscode")).toBeNull();
     expect(screen.queryByTestId("file-viewer-copy-path")).toBeNull();
     expect(screen.queryByTestId("file-viewer-copy-content")).toBeNull();
+  });
+
+  describe("play from here", () => {
+    afterEach(() => {
+      speechKey = null;
+    });
+
+    it("renders a markdown note under the page's speech key", () => {
+      speechKey = "alokai/notes/foo.md";
+      render(<FileViewer filePath="notes/foo.md" content={CONTENT} absolutePath={ABSOLUTE} loading={false} />);
+      const layer = screen.getByTestId("play-from-here");
+      expect(layer.getAttribute("data-doc-key")).toBe("alokai/notes/foo.md");
+      expect(layer.contains(screen.getByTestId("md"))).toBe(true);
+    });
   });
 });

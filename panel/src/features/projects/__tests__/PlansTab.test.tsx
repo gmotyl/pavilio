@@ -12,6 +12,42 @@ vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage }),
 }));
 
+// The page's ▶ layer as a probe: which speech key the rendered markdown sits
+// under. `speechKey` stands in for the projects directory the server reports,
+// so a test can give the open page a key.
+let speechKey: string | null = null;
+vi.mock("../docSpeech", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../docSpeech")>();
+  return {
+    ...actual,
+    useDocSpeech: (...args: Parameters<typeof actual.useDocSpeech>) => {
+      const real = actual.useDocSpeech(...args);
+      return speechKey && args[2] ? { key: speechKey, text: args[1] ?? "" } : real;
+    },
+  };
+});
+// The toolbar's speaking half needs the panel's one speech host; these tests
+// are about the page under it, so a keyed page gets no toolbar.
+vi.mock("../ViewerActions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../ViewerActions")>();
+  const Real = actual.default;
+  return {
+    ...actual,
+    default: (props: import("react").ComponentProps<typeof Real>) => (speechKey ? null : <Real {...props} />),
+  };
+});
+vi.mock("../../speech/PlayFromHere", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../speech/PlayFromHere")>();
+  return {
+    ...actual,
+    PlayFromHere: ({ docKey, children }: { docKey?: string; children: import("react").ReactNode }) => (
+      <div data-testid="play-from-here" data-doc-key={docKey ?? ""}>
+        {children}
+      </div>
+    ),
+  };
+});
+
 import PlansTab from "../PlansTab";
 import { readLastSectionFile } from "../../shell/lastPath";
 
@@ -915,5 +951,19 @@ describe("PlansTab archived toggle", () => {
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith("# Hello plan body"),
     );
+  });
+
+  it("renders the open plan under the page's speech key", async () => {
+    speechKey = "workspace/woo.md";
+    try {
+      renderWithRouter(<PlansTab projectName="alokai" />);
+      fireEvent.click(await screen.findByTestId("plans-tab-file-workspace-woo.md"));
+      await waitFor(() => expect(screen.getByText("Hello plan body")).toBeTruthy());
+      const layer = screen.getByTestId("play-from-here");
+      expect(layer.getAttribute("data-doc-key")).toBe("workspace/woo.md");
+      expect(layer.contains(screen.getByText("Hello plan body"))).toBe(true);
+    } finally {
+      speechKey = null;
+    }
   });
 });

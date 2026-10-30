@@ -4,6 +4,7 @@ import ViewerActions from "./ViewerActions";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useDocSpeech } from "./docSpeech";
+import { PlayFromHere } from "../speech/PlayFromHere";
 import { usePeekTriggerProps } from "./peekTrigger";
 
 interface Props {
@@ -68,7 +69,9 @@ export function FileViewer({
       ) : (
         <ImageDropZone targetMarkdown={filePath}>
           {isMarkdown(filePath) ? (
-            <MarkdownRenderer content={content} basePath={filePath} />
+            <PlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
+              <MarkdownRenderer content={content} basePath={filePath} />
+            </PlayFromHere>
           ) : isJson(filePath) ? (
             <pre
               className="text-sm font-mono p-4 rounded-lg overflow-auto"

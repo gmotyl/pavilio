@@ -29,7 +29,8 @@ import { startTaskRun } from "./startTaskRun";
 import { taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
 import { relativeToWorkspace } from "./relativeToWorkspace";
-import { useDocSpeech } from "./docSpeech";
+import { useDocSpeech, type DocSpeech } from "./docSpeech";
+import { PlayFromHere } from "../speech/PlayFromHere";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
 
@@ -190,15 +191,17 @@ function PlanDetailHeader({
   path,
   relativePath,
   content,
+  speech,
 }: {
   path: string;
   /** `path` relative to the workspace root, or null while the root is loading. */
   relativePath: string | null;
   /** The open plan's source, or null while it is still loading. */
   content: string | null;
+  /** The open plan's speech — PlansTab owns it, as the page's ▶ needs the same key. */
+  speech: DocSpeech | undefined;
 }) {
   const peek = usePeekTriggerProps();
-  const speech = useDocSpeech(path, content, path.endsWith(".md"));
   return (
     <div
       className="flex items-center gap-2 mb-4 pb-3"
@@ -280,6 +283,7 @@ export default function PlansTab({ projectName, archived = false }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedPath = searchParams.get("file");
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const speech = useDocSpeech(selectedPath, fileContent, selectedPath?.endsWith(".md") ?? false);
   const [fileError, setFileError] = useState<string | null>(null);
   // Deliberately NOT persisted: a stored flag would strand the user back in the
   // full history weeks after a single click. A reload or project switch resets it.
@@ -634,6 +638,7 @@ export default function PlansTab({ projectName, archived = false }: Props) {
               path={selectedPath}
               relativePath={selectedRelative}
               content={fileContent}
+              speech={speech}
             />
           )}
           {selectedPath && fileError && (
@@ -660,7 +665,9 @@ export default function PlansTab({ projectName, archived = false }: Props) {
             </p>
           )}
           {fileContent !== null && (
-            <MarkdownRenderer content={fileContent} basePath={selectedBasePath} />
+            <PlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
+              <MarkdownRenderer content={fileContent} basePath={selectedBasePath} />
+            </PlayFromHere>
           )}
         </>
       }

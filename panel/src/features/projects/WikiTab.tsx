@@ -9,6 +9,7 @@ import { useFileListControls } from "./fileListControls";
 import { usePeekTriggerProps } from "./peekTrigger";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useDocSpeech } from "./docSpeech";
+import { PlayFromHere } from "../speech/PlayFromHere";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useProjectWiki, useWikiPage, type WikiPageInfo, type WikiTree } from "./useProjectWiki";
 import { clearLastSectionFile, writeLastSectionFile } from "../shell/lastPath";
@@ -476,7 +477,9 @@ function WikiPageView({
       )}
       {body !== null && (
         <div data-testid="wiki-body">
-          <MarkdownRenderer content={body} basePath={file} />
+          <PlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
+            <MarkdownRenderer content={body} basePath={file} />
+          </PlayFromHere>
         </div>
       )}
       {info && (
