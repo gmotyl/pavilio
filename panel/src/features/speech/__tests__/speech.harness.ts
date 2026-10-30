@@ -182,6 +182,50 @@ export const synthMock = () => ({
   SPEECH_AUDIO_MIME_TYPE: "audio/mpeg",
 });
 
+/**
+ * The page audio cache's stand-ins, for `vi.mock("../pageCache", () =>
+ * pageCacheMock())`. By default the cache is empty and unreachable-safe: every
+ * `pageAudio` is a miss that the active synthesizer answers (so a page run
+ * reads exactly as it did before the cache), the list and the prune resolve
+ * with nothing, and no unit is on disk. Each is a spy, so a suite can assert
+ * what the host asked for — or that an answer asked for nothing.
+ */
+export const pageCache = {
+  pageAudio: vi.fn(
+    (_docKey: string, unit: SpeechUnit, options?: Parameters<typeof tieredSynth.synthesizeSpeech>[1]) =>
+      current().synthesizeSpeech(unit.text, options),
+  ),
+  loadPageList: vi.fn(async (_docKey: string): Promise<boolean> => true),
+  prunePage: vi.fn(
+    async (_docKey: string, _units: readonly SpeechUnit[], _options?: { isCurrent?: () => boolean }): Promise<void> => {},
+  ),
+  pageUnitState: vi.fn((_docKey: string, _unit: SpeechUnit): "warming" | "ready" | undefined => undefined),
+  pageCachedShare: vi.fn((_docKey: string, _units: readonly SpeechUnit[]) => ({ cached: 0, bytes: 0 })),
+  subscribePageCache: vi.fn((_listener: () => void) => () => {}),
+  clearPage: vi.fn(async (_docKey: string): Promise<void> => {}),
+  cacheTotals: vi.fn(async () => ({ pages: 0, units: 0, bytes: 0 })),
+  wipeCache: vi.fn(async () => ({ pages: 0, units: 0, bytes: 0 })),
+};
+
+/** The `vi.mock("../pageCache", …)` factory. Delegates to {@link pageCache}. */
+export const pageCacheMock = () => ({
+  pageAudio: (...args: Parameters<typeof pageCache.pageAudio>) => pageCache.pageAudio(...args),
+  loadPageList: (...args: Parameters<typeof pageCache.loadPageList>) => pageCache.loadPageList(...args),
+  prunePage: (...args: Parameters<typeof pageCache.prunePage>) => pageCache.prunePage(...args),
+  pageUnitState: (...args: Parameters<typeof pageCache.pageUnitState>) => pageCache.pageUnitState(...args),
+  pageCachedShare: (...args: Parameters<typeof pageCache.pageCachedShare>) =>
+    pageCache.pageCachedShare(...args),
+  subscribePageCache: (...args: Parameters<typeof pageCache.subscribePageCache>) =>
+    pageCache.subscribePageCache(...args),
+  clearPage: (...args: Parameters<typeof pageCache.clearPage>) => pageCache.clearPage(...args),
+  cacheTotals: () => pageCache.cacheTotals(),
+  wipeCache: () => pageCache.wipeCache(),
+});
+
+/** Every page cache call any test made, so "never touched" is one assertion. */
+export const pageCacheCalls = (): number =>
+  Object.values(pageCache).reduce((sum, spy) => sum + spy.mock.calls.length, 0);
+
 /** The texts that reached the active synthesizer, in order. */
 export const requestedTexts = (): string[] => current().requests.map((request) => request.text);
 export const timesRequested = (text: string): number =>
@@ -297,6 +341,8 @@ export function resetSpeechHarness(): void {
   unlocks.length = 0;
   ws.setters.clear();
   localStorage.clear();
+  // Back to each spy's default: an empty cache whose every unit is a miss.
+  for (const spy of Object.values(pageCache)) spy.mockReset();
 
   global.fetch = vi.fn(
     async () => ({ ok: true, json: async () => ({ utterances: [] }) }) as Response,

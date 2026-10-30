@@ -8,7 +8,10 @@
  * unit has been played); everything else is decided from the playhead and the
  * cache alone, which is what this module takes.
  */
-import type { SpeechCacheState } from "./synth";
+import { isDocSpeechKey } from "./docKey";
+import { pageUnitState, subscribePageCache } from "./pageCache";
+import { speechCacheState, subscribeSpeechCache, type SpeechCacheState } from "./synth";
+import type { SpeechUnit } from "./types";
 
 /**
  * A segment's state. Five, because `ready` had to split: the cache stores the
@@ -39,4 +42,36 @@ export function segmentStateFor(args: {
   // Absent, in flight, or in hand — ahead of the playhead, or with no run at
   // all, the cache is the only thing that knows.
   return cache;
+}
+
+/**
+ * The cache's answer for one unit of `key`'s run — the `cache` that
+ * {@link segmentStateFor} takes. A page's unit asks the page audio cache first:
+ * on disk but not yet fetched is `warming`, fetched is `ready`; a unit the page
+ * cache does not hold (or has not hashed yet) is the synthesizer's to describe.
+ * An answer's unit asks the synthesizer alone, so answers never touch the page
+ * cache. A missing unit (a stale render) is `cold`.
+ */
+export function unitCacheState(
+  key: string,
+  unit: SpeechUnit | undefined,
+  voice: string,
+): SpeechCacheState {
+  if (!unit) return "cold";
+  const onDisk = isDocSpeechKey(key) ? pageUnitState(key, unit) : undefined;
+  return onDisk ?? speechCacheState(unit.text, { voice, lang: unit.lang });
+}
+
+/**
+ * Subscribes to every change {@link unitCacheState} can answer differently
+ * after: the synthesizer's cache and the page audio cache. Returns the
+ * unsubscribe for both.
+ */
+export function subscribeUnitCache(listener: () => void): () => void {
+  const unsubscribeSpeech = subscribeSpeechCache(listener);
+  const unsubscribePage = subscribePageCache(listener);
+  return () => {
+    unsubscribeSpeech();
+    unsubscribePage();
+  };
 }

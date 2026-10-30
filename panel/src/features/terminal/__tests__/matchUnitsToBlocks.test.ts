@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { prepare } from "../../speech/prepare";
-import { matchUnitsToBlocks, normalizeForMatch } from "../matchUnitsToBlocks";
+import { matchUnitsToBlocks, normalizeForMatch } from "../../speech/matchUnitsToBlocks";
 
 /**
  * One paragraph past the unit ceiling (450) but under twice it, so `prepare`

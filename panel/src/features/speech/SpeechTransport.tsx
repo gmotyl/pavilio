@@ -7,15 +7,15 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { speechCacheState, subscribeSpeechCache } from "./synth";
-import { segmentStateFor, type SegmentState } from "./segmentState";
+import { segmentStateFor, subscribeUnitCache, unitCacheState, type SegmentState } from "./segmentState";
 import type { CellSpeechState, SpeechUnit } from "./types";
 import type { SpeechProgress } from "./useSpeechPlayer";
 
 export interface SpeechTransportProps {
   /**
    * The suffix of every `data-testid` the transport renders — the session id
-   * on a cell, the doc key on a page. Not a label: nothing reads it but tests.
+   * on a cell, the doc key on a page. Not a label: besides tests, only the
+   * segment states read it, to ask a page's units of its audio cache.
    */
   id: string;
   /** The run's state for this key, from the host's `stateFor`. */
@@ -58,6 +58,12 @@ export interface SpeechTransportProps {
    * stylesheet and tests keyed on it — is unchanged by the extraction.
    */
   between?: ReactNode;
+  /**
+   * The unit a press elsewhere would land on — the page's hovered block
+   * (`PlayFromHere`). Its segment is outlined (`data-hint`); the segment stays
+   * clickable as any other. Omitted, nothing is outlined.
+   */
+  hintUnit?: number | null;
 }
 
 /**
@@ -84,7 +90,7 @@ const FALLBACK_CHARS_PER_SECOND = 15;
  * exceeded" — for any snapshot built per call. A collection of segment states
  * is exactly that trap: a fresh array or Map every render. So the store's value
  * is this number, which is referentially stable by construction, and the states
- * themselves are read during render by {@link speechCacheState} — a Map lookup
+ * themselves are read during render by `unitCacheState` — a Map lookup
  * and a property read, once per unit, cheap enough to pay on every pass.
  *
  * Module-level rather than per-transport because the two functions below are
@@ -94,7 +100,8 @@ const FALLBACK_CHARS_PER_SECOND = 15;
 let cacheVersion = 0;
 
 function subscribeCacheVersion(onStoreChange: () => void): () => void {
-  return subscribeSpeechCache(() => {
+  // Both caches: a page's units are read from the page audio cache first.
+  return subscribeUnitCache(() => {
     cacheVersion += 1;
     onStoreChange();
   });
@@ -181,6 +188,7 @@ export function SpeechTransport({
   pulse = false,
   pending = false,
   between,
+  hintUnit = null,
 }: SpeechTransportProps) {
   // Told, not asked. The transport reads the cache during render, and progress
   // was its only other re-render trigger — which bounds staleness to ~250ms
@@ -212,7 +220,8 @@ export function SpeechTransport({
     const state = segmentStateFor({
       index,
       playingIndex: progress?.unitIndex ?? null,
-      cache: speechCacheState(units[index]?.text ?? "", { voice, lang: units[index]?.lang }),
+      // Keyed by `id`: a page's units ask its audio cache first.
+      cache: unitCacheState(id, units[index], voice),
     });
     // A measured unit is one whose audio has been in the element: played, this
     // run, whether or not a run is still going. Only the bar has `durations`,
@@ -338,6 +347,7 @@ export function SpeechTransport({
               title={`Unit ${index + 1} of ${units.length}`}
               data-testid={`speech-bar-segment-${id}-${index}`}
               data-segment={segment}
+              data-hint={index === hintUnit ? "1" : undefined}
               className="speech-bar-seg"
               style={{ width: `${width}%` }}
               onMouseDown={(e) => {

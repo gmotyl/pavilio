@@ -61,10 +61,11 @@ import { alerts } from "../alerts/store";
 import { createAutoplayQueue, type AutoplayQueue } from "./autoplayQueue";
 import { isDocSpeechKey } from "./docKey";
 import { speechFailureAlert } from "./failureAlert";
-import { voteLanguage } from "./language";
 import { prepare } from "./prepare";
-import { pageSpeechText } from "./pageText";
-import { isSpeechSynthesized, synthesizeSpeech } from "./synth";
+import { pageSpeechText, preparePageText } from "./pageText";
+import { loadPageList, pageUnitState, prunePage } from "./pageCache";
+import { isSpeechSynthesized } from "./synth";
+import { unitAudio } from "./unitAudio";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
@@ -167,8 +168,13 @@ export interface PageSpeech {
    * (`pageSpeechText`) — as its key's one utterance (id = that text's hash)
    * and starts it: unit 0 is asked for at once, the key is preparing until it
    * is in hand, and whatever else was speaking is barged in on.
+   *
+   * `startUnit` starts the run there instead of at unit 0 — the ▶ on a page
+   * block. Clamped into the page's units (a non-number reads as 0), as a
+   * segment click is. With the page already playing it is a jump: the same
+   * utterance restarts at that unit, as a segment click restarts it.
    */
-  speakDocument(input: { key: string; text: string }): void;
+  speakDocument(input: { key: string; text: string; startUnit?: number }): void;
   /** Stops the page's run, if it holds the element, and forgets the page. */
   stopDocument(key: string): void;
 }
@@ -612,7 +618,9 @@ export function useSpeechHost({
       // page is dropped.
       const known = pageLanguagesRef.current.get(utterance.id);
       if (known) return known;
-      const language = voteLanguage(utterance.text);
+      // The page's own preparation picks it, so the language a page plays in
+      // is the one every other reader of the page prepared it in.
+      const { language } = preparePageText(utterance.text);
       pageLanguagesRef.current.set(utterance.id, language);
       return language;
     },
@@ -640,7 +648,13 @@ export function useSpeechHost({
       const cached = preparedRef.current.get(utterance.id);
       if (cached) return cached;
 
-      const prepared = prepare(utterance.text, { language });
+      // A page (`doc:` key) is prepared the one way every page is — block-
+      // bounded, in its own vote's language (`preparePageText`) — so the units
+      // the bar and play-from-here index are these units. An answer packs in
+      // its session's language, as it always has.
+      const prepared = isDocSpeechKey(utterance.sessionId)
+        ? preparePageText(utterance.text)
+        : prepare(utterance.text, { language });
       preparedRef.current.set(utterance.id, prepared);
       return prepared;
     },
@@ -706,15 +720,19 @@ export function useSpeechHost({
     [abortPreloads],
   );
 
-  /** Unit 0 of an arriving utterance, on anytts' `warm` tier, once. */
+  /**
+   * Unit 0 of an arriving utterance, on anytts' `warm` tier, once — or, for a
+   * page run started mid-page, the unit it starts at (`start`, already
+   * clamped into the units): that is the one the click waits on.
+   */
   const warmFirstUnit = useCallback(
-    (utterance: Utterance, units: readonly SpeechUnit[]): void => {
+    (utterance: Utterance, units: readonly SpeechUnit[], start = 0): void => {
       if (warmedRef.current.has(utterance.id)) return;
       // Marked before the synthesis, not after: a second render must not start
       // a second warm of the same utterance while the first is in flight.
       warmedRef.current.add(utterance.id);
 
-      const first = units[0];
+      const first = units[start];
       if (!first) return;
 
       // Its own controller, never the preloads': see `UtteranceSynthesis`.
@@ -727,16 +745,20 @@ export function useSpeechHost({
       // waiting in a queue is a cell waiting for its audio.
       setPreparing(utterance.sessionId, true);
 
-      // `synthesizeSpeech` rather than `prefetchSpeech`: the promise is the
-      // whole point here — it is what says when the cell stops being red — and
-      // a fire-and-forget warm cannot be reported on. The failure is swallowed
-      // exactly as `prefetchSpeech` swallows it.
+      // `unitAudio` (a `synthesizeSpeech` underneath) rather than
+      // `prefetchSpeech`: the promise is the whole point here — it is what says
+      // when the cell stops being red — and a fire-and-forget warm cannot be
+      // reported on. The failure is swallowed exactly as `prefetchSpeech`
+      // swallows it.
       //
       // The voice is the one the click will use — the session's, through its
       // project, from the same `voiceFor` `useSpeechPlayer` reads. The
       // cache keys on voice + text, so warming with any other one is a
       // synthesis nobody ever plays.
-      synthesizeSpeech(first.text, {
+      //
+      // A page's unit 0 goes through its audio cache (`unitAudio`), so one on
+      // disk is fetched rather than synthesized.
+      unitAudio(utterance.sessionId, first, {
         voice: voiceForRef.current(utterance.sessionId),
         lang: first.lang,
         tier: "warm",
@@ -788,14 +810,18 @@ export function useSpeechHost({
 
       for (let index = 1; index < units.length; index += 1) {
         const key = `${id}#${index}`;
-        const { text, lang } = units[index];
+        const unit = units[index];
+        const { text, lang } = unit;
         if (preloadedRef.current.has(key)) {
           // The synth cache is an LRU: a unit requested earlier may have been
           // evicted since, and Play would then pay for it. Requested but cold
           // now (`isSpeechSynthesized` is `speechCacheState !== "cold"`, so in
           // flight counts as held) -> ask again.
+          // A page's unit whose bytes the page cache holds is not evicted,
+          // whatever the synth LRU did.
           const evicted =
             preloadStartedRef.current.has(key) &&
+            !(isDocSpeechKey(sessionId) && pageUnitState(sessionId, unit) === "ready") &&
             !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId), lang });
           if (!evicted) continue;
           preloadStartedRef.current.delete(key);
@@ -808,7 +834,7 @@ export function useSpeechHost({
         const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
         const voice = voiceForRef.current(sessionId);
-        synthesizeSpeech(text, { voice, lang, tier: "preload", signal }).catch(
+        unitAudio(sessionId, unit, { voice, lang, tier: "preload", signal }).catch(
           (error: unknown) => {
             // Called off: whoever aborted already forgot the unit, and a late
             // rejection must not touch a fresh controller's bookkeeping.
@@ -1117,7 +1143,7 @@ export function useSpeechHost({
   }, []);
 
   const speakDocument = useCallback(
-    ({ key, text: source }: { key: string; text: string }): void => {
+    ({ key, text: source, startUnit = 0 }: { key: string; text: string; startUnit?: number }): void => {
       // The page's source as its surface loaded it; what is spoken — and
       // hashed into the id — is that source without its frontmatter.
       const text = pageSpeechText(source);
@@ -1156,11 +1182,38 @@ export function useSpeechHost({
         }
         return;
       }
-      // A local utterance is never warmed on arrival, so its unit 0 is warmed
-      // here — the same warm the click then finds in flight, and the same red
-      // until it lands.
-      warmFirstUnit(utterance, units);
-      speakUtterance(key, utterance);
+      // The page's cached units, then its orphans dropped: listed first, so
+      // the prune mirrors what the list loaded, and the prune hashes every
+      // unit, which is what lets the bar read their state synchronously. In
+      // the background, never awaited: unit 0 must not wait on two round trips,
+      // and `pageAudio` asks the server per unit anyway. Both swallow their own
+      // failures — an unreachable cache plays the page as if there were none,
+      // and raises nothing.
+      //
+      // The prune runs only while this revision is still the page's
+      // utterance: a delayed list of an older revision, landing after the
+      // page was edited and replayed, would otherwise keep only the old units
+      // and delete the newer revision's audio. Checked before the prune starts
+      // and handed to it, which checks again before its POST and before it
+      // deletes anything locally.
+      const isCurrent = (): boolean => pageUtterancesRef.current.get(key) === utterance.id;
+      void loadPageList(key)
+        .then(() => {
+          if (!isCurrent()) return;
+          return prunePage(key, units, { isCurrent });
+        })
+        .catch(() => {});
+      // A non-number has no unit to clamp to, so it is 0; otherwise clamped
+      // into the units, as `speakUtterance` clamps a segment click's.
+      const start = Math.min(
+        Math.max(Number.isFinite(startUnit) ? Math.trunc(startUnit) : 0, 0),
+        units.length - 1,
+      );
+      // A local utterance is never warmed on arrival, so the unit the run
+      // starts at is warmed here — the same warm the click then finds in
+      // flight, and the same red until it lands.
+      warmFirstUnit(utterance, units, start);
+      speakUtterance(key, utterance, start);
     },
     [
       abortUtterance,

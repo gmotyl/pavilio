@@ -282,6 +282,14 @@ export interface SpeechUnit {
    * respelled.
    */
   lang?: "pl" | "en";
+  /**
+   * Pages only (`prepare`'s `blockBounded`): the index of the block this unit
+   * starts in — and, since no page unit spans two blocks, the only block it
+   * speaks. Counts the blocks that produce a unit, from 0, so the first unit
+   * of block `b` is the first unit with `block === b`. Absent on an answer's
+   * units. See `prepareBlocks` in `prepare.ts`.
+   */
+  block?: number;
 }
 
 /**

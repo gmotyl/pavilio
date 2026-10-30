@@ -945,6 +945,14 @@ input[type="checkbox"] {
   box-shadow: inset 0 0 0 1px var(--speech-seg);
 }
 
+/* The segment a hovered page block would start at (`PlayFromHere`): the
+   mockup's hint outline. Outline, not border, so the segment keeps its width
+   and stays clickable as any other. */
+.speech-bar-seg[data-hint] {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .speech-bar-fill {
   position: absolute;
   inset: 0 auto 0 0;
@@ -2549,4 +2557,60 @@ input[type="checkbox"] {
   text-decoration: underline dashed;
   text-underline-offset: 3px;
   cursor: help;
+}
+
+/* Play from here: the page's ▶ layer. Over the page, transparent to the
+   pointer; each ▶ sits on its block's left edge, over the start of the text —
+   no gutter, so no block's padding, margin or text moves (agreed deviation from
+   the mockup). Hidden and pointer-transparent until its block is hovered,
+   focused or tapped, so a first tap on touch lands on the block, not the ▶. */
+.play-from-here-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.play-from-here {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--speech-seg);
+  cursor: pointer;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 1;
+  transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.play-from-here svg {
+  width: 12px;
+  height: 12px;
+}
+
+.play-from-here[data-shown],
+.play-from-here:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.play-from-here:hover {
+  border-color: var(--speech-seg);
+}
+
+.play-from-here:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The hovered block's highlight: background plus a spread shadow in the same
+   colour, so it reaches past the text without a pixel of padding. */
+[data-speak-hover] {
+  background: var(--bg-hover);
+  box-shadow: 0 0 0 4px var(--bg-hover);
+  border-radius: 4px;
 }

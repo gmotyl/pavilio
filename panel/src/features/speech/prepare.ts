@@ -44,6 +44,12 @@ export interface PrepareOptions {
    * `lang`, where it picks the Pronunciation map.
    */
   language?: "pl" | "en";
+  /**
+   * Page packing: no unit ever spans two blocks, so a page can be started at
+   * any block. See {@link prepareBlocks}. Off (answers): units pack across
+   * paragraphs exactly as they always have, and carry no `block`.
+   */
+  blockBounded?: boolean;
 }
 
 /**
@@ -56,6 +62,8 @@ export interface PrepareOptions {
 interface Packed {
   source: string;
   text: string;
+  /** Block-bounded packing only: the index of the block this unit starts in. */
+  block?: number;
 }
 
 /** An ATX heading line: `#` … `######`, up to three leading spaces. */
@@ -473,17 +481,156 @@ function takeHeading(paragraphs: string[]): string | null {
  * trim.
  */
 function toUnits(packed: readonly Packed[], lang: "pl" | "en"): SpeechUnit[] {
-  return packed.map(({ source, text: spoken }) => {
+  return packed.map(({ source, text: spoken, block }) => {
     const text = spoken.replace(/^ *, */, "");
 
-    return { text, chars: text.length, source, lang };
+    // `block` is added only when packing set it, so an answer's units keep
+    // exactly the shape they always had.
+    const unit: SpeechUnit = { text, chars: text.length, source, lang };
+    if (block !== undefined) unit.block = block;
+    return unit;
   });
+}
+
+/** A blockquote line with no text: `>` (or nested `> >`) alone separates two quoted paragraphs. */
+const QUOTE_SEPARATOR_RE = /^ {0,3}>[>\s]*$/;
+/** A setext underline: the paragraph lines above it render as one heading. */
+const SETEXT_UNDERLINE_RE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+/** A line's blockquote prefix, nested ones included (`> `, `> > `). */
+const QUOTE_PREFIX_RE = /^(?: {0,3}> ?)+/;
+
+/** How many blockquotes the line sits in: `0` outside any, `2` for `> > `. */
+function quoteDepth(line: string): number {
+  return (QUOTE_PREFIX_RE.exec(line)?.[0].match(/>/g) ?? []).length;
+}
+
+/** The line inside its blockquote container: what markdown parses as the quoted block's line. */
+function unquote(line: string): string {
+  return line.replace(QUOTE_PREFIX_RE, "");
+}
+
+/**
+ * One block of a page, as {@link splitBlockLines} cuts it: its `source` (what
+ * the viewer text-matches against the rendered block) and what is `spoken`,
+ * which differ only for a setext heading, whose underline is structure — not
+ * text the renderer shows or the voice should read.
+ */
+interface PageBlock {
+  source: string;
+  spoken: string;
+  heading: boolean;
+}
+
+/**
+ * A paragraph cut at every boundary markdown renders as two blocks but
+ * `strip.ts` keeps in one paragraph (there is no blank line between them):
+ * - an ATX heading line — a heading may interrupt a paragraph, and the text
+ *   right under it is a block of its own, so each heading line stands alone;
+ * - a setext underline — the lines above it are the heading, and what follows
+ *   is a new block; the underline itself is dropped from the heading's source
+ *   and its speech, so a short heading still matches its rendered text. Only
+ *   in the same container as the line above it: `Intro` then `> ===` is a
+ *   paragraph and a quote whose `===` is text, so that line stays literal;
+ * - a blockquote line holding only `>` — the quoted paragraphs on either side
+ *   render as two `<p>`; the separator itself speaks nothing and is dropped.
+ * Headings are recognised inside a blockquote too, after its `>` prefix: a
+ * quoted heading keeps the prefix in its source (the matcher ignores `>` and
+ * `#`) but is spoken as its bare text.
+ * Block-bounded packing only: answers pack exactly as they always have.
+ */
+function splitBlockLines(paragraph: string): PageBlock[] {
+  const blocks: PageBlock[] = [];
+  let run: string[] = [];
+  const push = (source: string, spoken: string, heading: boolean): void => {
+    if (source) blocks.push({ source, spoken, heading });
+  };
+  const flush = (heading = false): void => {
+    const source = run.join("\n").trim();
+    // A paragraph keeps its quote markers as ever; a heading speaks bare.
+    push(source, heading ? run.map(unquote).join("\n").trim() : source, heading);
+    run = [];
+  };
+
+  for (const line of paragraph.split("\n")) {
+    if (QUOTE_SEPARATOR_RE.test(line)) {
+      flush();
+    } else if (HEADING_LINE_RE.test(unquote(line))) {
+      flush();
+      push(line.trim(), unquote(line).trim(), true);
+    } else if (
+      SETEXT_UNDERLINE_RE.test(unquote(line)) &&
+      run.length > 0 &&
+      quoteDepth(line) === quoteDepth(run[run.length - 1]!)
+    ) {
+      flush(true);
+    } else {
+      run.push(line);
+    }
+  }
+  flush();
+
+  return blocks;
+}
+
+/**
+ * Block-bounded packing, for pages: the page is started at any block (the
+ * viewer's ▶), so no unit may hold the tail of one block and the head of the
+ * next. Each block — a top-level paragraph, a heading, a list item (which
+ * `strip.ts` already makes a paragraph of its own) or a removed block's
+ * placeholder — is packed on its own: a block over {@link UNIT_MAX_CHARS} is
+ * still cut on sentences, and the {@link UNIT_MIN_CHARS} floor, which only ever
+ * merges *across* paragraphs, never applies.
+ *
+ * The answer-only orderings have nothing left to do here. The opening heading,
+ * leading placeholders and a TLDR are each a block, so each is already a unit
+ * of its own, in place. The fast start keeps only its in-block half — the
+ * first body block's opening sentence becomes unit 0's neighbour-free start —
+ * and drops the half that borrows a sentence from the next paragraph.
+ *
+ * Block indices: `block` counts the blocks that produce at least one unit, in
+ * page order, from 0 — a block that speaks nothing (a paragraph of bare
+ * markers) takes no index, and a placeholder (`⟦code⟧`, `⟦table⟧`, `⟦html⟧`,
+ * spoken "code block") takes one, because it is a unit. Every unit of a block
+ * carries the same index and a block's units are consecutive, so the first unit
+ * of block `b` is `units.findIndex((u) => u.block === b)`. The viewer finds a
+ * rendered block's unit by text (`unit.source`, as `matchUnitsToBlocks` does
+ * for the answer pane) and then snaps to the first unit carrying that unit's
+ * `block`. A rendered code block, mermaid diagram or table never text-matches
+ * a placeholder's source, so it gets no ▶; frontmatter never reaches here
+ * (`pageSpeechText` strips it).
+ */
+function prepareBlocks(paragraphs: readonly string[], language: "pl" | "en"): Packed[] {
+  const blocks = paragraphs.flatMap(splitBlockLines);
+  const units: Packed[] = [];
+  let index = 0;
+  let opening = true;
+
+  for (const block of blocks) {
+    const text = toSpokenText(block.spoken, language);
+    if (!text) continue;
+    const spoken: Packed = { source: block.source, text };
+
+    // The first block that is neither a heading nor a placeholder is the body's
+    // first paragraph — the one the fast start comes from, unless it is a TLDR.
+    const leading = block.heading || SENTINEL_ONLY_RE.test(block.source);
+    const fastStart =
+      opening && !leading && !TLDR_PARAGRAPH_RE.test(block.source) ? takeFastStart(spoken, []) : null;
+    if (!leading) opening = false;
+
+    const pieces = fastStart ? [fastStart.unit, ...packBody(fastStart.body)] : packBody([spoken]);
+    for (const piece of pieces) units.push({ ...piece, block: index });
+    index += 1;
+  }
+
+  return units;
 }
 
 export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech {
   const language = opts?.language ?? "en";
 
   const paragraphs = splitParagraphs(stripToSpeakableText(markdown));
+  if (opts?.blockBounded) return { units: toUnits(prepareBlocks(paragraphs, language), language), language };
+
   const heading = takeHeading(paragraphs);
 
   const opening: Packed[] = [];

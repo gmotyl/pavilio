@@ -727,3 +727,225 @@ describe("removeMarkers", () => {
     expect(removeMarkers(input)).toBe(expected);
   });
 });
+
+describe("prepare with blockBounded (pages)", () => {
+  /** An 80-character paragraph: one sentence, so the fast start leaves it whole. */
+  const eighty = (word: string): string => {
+    const text = `The ${word} paragraph talks about the panel and its speech for a while`.padEnd(79, "x");
+    return `${text}.`;
+  };
+
+  /** `sentence` said `count` times, space-joined. */
+  const sentences = (sentence: string, count: number): string => Array(count).fill(sentence).join(" ");
+
+  it("block-bounded: short blocks stay separate units", () => {
+    const first = eighty("first");
+    const second = eighty("second");
+    expect(first).toHaveLength(80);
+    const page = ["# Title", "", first, "", second].join("\n");
+
+    const { units } = prepare(page, { blockBounded: true });
+
+    expect(units.map((unit) => unit.text)).toEqual(["Title", first, second]);
+    expect(units.map((unit) => unit.block)).toEqual([0, 1, 2]);
+  });
+
+  it("block-bounded: a long block splits within the ceiling", () => {
+    const long = sentences("This sentence exists to make one paragraph run past the ceiling.", 16);
+    expect(long.length).toBeGreaterThanOrEqual(1000);
+    const before = "A short paragraph before it.";
+    const after = "A short paragraph after it.";
+    const page = [before, "", long, "", after].join("\n");
+
+    const { units } = prepare(page, { blockBounded: true });
+
+    const longUnits = units.filter((unit) => unit.block === 1);
+    expect(longUnits.length).toBeGreaterThan(1);
+    for (const unit of longUnits) {
+      expect(unit.chars).toBeLessThanOrEqual(UNIT_MAX_CHARS);
+      expect(unit.text).not.toContain("short paragraph");
+      expect(long).toContain(unit.text);
+    }
+    expect(longUnits.map((unit) => unit.text).join(" ")).toBe(long);
+    expect(units[0]).toMatchObject({ text: before, block: 0 });
+    expect(units[units.length - 1]).toMatchObject({ text: after, block: 2 });
+  });
+
+  it("block-bounded: list items start their own units", () => {
+    const page = ["Here is what changed:", "", "- The player keeps its place.", "- The bar folds away.", "- Units are cached."].join(
+      "\n",
+    );
+
+    const { units } = prepare(page, { blockBounded: true });
+
+    expect(units.map((unit) => [unit.text, unit.block])).toEqual([
+      ["Here is what changed:", 0],
+      ["The player keeps its place.", 1],
+      ["The bar folds away.", 2],
+      ["Units are cached.", 3],
+    ]);
+  });
+
+  it("block-bounded: a heading glued to its paragraph is a block of its own", () => {
+    const page = ["Intro sentence here.", "", "## Details", "Detail sentence one. Detail sentence two."].join("\n");
+
+    const { units } = prepare(page, { blockBounded: true });
+
+    expect(units.map((unit) => [unit.text, unit.source, unit.block])).toEqual([
+      ["Intro sentence here.", "Intro sentence here.", 0],
+      ["Details", "## Details", 1],
+      ["Detail sentence one. Detail sentence two.", "Detail sentence one. Detail sentence two.", 2],
+    ]);
+  });
+
+  it("block-bounded: a removed block's placeholder is a block of its own", () => {
+    const page = ["Before the code.", "", "```ts", "const x = 1;", "```", "", "After the code."].join("\n");
+
+    const { units } = prepare(page, { blockBounded: true, language: "pl" });
+
+    expect(units.map((unit) => [unit.text, unit.source, unit.block])).toEqual([
+      ["Before the code.", "Before the code.", 0],
+      ["blok kodu.", "⟦code⟧", 1],
+      ["After the code.", "After the code.", 2],
+    ]);
+  });
+
+  it("block-bounded: a two-paragraph blockquote is two blocks", () => {
+    const page = ["> The first quoted paragraph.", ">", "> The second quoted paragraph."].join("\n");
+
+    const { units } = prepare(page, { blockBounded: true });
+
+    expect(units.map((unit) => unit.block)).toEqual([0, 1]);
+    expect(units[0].source).toContain("first quoted paragraph");
+    expect(units[0].source).not.toContain("second");
+    expect(units[1].source).toContain("second quoted paragraph");
+  });
+
+  it("block-bounded: a setext heading followed directly by prose is two blocks", () => {
+    for (const underline of ["=====", "-----"]) {
+      const page = ["The Title", underline, "Body prose right under the title."].join("\n");
+
+      const { units } = prepare(page, { blockBounded: true });
+
+      expect(units.map((unit) => unit.block), underline).toEqual([0, 1]);
+      expect(units[0].source, underline).toContain("The Title");
+      expect(units[0].source, underline).not.toContain("Body");
+      expect(units[1].source, underline).toBe("Body prose right under the title.");
+    }
+  });
+
+  it("block-bounded: a setext heading's underline is neither spoken nor in its source", () => {
+    for (const underline of ["=====", "-----"]) {
+      const { units } = prepare(["Title", underline, "Body"].join("\n"), { blockBounded: true });
+
+      expect(units.map((unit) => [unit.source, unit.text, unit.block]), underline).toEqual([
+        ["Title", "Title", 0],
+        ["Body", "Body", 1],
+      ]);
+    }
+  });
+
+  it("block-bounded: a quoted ATX heading is a block of its own, spoken without its markers", () => {
+    const { units } = prepare(["> ## Quoted Heading", "> Quoted prose under it."].join("\n"), {
+      blockBounded: true,
+    });
+
+    expect(units.map((unit) => [unit.source, unit.text, unit.block])).toEqual([
+      ["> ## Quoted Heading", "Quoted Heading", 0],
+      ["> Quoted prose under it.", "> Quoted prose under it.", 1],
+    ]);
+  });
+
+  it("block-bounded: a quoted setext heading is a block of its own, its underline dropped", () => {
+    for (const underline of ["> =====", "> -----"]) {
+      const { units } = prepare(["> Quoted Title", underline, "> Quoted prose under it."].join("\n"), {
+        blockBounded: true,
+      });
+
+      expect(units.map((unit) => [unit.source, unit.text, unit.block]), underline).toEqual([
+        ["> Quoted Title", "Quoted Title", 0],
+        ["> Quoted prose under it.", "> Quoted prose under it.", 1],
+      ]);
+    }
+  });
+
+  it("block-bounded: a quoted underline under an unquoted line is no setext heading", () => {
+    for (const underline of ["> ===", "> ---"]) {
+      const page = ["Intro", underline, "> Quoted text"].join("\n");
+
+      const { units } = prepare(page, { blockBounded: true });
+
+      // The underline sits in the quote, the line above it outside: markdown
+      // renders a paragraph and a quote, never a heading "Intro". The quoted
+      // underline stays literal text, in source and in speech.
+      expect(units.map((unit) => unit.source), underline).toEqual([page]);
+      expect(units[0].text, underline).toContain(underline.slice(2));
+      expect(units[0].text, underline).toContain("Intro");
+    }
+  });
+
+  it("block-bounded: a setext underline must sit at the same quote depth as its heading", () => {
+    // Same container, nested: still a heading.
+    const nested = prepare(["> > Deep Title", "> > =====", "> > Deep prose."].join("\n"), { blockBounded: true });
+    expect(nested.units.map((unit) => [unit.source, unit.text, unit.block])).toEqual([
+      ["> > Deep Title", "Deep Title", 0],
+      ["> > Deep prose.", "> > Deep prose.", 1],
+    ]);
+
+    // One level deeper than the line above it: not an underline of that line.
+    const deeper = ["> Outer line", "> > =====", "> > Inner text"].join("\n");
+    expect(prepare(deeper, { blockBounded: true }).units.map((unit) => unit.source)).toEqual([deeper]);
+  });
+
+  it("answers keep today's packing", () => {
+    const repeated = "This sentence exists to push the paragraph past the ceiling.";
+    const answer = [
+      "# Release notes",
+      "",
+      "Here is what changed:",
+      "",
+      "- The player keeps its place.",
+      "- The bar folds away.",
+      "- Units are cached.",
+      "",
+      "## Details",
+      "Short paragraph one about the panel.",
+      "",
+      "Short paragraph two about the speech units.",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+      "",
+      sentences(repeated, 9),
+    ].join("\n");
+    // Captured from `prepare` before block-bounded packing existed.
+    const today = {
+      language: "pl",
+      units: [
+        { text: "Release notes", chars: 13, source: "# Release notes", lang: "pl" },
+        {
+          text: "Here is what changed: The player keeps its place.",
+          chars: 49,
+          source: "Here is what changed: The player keeps its place.",
+          lang: "pl",
+        },
+        {
+          text: "The bar folds away. Units are cached. Details Short paragraph one about the panel. Short paragraph two about the speech units. blok kodu.",
+          chars: 137,
+          source:
+            "The bar folds away. Units are cached. ## Details\nShort paragraph one about the panel. Short paragraph two about the speech units. ⟦code⟧",
+          lang: "pl",
+        },
+        { text: sentences(repeated, 7), chars: 426, source: sentences(repeated, 9), lang: "pl" },
+        { text: sentences(repeated, 2), chars: 121, source: sentences(repeated, 9), lang: "pl" },
+      ],
+    };
+
+    const prepared = prepare(answer, { language: "pl" });
+
+    expect(prepared).toStrictEqual(today);
+    expect(prepare(answer, { language: "pl", blockBounded: false })).toStrictEqual(today);
+    for (const unit of prepared.units) expect(Object.keys(unit)).not.toContain("block");
+  });
+});

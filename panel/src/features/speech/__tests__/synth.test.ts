@@ -175,6 +175,53 @@ describe("the anytts seam", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("resetSpeechCache empties the in-memory cache", async () => {
+    const first = {
+      ...lib.fake,
+      synthesize: vi.fn(async () => ({
+        bytes: lib.state.bytes,
+        mime: "audio/mpeg" as const,
+        engine: "edge",
+        voice: "v",
+      })),
+      state: vi.fn(() => "ready" as const),
+    };
+    lib.createTts.mockImplementationOnce(() => first);
+
+    await synth.synthesizeSpeech("hello", { voice: "v" });
+    expect(synth.speechCacheState("hello", { voice: "v" })).toBe("ready");
+
+    synth.resetSpeechCache();
+
+    // A fresh instance answers from an empty cache and synthesizes again.
+    expect(synth.speechCacheState("hello", { voice: "v" })).toBe("cold");
+    await synth.synthesizeSpeech("hello", { voice: "v" });
+    expect(lib.createTts).toHaveBeenCalledTimes(2);
+    expect(first.synthesize).toHaveBeenCalledTimes(1);
+    expect(lib.fake.synthesize).toHaveBeenCalledTimes(1);
+  });
+
+  it("resetSpeechCache notifies cache listeners", async () => {
+    const unsubscribeFirst = vi.fn();
+    const first = { ...lib.fake, subscribe: vi.fn(() => unsubscribeFirst) };
+    lib.createTts.mockImplementationOnce(() => first);
+
+    const listener = vi.fn();
+    synth.subscribeSpeechCache(listener);
+
+    synth.resetSpeechCache();
+
+    // The subscription moves to the new instance, and readers re-peek on a
+    // microtask — the same path a preference change takes.
+    expect(unsubscribeFirst).toHaveBeenCalledTimes(1);
+    expect(lib.fake.subscribe).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
+    lib.emit("add");
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it("synthesizeSpeech forwards voice, tier, signal and the engine preference and returns the bytes", async () => {
     // The only engine the instance configures; an unconfigured one falls back
     // (see the next test), so "the preference is forwarded" is pinned by edge.

@@ -12,6 +12,7 @@ import {
 import { copyToClipboard } from "../../lib/clipboard";
 import { DocumentSpeechBar } from "../speech/DocumentSpeechBar";
 import { usePageSpeech } from "../speech/SpeechHostProvider";
+import { usePlayFromHereHandler, usePlayHint } from "../speech/PlayFromHere";
 import { pageHasSpeech } from "../speech/pageText";
 import { openInVSCode } from "../shell/vscode";
 import type { DocSpeech } from "./docSpeech";
@@ -256,6 +257,15 @@ function SpeakingToolbar({
     pageSpeech.speakDocument({ key: speech.key, text: speech.text });
   };
 
+  // A ▶ on one of the page's blocks (`PlayFromHere`): the bar unfolds if it
+  // was folded, and the run starts — or jumps — at that block's first unit.
+  usePlayFromHereHandler(speech.key, (startUnit) => {
+    setOpenKey(speech.key);
+    pageSpeech.speakDocument({ key: speech.key, text: speech.text, startUnit });
+  });
+  // The unit a hovered block would start at: its segment is outlined.
+  const hintUnit = usePlayHint(speech.key);
+
   // A page that prepares to nothing — still loading, code blocks only,
   // frontmatter only — offers no Play. Prepared once per text, not per render.
   // An unfolded bar keeps its Stop whatever the text became: folding is how
@@ -301,7 +311,7 @@ function SpeakingToolbar({
       </div>
       {open && (
         <div className="viewer-speech-bar">
-          <DocumentSpeechBar docKey={speech.key} />
+          <DocumentSpeechBar docKey={speech.key} hintUnit={hintUnit} />
         </div>
       )}
     </div>

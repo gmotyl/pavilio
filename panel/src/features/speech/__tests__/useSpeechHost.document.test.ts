@@ -12,6 +12,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   emitUtterance,
   endCurrentUnit,
+  pageCache,
+  pageCacheCalls,
+  pageCacheMock,
   played,
   requestedTexts,
   resetSpeechHarness,
@@ -24,6 +27,8 @@ import {
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
+// Empty by default: every page unit is a miss the fake synthesizer answers.
+vi.mock("../pageCache", () => pageCacheMock());
 vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
 // The real vote, counted: a page's language is voted once per utterance, not
 // on every render that asks for its units.
@@ -298,5 +303,176 @@ describe("useSpeechHost — page speech", () => {
     expect(getAlertsSnapshot()).toEqual([]);
     // Nothing the page did lands in a cell's queue.
     expect(host().queueFor("cell-a").current).toBeNull();
+  });
+
+  it("a doc run's units, warm included, come through the page cache", async () => {
+    const text = response(3, "Page");
+    const units = unitsOf(text);
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    for (let i = 0; i < units.length; i += 1) await endCurrentUnit();
+
+    // The unit-0 warm and the run both ask the page cache, by doc key.
+    const asked = pageCache.pageAudio.mock.calls;
+    expect(asked.every(([key]) => key === PAGE)).toBe(true);
+    expect(asked.some(([, unit, options]) => unit.text === units[0] && options?.tier === "warm")).toBe(
+      true,
+    );
+    expect(new Set(asked.map(([, unit]) => unit.text))).toEqual(new Set(units));
+  });
+
+  it("answer runs never touch the page cache", async () => {
+    const host = renderHost();
+    // Autoplay: the answer is warmed, its remainder preloaded, then played.
+    await autoplay(host, "cell-a");
+    const text = response(3, "Answer");
+
+    await emitUtterance("cell-a", "u-1", text);
+    for (let i = 0; i < unitsOf(text).length; i += 1) await endCurrentUnit();
+
+    expect(played).toHaveLength(unitsOf(text).length);
+    expect(pageCacheCalls()).toBe(0);
+  });
+
+  it("speakDocument starts at startUnit", async () => {
+    const text = response(6, "Page");
+    const units = unitsOf(text);
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: 4 }));
+
+    expect(played).toEqual([`blob:${units[4]}`]);
+    expect(host().progressFor(PAGE)?.unitIndex).toBe(4);
+    await endCurrentUnit();
+    expect(played).toEqual([`blob:${units[4]}`, `blob:${units[5]}`]);
+  });
+
+  it("a page run started mid-page warms its start unit, not unit 0", async () => {
+    const text = response(6, "Page");
+    const units = unitsOf(text);
+    synth.hold(units[4]);
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: 4 }));
+
+    // The warm is the start unit's, and the key is red until that one lands.
+    expect(synth.requests[0]).toMatchObject({ text: units[4], tier: "warm" });
+    expect(host().preparingSessionIds.has(PAGE)).toBe(true);
+    await settle(() => synth.release(units[4]));
+    expect(host().preparingSessionIds.has(PAGE)).toBe(false);
+    expect(requestedTexts()).not.toContain(units[0]);
+
+    // Clamped as the run's index is: past the end warms the last unit.
+    synth.reset();
+    await settle(() => host().stopDocument(PAGE));
+    await settle(() => host().speakDocument({ key: PAGE, text: response(3, "Late"), startUnit: 99 }));
+    expect(synth.requests[0]).toMatchObject({ text: unitsOf(response(3, "Late"))[2], tier: "warm" });
+  });
+
+  it("speakDocument clamps an out-of-range startUnit", async () => {
+    const text = response(3, "Page");
+    const units = unitsOf(text);
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: 99 }));
+    expect(played).toEqual([`blob:${units[2]}`]);
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: -3 }));
+    expect(played.at(-1)).toBe(`blob:${units[0]}`);
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: Number.NaN }));
+    expect(played.at(-1)).toBe(`blob:${units[0]}`);
+  });
+
+  it("speakDocument with startUnit jumps an active page run", async () => {
+    const text = response(5, "Page");
+    const units = unitsOf(text);
+    const host = renderHost();
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    const landed = utteranceUnderCursor(host().queueFor(PAGE))?.id;
+    expect(played).toEqual([`blob:${units[0]}`]);
+
+    await settle(() => host().speakDocument({ key: PAGE, text, startUnit: 3 }));
+
+    // The same utterance, restarted at unit 3 — as a segment click restarts it.
+    expect(utteranceUnderCursor(host().queueFor(PAGE))?.id).toBe(landed);
+    expect(played).toEqual([`blob:${units[0]}`, `blob:${units[3]}`]);
+    expect(host().speakingSessionId).toBe(PAGE);
+    expect(host().progressFor(PAGE)?.unitIndex).toBe(3);
+    // The run it superseded was not heard: the page plays on to its end.
+    await endCurrentUnit();
+    expect(played.at(-1)).toBe(`blob:${units[4]}`);
+  });
+
+  it("a page run prunes the page's orphans", async () => {
+    const text = response(3, "Page");
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+
+    expect(pageCache.loadPageList).toHaveBeenCalledWith(PAGE);
+    expect(pageCache.prunePage).toHaveBeenCalledTimes(1);
+    const [key, units] = pageCache.prunePage.mock.calls[0];
+    expect(key).toBe(PAGE);
+    expect(units.map((unit) => unit.text)).toEqual(unitsOf(text));
+    // Listed first, then pruned: the prune mirrors what the list loaded.
+    expect(pageCache.loadPageList.mock.invocationCallOrder[0]).toBeLessThan(
+      pageCache.prunePage.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("a delayed list of an older revision does not prune the newer revision", async () => {
+    const older = response(3, "Old");
+    const newer = response(3, "New");
+    let landOlderList: () => void = () => {};
+    pageCache.loadPageList.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (landOlderList = () => resolve(true))),
+    );
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text: older }));
+    // The page was edited and replayed while the older revision's list was out.
+    await settle(() => host().speakDocument({ key: PAGE, text: newer }));
+    await settle(() => landOlderList());
+
+    // Only the current revision prunes: the older chain pruning with its own
+    // units would delete the newer revision's audio.
+    expect(pageCache.prunePage).toHaveBeenCalledTimes(1);
+    const [, units] = pageCache.prunePage.mock.calls[0];
+    expect(units.map((unit) => unit.text)).toEqual(unitsOf(newer));
+  });
+
+  it("a prune already out for an older revision is told it is no longer current", async () => {
+    const older = response(3, "Old");
+    const newer = response(3, "New");
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text: older }));
+    // The older revision's prune started (its list landed) and is still out.
+    expect(pageCache.prunePage).toHaveBeenCalledTimes(1);
+    const olderOptions = pageCache.prunePage.mock.calls[0][2] as { isCurrent?: () => boolean } | undefined;
+    expect(olderOptions?.isCurrent?.()).toBe(true);
+
+    await settle(() => host().speakDocument({ key: PAGE, text: newer }));
+
+    // Replaced: the older prune re-checks before its POST and before deleting
+    // locally, so it stands down instead of pruning the newer revision's units.
+    expect(olderOptions?.isCurrent?.()).toBe(false);
+    const newerOptions = pageCache.prunePage.mock.calls[1][2] as { isCurrent?: () => boolean } | undefined;
+    expect(newerOptions?.isCurrent?.()).toBe(true);
+  });
+
+  it("a page plays as today when the page cache is unreachable", async () => {
+    pageCache.loadPageList.mockRejectedValueOnce(new Error("GET answered 503"));
+    const text = response(2, "Page");
+    const host = renderHost();
+
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    await endCurrentUnit();
+    await endCurrentUnit();
+
+    expect(played).toEqual(unitsOf(text).map((unit) => `blob:${unit}`));
+    expect(getAlertsSnapshot()).toEqual([]);
   });
 });

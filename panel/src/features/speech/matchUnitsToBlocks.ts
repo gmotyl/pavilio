@@ -138,6 +138,17 @@ function matchKind(block: string, unit: string): MatchKind | null {
   return null;
 }
 
+/**
+ * How strongly a normalized rendered block matches a normalized unit source:
+ * 0 (the block is the unit) to 3 (only a head/tail window is found), lower is
+ * stronger; `null` when it does not match. The rules of
+ * {@link matchUnitsToBlocks}, for a caller that pairs blocks with units its own
+ * way — the page's ▶ (`PlayFromHere`) walks both in order.
+ */
+export function blockMatchStrength(block: string, unit: string): number | null {
+  return matchKind(block, unit);
+}
+
 export function matchUnitsToBlocks(
   units: readonly { source: string }[],
   blocks: readonly string[],

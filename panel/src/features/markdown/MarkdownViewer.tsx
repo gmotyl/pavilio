@@ -7,6 +7,7 @@ import ViewerActions from "../projects/ViewerActions";
 import { relativeToWorkspace } from "../projects/relativeToWorkspace";
 import { useWorkspaceRoot } from "../projects/useWorkspaceRoot";
 import { useDocSpeech } from "../projects/docSpeech";
+import { PlayFromHere } from "../speech/PlayFromHere";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { useFloatingAction } from "../shell/Layout";
@@ -192,7 +193,12 @@ export default function MarkdownViewer() {
     <div className={`p-6 ${wide ? "" : "max-w-5xl"}`}>
       <ImageDropZone targetMarkdown={filePath}>
         {isMarkdown ? (
-          <MarkdownRenderer content={content} basePath={filePath} />
+          // Always the same wrapper, so the renderer (and its mermaid
+          // diagrams) is not remounted when the speech key arrives; without a
+          // key — the projects directory not known yet — no block gets a ▶.
+          <PlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
+            <MarkdownRenderer content={content} basePath={filePath} />
+          </PlayFromHere>
         ) : isJson ? (
           <pre
             className="text-sm font-mono p-4 rounded-lg overflow-auto"
