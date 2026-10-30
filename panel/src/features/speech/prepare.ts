@@ -499,6 +499,11 @@ const SETEXT_UNDERLINE_RE = /^ {0,3}(?:=+|-+)[ \t]*$/;
 /** A line's blockquote prefix, nested ones included (`> `, `> > `). */
 const QUOTE_PREFIX_RE = /^(?: {0,3}> ?)+/;
 
+/** How many blockquotes the line sits in: `0` outside any, `2` for `> > `. */
+function quoteDepth(line: string): number {
+  return (QUOTE_PREFIX_RE.exec(line)?.[0].match(/>/g) ?? []).length;
+}
+
 /** The line inside its blockquote container: what markdown parses as the quoted block's line. */
 function unquote(line: string): string {
   return line.replace(QUOTE_PREFIX_RE, "");
@@ -523,7 +528,9 @@ interface PageBlock {
  *   right under it is a block of its own, so each heading line stands alone;
  * - a setext underline — the lines above it are the heading, and what follows
  *   is a new block; the underline itself is dropped from the heading's source
- *   and its speech, so a short heading still matches its rendered text;
+ *   and its speech, so a short heading still matches its rendered text. Only
+ *   in the same container as the line above it: `Intro` then `> ===` is a
+ *   paragraph and a quote whose `===` is text, so that line stays literal;
  * - a blockquote line holding only `>` — the quoted paragraphs on either side
  *   render as two `<p>`; the separator itself speaks nothing and is dropped.
  * Headings are recognised inside a blockquote too, after its `>` prefix: a
@@ -550,7 +557,11 @@ function splitBlockLines(paragraph: string): PageBlock[] {
     } else if (HEADING_LINE_RE.test(unquote(line))) {
       flush();
       push(line.trim(), unquote(line).trim(), true);
-    } else if (SETEXT_UNDERLINE_RE.test(unquote(line)) && run.length > 0) {
+    } else if (
+      SETEXT_UNDERLINE_RE.test(unquote(line)) &&
+      run.length > 0 &&
+      quoteDepth(line) === quoteDepth(run[run.length - 1]!)
+    ) {
       flush(true);
     } else {
       run.push(line);

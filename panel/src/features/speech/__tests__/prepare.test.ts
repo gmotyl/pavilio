@@ -869,6 +869,34 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
+  it("block-bounded: a quoted underline under an unquoted line is no setext heading", () => {
+    for (const underline of ["> ===", "> ---"]) {
+      const page = ["Intro", underline, "> Quoted text"].join("\n");
+
+      const { units } = prepare(page, { blockBounded: true });
+
+      // The underline sits in the quote, the line above it outside: markdown
+      // renders a paragraph and a quote, never a heading "Intro". The quoted
+      // underline stays literal text, in source and in speech.
+      expect(units.map((unit) => unit.source), underline).toEqual([page]);
+      expect(units[0].text, underline).toContain(underline.slice(2));
+      expect(units[0].text, underline).toContain("Intro");
+    }
+  });
+
+  it("block-bounded: a setext underline must sit at the same quote depth as its heading", () => {
+    // Same container, nested: still a heading.
+    const nested = prepare(["> > Deep Title", "> > =====", "> > Deep prose."].join("\n"), { blockBounded: true });
+    expect(nested.units.map((unit) => [unit.source, unit.text, unit.block])).toEqual([
+      ["> > Deep Title", "Deep Title", 0],
+      ["> > Deep prose.", "> > Deep prose.", 1],
+    ]);
+
+    // One level deeper than the line above it: not an underline of that line.
+    const deeper = ["> Outer line", "> > =====", "> > Inner text"].join("\n");
+    expect(prepare(deeper, { blockBounded: true }).units.map((unit) => unit.source)).toEqual([deeper]);
+  });
+
   it("answers keep today's packing", () => {
     const repeated = "This sentence exists to push the paragraph past the ceiling.";
     const answer = [
