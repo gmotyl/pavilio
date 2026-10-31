@@ -38,8 +38,9 @@ export const mermaidThemeVariables = {
   noteBorderColor: "#52525b",
   noteTextColor: "#e4e4e7",
   // ER diagrams — attribute rows. The light "base" theme derives near-white
-  // rows from mainBkg; mermaid 11's erBox reads rowOdd/rowEven, while the
-  // attributeBackgroundColor* names are kept for older/other renderers.
+  // rows from mainBkg; mermaid 11's erBox reads rowOdd/rowEven. In 11.14 the
+  // attributeBackgroundColor* names are only defaulted by the themes and no
+  // renderer reads them; they are set here just to keep the theme consistent.
   attributeBackgroundColorOdd: "#1f2a2e",
   attributeBackgroundColorEven: "#172024",
   rowOdd: "#1f2a2e",
