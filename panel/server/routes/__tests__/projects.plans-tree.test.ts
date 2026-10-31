@@ -321,6 +321,36 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     expect(src.message).toMatch(/mode/i);
   });
 
+  it("reports a repos.json entry with a non-string path as invalid without breaking the tree", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    const openspecDir = join(repoPath, "openspec");
+    seedChange(openspecDir, "add-checkout");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        { name: "pavilio", path: repoPath, openspec: { mode: "native" } },
+        { name: "broken", path: 123, openspec: { mode: "native" } },
+      ]),
+    );
+    const app = makeApp(projectsRouter, "/api/projects");
+
+    const res = await request(app).get("/api/projects/alokai/plans-tree");
+    expect(res.status).toBe(200);
+    const valid = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(valid.kind).toBe("openspec");
+    expect(valid.changes.map((c: { changeId: string }) => c.changeId)).toContain("add-checkout");
+    const broken = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:broken");
+    expect(broken.kind).toBe("openspec-error");
+    expect(typeof broken.message).toBe("string");
+
+    const read = await request(app)
+      .get("/api/projects/alokai/plans/read")
+      .query({ path: join(openspecDir, "changes", "add-checkout", "proposal.md") });
+    expect(read.status).toBe(200);
+    expect(read.body.content).toBe("# proposal");
+  });
+
   it("omits a configured source whose OpenSpec dir exists but holds no changes", async () => {
     seedFile(join(projectsDir, "alokai", "PROJECT.md"));
     const repoPath = join(tmpRoot, "repos", "pavilio");

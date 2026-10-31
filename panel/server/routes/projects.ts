@@ -280,24 +280,31 @@ function openSpecSources(
     },
   ];
   for (const r of readReposJson(projectDir)) {
-    let openspecDir: string;
-    let mode: "native" | "store";
-    let config: ReturnType<typeof parseOpenSpecConfig>;
-    const repoPath = resolve(expandHome(r.path));
+    // Everything derived from the raw repos.json entry is computed inside the
+    // try: readReposJson() does not validate entries, so even resolving `path`
+    // can throw (e.g. a non-string path) and must land on the invalid list
+    // instead of failing the whole project.
+    let resolved: {
+      repoPath: string;
+      config: ReturnType<typeof parseOpenSpecConfig>;
+      mode: "native" | "store";
+      openspecDir: string;
+    };
     try {
-      config = parseOpenSpecConfig(r);
+      const repoPath = resolve(expandHome(r.path));
+      const config = parseOpenSpecConfig(r);
       const resolution = resolveOpenSpecRoot({
         projectPath: projectDir,
         repo: { name: r.name, path: repoPath },
         config,
       });
       if (resolution.mode === "unconfigured") continue;
-      mode = resolution.mode;
-      openspecDir = resolution.openspecDir;
+      resolved = { repoPath, config, mode: resolution.mode, openspecDir: resolution.openspecDir };
     } catch (err) {
-      // Unknown mode / root escaping its boundary → not a valid source, so it is
-      // never read from. Reported (not silently skipped) so a typo'd
-      // `openspec.root` doesn't disappear a repo's specs with zero signal.
+      // Malformed entry / unknown mode / root escaping its boundary → not a
+      // valid source, so it is never read from. Reported (not silently skipped)
+      // so a typo'd `openspec.root` doesn't disappear a repo's specs with zero
+      // signal.
       const message = (err as Error).message;
       console.warn(`[openSpecSources] ${basename(projectDir)}: skipping repo ${r.name}:`, message);
       invalid.push({
@@ -308,6 +315,7 @@ function openSpecSources(
       });
       continue;
     }
+    const { repoPath, config, mode, openspecDir } = resolved;
     out.push({
       id: `openspec:repo:${r.name}`,
       label: `${r.name} (OpenSpec)`,
