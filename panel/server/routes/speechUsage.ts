@@ -15,16 +15,28 @@ export interface SpeechUsageOptions {
   store: UsageStore;
 }
 
+/**
+ * An engine id as anytts names them (`edge`, `elevenlabs`, `cascade`, …). The
+ * id becomes a key in the persisted usage file, so a client cannot grow it
+ * with arbitrary or oversized names.
+ */
+const ENGINE_ID = /^[a-z0-9-]{1,32}$/;
+
+/** `Number.isSafeInteger` rejects non-numbers too, but does not narrow the type. */
+function isPositiveCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
 export function createSpeechUsageRouter({ store }: SpeechUsageOptions): Router {
   const router = Router();
 
   router.post("/usage", async (req, res) => {
     const { engine, chars } = (req.body ?? {}) as { engine?: unknown; chars?: unknown };
-    if (typeof engine !== "string" || engine === "") {
-      res.status(400).json({ error: "engine must be a non-empty string" });
+    if (typeof engine !== "string" || !ENGINE_ID.test(engine)) {
+      res.status(400).json({ error: "engine must be 1-32 lowercase letters, digits or dashes" });
       return;
     }
-    if (typeof chars !== "number" || !Number.isSafeInteger(chars) || chars <= 0) {
+    if (!isPositiveCount(chars)) {
       res.status(400).json({ error: "chars must be a positive integer" });
       return;
     }

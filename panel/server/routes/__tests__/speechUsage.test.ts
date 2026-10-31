@@ -55,13 +55,18 @@ describe("/api/speech/usage", () => {
     expect(store.record).toHaveBeenCalledWith("edge", 42);
   });
 
-  it("POST rejects a missing engine or non-positive chars with 400", async () => {
+  it("POST rejects a missing or malformed engine, or non-positive chars, with 400", async () => {
     const store = fakeStore();
     const app = loadApp(store);
     const bodies: unknown[] = [
       { chars: 42 },
       { engine: "", chars: 42 },
       { engine: 7, chars: 42 },
+      // Engine ids are bounded: lowercase letters, digits and dashes, at most 32.
+      { engine: "a".repeat(33), chars: 42 },
+      { engine: "Edge", chars: 42 },
+      { engine: "../x", chars: 42 },
+      { engine: "edge ", chars: 42 },
       { engine: "edge" },
       { engine: "edge", chars: 0 },
       { engine: "edge", chars: -5 },
@@ -97,6 +102,29 @@ describe("/api/speech/usage", () => {
       .post("/api/speech/usage")
       .set("Cookie", COOKIE)
       .send({ engine: "edge", chars: 42 });
+
+    expect(res.status).toBe(500);
+    expect(typeof res.body.error).toBe("string");
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("POST accepts every bounded engine id up to 32 characters", async () => {
+    const store = fakeStore();
+    const app = loadApp(store);
+    for (const engine of ["cascade", "elevenlabs", "a".repeat(32), "x-1"]) {
+      const res = await request(app).post("/api/speech/usage").set("Cookie", COOKIE).send({ engine, chars: 1 });
+      expect(res.status, engine).toBe(204);
+    }
+    expect(store.record).toHaveBeenCalledTimes(4);
+  });
+
+  it("GET answers 500 when the store cannot read", async () => {
+    const store = fakeStore();
+    store.readAll.mockRejectedValueOnce(new Error("EIO: i/o error"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await request(loadApp(store)).get("/api/speech/usage").set("Cookie", COOKIE);
 
     expect(res.status).toBe(500);
     expect(typeof res.body.error).toBe("string");
