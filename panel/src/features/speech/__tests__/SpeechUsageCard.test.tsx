@@ -87,8 +87,15 @@ describe("SpeechUsageCard", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     unmount();
 
-    // A server that answers with an error status fails the same way.
-    stubFetch({ "/api/speech/usage": () => jsonResponse({ error: "boom" }, { status: 500 }) });
+    // A server that answers with an error status fails the same way — even
+    // when its body would parse as valid usage data.
+    stubFetch({
+      "/api/speech/usage": () =>
+        jsonResponse(
+          { months: [{ month: "2026-10", engines: { edge: 5 }, total: 5 }] },
+          { status: 500 },
+        ),
+    });
     render(<SpeechUsageCard />);
 
     expect(await screen.findByTestId("speech-usage-error")).toHaveTextContent(/could not load/i);

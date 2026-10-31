@@ -11,17 +11,26 @@ const lib = vi.hoisted(() => {
   const state = {
     stateAnswer: "cold" as "cold" | "pending" | "ready",
     bytes: new ArrayBuffer(3),
+    // Texts a successful synthesis has cached: like real anytts, their state
+    // is `ready` afterwards, so a seam that reads the state after the await
+    // sees a cache hit and would never report.
+    cached: new Set<string>(),
   };
   const fake = {
-    synthesize: vi.fn(async (req: { voice?: string; engine?: string }) => ({
-      bytes: state.bytes,
-      mime: "audio/mpeg" as const,
-      engine: req.engine ?? "edge",
-      voice: req.voice ?? "default",
-    })),
+    synthesize: vi.fn(async (req: { text?: string; voice?: string; engine?: string }) => {
+      if (req.text !== undefined) state.cached.add(req.text);
+      return {
+        bytes: state.bytes,
+        mime: "audio/mpeg" as const,
+        engine: req.engine ?? "edge",
+        voice: req.voice ?? "default",
+      };
+    }),
     prefetch: vi.fn(),
     isCached: vi.fn(() => false),
-    state: vi.fn((_req: unknown) => state.stateAnswer),
+    state: vi.fn((req: { text?: string }) =>
+      req.text !== undefined && state.cached.has(req.text) ? "ready" : state.stateAnswer,
+    ),
     subscribe: vi.fn(() => () => {}),
   };
   return { state, fake, createTts: vi.fn((..._args: unknown[]): unknown => fake) };
@@ -75,6 +84,7 @@ beforeEach(async () => {
   lib.fake.prefetch.mockClear();
   lib.fake.state.mockClear();
   lib.state.stateAnswer = "cold";
+  lib.state.cached.clear();
   prefs.engine = "edge";
   prefs.route = undefined;
   fetchMock.mockReset();
@@ -111,7 +121,6 @@ describe("Edge usage report", () => {
     // A failing prefetch reports nothing and never throws.
     fetchMock.mockClear();
     lib.fake.synthesize.mockRejectedValueOnce(new Error("boom"));
-    lib.fake.prefetch.mockImplementationOnce(() => {});
     expect(() => synth.prefetchSpeech("again", { voice: "v" })).not.toThrow();
     await settle();
     expect(reports()).toEqual([]);
@@ -120,8 +129,9 @@ describe("Edge usage report", () => {
   it("does not report cache hits or in-flight joins", async () => {
     for (const answer of ["ready", "pending"] as const) {
       lib.state.stateAnswer = answer;
-      await synth.synthesizeSpeech("hello", { voice: "v" });
-      synth.prefetchSpeech("hello", { voice: "v" });
+      // A fresh text per answer, so the state comes from `stateAnswer`.
+      await synth.synthesizeSpeech(`hello ${answer}`, { voice: "v" });
+      synth.prefetchSpeech(`hello ${answer}`, { voice: "v" });
     }
     await settle();
 
