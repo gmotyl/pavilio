@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fixAmbiguousLabels, subgraphTitlesInOrder, clusterPaletteOrder } from "../MermaidDiagram";
+import { fixAmbiguousLabels, subgraphTitlesInOrder, clusterPaletteOrder, mermaidThemeVariables } from "../MermaidDiagram";
 
 describe("fixAmbiguousLabels", () => {
   it.each([
@@ -91,5 +91,34 @@ describe("clusterPaletteOrder", () => {
 
   it("returns nothing when the diagram has no clusters", () => {
     expect(clusterPaletteOrder([], "flowchart TD\n  A --> B")).toEqual([]);
+  });
+});
+
+// WCAG 2.x relative luminance of a #rrggbb colour.
+function relativeLuminance(hex: string): number {
+  const channels = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+describe("mermaid theme variables", () => {
+  it("sets dark, distinct ER attribute row colours with readable contrast", () => {
+    const vars = mermaidThemeVariables as Record<string, string | undefined>;
+    const { attributeBackgroundColorOdd: odd, attributeBackgroundColorEven: even, textColor } = vars;
+    // mermaid 11's erBox shape fills attribute rows from rowOdd/rowEven; the
+    // attributeBackgroundColor* names are only defaulted, never rendered.
+    expect(vars.rowOdd).toBe(odd);
+    expect(vars.rowEven).toBe(even);
+    expect(odd).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(even).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(odd!.toLowerCase()).not.toBe(even!.toLowerCase());
+    expect(textColor).toBe("#e4e4e7");
+    expect(contrastRatio(odd!, textColor!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(even!, textColor!)).toBeGreaterThanOrEqual(4.5);
   });
 });
