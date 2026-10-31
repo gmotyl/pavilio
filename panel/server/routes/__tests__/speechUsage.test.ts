@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import express, { type Express } from "express";
 import request from "supertest";
@@ -109,5 +112,30 @@ describe("/api/speech/usage", () => {
     expect((await request(app).post("/api/speech/usage").send({ engine: "edge", chars: 42 })).status).toBe(401);
     expect(store.record).not.toHaveBeenCalled();
     expect(store.readAll).not.toHaveBeenCalled();
+  });
+
+  it("the production file mounts the router behind auth, sharing the TTS handler's store", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(resolve(here, "../../panel-server.ts"), "utf8");
+    const parser = /app\s*\.\s*use\s*\(\s*express\s*\.\s*json\s*\(\s*\)\s*\)/.exec(source);
+    const mobileGate = /app\s*\.\s*use\s*\(\s*mobileAuthMiddleware\s*\)/.exec(source);
+    const gate = /app\s*\.\s*use\s*\(\s*authMiddleware\s*\)/.exec(source);
+    const mount =
+      /app\s*\.\s*use\s*\(\s*["']\/api\/speech["']\s*,\s*createSpeechUsageRouter\s*\(\s*\{\s*store\s*:\s*usageStore\s*\}\s*\)\s*\)/.exec(
+        source,
+      );
+    expect(parser, "the global express.json() mount").not.toBeNull();
+    expect(mobileGate, "the global mobileAuthMiddleware mount").not.toBeNull();
+    expect(gate, "the global authMiddleware mount").not.toBeNull();
+    expect(mount, "the speech usage router mount").not.toBeNull();
+    expect(mount!.index).toBeGreaterThan(parser!.index);
+    expect(mount!.index).toBeGreaterThan(mobileGate!.index);
+    expect(mount!.index).toBeGreaterThan(gate!.index);
+
+    // One store for the server: the relay's counting and the browser's reports
+    // share its record chain.
+    expect(source.match(/createUsageStore\s*\(/g), "one createUsageStore() call").toHaveLength(1);
+    expect(source).toMatch(/const\s+usageStore\s*=\s*createUsageStore\s*\(/);
+    expect(source).toMatch(/createTtsHandler\s*\(\s*\{[^}]*\busage\s*:\s*usageStore\b[^}]*\}\s*\)/);
   });
 });
