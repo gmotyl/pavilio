@@ -41,6 +41,8 @@ import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import { createTtsHandler } from "./routes/tts.js";
 import { createTtsHolder } from "./lib/speech/ttsHolder.js";
 import { createSpeechEnginesRouter } from "./routes/speechEngines.js";
+import { createSpeechUsageRouter } from "./routes/speechUsage.js";
+import { createUsageStore } from "./lib/speech/usage-store.js";
 import { createPageCacheRouter } from "./routes/pageCache.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
@@ -198,6 +200,9 @@ export async function startPanel(
   // One anytts instance for the whole server, built from the secrets store;
   // the speech engine routes rebuild it when a key changes.
   const ttsHolder = createTtsHolder();
+  // One usage store for the whole server: its record chain only serializes callers
+  // that share the instance, so every writer must use this one.
+  const usageStore = createUsageStore();
   app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ holder: ttsHolder }));
 
   app.use(express.json());
@@ -232,6 +237,7 @@ export async function startPanel(
   app.use("/api", preferencesRouter);
   app.use("/api/speech", speechRouter);
   app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder }));
+  app.use("/api/speech", createSpeechUsageRouter({ store: usageStore }));
   // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
   app.use("/api/speech/page-cache", createPageCacheRouter());
   app.use("/api", scriptsRouter);
