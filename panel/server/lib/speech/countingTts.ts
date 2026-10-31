@@ -14,6 +14,11 @@ import type { UsageStore } from "./usage-store.js";
  * is fire-and-forget: a store failure is logged and never delays or breaks the
  * result.
  *
+ * Counting is best-effort under rare races: a cascade's `state()` is one
+ * answer for all its members, so the same text requested concurrently through
+ * a direct keyed engine and a cascade can be under- or double-counted, and a
+ * cold starter that aborts while a joiner continues goes uncounted.
+ *
  * Every other `Tts` method delegates to `tts`. `prefetch` is not counted: the
  * relay only ever calls `synthesize`, and anytts' prefetch runs its internal
  * synthesize, which this wrapper cannot see.

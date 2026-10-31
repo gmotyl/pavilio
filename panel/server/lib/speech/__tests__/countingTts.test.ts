@@ -97,10 +97,21 @@ describe("countingTts", () => {
     const store = fakeStore();
     const tts = countingTts(inner as unknown as Tts, store);
 
-    await tts.synthesize({ text: "hello", voice: "v" });
-    await tts.synthesize({ engine: "edge", text: "hello", voice: "v" });
+    // Distinct texts: a shared one would be cached by the first call, so the
+    // second would be skipped as "ready" whether or not the Edge guard holds.
+    // The holder configures edge, so without the guard a browser `edge`
+    // request would be counted here and again by the browser's own report.
+    const plain: SynthesisRequest = { text: "plain hello", voice: "v" };
+    const edge: SynthesisRequest = { engine: "edge", text: "edge hello", voice: "v" };
+    expect(inner.state(plain)).toBe("cold");
+    expect(inner.state(edge)).toBe("cold");
+
+    await tts.synthesize(plain);
+    await tts.synthesize(edge);
     await settle();
 
+    expect(inner.synthesize).toHaveBeenCalledWith(plain);
+    expect(inner.synthesize).toHaveBeenCalledWith(edge);
     expect(inner.synthesize).toHaveBeenCalledTimes(2);
     expect(store.record).not.toHaveBeenCalled();
   });
