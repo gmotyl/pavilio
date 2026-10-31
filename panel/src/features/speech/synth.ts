@@ -242,6 +242,35 @@ export function isSpeechSynthesized(
 }
 
 /**
+ * Whether a synthesis of `req` is one the browser reports as Edge usage: the
+ * engine is `edge` (on either route — under `auto` anytts picks direct or
+ * relay per call, so the server skips plain Edge requests and counts on this
+ * report) and nothing is cached or in flight for it yet, so the call will
+ * reach the network. Keyed engines and the cascade are counted by the server.
+ */
+function isReportable(instance: Tts, req: SynthesisRequest): boolean {
+  return req.engine === "edge" && instance.state(req) === "cold";
+}
+
+/**
+ * Fire-and-forget report of a successful Edge synthesis of `text`, counted in
+ * code points. `keepalive` lets it outlive a closing tab; a failed report is
+ * swallowed, since usage counting must never disturb speech.
+ */
+function reportUsage(text: string): void {
+  try {
+    fetch("/api/speech/usage", {
+      method: "POST",
+      keepalive: true,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ engine: "edge", chars: [...text].length }),
+    }).catch(() => {});
+  } catch {
+    // A fetch that throws synchronously is swallowed the same way.
+  }
+}
+
+/**
  * Synthesizes `text` and resolves to its MP3 audio. Repeat calls resolve from
  * the library's cache and hand back the same `ArrayBuffer` — wrap it with
  * {@link toSpeechBlob} to play it; never detach or transfer it.
@@ -254,11 +283,15 @@ export async function synthesizeSpeech(
     // Surface it instead of asking the engine for silence.
     throw new Error("synthesizeSpeech: empty text");
   }
-  const result = await tts().synthesize({
-    ...request(text, options),
+  const instance = tts();
+  const req = request(text, options);
+  const report = isReportable(instance, req);
+  const result = await instance.synthesize({
+    ...req,
     tier: options.tier ?? "run",
     signal: options.signal,
   });
+  if (report) reportUsage(req.text);
   return result.bytes;
 }
 
@@ -278,11 +311,20 @@ export function toSpeechBlob(buffer: ArrayBuffer): Blob {
  */
 export function prefetchSpeech(text: string, options: SpeechSynthesisOptions = {}): void {
   if (isBlank(text)) return;
-  tts().prefetch({
-    ...request(text, options),
-    tier: options.tier ?? "preload",
-    signal: options.signal,
-  });
+  const instance = tts();
+  const req = request(text, options);
+  const queued = { ...req, tier: options.tier ?? "preload", signal: options.signal };
+  if (!isReportable(instance, req)) {
+    instance.prefetch(queued);
+    return;
+  }
+  // anytts' `prefetch` is `synthesize(req).catch(() => {})`, which hides the
+  // outcome; a reportable warm calls `synthesize` itself to learn it, and
+  // swallows a failure just the same.
+  instance.synthesize(queued).then(
+    () => reportUsage(req.text),
+    () => {},
+  );
 }
 
 /**
