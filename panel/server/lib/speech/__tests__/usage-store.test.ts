@@ -3,13 +3,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Wrap rename so the tests can prove the write goes through tmp file + rename.
+// Wrap rename so the tests can prove the write goes through tmp file + rename, and
+// readFile so a test can inject a read error the filesystem won't produce as root.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, rename: vi.fn(actual.rename) };
+  return { ...actual, readFile: vi.fn(actual.readFile), rename: vi.fn(actual.rename) };
 });
 
-import { rename } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import { createUsageStore, USAGE_MONTHS_KEPT } from "../usage-store";
 
 let root: string;
@@ -19,6 +20,7 @@ beforeEach(() => {
   // Not created up front: record has to create it.
   dir = join(root, "tts-usage");
   vi.mocked(rename).mockClear();
+  vi.mocked(readFile).mockClear();
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -32,7 +34,8 @@ const at = (year: number, month1: number, day = 15) => new Date(year, month1 - 1
 describe("usage store", () => {
   it("record creates the host file with the local month key", async () => {
     const store = createUsageStore({ dir, host: "spock" });
-    // Last minute of the local month: a UTC-based key would roll over in UTC+ zones.
+    // Last minute of the local month: in UTC− zones that instant is already the next UTC
+    // month, so a UTC-based key would roll over too early.
     await store.record("azure", 5, new Date(2026, 9, 31, 23, 59));
 
     expect(readHost()).toEqual({ "2026-10": { azure: 5 } });
@@ -43,6 +46,11 @@ describe("usage store", () => {
     expect(String(from)).not.toBe(hostFile());
     expect(to).toBe(hostFile());
     expect(readdirSync(dir)).toEqual(["spock.json"]);
+
+    // First minute of the local month: in UTC+ zones that instant is still the previous
+    // UTC month, so a UTC-based key would roll over too late.
+    await store.record("azure", 3, new Date(2026, 10, 1, 0, 1));
+    expect(readHost()).toEqual({ "2026-10": { azure: 5 }, "2026-11": { azure: 3 } });
   });
 
   it("record adds to an existing engine/month", async () => {
@@ -130,5 +138,32 @@ describe("usage store", () => {
     expect(months[0].engines.constructor).toBe(10);
     expect(Object.getOwnPropertyDescriptor(months[0].engines, "__proto__")?.value).toBe(2);
     expect(months[0].total).toBe(12);
+  });
+
+  it("a non-ENOENT read error rejects without overwriting", async () => {
+    mkdirSync(dir, { recursive: true });
+    const before = JSON.stringify({ "2026-09": { azure: 40 } });
+    writeFileSync(hostFile(), before);
+    const eio = Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+    vi.mocked(readFile).mockRejectedValueOnce(eio);
+    const store = createUsageStore({ dir, host: "spock" });
+
+    await expect(store.record("azure", 5, at(2026, 10))).rejects.toBe(eio);
+
+    expect(rename).not.toHaveBeenCalled();
+    expect(readFileSync(hostFile(), "utf8")).toBe(before);
+  });
+
+  it("a failed write does not poison later records", async () => {
+    const store = createUsageStore({ dir, host: "spock" });
+    const failure = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    vi.mocked(rename).mockRejectedValueOnce(failure);
+
+    await expect(store.record("azure", 5, at(2026, 10))).rejects.toBe(failure);
+    // The failed write left no tmp file behind and the next record still lands.
+    await store.record("azure", 7, at(2026, 10));
+
+    expect(readHost()).toEqual({ "2026-10": { azure: 7 } });
+    expect(readdirSync(dir)).toEqual(["spock.json"]);
   });
 });

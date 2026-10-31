@@ -71,16 +71,24 @@ export function createUsageStore(opts: { dir?: string; host?: string } = {}): Us
 
   // Every record is a read-modify-write of the host file; chaining them keeps
   // concurrent callers from reading the same snapshot and dropping an increment.
+  // Serialization is per store instance (per process): two stores on one file are not.
   let chain: Promise<void> = Promise.resolve();
 
   async function readOwn(): Promise<HostData> {
+    let raw: string;
     try {
-      return parseHost(await readFile(file, "utf8"));
+      raw = await readFile(file, "utf8");
     } catch (err) {
-      // Missing file → start fresh; a malformed own file is overwritten by this record.
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.warn(`[tts-usage] resetting unreadable ${file}:`, (err as Error).message);
-      }
+      // Missing file → start fresh. Any other read error (EACCES, EIO, EISDIR) rejects the
+      // record instead: treating it as empty would overwrite the file and wipe its history.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return emptyMap<Counts>();
+      throw err;
+    }
+    try {
+      return parseHost(raw);
+    } catch (err) {
+      // A malformed own file is overwritten by this record.
+      console.warn(`[tts-usage] resetting malformed ${file}:`, (err as Error).message);
       return emptyMap<Counts>();
     }
   }
