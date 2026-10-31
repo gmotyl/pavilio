@@ -155,6 +155,27 @@ describe("diffActiveChanges", () => {
     expect(diffActiveChanges(wt, main)).toEqual(new Set());
   });
 
+  it("never flags archived changes even when main has no archive dir", () => {
+    // Main has no `changes/archive/`, so `archive` cannot compare equal. A stray
+    // top-level artifact gives `archive/` a non-empty artifact list, so only the
+    // explicit archive skip keeps it out of the result.
+    change(wt, "archive/2026-10-01-old", { "proposal.md": "# old\n" });
+    change(wt, "archive", { "proposal.md": "# stray\n" });
+    change(main, "active", full);
+    expect(diffActiveChanges(wt, main)).toEqual(new Set());
+  });
+
+  it("skips a worktree change with no artifacts", () => {
+    mkdirSync(join(wt, "changes", "empty-dir"), { recursive: true });
+    change(wt, "only-notes", { "notes.txt": "scratch" });
+    // Every artifact deleted vs main: the worktree side has nothing to show.
+    change(wt, "all-deleted", { "notes.txt": "scratch" });
+    change(main, "all-deleted", full);
+    change(wt, "real", full);
+    mkdirSync(join(main, "changes"), { recursive: true });
+    expect(diffActiveChanges(wt, main)).toEqual(new Set(["real"]));
+  });
+
   it("returns an empty set when the worktree has no changes dir", () => {
     change(main, "only-main", full);
     expect(diffActiveChanges(wt, main)).toEqual(new Set());

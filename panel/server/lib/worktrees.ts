@@ -100,10 +100,17 @@ function changeArtifactPaths(changeDir: string): string[] {
   return out.sort();
 }
 
-/** True when the artifact sets differ or any same-named artifact's bytes differ. */
+/**
+ * True when the worktree change has at least one artifact and the artifact sets
+ * differ or any same-named artifact's bytes differ.
+ */
 function changeDiffers(wtChangeDir: string, mainChangeDir: string): boolean {
-  if (!isDir(mainChangeDir)) return true;
   const wtPaths = changeArtifactPaths(wtChangeDir);
+  // Nothing to show: the Plans tree drops artifact-less changes, yet flagging one
+  // would still register the worktree as a source and admit its tree to the plans
+  // read allowlist.
+  if (wtPaths.length === 0) return false;
+  if (!isDir(mainChangeDir)) return true;
   const mainPaths = changeArtifactPaths(mainChangeDir);
   if (wtPaths.length !== mainPaths.length || wtPaths.some((p, i) => p !== mainPaths[i])) return true;
   for (const rel of wtPaths) {
@@ -121,7 +128,8 @@ function changeDiffers(wtChangeDir: string, mainChangeDir: string): boolean {
  * Active (non-archive) change ids under `<worktreeOpenspec>/changes/` that differ from `<mainOpenspec>/changes/`.
  *
  * Never throws. Error policy: a missing or unreadable worktree `changes/` dir yields an
- * empty set (nothing to show); a missing main change dir or an unreadable artifact on
+ * empty set (nothing to show); a worktree change with no artifacts is skipped (the Plans
+ * tree would drop it anyway); a missing main change dir or an unreadable artifact on
  * either side counts as "differs" (better to show a duplicate than hide worktree work).
  */
 export function diffActiveChanges(worktreeOpenspecDir: string, mainOpenspecDir: string): Set<string> {

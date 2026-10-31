@@ -726,6 +726,20 @@ describe("GET /api/projects/:name/plans-tree — worktree sources", () => {
     expect(read.status).toBe(403);
   });
 
+  it("contributes no source for a worktree whose only differing change has no artifacts", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-scratch", "scratch");
+    const stray = join(wt, "openspec", "changes", "g", "notes.md");
+    seedFile(stray, "scratch");
+
+    expect(worktreeSources(await tree())).toEqual([]);
+    // Not registered as a source at all, so its tree stays out of the read allowlist.
+    const read = await request(makeApp(projectsRouter, "/api/projects"))
+      .get("/api/projects/alokai/plans/read")
+      .query({ path: stray });
+    expect(read.status).toBe(403);
+  });
+
   it("labels a detached worktree with its short sha", async () => {
     seedNativeRepo();
     const wt = addWorktree("pavilio-detached", null);
