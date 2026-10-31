@@ -17,8 +17,14 @@ function fakeTts(opts: { cached?: boolean; answeredBy?: string } = {}) {
   // Like real anytts, a successful synthesis caches its text: a wrapper that
   // read `isCached` after the await would see a hit and never record.
   const cache = new Set<string>();
+  // Texts whose synthesis is running: a second request for one joins it, as
+  // anytts does, and `state` answers "pending" for it.
+  const inFlight = new Set<string>();
   const inner = {
     synthesize: vi.fn(async (req: SynthesisRequest): Promise<SynthesisResult> => {
+      inFlight.add(req.text);
+      await Promise.resolve();
+      inFlight.delete(req.text);
       cache.add(req.text);
       return {
         bytes: BYTES,
@@ -29,7 +35,9 @@ function fakeTts(opts: { cached?: boolean; answeredBy?: string } = {}) {
     }),
     prefetch: vi.fn(),
     isCached: vi.fn((req: SynthesisRequest) => (opts.cached ?? false) || cache.has(req.text)),
-    state: vi.fn((_req: SynthesisRequest) => "cold" as const),
+    state: vi.fn((req: SynthesisRequest): "cold" | "pending" | "ready" =>
+      (opts.cached ?? false) || cache.has(req.text) ? "ready" : inFlight.has(req.text) ? "pending" : "cold",
+    ),
     subscribe: vi.fn(() => () => {}),
     restartStalled: vi.fn(() => true),
     engineStatus: vi.fn((_id: string) => ({ state: "ready" as const })),
@@ -109,9 +117,24 @@ describe("countingTts", () => {
     await tts.synthesize(cascade);
     await settle();
 
-    expect(inner.isCached).toHaveBeenCalledWith(keyed);
-    expect(inner.isCached).toHaveBeenCalledWith(cascade);
+    expect(inner.state).toHaveBeenCalledWith(keyed);
+    expect(inner.state).toHaveBeenCalledWith(cascade);
     expect(store.record).not.toHaveBeenCalled();
+  });
+
+  it("does not record a request that joins one in flight", async () => {
+    const inner = fakeTts({ answeredBy: "google" });
+    const store = fakeStore();
+    const tts = countingTts(inner as unknown as Tts, store);
+
+    // Two concurrent relay requests for the same uncached text: anytts runs
+    // one network synthesis and the second joins it, so only one is counted.
+    const req: SynthesisRequest = { engine: "cascade", text: "hello", lang: "en" };
+    await Promise.all([tts.synthesize(req), tts.synthesize(req)]);
+    await settle();
+
+    expect(store.record).toHaveBeenCalledTimes(1);
+    expect(store.record).toHaveBeenCalledWith("google", 5);
   });
 
   it("does not record failures and rethrows", async () => {
@@ -169,7 +192,7 @@ describe("countingTts", () => {
     expect(inner.prefetch).toHaveBeenCalledWith(req);
     expect(tts.isCached(req)).toBe(true);
     expect(inner.isCached).toHaveBeenCalledWith(req);
-    expect(tts.state(req)).toBe("cold");
+    expect(tts.state(req)).toBe("ready");
     expect(inner.state).toHaveBeenCalledWith(req);
     const unsubscribe = tts.subscribe(listener);
     expect(inner.subscribe).toHaveBeenCalledWith(listener);

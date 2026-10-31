@@ -7,10 +7,12 @@ import type { UsageStore } from "./usage-store.js";
  * answered (for a cascade, the member — `SynthesisResult.engine`).
  *
  * Not recorded: requests with no engine or engine `edge` (the browser reports
- * Edge itself, on either route), requests already cached before the call (for
- * a cascade, anytts' `isCached` is true when any member's cache answers), and
- * failures, whose rejection propagates unchanged. Recording is fire-and-forget:
- * a store failure is logged and never delays or breaks the result.
+ * Edge itself, on either route), requests not "cold" before the call — cached
+ * ("ready"; for a cascade, when any member's cache answers) or joining a
+ * synthesis already in flight ("pending", counted once by the request that
+ * started it) — and failures, whose rejection propagates unchanged. Recording
+ * is fire-and-forget: a store failure is logged and never delays or breaks the
+ * result.
  *
  * Every other `Tts` method delegates to `tts`. `prefetch` is not counted: the
  * relay only ever calls `synthesize`, and anytts' prefetch runs its internal
@@ -19,9 +21,12 @@ import type { UsageStore } from "./usage-store.js";
 export function countingTts(tts: Tts, store: UsageStore): Tts {
   async function synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
     if (req.engine === undefined || req.engine === "edge") return tts.synthesize(req);
-    const cached = tts.isCached(req);
+    // Read before the call: a synthesis caches its text. Only "cold" reaches
+    // the network; "pending" joins a synthesis already in flight, which the
+    // request that started it records.
+    const cold = tts.state(req) === "cold";
     const result = await tts.synthesize(req);
-    if (!cached) record(result.engine, [...req.text].length);
+    if (cold) record(result.engine, [...req.text].length);
     return result;
   }
 
