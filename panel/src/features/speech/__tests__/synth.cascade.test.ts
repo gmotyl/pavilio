@@ -46,6 +46,8 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init: RequestInit) => {
+      // The browser's Edge usage report is not a relay call.
+      if (url === "/api/speech/usage") return new Response(null, { status: 204 });
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       relayed.push({ url, body });
       // The cascade names the member that spoke: here, the first in the order.
