@@ -34,7 +34,7 @@ openspec/
 
 Each artifact scope selects one of two backends independently; both use the identical tree above and differ only in the storage root:
 
-- **native** — the tree lives inside the repository's own `<repo>/openspec/`. Used only when that repository has adopted OpenSpec.
+- **native** — the tree lives inside the repository's own `<repo>/openspec/`. Used only when that repository has adopted OpenSpec. Artifacts written in a linked git worktree of the repo (e.g. a `<repo>-<slug>` feature worktree) show up in the Plans tab as `<repo> @ <branch>` — only the changes that differ from the main checkout. A grill / writing-plans report links such an artifact as `/project/<p>/plans?file=<absolute worktree path>`.
 - **store** — an identically shaped tree under the project workspace: `projects/<project>/plans/<repo>/openspec/` for an unadopted linked repository, or `projects/<project>/plans/openspec/` for a project-wide change not tied to a single repository.
 
 A store is just a directory tree — there is **no registered store id** and **no CLI**. Pavilio never initializes OpenSpec in, or writes planning files into, an unadopted repository.
