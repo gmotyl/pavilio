@@ -203,7 +203,7 @@ export async function startPanel(
   // One usage store for the whole server: its record chain only serializes callers
   // that share the instance, so every writer must use this one.
   const usageStore = createUsageStore();
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ holder: ttsHolder }));
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ holder: ttsHolder, usage: usageStore }));
 
   app.use(express.json());
   app.use(mobileAuthMiddleware);
