@@ -19,6 +19,7 @@ import {
 import { expandHome } from "../lib/paths.js";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, resolveOpenSpecRoot } from "../lib/openspec.js";
+import { diffActiveChanges, listRepoWorktrees } from "../lib/worktrees.js";
 import { getAllDefaultUsers, setDefaultUser } from "../lib/project-default-user.js";
 import { listOsUsers } from "../lib/os-users.js";
 import { buildWikiTree } from "../lib/wiki/tree.js";
@@ -223,6 +224,12 @@ interface OpenSpecSourceDesc {
    * root that does not exist is a typo worth surfacing.
    */
   configured: boolean;
+  /**
+   * Set on a worktree source: a linked git worktree of a native repo. It lists
+   * only the active changes in `changeIds` (those differing from the main
+   * checkout); its archive and living specs are never surfaced.
+   */
+  worktree?: { path: string; branch: string | null; changeIds: Set<string> };
 }
 
 /** A repos.json `openspec` config that could not be resolved into a source. */
@@ -249,8 +256,16 @@ function configuredRootOf(entry: unknown): string | null {
  * A malformed or boundary-escaping config never becomes a source — it is
  * returned under `invalid` instead, so callers that read the filesystem stay on
  * validated roots while the Plans tab can still show the user their typo.
+ *
+ * Native repos also contribute one worktree source per linked git worktree that
+ * carries at least one active change differing from the main checkout. Pass
+ * `worktrees: false` where only the main checkouts matter (living specs), which
+ * also skips the `git worktree list` call.
  */
-function openSpecSources(projectDir: string): {
+function openSpecSources(
+  projectDir: string,
+  { worktrees = true }: { worktrees?: boolean } = {},
+): {
   sources: OpenSpecSourceDesc[];
   invalid: InvalidOpenSpecSourceDesc[];
 } {
@@ -265,22 +280,31 @@ function openSpecSources(projectDir: string): {
     },
   ];
   for (const r of readReposJson(projectDir)) {
-    let openspecDir: string;
-    let mode: "native" | "store";
+    // Everything derived from the raw repos.json entry is computed inside the
+    // try: readReposJson() does not validate entries, so even resolving `path`
+    // can throw (e.g. a non-string path) and must land on the invalid list
+    // instead of failing the whole project.
+    let resolved: {
+      repoPath: string;
+      config: ReturnType<typeof parseOpenSpecConfig>;
+      mode: "native" | "store";
+      openspecDir: string;
+    };
     try {
+      const repoPath = resolve(expandHome(r.path));
       const config = parseOpenSpecConfig(r);
       const resolution = resolveOpenSpecRoot({
         projectPath: projectDir,
-        repo: { name: r.name, path: resolve(expandHome(r.path)) },
+        repo: { name: r.name, path: repoPath },
         config,
       });
       if (resolution.mode === "unconfigured") continue;
-      mode = resolution.mode;
-      openspecDir = resolution.openspecDir;
+      resolved = { repoPath, config, mode: resolution.mode, openspecDir: resolution.openspecDir };
     } catch (err) {
-      // Unknown mode / root escaping its boundary → not a valid source, so it is
-      // never read from. Reported (not silently skipped) so a typo'd
-      // `openspec.root` doesn't disappear a repo's specs with zero signal.
+      // Malformed entry / unknown mode / root escaping its boundary → not a
+      // valid source, so it is never read from. Reported (not silently skipped)
+      // so a typo'd `openspec.root` doesn't disappear a repo's specs with zero
+      // signal.
       const message = (err as Error).message;
       console.warn(`[openSpecSources] ${basename(projectDir)}: skipping repo ${r.name}:`, message);
       invalid.push({
@@ -291,6 +315,7 @@ function openSpecSources(projectDir: string): {
       });
       continue;
     }
+    const { repoPath, config, mode, openspecDir } = resolved;
     out.push({
       id: `openspec:repo:${r.name}`,
       label: `${r.name} (OpenSpec)`,
@@ -298,8 +323,50 @@ function openSpecSources(projectDir: string): {
       openspecDir,
       configured: true,
     });
+    if (worktrees && mode === "native") {
+      out.push(...worktreeSources(projectDir, r.name, repoPath, config, openspecDir));
+    }
   }
   return { sources: out, invalid };
+}
+
+/**
+ * Worktree sources of one native repo: each linked worktree whose active changes
+ * differ from the main checkout's `mainOpenspecDir`. The worktree's tree is
+ * resolved with the same `root` rule as the main checkout. Never throws — git
+ * failures already degrade to no worktrees inside `listRepoWorktrees`.
+ */
+function worktreeSources(
+  projectDir: string,
+  name: string,
+  repoPath: string,
+  config: ReturnType<typeof parseOpenSpecConfig>,
+  mainOpenspecDir: string,
+): OpenSpecSourceDesc[] {
+  const out: OpenSpecSourceDesc[] = [];
+  for (const wt of listRepoWorktrees(repoPath)) {
+    let openspecDir: string;
+    try {
+      const resolution = resolveOpenSpecRoot({ projectPath: projectDir, repo: { name, path: wt.path }, config });
+      if (resolution.mode !== "native") continue;
+      openspecDir = resolution.openspecDir;
+    } catch {
+      // The same root already resolved for the main checkout; a worktree-only
+      // failure is not worth an error row.
+      continue;
+    }
+    const changeIds = diffActiveChanges(openspecDir, mainOpenspecDir);
+    if (changeIds.size === 0) continue;
+    out.push({
+      id: `openspec:repo:${name}@${wt.path}`,
+      label: `${name} @ ${wt.branch ?? wt.head.slice(0, 7)} (OpenSpec)`,
+      mode: "native",
+      openspecDir,
+      configured: true,
+      worktree: { path: wt.path, branch: wt.branch, changeIds },
+    });
+  }
+  return out;
 }
 
 interface PlanArtifact {
@@ -399,19 +466,29 @@ function readChangeArtifacts(changeDir: string, projectsDir: string): PlanArtifa
 
 const ARCHIVE_DATE_RE = /^(\d{4}-\d{2}-\d{2})-.+$/;
 
-/** Discover active and archived change records under one `openspec/` tree. */
-function listOpenSpecChanges(openspecDir: string, sourceId: string, projectsDir: string): ChangeRecord[] {
+/**
+ * Discover active and archived change records under one `openspec/` tree. With
+ * `onlyActive` (a worktree source) only those active change ids are listed and
+ * the archive is skipped.
+ */
+function listOpenSpecChanges(
+  openspecDir: string,
+  sourceId: string,
+  projectsDir: string,
+  onlyActive?: Set<string>,
+): ChangeRecord[] {
   const changesDir = join(openspecDir, "changes");
   if (!existsSync(changesDir) || !statSync(changesDir).isDirectory()) return [];
   const out: ChangeRecord[] = [];
   for (const e of readdirSync(changesDir, { withFileTypes: true })) {
     if (!e.isDirectory() || e.name === "archive") continue;
+    if (onlyActive && !onlyActive.has(e.name)) continue;
     const artifacts = readChangeArtifacts(join(changesDir, e.name), projectsDir);
     if (artifacts.length === 0) continue;
     out.push({ changeId: e.name, source: sourceId, status: "active", archiveDate: null, artifacts });
   }
   const archiveDir = join(changesDir, "archive");
-  if (existsSync(archiveDir) && statSync(archiveDir).isDirectory()) {
+  if (!onlyActive && existsSync(archiveDir) && statSync(archiveDir).isDirectory()) {
     for (const e of readdirSync(archiveDir, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
       const artifacts = readChangeArtifacts(join(archiveDir, e.name), projectsDir);
@@ -457,8 +534,9 @@ function listOpenSpecLivingSpecs(openspecDir: string, sourceId: string, projects
  * Directories a project may surface plan files from: the legacy flat `plans/` tree
  * (also covering `plans/archived/` and the project-local `plans/openspec/` store,
  * which nest under it) plus each configured OpenSpec root (native repo trees live
- * outside `plans/`). Unconfigured repos contribute nothing, so an `openspec/`-shaped
- * path under them is rejected as traversal.
+ * outside `plans/`), including surfaced worktree sources of native repos.
+ * Unconfigured repos and unregistered worktrees contribute nothing, so an
+ * `openspec/`-shaped path under them is rejected as traversal.
  *
  * NOTE: `isPlanPathAllowed` uses a depth-agnostic `isPathUnder` check, so nested
  * artifacts (archived plans, `openspec/changes/<id>/...`) are admitted without listing
@@ -587,9 +665,10 @@ router.get("/:name/context", (req, res) => {
   }
 
   // Living OpenSpec capability specs, grouped by source (project store + linked repos).
+  // Main checkouts only: a worktree's living specs are never surfaced.
   const openspecSpecs: LivingSpecFile[] = [];
   const openspecSources: ContextSource[] = [];
-  for (const os of openSpecSources(projectDir).sources) {
+  for (const os of openSpecSources(projectDir, { worktrees: false }).sources) {
     const living = listOpenSpecLivingSpecs(os.openspecDir, os.id, projectsDir);
     if (living.length === 0) continue;
     openspecSources.push({ id: os.id, label: os.label, absoluteRoot: os.openspecDir });
@@ -615,7 +694,8 @@ router.get("/:name/context/read", (req, res) => {
 
   const absPath = resolve(pathParam);
   const allowlist = buildContextAllowlist(projectDir);
-  const openspecDirs = openSpecSources(projectDir).sources.map((s) => s.openspecDir);
+  // Main checkouts only, mirroring the /context listing: worktree living specs stay unreadable.
+  const openspecDirs = openSpecSources(projectDir, { worktrees: false }).sources.map((s) => s.openspecDir);
   if (!isContextPathAllowed(absPath, allowlist, openspecDirs)) {
     return res.status(403).json({ error: "Path not in this project's context allowlist" });
   }
@@ -663,7 +743,7 @@ router.get("/:name/plans-tree", (req, res) => {
       openspecSources.push({ ...base, changes: [], missing: true });
       continue;
     }
-    const changes = listOpenSpecChanges(os.openspecDir, os.id, projectsDir);
+    const changes = listOpenSpecChanges(os.openspecDir, os.id, projectsDir, os.worktree?.changeIds);
     if (changes.length === 0) continue;
     contributedChanges += changes.length;
     openspecSources.push({ ...base, changes });

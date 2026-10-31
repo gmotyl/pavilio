@@ -3,45 +3,56 @@ import mermaid from "mermaid";
 
 let mermaidInitialized = false;
 
+// Dark palette handed to mermaid's "base" theme; exported so tests can check it.
+export const mermaidThemeVariables = {
+  // Global — flowchart nodes use a dark teal
+  primaryColor: "#1a3a3a",
+  primaryTextColor: "#e4e4e7",
+  primaryBorderColor: "#2dd4bf50",
+  lineColor: "#71717a",
+  secondaryColor: "#1e293b",
+  tertiaryColor: "#18181b",
+  background: "#18181b",
+  mainBkg: "#1a3a3a",
+  nodeBorder: "#2dd4bf50",
+  clusterBkg: "#0f1d2e",
+  clusterBorder: "#1e3a5f",
+  titleColor: "#e4e4e7",
+  edgeLabelBackground: "#1e1e22",
+  textColor: "#e4e4e7",
+  // Sequence diagrams — actors use a dark blue
+  actorBkg: "#172554",
+  actorBorder: "#1d4ed8",
+  actorTextColor: "#e4e4e7",
+  actorLineColor: "#52525b",
+  signalColor: "#e4e4e7",
+  signalTextColor: "#e4e4e7",
+  labelBoxBkgColor: "#27272a",
+  labelBoxBorderColor: "#52525b",
+  labelTextColor: "#e4e4e7",
+  loopTextColor: "#a1a1aa",
+  activationBorderColor: "#52525b",
+  activationBkgColor: "#3f3f46",
+  sequenceNumberColor: "#18181b",
+  noteBkgColor: "#3f3f46",
+  noteBorderColor: "#52525b",
+  noteTextColor: "#e4e4e7",
+  // ER diagrams — attribute rows. The light "base" theme derives near-white
+  // rows from mainBkg; mermaid 11's erBox reads rowOdd/rowEven. In 11.14 the
+  // attributeBackgroundColor* names are only defaulted by the themes and no
+  // renderer reads them; they are set here just to keep the theme consistent.
+  attributeBackgroundColorOdd: "#1f2a2e",
+  attributeBackgroundColorEven: "#172024",
+  rowOdd: "#1f2a2e",
+  rowEven: "#172024",
+};
+
 function initMermaid() {
   if (mermaidInitialized) return;
   mermaid.initialize({
     startOnLoad: false,
     theme: "base",
-    themeVariables: {
-      // Global — flowchart nodes use a dark teal
-      primaryColor: "#1a3a3a",
-      primaryTextColor: "#e4e4e7",
-      primaryBorderColor: "#2dd4bf50",
-      lineColor: "#71717a",
-      secondaryColor: "#1e293b",
-      tertiaryColor: "#18181b",
-      background: "#18181b",
-      mainBkg: "#1a3a3a",
-      nodeBorder: "#2dd4bf50",
-      clusterBkg: "#0f1d2e",
-      clusterBorder: "#1e3a5f",
-      titleColor: "#e4e4e7",
-      edgeLabelBackground: "#1e1e22",
-      textColor: "#e4e4e7",
-      // Sequence diagrams — actors use a dark blue
-      actorBkg: "#172554",
-      actorBorder: "#1d4ed8",
-      actorTextColor: "#e4e4e7",
-      actorLineColor: "#52525b",
-      signalColor: "#e4e4e7",
-      signalTextColor: "#e4e4e7",
-      labelBoxBkgColor: "#27272a",
-      labelBoxBorderColor: "#52525b",
-      labelTextColor: "#e4e4e7",
-      loopTextColor: "#a1a1aa",
-      activationBorderColor: "#52525b",
-      activationBkgColor: "#3f3f46",
-      sequenceNumberColor: "#18181b",
-      noteBkgColor: "#3f3f46",
-      noteBorderColor: "#52525b",
-      noteTextColor: "#e4e4e7",
-    },
+    themeVariables: mermaidThemeVariables,
     fontFamily: "ui-sans-serif, system-ui, sans-serif",
     flowchart: { curve: "basis", padding: 16 },
     sequence: { mirrorActors: false },

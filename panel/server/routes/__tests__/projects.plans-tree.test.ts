@@ -1,9 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, existsSync } from "fs";
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  symlinkSync,
+  existsSync,
+  realpathSync,
+} from "fs";
+import { spawnSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { configMock, makeApp } from "../../test-kit";
+import { gitSafeEnv } from "../../lib/gitEnv";
 
 let tmpRoot = "";
 let projectsDir = "";
@@ -14,7 +25,14 @@ vi.mock("../../lib/discovery", async () => {
   return { ...actual, discoverProjects: () => [] };
 });
 
+// Wrapped (not replaced) so tests can assert which repos run worktree discovery.
+vi.mock("../../lib/worktrees", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/worktrees")>("../../lib/worktrees");
+  return { ...actual, listRepoWorktrees: vi.fn(actual.listRepoWorktrees) };
+});
+
 import projectsRouter from "../projects";
+import { listRepoWorktrees } from "../../lib/worktrees";
 
 function seedFile(abs: string, content = "x") {
   mkdirSync(join(abs, ".."), { recursive: true });
@@ -30,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(listRepoWorktrees).mockClear();
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -300,6 +319,36 @@ describe("GET /api/projects/:name/plans-tree — OpenSpec sources", () => {
     expect(src.kind).toBe("openspec-error");
     expect(src.configuredRoot).toBeNull();
     expect(src.message).toMatch(/mode/i);
+  });
+
+  it("reports a repos.json entry with a non-string path as invalid without breaking the tree", async () => {
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const repoPath = join(tmpRoot, "repos", "pavilio");
+    const openspecDir = join(repoPath, "openspec");
+    seedChange(openspecDir, "add-checkout");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        { name: "pavilio", path: repoPath, openspec: { mode: "native" } },
+        { name: "broken", path: 123, openspec: { mode: "native" } },
+      ]),
+    );
+    const app = makeApp(projectsRouter, "/api/projects");
+
+    const res = await request(app).get("/api/projects/alokai/plans-tree");
+    expect(res.status).toBe(200);
+    const valid = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:pavilio");
+    expect(valid.kind).toBe("openspec");
+    expect(valid.changes.map((c: { changeId: string }) => c.changeId)).toContain("add-checkout");
+    const broken = res.body.sources.find((s: { id: string }) => s.id === "openspec:repo:broken");
+    expect(broken.kind).toBe("openspec-error");
+    expect(typeof broken.message).toBe("string");
+
+    const read = await request(app)
+      .get("/api/projects/alokai/plans/read")
+      .query({ path: join(openspecDir, "changes", "add-checkout", "proposal.md") });
+    expect(read.status).toBe(200);
+    expect(read.body.content).toBe("# proposal");
   });
 
   it("omits a configured source whose OpenSpec dir exists but holds no changes", async () => {
@@ -590,5 +639,226 @@ describe("plans routes — archived project", () => {
       `/api/projects/delta/plans/read?path=${encodeURIComponent(join(projectsDir, "archived", "delta", "plans", "old.md"))}`,
     );
     expect(read.status).toBe(403);
+  });
+});
+
+// --- Native OpenSpec changes from linked worktrees ------------------------------
+
+// Fixture git calls strip GIT_DIR & co: when the suite runs from a hook in a
+// linked worktree those would otherwise retarget the real repository.
+function git(cwd: string, ...args: string[]) {
+  const r = spawnSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@test", ...args], {
+    cwd,
+    encoding: "utf-8",
+    env: gitSafeEnv(),
+  });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout;
+}
+
+describe("GET /api/projects/:name/plans-tree — worktree sources", () => {
+  type Change = { changeId: string; status: string; source: string };
+  type Src = { id: string; label: string; changes: Change[] };
+  let reposRoot = "";
+  let repo = "";
+
+  /** A committed native repo holding active changes `a` and `b`, wired into repos.json. */
+  function seedNativeRepo() {
+    // realpath so fixture paths match what git reports for worktrees.
+    reposRoot = join(realpathSync(tmpRoot), "repos");
+    repo = join(reposRoot, "pavilio");
+    mkdirSync(repo, { recursive: true });
+    git(repo, "init", "--quiet");
+    seedFile(join(repo, "openspec", "changes", "a", "proposal.md"), "# a");
+    seedFile(join(repo, "openspec", "changes", "b", "proposal.md"), "# b");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repo, openspec: { mode: "native" } }]),
+    );
+  }
+
+  /** A sibling linked worktree on `branch`, or detached when null. */
+  function addWorktree(name: string, branch: string | null): string {
+    const wt = join(reposRoot, name);
+    if (branch) git(repo, "worktree", "add", "--quiet", "-b", branch, wt);
+    else git(repo, "worktree", "add", "--quiet", "--detach", wt);
+    return wt;
+  }
+
+  async function tree(): Promise<Src[]> {
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/plans-tree");
+    expect(res.status).toBe(200);
+    return res.body.sources;
+  }
+
+  const worktreeSources = (sources: Src[]) => sources.filter((s) => s.id.startsWith("openspec:repo:pavilio@"));
+
+  it("surfaces a worktree-only change as a worktree source", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-poc-wallet", "poc-wallet");
+    seedFile(join(wt, "openspec", "changes", "bp-1987-wallet-poc", "proposal.md"), "# wallet");
+
+    const sources = await tree();
+    const src = sources.find((s) => s.id === `openspec:repo:pavilio@${wt}`);
+    expect(src).toBeTruthy();
+    expect(src!.label).toBe("pavilio @ poc-wallet (OpenSpec)");
+    expect(src!.changes.map((c) => [c.changeId, c.status])).toEqual([["bp-1987-wallet-poc", "active"]]);
+    // The main checkout source is still there, unchanged.
+    const main = sources.find((s) => s.id === "openspec:repo:pavilio");
+    expect(main!.changes.map((c) => c.changeId)).toEqual(["a", "b"]);
+  });
+
+  it("hides a worktree whose changes match main", async () => {
+    seedNativeRepo();
+    addWorktree("pavilio-clean", "clean");
+
+    const sources = await tree();
+    expect(vi.mocked(listRepoWorktrees)).toHaveBeenCalledWith(repo);
+    expect(worktreeSources(sources)).toEqual([]);
+  });
+
+  it("lists only the differing change for an edited worktree change", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-edit", "edit");
+    seedFile(join(wt, "openspec", "changes", "a", "tasks.md"), "# tasks");
+
+    const sources = await tree();
+    const src = sources.find((s) => s.id === `openspec:repo:pavilio@${wt}`);
+    expect(src!.changes.map((c) => c.changeId)).toEqual(["a"]);
+    const main = sources.find((s) => s.id === "openspec:repo:pavilio");
+    const mainA = main!.changes.find((c) => c.changeId === "a");
+    expect(mainA).toBeTruthy();
+    expect(src!.changes[0].changeId).toBe(mainA!.changeId);
+    expect(src!.changes[0].source).toBe(`openspec:repo:pavilio@${wt}`);
+  });
+
+  it("omits worktree archive and living specs", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-arch", "arch");
+    seedFile(join(wt, "openspec", "changes", "c", "proposal.md"), "# c");
+    seedFile(join(wt, "openspec", "changes", "archive", "2026-08-01-old", "proposal.md"), "# old");
+    seedFile(join(wt, "openspec", "specs", "checkout", "spec.md"), "# living");
+
+    const sources = await tree();
+    const src = sources.find((s) => s.id === `openspec:repo:pavilio@${wt}`);
+    expect(src!.changes.map((c) => [c.changeId, c.status])).toEqual([["c", "active"]]);
+
+    const ctx = await request(makeApp(projectsRouter, "/api/projects")).get("/api/projects/alokai/context");
+    expect(ctx.status).toBe(200);
+    expect(JSON.stringify(ctx.body)).not.toContain(wt);
+    const living = join(wt, "openspec", "specs", "checkout", "spec.md");
+    const read = await request(makeApp(projectsRouter, "/api/projects"))
+      .get("/api/projects/alokai/context/read")
+      .query({ path: living });
+    expect(read.status).toBe(403);
+  });
+
+  it("contributes no source for a worktree whose only differing change has no artifacts", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-scratch", "scratch");
+    const stray = join(wt, "openspec", "changes", "g", "notes.md");
+    seedFile(stray, "scratch");
+
+    expect(worktreeSources(await tree())).toEqual([]);
+    // Not registered as a source at all, so its tree stays out of the read allowlist.
+    const read = await request(makeApp(projectsRouter, "/api/projects"))
+      .get("/api/projects/alokai/plans/read")
+      .query({ path: stray });
+    expect(read.status).toBe(403);
+  });
+
+  it("labels a detached worktree with its short sha", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-detached", null);
+    seedFile(join(wt, "openspec", "changes", "d", "proposal.md"), "# d");
+    const sha = git(wt, "rev-parse", "HEAD").trim();
+
+    const src = (await tree()).find((s) => s.id === `openspec:repo:pavilio@${wt}`);
+    expect(src!.label).toBe(`pavilio @ ${sha.slice(0, 7)} (OpenSpec)`);
+  });
+
+  it("drops the source after the worktree is removed", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-gone", "gone");
+    seedFile(join(wt, "openspec", "changes", "e", "proposal.md"), "# e");
+    expect(worktreeSources(await tree()).map((s) => s.id)).toEqual([`openspec:repo:pavilio@${wt}`]);
+
+    git(repo, "worktree", "remove", "--force", wt);
+    const after = await tree();
+    expect(worktreeSources(after)).toEqual([]);
+    expect(after.find((s) => s.id === "openspec:repo:pavilio")).toBeTruthy();
+  });
+
+  it("serves a plan file from a surfaced worktree", async () => {
+    seedNativeRepo();
+    const wt = addWorktree("pavilio-serve", "serve");
+    const target = join(wt, "openspec", "changes", "f", "proposal.md");
+    seedFile(target, "# from the worktree");
+
+    const res = await request(makeApp(projectsRouter, "/api/projects"))
+      .get("/api/projects/alokai/plans/read")
+      .query({ path: target });
+    expect(res.status).toBe(200);
+    expect(res.body.content).toBe("# from the worktree");
+  });
+
+  it("refuses a plan file from an unregistered openspec dir", async () => {
+    seedNativeRepo();
+    addWorktree("pavilio-real", "real");
+    // Looks like a worktree of the repo, but git has never heard of it.
+    const stray = join(reposRoot, "pavilio-stray", "openspec", "changes", "x", "proposal.md");
+    seedFile(stray, "# stray");
+
+    const res = await request(makeApp(projectsRouter, "/api/projects"))
+      .get("/api/projects/alokai/plans/read")
+      .query({ path: stray });
+    expect(res.status).toBe(403);
+  });
+
+  it("skips worktree discovery for store-mode repos", async () => {
+    seedNativeRepo();
+    const storeRepo = join(reposRoot, "store-repo");
+    mkdirSync(storeRepo, { recursive: true });
+    seedChange(join(projectsDir, "alokai", "plans", "store-repo", "openspec"), "s");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([
+        { name: "pavilio", path: repo, openspec: { mode: "native" } },
+        { name: "store-repo", path: storeRepo, openspec: { mode: "store" } },
+      ]),
+    );
+
+    await tree();
+    const calls = vi.mocked(listRepoWorktrees).mock.calls.map((c) => c[0]);
+    // Positive control: the spy is bound and sees the native repo …
+    expect(calls).toContain(repo);
+    // … but never the store-mode one.
+    expect(calls).not.toContain(storeRepo);
+  });
+
+  it("keeps the main source when git worktree list fails", async () => {
+    // A native repo path that holds an openspec tree but is not a git repository.
+    seedFile(join(projectsDir, "alokai", "PROJECT.md"));
+    const notGit = join(realpathSync(tmpRoot), "repos", "not-git");
+    seedChange(join(notGit, "openspec"), "add-checkout");
+    writeFileSync(
+      join(projectsDir, "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: notGit, openspec: { mode: "native" } }]),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const sources = await tree();
+      expect(vi.mocked(listRepoWorktrees)).toHaveBeenCalledWith(notGit);
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("git worktree list failed"))).toBe(true);
+      const main = sources.find((s) => s.id === "openspec:repo:pavilio");
+      expect(main!.changes.map((c) => c.changeId)).toEqual(["add-checkout"]);
+      expect(worktreeSources(sources)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
