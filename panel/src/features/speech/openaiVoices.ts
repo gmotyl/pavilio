@@ -8,7 +8,7 @@ import type { EngineConfig, VoiceInfo } from "anytts";
 // anytts does not export `VoiceMap` from its entry point; derive it from the engine config.
 type VoiceMap = NonNullable<EngineConfig["voices"]>;
 
-export const OPENAI_CATALOG: VoiceInfo[] = [
+export const OPENAI_CATALOG: readonly VoiceInfo[] = [
   { id: "cand-en-gb-f2", locale: "en-GB", gender: "female", label: "British, middle-aged, low", multilingual: false },
   { id: "cand-en-gb-f3", locale: "en-GB", gender: "female", label: "British, young, high", multilingual: false },
   { id: "cand-en-gb-m1", locale: "en-GB", gender: "male", label: "British, young", multilingual: false },
