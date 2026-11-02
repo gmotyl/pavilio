@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { EdgeEngineOptions, Tts } from "anytts";
 import { createRelayHandler, toNodeHandler } from "anytts/server";
+import { countingTts } from "../lib/speech/countingTts.js";
 import { createTtsHolder, type TtsHolder } from "../lib/speech/ttsHolder.js";
+import { createUsageStore, type UsageStore } from "../lib/speech/usage-store.js";
 
 /** Longest `text` the relay synthesizes; longer requests get 413. */
 const MAX_CHARS = 2000;
@@ -13,6 +15,11 @@ export interface TtsHandlerOptions {
   transport?: EdgeEngineOptions["transport"];
   /** The server's Tts holder. Default: a fresh one built from the secrets store. */
   holder?: TtsHolder;
+  /**
+   * Where keyed-engine and cascade syntheses are counted. Default: a store on
+   * the workspace usage directory, created on the first request.
+   */
+  usage?: UsageStore;
 }
 
 /**
@@ -24,15 +31,19 @@ export interface TtsHandlerOptions {
  * Each request calls the relay built around the holder's *current* instance:
  * after `holder.rebuild()` the next request gets a new relay, while one already
  * running keeps the relay (and instance) it started with.
+ *
+ * Keyed-engine and cascade syntheses are counted in `usage` (see
+ * {@link countingTts}); plain Edge requests are counted by the browser.
  */
 export function createTtsHandler(options: TtsHandlerOptions = {}): NodeHandler {
   const { transport } = options;
   const holder = options.holder ?? createTtsHolder({ transport });
+  let usage = options.usage;
 
   const relayFor = (tts: Tts): NodeHandler =>
     toNodeHandler(
       createRelayHandler({
-        tts,
+        tts: countingTts(tts, (usage ??= createUsageStore())),
         maxChars: MAX_CHARS,
         // Every request is let through here: the panel's mobileAuthMiddleware
         // and authMiddleware guard the route before it reaches the relay.
@@ -44,6 +55,7 @@ export function createTtsHandler(options: TtsHandlerOptions = {}): NodeHandler {
   let built: { tts: Tts; handler: NodeHandler } | undefined;
   return (req, res) => {
     const tts = holder.current();
+    // Keyed by the holder's instance, not the counting wrapper around it.
     if (built?.tts !== tts) built = { tts, handler: relayFor(tts) };
     built.handler(req, res);
   };

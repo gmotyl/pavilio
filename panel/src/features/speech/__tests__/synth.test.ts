@@ -258,7 +258,10 @@ describe("the anytts seam", () => {
       synth.speechCacheState("hello", { voice: "v" });
 
       expect((lib.fake.synthesize.mock.calls[0]?.[0] as SynthesisRequest).engine).toBe("edge");
-      expect(lib.fake.prefetch).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "edge" }));
+      // A cold Edge warm calls `synthesize` itself, to learn the outcome it reports.
+      expect(lib.fake.synthesize).toHaveBeenLastCalledWith(
+        expect.objectContaining({ engine: "edge", tier: "preload" }),
+      );
       expect(lib.fake.state).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "edge" }));
     }
   });

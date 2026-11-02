@@ -18,6 +18,7 @@ import { authMiddleware } from "../../lib/auth";
 import { mobileAuthMiddleware } from "../../middleware/mobile-auth";
 import { createTtsHandler } from "../tts";
 import { createTtsHolder, type TtsHolder } from "../../lib/speech/ttsHolder";
+import type { UsageStore } from "../../lib/speech/usage-store";
 
 afterAll(() => {
   if (previousToken === undefined) delete process.env.PANEL_TOKEN;
@@ -108,9 +109,14 @@ function loadApp(): { app: Express; opened: () => number } {
   const app = express();
   // A keyless holder, so the test never reads the real ~/.panel/secrets.env or env keys.
   const holder = createTtsHolder({ transport, resolveKey: () => ({ source: "none" }) });
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder }));
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder, usage: fakeUsage() }));
   app.use(express.json());
   return { app, opened };
+}
+
+/** A usage store stand-in, so the relay's counting never writes the real workspace. */
+function fakeUsage(): UsageStore & { record: ReturnType<typeof vi.fn> } {
+  return { record: vi.fn(async () => {}), readAll: vi.fn(async () => []) };
 }
 
 const VOICE = "en-US-AndrewMultilingualNeural";
@@ -210,14 +216,20 @@ function fakeTts(name: string, pending?: Promise<void>): Tts & { synthesize: Ret
 }
 
 /** The production mount over a holder whose instances come from `instances`, in order. */
-function loadHolderApp(instances: Tts[]): { app: Express; holder: TtsHolder; opened: () => number } {
+function loadHolderApp(instances: Tts[]): {
+  app: Express;
+  holder: TtsHolder;
+  opened: () => number;
+  usage: ReturnType<typeof fakeUsage>;
+} {
   const { transport, opened } = fakeTransport();
   const queue = [...instances];
   const holder = createTtsHolder({ createTts: () => queue.shift()!, resolveKey: () => ({ source: "none" }) });
+  const usage = fakeUsage();
   const app = express();
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder }));
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder, usage }));
   app.use(express.json());
-  return { app, holder, opened };
+  return { app, holder, opened, usage };
 }
 
 const CASCADE_BODY = { engine: "cascade", text: "Hello.", lang: "en" };
@@ -226,7 +238,7 @@ describe("/api/tts over the Tts holder", () => {
   it("rebuild swaps the instance for the next request", async () => {
     const first = fakeTts("first");
     const second = fakeTts("second");
-    const { app, holder } = loadHolderApp([first, second]);
+    const { app, holder, usage } = loadHolderApp([first, second]);
 
     const before = await request(app).post("/api/tts").set("Cookie", COOKIE).send(CASCADE_BODY);
     expect(before.status).toBe(200);
@@ -240,6 +252,11 @@ describe("/api/tts over the Tts holder", () => {
     expect(first.synthesize).toHaveBeenCalledTimes(1);
     expect(second.synthesize).toHaveBeenCalledTimes(1);
     expect(second.synthesize.mock.calls[0]![0]).toMatchObject({ engine: "cascade", text: "Hello.", lang: "en" });
+    // Each relay counts through its own instance, under the engine that answered.
+    expect(usage.record.mock.calls).toEqual([
+      ["first", 6],
+      ["second", 6],
+    ]);
   });
 
   it("an in-flight request finishes on the old instance", async () => {
@@ -264,7 +281,7 @@ describe("/api/tts over the Tts holder", () => {
 
   it("edge requests are unchanged", async () => {
     const tts = fakeTts("first");
-    const { app, opened } = loadHolderApp([tts]);
+    const { app, opened, usage } = loadHolderApp([tts]);
 
     const res = await request(app)
       .post("/api/tts")
@@ -282,6 +299,8 @@ describe("/api/tts over the Tts holder", () => {
     expect([...(res.body as Buffer)]).toEqual(AUDIO);
     expect(opened()).toBe(1);
     expect(tts.synthesize).not.toHaveBeenCalled();
+    // The browser reports Edge usage; the relay does not count it.
+    expect(usage.record).not.toHaveBeenCalled();
 
     const unauthenticated = await request(app).post("/api/tts").send(CASCADE_BODY);
     expect(unauthenticated.status).toBe(401);

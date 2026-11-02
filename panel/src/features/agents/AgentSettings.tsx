@@ -4,6 +4,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { openInVSCode as openPathInVSCode } from "../shell/vscode";
 import { VoiceSelect } from "../speech/VoiceSelect";
 import { EngineSettings } from "../speech/EngineSettings";
+import { SpeechUsageCard } from "../speech/SpeechUsageCard";
 import { AutoOpenAnswerToggle } from "../speech/AutoOpenAnswerToggle";
 import { PageCacheSettings } from "../speech/PageCacheSettings";
 import { NotificationsToggle } from "../notifications/NotificationsToggle";
@@ -623,6 +624,9 @@ export default function AgentSettings() {
         <VoiceSelect />
         <div className="mt-4">
           <EngineSettings />
+        </div>
+        <div className="mt-4">
+          <SpeechUsageCard />
         </div>
         <div className="mt-4">
           <AutoOpenAnswerToggle />
