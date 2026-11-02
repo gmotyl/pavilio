@@ -6,7 +6,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -521,6 +523,97 @@ describe("scripts/panel local TTS server control", () => {
     expect(warnings[0]).toMatch(/warning/i);
     expect(warnings[0]).toMatch(/\bstart\b/);
     expect(warnings[0]).toMatch(/exit(ed)?( with)?( code)? 1\b/);
+  });
+
+  /** A control script that never returns, and records its pid so a case can check it was reaped. */
+  function writeHangingCtl(pidFile: string) {
+    writeFileSync(
+      ctl,
+      ["#!/usr/bin/env bash", `echo $$ > "${pidFile}"`, "while :; do sleep 1; done", ""].join("\n"),
+      { mode: 0o755 },
+    );
+  }
+
+  /**
+   * A PATH with every tool the developer's PATH offers *except* `timeout`: one
+   * directory of symlinks, first name wins, as `command -v` would resolve it.
+   * The pnpm stub still goes first, exactly as runPanel arranges it.
+   */
+  function pathWithoutTimeout(): string {
+    const bin = join(sandbox, "bin-no-timeout");
+    mkdirSync(bin, { recursive: true });
+    const seen = new Set<string>(["timeout"]);
+    for (const dir of (process.env.PATH ?? "").split(":")) {
+      if (!dir || dir === stubBin) continue;
+      let names: string[];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        symlinkSync(join(dir, name), join(bin, name));
+      }
+    }
+    return `${stubBin}:${bin}`;
+  }
+
+  it("a hanging TTS control script is cut off without timeout", async () => {
+    const pidFile = join(sandbox, "ctl.pid");
+    writeHangingCtl(pidFile);
+    const PATH = pathWithoutTimeout();
+    // The arranged PATH really has no `timeout` on it.
+    const probe = spawnSync("bash", ["-c", "command -v timeout || echo none"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH },
+    });
+    expect(probe.stdout.trim()).toBe("none");
+
+    const t0 = Date.now();
+    const started = runPanel("start", {
+      PANEL_TTS_SERVER_CTL: ctl,
+      PANEL_TTS_SERVER_CTL_TIMEOUT: "2",
+      PATH,
+    });
+    const elapsed = Date.now() - t0;
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toContain("panel started");
+    const warnings = started.output.split("\n").filter((line) => line.includes(ctl));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/warning/i);
+    expect(warnings[0]).toMatch(/timed out after 2s/);
+    // Two seconds of patience, a short kill grace and the panel's own start.
+    expect(elapsed).toBeLessThan(20000);
+    // The control script itself was killed, not left running in the background.
+    const ctlPid = Number(readFileSync(pidFile, "utf8").trim());
+    expect(await waitUntil(() => !alive(ctlPid), 5000)).toBe(true);
+  });
+
+  it("the coreutils timeout path honours PANEL_TTS_SERVER_CTL_TIMEOUT", async () => {
+    const pidFile = join(sandbox, "ctl.pid");
+    writeHangingCtl(pidFile);
+    // Only meaningful where coreutils `timeout` exists; this suite runs on Linux.
+    expect(spawnSync("bash", ["-c", "command -v timeout"]).status).toBe(0);
+
+    const t0 = Date.now();
+    const started = runPanel("start", {
+      PANEL_TTS_SERVER_CTL: ctl,
+      PANEL_TTS_SERVER_CTL_TIMEOUT: "2",
+    });
+    const elapsed = Date.now() - t0;
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    const warnings = started.output.split("\n").filter((line) => line.includes(ctl));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/timed out after 2s/);
+    expect(elapsed).toBeLessThan(20000);
+    const ctlPid = Number(readFileSync(pidFile, "utf8").trim());
+    expect(await waitUntil(() => !alive(ctlPid), 5000)).toBe(true);
   });
 
   it("a non-executable TTS control script is skipped with a warning", async () => {

@@ -156,10 +156,48 @@ tts_server_ctl_path() {
   printf '%s' "$value"
 }
 
+# `timeout <secs> <cmd...>` for hosts without coreutils timeout, with its
+# semantics: the command's exit status, or 124 when it ran past the limit and was
+# killed (TERM, then KILL after a short grace).
+#
+# The command runs in a process group of its own (`set -m` around the launch),
+# and the whole group is signalled — what GNU timeout does too, so a child the
+# script is waiting on (a `sleep`, a `curl`) dies with it rather than lingering.
+# A daemon the script detached with setsid lives in a new session and process
+# group, so it is out of reach and survives, as it should. Waiting is a
+# foreground poll on quarter-second sleeps, not a background sleeper racing the
+# command, so nothing is left behind whichever finishes first.
+run_with_limit() {
+  local limit="$1" pid ticks=0 grace=0
+  shift
+  set -m
+  "$@" &
+  pid=$!
+  set +m
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$ticks" -ge $((limit * 4)) ]; then
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      # Two seconds for a clean exit, then no more asking.
+      while kill -0 "$pid" 2>/dev/null && [ "$grace" -lt 8 ]; do
+        sleep "$POLL_INTERVAL"
+        grace=$((grace + 1))
+      done
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep "$POLL_INTERVAL"
+    ticks=$((ticks + 1))
+  done
+  wait "$pid"
+}
+
 # Run `<ctl> start|stop` when a control script is configured; a no-op, with no
 # output at all, when it is not. Never fails the panel verb: the panel works
 # without a local TTS server (the engine cascade moves on), so a missing script,
-# a non-zero exit or a hang past 60s costs one warning line and nothing else.
+# a non-zero exit or a hang past the limit costs one warning line and nothing
+# else. The limit is $PANEL_TTS_SERVER_CTL_TIMEOUT seconds (a positive integer;
+# anything else means the default, 60).
 # The script's own output goes to the panel log, not the terminal — and not to
 # a pipe a caller may be reading, which a daemon it spawns could hold open.
 tts_server_ctl() {
@@ -176,16 +214,21 @@ tts_server_ctl() {
   fi
   mkdir -p "$(dirname "$LOG_FILE")"
   echo "--- tts server $verb $(date -Is 2>/dev/null) ---" >>"$LOG_FILE"
+  local limit="${PANEL_TTS_SERVER_CTL_TIMEOUT:-60}"
+  case "$limit" in
+    '' | *[!0-9]* | 0*) limit=60 ;;
+  esac
   if command -v timeout >/dev/null 2>&1; then
-    timeout 60 "$ctl" "$verb" >>"$LOG_FILE" 2>&1 </dev/null
+    timeout "$limit" "$ctl" "$verb" >>"$LOG_FILE" 2>&1 </dev/null
+    rc=$?
   else
-    # No coreutils timeout (stock macOS): unbounded is still better than skipping.
-    "$ctl" "$verb" >>"$LOG_FILE" 2>&1 </dev/null
+    # No coreutils timeout (stock macOS): the same bound, in bash.
+    run_with_limit "$limit" "$ctl" "$verb" >>"$LOG_FILE" 2>&1 </dev/null
+    rc=$?
   fi
-  rc=$?
   if [ "$rc" -ne 0 ]; then
     local why=""
-    [ "$rc" -eq 124 ] && why=", timed out after 60s"
+    [ "$rc" -eq 124 ] && why=", timed out after ${limit}s"
     echo "warning: PANEL_TTS_SERVER_CTL $ctl $verb exited $rc$why (see $LOG_REL)" >&2
   fi
   return 0
