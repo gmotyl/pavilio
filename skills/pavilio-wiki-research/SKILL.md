@@ -36,10 +36,11 @@ with their original URL.
 
 0. **Target.** Current project = the one set earlier in the conversation (by
    `/pavilio-session-start`, `/pavilio-wiki` or another project-scoped skill), else the project
-   of `pwd` (`scripts/wiki project --cwd <dir>`; exit 2 → none). `kind` from `scripts/wiki
-   project --name <p>`; `topic` = the frontmatter `topic` of its `PROJECT.md` (not returned).
-   - None, `knowledge`, or a research project whose `topic` matches → ask nothing; step 1 as
-     written (a matching one continues as a new round). `knowledge` is never a target.
+   of `pwd`: `scripts/wiki project --cwd "$PWD"` counts only with `"via": "cwd"` — `"cell"` (the
+   panel cell's project) or exit 2 → none. `kind` from that output or `scripts/wiki project
+   --name <p>`; `topic` = the frontmatter `topic` of its `PROJECT.md` (not returned).
+   - None or `knowledge` → ask nothing; step 1 as written. `knowledge` is never a target. A
+     research project whose `topic` matches → ask nothing; continue `<p>` as a new round.
    - An ordinary project, or a research project with another topic → ask per [[pavilio-ask]]
      (letters fixed), then stop:
 
@@ -99,24 +100,26 @@ with their original URL.
      in that repo, never in the workspace.
    - **Contribute mode** (ordinary `<p>`): ask per spike (letters fixed), then stop:
 
-     - **A)** Spike branch in a code repo *(recommended)* — repos from `projects/<p>/repos.json`
-       minus the `<p>-spikes` entry; several → the user picks one; none → do not offer A, and C
-       is recommended. Default branch = `git -C <repo> symbolic-ref --short
-       refs/remotes/origin/HEAD` minus `origin/`, else the current branch. Run `git -C <repo>
-       worktree add ../<repo-basename>-spike-<slug> -b spike/<slug> <default branch>` (branch or
-       worktree exists → pick a new slug), write the code under `<worktree>/<slug>/` and commit it
-       on `spike/<slug>`; never push, never use the workspace repo.
+     - **A)** Spike branch in a code repo *(recommended)* — `projects/<p>/repos.json` entries
+       (`{name, path}`; `<repo>` = `path`) minus `<p>-spikes`; several → the user picks one;
+       none → do not offer A, and C is recommended. Default branch = `git -C <repo>
+       symbolic-ref --short refs/remotes/origin/HEAD` minus `origin/`, else the current branch.
+       Run `git -C <repo> worktree add ../<repo-basename>-spike-<slug> -b spike/<slug> <default
+       branch>` (branch or worktree exists → pick a new slug), write the code under
+       `<worktree>/<slug>/` and commit it on `spike/<slug>`; never push, never use the workspace
+       repo.
      - **B)** Skip — append the question to `## Gaps` in `projects/<p>/wiki/open-questions.md` as
-       "needs an experiment", per `skills/pavilio-wiki/CONVENTIONS.md`; an item already on the
-       same question gets the note instead of a second item.
+       "needs an experiment", per `skills/pavilio-wiki/CONVENTIONS.md` (file or section missing →
+       create it); an item already on the same question gets the note instead.
      - **C)** New spike folder — `scripts/project spike-repo <p>`, as in a research project.
      - **D)** Other, tell me how
 
    Every spike that ran: write the findings with [[pavilio-memo-explain]] to
    `projects/<p>/memo/`, then give `<slug>/` a one-line `README.md` linking the memo's
-   `/project/<p>/memo?file=…` link that pavilio-memo-explain returns (A: committed on the
-   branch) — never a `FINDINGS.md`, never a `panel-link` one. Spike memos are wiki records, so
-   the next ingest picks them up, not this round's answers; note them in step 8's next-round line.
+   `/project/<p>/memo?file=…` link that pavilio-memo-explain returns (committed with the code: on
+   the branch for A, in the spikes repo otherwise) — never a `FINDINGS.md`, never a `panel-link`
+   one. Spike memos are wiki records, so the next ingest picks them up, not this round's
+   answers; note them in step 8's next-round line.
 8. **Commit + next round** — commit `projects/<p>/PROJECT.md` (plus `repos.json` and the spike
    memos after a spike) as `<p>: research round <topic>` (the wiki commits are pavilio-wiki's).
    On a new project's first round commit the whole `projects/<p>/` instead (the scaffold's
