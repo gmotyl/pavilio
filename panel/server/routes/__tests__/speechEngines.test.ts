@@ -31,6 +31,7 @@ const KEY_VARS = [
   "SPEECHIFY_API_KEY",
   "AZURE_SPEECH_KEY",
   "AZURE_SPEECH_REGION",
+  "OPENAI_TTS_BASE_URL",
 ] as const;
 
 const COOKIE = `panel_token=${TOKEN}`;
@@ -57,7 +58,7 @@ const secrets = () => (existsSync(secretsFile()) ? readFileSync(secretsFile(), "
  * throws. `windows` overrides the state of a keyed engine that has a key.
  */
 function fakeTts(config: TtsConfig, windows: Record<string, EngineStatus>): Tts {
-  const engines = config.engines as Record<string, { apiKey?: string } | undefined>;
+  const engines = config.engines as Record<string, { apiKey?: string; baseUrl?: string } | undefined>;
   return {
     synthesize: vi.fn(),
     prefetch: () => {},
@@ -69,6 +70,7 @@ function fakeTts(config: TtsConfig, windows: Record<string, EngineStatus>): Tts 
       const engine = engines[id];
       if (!engine) throw new RangeError(`unknown engine ${id}`);
       if (id === "edge" || id === "cascade") return { state: "ready" };
+      if (id === "openai") return windows[id] ?? { state: engine.baseUrl ? "ready" : "no-key" };
       if (!engine.apiKey) return { state: "no-key" };
       return windows[id] ?? { state: "ready" };
     },
@@ -107,6 +109,7 @@ type Engine = {
   keySource: string;
   keyLast4?: string;
   region?: string;
+  baseUrl?: string;
   status: EngineStatus;
 };
 
@@ -138,7 +141,7 @@ describe("/api/speech engines and keys", () => {
     expect(configs[1]!.engines.elevenlabs).toEqual({ apiKey: KEY });
 
     const list = await engines(app);
-    expect(list.map((e) => e.id)).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge"]);
+    expect(list.map((e) => e.id)).toEqual(["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"]);
     expect(engine(list, "elevenlabs")).toEqual({
       id: "elevenlabs",
       label: "ElevenLabs",
@@ -341,5 +344,117 @@ describe("/api/speech engines and keys", () => {
 
     const removed = await request(app).delete("/api/speech/keys/elevenlabs").set("Cookie", COOKIE);
     expect(removed.status).toBe(500);
+  });
+});
+
+describe("/api/speech openai address", () => {
+  const ADDRESS = "http://127.0.0.1:8890";
+  const put = (app: Express, body: object) =>
+    request(app).put("/api/speech/keys/openai").set("Cookie", COOKIE).send(body);
+
+  it("lists openai as no-key while the address is unset", async () => {
+    const { app, configs } = loadApp();
+    const list = await engines(app);
+    expect(list[0]!.id).toBe("openai");
+    expect(engine(list, "openai")).toEqual({
+      id: "openai",
+      label: expect.any(String),
+      keyed: true,
+      keySource: "none",
+      status: { state: "no-key" },
+    });
+    // Listed, but still out of the server Tts and its cascade.
+    expect(configs[0]!.engines.openai).toBeUndefined();
+
+    // A stored address that is not a URL (a hand-edited file) does not break the list:
+    // the row shows it, so it can be fixed, and the engine stays off.
+    vi.stubEnv("OPENAI_TTS_BASE_URL", "localhost8890");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const broken = loadApp();
+      expect(engine(await engines(broken.app), "openai")).toEqual({
+        id: "openai",
+        label: expect.any(String),
+        keyed: true,
+        keySource: "env",
+        baseUrl: "localhost8890",
+        status: { state: "no-key" },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("shows the address in full once set", async () => {
+    const until = "2026-11-02T12:00:00.000Z";
+    const { app } = loadApp({ windows: { openai: { state: "rate-limited", until } } });
+    expect((await put(app, { baseUrl: ADDRESS })).status).toBe(204);
+
+    const row = engine(await engines(app), "openai");
+    expect(row).toEqual({
+      id: "openai",
+      label: expect.any(String),
+      keyed: true,
+      keySource: "file",
+      baseUrl: ADDRESS,
+      status: { state: "rate-limited", until },
+    });
+    expect(row.keyLast4).toBeUndefined();
+  });
+
+  it("saves a valid address and rebuilds", async () => {
+    const { app, configs } = loadApp();
+    const res = await put(app, { baseUrl: `  ${ADDRESS}  ` });
+    expect(res.status).toBe(204);
+    expect(secrets()).toBe(`OPENAI_TTS_BASE_URL=${ADDRESS}\n`);
+    expect(configs).toHaveLength(2);
+    expect(configs[1]!.engines.openai).toMatchObject({ baseUrl: ADDRESS });
+    expect(engine(await engines(app), "openai").status).toEqual({ state: "ready" });
+  });
+
+  it("rejects an address that is not a URL", async () => {
+    const { app, configs } = loadApp();
+    for (const body of [
+      { baseUrl: "localhost8890" },
+      { baseUrl: "ftp://127.0.0.1:8890" },
+      { baseUrl: "" },
+      { baseUrl: "http://127.0.0.1:8890\nELEVENLABS_API_KEY=x" },
+      { apiKey: ADDRESS },
+      {},
+    ]) {
+      const res = await put(app, body);
+      expect(res.status).toBe(400);
+      expect(res.text).not.toContain("localhost8890");
+    }
+    expect(secrets()).toBe("");
+    expect(configs).toHaveLength(1);
+  });
+
+  it("answers 409 when the environment sets the address", async () => {
+    vi.stubEnv("OPENAI_TTS_BASE_URL", "http://10.0.0.5:8890");
+    const { app, configs } = loadApp();
+    expect((await put(app, { baseUrl: ADDRESS })).status).toBe(409);
+    expect(secrets()).toBe("");
+    expect(configs).toHaveLength(1);
+    expect(engine(await engines(app), "openai")).toMatchObject({
+      keySource: "env",
+      baseUrl: "http://10.0.0.5:8890",
+      status: { state: "ready" },
+    });
+  });
+
+  it("removes the address and rebuilds", async () => {
+    const { app, configs } = loadApp();
+    await request(app).put("/api/speech/keys/elevenlabs").set("Cookie", COOKIE).send({ apiKey: KEY });
+    expect((await put(app, { baseUrl: ADDRESS })).status).toBe(204);
+
+    const res = await request(app).delete("/api/speech/keys/openai").set("Cookie", COOKIE);
+    expect(res.status).toBe(204);
+    expect(secrets()).toBe(`ELEVENLABS_API_KEY=${KEY}\n`);
+    expect(configs).toHaveLength(4);
+    expect(configs[3]!.engines.openai).toBeUndefined();
+    const row = engine(await engines(app), "openai");
+    expect(row).toMatchObject({ keySource: "none", status: { state: "no-key" } });
+    expect(row.baseUrl).toBeUndefined();
   });
 });

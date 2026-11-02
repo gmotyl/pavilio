@@ -32,7 +32,7 @@ export const CASCADE_ORDER = ["openai", "elevenlabs", "cartesia", "speechify", "
 const AZURE_REGION = /^[a-z0-9]+$/;
 
 /** The `openai` engine's own address check: anything but an http(s) URL makes `createTts` throw. */
-function isHttpUrl(value: string): boolean {
+export function isHttpUrl(value: string): boolean {
   try {
     const { protocol } = new URL(value);
     return protocol === "http:" || protocol === "https:";
