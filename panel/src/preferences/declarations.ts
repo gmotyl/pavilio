@@ -256,6 +256,7 @@ export interface CascadeEntry {
  * server file and fails when the two drift apart.
  */
 export const DEFAULT_CASCADE_ORDER: readonly string[] = [
+  "openai",
   "elevenlabs",
   "cartesia",
   "speechify",

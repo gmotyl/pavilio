@@ -54,15 +54,28 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
   const labels = new Map(listEngines().map((e) => [e.id, e.label]));
   const router = Router();
 
+  /** The member's status, or undefined when the holder does not configure it. */
+  const statusOf = (id: string): EngineStatus | undefined => {
+    try {
+      return holder.engineStatus(id);
+    } catch (error) {
+      if (error instanceof RangeError) return undefined;
+      throw error;
+    }
+  };
+
   router.get("/engines", (_req, res) => {
     // The cascade members only: `cascade` itself has no key and its status is its members'.
-    const list = CASCADE_ORDER.map((id): SpeechEngineInfo => {
+    // A member the holder leaves out (`openai` without an address) is not listed.
+    const list = CASCADE_ORDER.flatMap((id): SpeechEngineInfo[] => {
+      const status = statusOf(id);
+      if (!status) return [];
       const info: SpeechEngineInfo = {
         id,
         label: labels.get(id) ?? id,
         keyed: isKeyed(id),
         keySource: "none",
-        status: holder.engineStatus(id),
+        status,
       };
       if (isKeyed(id)) {
         const key = resolveKey(KEYED_ENGINES[id]);
@@ -74,7 +87,7 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
           if (region) info.region = region;
         }
       }
-      return info;
+      return [info];
     });
     res.json(list);
   });

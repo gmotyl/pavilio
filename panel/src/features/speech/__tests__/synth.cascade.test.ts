@@ -103,7 +103,8 @@ describe("cascade requests through the speech seam", () => {
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
     expect(Object.values(expectedVoices).every(Boolean)).toBe(true);
-    const order = ["elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    // `openai` leads the default order; the server drops it when it has no address.
+    const order = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
     expect(request).toEqual({
@@ -142,6 +143,7 @@ describe("cascade requests through the speech seam", () => {
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "azure", on: false },
+      { id: "openai", on: false },
     ]);
 
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });

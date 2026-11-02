@@ -112,20 +112,22 @@ describe("EngineSettings", () => {
     // engine: the old single "Default voice" select is gone.
     expect(within(section).getByRole("heading", { name: "Engines and cascade order" })).toBeInTheDocument();
     expect(within(section).queryByRole("combobox", { name: "Default voice" })).toBeNull();
-    expect(within(section).getAllByRole("combobox", { name: "Voice" })).toHaveLength(5);
+    // One row per cascade member, `openai` included.
+    expect(within(section).getAllByRole("combobox", { name: "Voice" })).toHaveLength(6);
   });
 
   it("rows follow cascade order with move buttons", async () => {
     setCascadeOrder([
       { id: "edge", on: true },
       { id: "azure", on: true },
+      { id: "openai", on: true },
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "speechify", on: true },
     ]);
     await renderLoaded();
 
-    expect(rowIds()).toEqual(["edge", "azure", "elevenlabs", "cartesia", "speechify"]);
+    expect(rowIds()).toEqual(["edge", "azure", "openai", "elevenlabs", "cartesia", "speechify"]);
     rowIds().forEach((id, index) => {
       expect(within(row(id)).getByTestId("engine-position")).toHaveTextContent(String(index + 1));
     });
@@ -133,7 +135,7 @@ describe("EngineSettings", () => {
     expect(within(row("edge")).getByRole("button", { name: `Move ${LABELS.get("edge")} down` })).toBeInTheDocument();
     expect(within(row("speechify")).getByRole("button", { name: `Move ${LABELS.get("speechify")} up` })).toBeInTheDocument();
     expect(within(row("speechify")).queryByRole("button", { name: `Move ${LABELS.get("speechify")} down` })).toBeNull();
-    for (const id of ["azure", "elevenlabs", "cartesia"]) {
+    for (const id of ["azure", "openai", "elevenlabs", "cartesia"]) {
       expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} up` })).toBeInTheDocument();
       expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} down` })).toBeInTheDocument();
     }
@@ -141,18 +143,28 @@ describe("EngineSettings", () => {
 
   it("moving a row saves the order", async () => {
     const user = userEvent.setup();
+    // `openai` leads the default order; parked last here so ElevenLabs starts first.
+    setCascadeOrder([
+      { id: "elevenlabs", on: true },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: true },
+      { id: "edge", on: true },
+      { id: "openai", on: true },
+    ]);
     await renderLoaded();
-    expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge"]);
+    expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge", "openai"]);
 
     await user.click(within(row("elevenlabs")).getByRole("button", { name: `Move ${LABELS.get("elevenlabs")} down` }));
 
-    expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge"]);
+    expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge", "openai"]);
     expect(readPreference(preferences.speechCascadeOrder).map((entry) => entry.id)).toEqual([
       "cartesia",
       "elevenlabs",
       "speechify",
       "azure",
       "edge",
+      "openai",
     ]);
     // The first row now has no ↑, and the moved one does.
     expect(within(row("cartesia")).queryByRole("button", { name: `Move ${LABELS.get("cartesia")} up` })).toBeNull();
@@ -171,6 +183,7 @@ describe("EngineSettings", () => {
     await renderLoaded([
       ...mockupEngines().slice(0, 4),
       { ...mockupEngines()[4]!, status: { state: "ready" } },
+      { id: "openai", label: "OpenAI-compatible", keyed: false, keySource: "none", status: { state: "ready" } },
     ]);
 
     const chips = Object.fromEntries(
@@ -182,12 +195,14 @@ describe("EngineSettings", () => {
       speechify: "no key · skipped",
       azure: "bad key",
       edge: "ready",
+      openai: "ready",
     });
 
     for (const id of rowIds()) {
       const scope = within(row(id));
       expect(scope.getByText(LABELS.get(id)!)).toBeInTheDocument();
-      expect(scope.getByTestId("engine-limit").textContent).not.toBe("");
+      // A self-hosted server has no plan limit to note.
+      if (id !== "openai") expect(scope.getByTestId("engine-limit").textContent).not.toBe("");
       expect(scope.getByRole("combobox", { name: "Voice" })).toBeInTheDocument();
       expect(scope.getByRole("checkbox", { name: "Pronunciation map" })).toBeInTheDocument();
       expect(scope.getByRole("checkbox", { name: "In cascade" })).toBeChecked();
@@ -218,6 +233,7 @@ describe("EngineSettings", () => {
       { id: "speechify", on: false },
       { id: "azure", on: false },
       { id: "edge", on: true },
+      { id: "openai", on: false },
     ]);
     await renderLoaded();
 

@@ -182,6 +182,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   [
     "speech.cascadeOrder",
     [
+      { id: "openai", on: true },
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "speechify", on: true },

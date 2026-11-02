@@ -1,5 +1,6 @@
 import type { EdgeEngineOptions, EngineStatus, Tts, TtsConfig } from "anytts";
 import { createTts as createServerTts } from "anytts/server";
+import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "../../../src/features/speech/openaiVoices";
 import { resolveKey as resolveSecret, type KeyVar } from "./secrets.js";
 
 /**
@@ -20,11 +21,25 @@ export const KEYED_ENGINES = {
 
 export type KeyedEngineId = keyof typeof KEYED_ENGINES;
 
-/** The cascade's default member order; the browser sends its own order per request anyway. */
-export const CASCADE_ORDER = ["elevenlabs", "cartesia", "speechify", "azure", "edge"];
+/**
+ * The cascade's default member order; the browser sends its own order per request anyway.
+ * `openai` leads but is configured only when `OPENAI_TTS_BASE_URL` is set, so the order handed
+ * to `createTts` is narrowed to the engines actually configured.
+ */
+export const CASCADE_ORDER = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
 
 /** The Azure engine's own region check: with a key, anything else makes `createTts` throw. */
 const AZURE_REGION = /^[a-z0-9]+$/;
+
+/** The `openai` engine's own address check: anything but an http(s) URL makes `createTts` throw. */
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 export interface TtsHolderOptions {
   /** Builds the instance; tests inject fakes. Default: `createTts` from `anytts/server`. */
@@ -68,14 +83,38 @@ function configFrom(
   }
   const azure = azureKey && regionOk ? { apiKey: azureKey, region } : {};
 
+  // `openai` has no keyless form: without a usable address it is left out altogether.
+  const baseUrl = key("OPENAI_TTS_BASE_URL");
+  const baseUrlOk = !!baseUrl && isHttpUrl(baseUrl);
+  if (baseUrl && !baseUrlOk) {
+    // Names the variable only, like the Azure warning: the value is not logged.
+    console.warn(
+      `[speech] OPENAI_TTS_BASE_URL is set but is not an http(s) URL ` +
+        `(e.g. "http://127.0.0.1:8890"): the openai engine stays off until it is fixed.`,
+    );
+  }
+  const members: TtsConfig["engines"] = {
+    elevenlabs: keyed(KEYED_ENGINES.elevenlabs),
+    cartesia: keyed(KEYED_ENGINES.cartesia),
+    speechify: keyed(KEYED_ENGINES.speechify),
+    azure,
+    edge: transport ? { transport } : {},
+  };
+  if (baseUrl && baseUrlOk) {
+    members.openai = {
+      baseUrl,
+      // anytts takes a mutable array; the shared catalog stays read-only.
+      catalog: [...OPENAI_CATALOG],
+      voices: OPENAI_VOICE_MAP,
+      languageField: "language",
+    };
+  }
+
   return {
     engines: {
-      elevenlabs: keyed(KEYED_ENGINES.elevenlabs),
-      cartesia: keyed(KEYED_ENGINES.cartesia),
-      speechify: keyed(KEYED_ENGINES.speechify),
-      azure,
-      edge: transport ? { transport } : {},
-      cascade: { order: CASCADE_ORDER },
+      ...members,
+      // anytts rejects a cascade member that is not a configured engine.
+      cascade: { order: CASCADE_ORDER.filter((id) => Object.hasOwn(members, id)) },
     },
     defaultEngine: "edge",
     // The relay passes no tier, so every request lands in the first one.

@@ -95,6 +95,7 @@ describe("ProjectVoiceSelect under the cascade", () => {
       { id: "speechify", on: false },
       { id: "elevenlabs", on: true },
       { id: "azure", on: true },
+      { id: "openai", on: false },
     ]);
     await renderCascade();
 
