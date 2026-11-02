@@ -82,16 +82,40 @@ describe("ensureSpikeRepo", () => {
     ]);
   });
 
-  it("refuses a non-research or missing project", () => {
+  it("creates and registers a spikes repo for an ordinary project", () => {
     makeProject("plain", "project");
+    const res = ensureSpikeRepo({ projectsDir, project: "plain", spikesRoot: "~/spikes", home });
+    const path = join(home, "spikes/plain");
+    expect(res).toEqual({ ok: true, path, repo: "created", registered: true });
+    expect(existsSync(join(path, ".git"))).toBe(true);
+    expect(reposJson("plain")).toEqual([{ name: "plain-spikes", path: "~/spikes/plain" }]);
+  });
+
+  it("creates a spikes repo for a project without a kind field", () => {
     makeProject("bare");
-    for (const project of ["plain", "bare", "ghost", "../evil"]) {
+    const res = ensureSpikeRepo({ projectsDir, project: "bare", spikesRoot: "~/spikes", home });
+    const path = join(home, "spikes/bare");
+    expect(res).toEqual({ ok: true, path, repo: "created", registered: true });
+    expect(existsSync(join(path, ".git"))).toBe(true);
+    expect(reposJson("bare")).toEqual([{ name: "bare-spikes", path: "~/spikes/bare" }]);
+  });
+
+  it("refuses a knowledge project and writes nothing", () => {
+    makeProject("knowledge", "knowledge");
+    const res = ensureSpikeRepo({ projectsDir, project: "knowledge", spikesRoot: "~/spikes", home });
+    expect(res).toMatchObject({ ok: false, code: 1 });
+    expect(res.ok ? "" : res.error).toContain("knowledge");
+    expect(existsSync(join(home, "spikes"))).toBe(false);
+    expect(existsSync(join(projectsDir, "knowledge/repos.json"))).toBe(false);
+  });
+
+  it("refuses a missing project and writes nothing", () => {
+    for (const project of ["ghost", "../evil"]) {
       const res = ensureSpikeRepo({ projectsDir, project, spikesRoot: "~/spikes", home });
       expect(res, project).toMatchObject({ ok: false, code: 1 });
     }
     expect(existsSync(join(home, "spikes"))).toBe(false);
-    expect(existsSync(join(projectsDir, "plain/repos.json"))).toBe(false);
-    expect(existsSync(join(projectsDir, "bare/repos.json"))).toBe(false);
+    expect(existsSync(join(projectsDir, "ghost"))).toBe(false);
   });
 
   it("asks on an occupied non-git dir", () => {

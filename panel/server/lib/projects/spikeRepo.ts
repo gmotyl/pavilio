@@ -9,9 +9,11 @@ import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
 import { projectKind } from "./kind";
 
 /**
- * `scripts/project spike-repo <p>` — the research project's spikes repo: the git repo
+ * `scripts/project spike-repo <p>` — the project's spikes repo: the git repo
  * `<spikesRoot>/<p>`, created (and `git init`ed) when missing and registered in
  * `projects/<p>/repos.json` as `{ name: "<p>-spikes", path: "<spikesRoot as written>/<p>" }`.
+ * Any existing project gets one (`kind: project` or `research`); a `kind: knowledge` project,
+ * which holds no code, is refused.
  *
  * Every refusal is checked before anything is written, so a refused run leaves the disk as it was.
  */
@@ -75,8 +77,8 @@ export function ensureSpikeRepo(options: SpikeRepoOptions): SpikeRepoResult {
   if (!isProjectDir(projectsDir, project)) {
     return { ok: false, code: 1, error: `no such project: ${project}` };
   }
-  if (projectKind(projectsDir, project) !== "research") {
-    return { ok: false, code: 1, error: `${project} is not a research project (kind: research)` };
+  if (projectKind(projectsDir, project) === "knowledge") {
+    return { ok: false, code: 1, error: `${project} is a knowledge project; it has no spikes repo` };
   }
 
   const root = options.spikesRoot.trim().replace(/\/+$/, "") || "/";

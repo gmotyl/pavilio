@@ -88,6 +88,15 @@ describe("scripts/project", () => {
     expect(existsSync(join(root, "projects/old"))).toBe(false);
   });
 
+  it("help describes spike-repo as open to every kind but knowledge", async () => {
+    const res = await cli(["--help"]);
+    expect(res.code).toBe(0);
+    const usage = res.json.usage as string;
+    const spike = usage.slice(usage.indexOf("spike-repo"), usage.indexOf("Exit:"));
+    expect(spike).not.toMatch(/must be a\s+kind: research/);
+    expect(spike).toMatch(/knowledge/);
+  });
+
   it("cli spike-repo prints the JSON result", async () => {
     const home = join(root, "home");
     mkdirSync(home);
