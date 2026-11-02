@@ -103,12 +103,12 @@ with their original URL.
 
      - **A)** Spike branch in a code repo *(recommended)* — `projects/<p>/repos.json` entries
        (`{name, path}`; `<repo>` = `path`) minus `<p>-spikes`; several → the user picks one;
-       none → do not offer A, and C is recommended. Default branch = `git -C <repo>
-       symbolic-ref --short refs/remotes/origin/HEAD` minus `origin/`, else the current branch.
-       Run `git -C <repo> worktree add ../<repo-basename>-spike-<slug> -b spike/<slug> <default
-       branch>` (branch or worktree exists → pick a new slug), write the code under
-       `<worktree>/<slug>/` and commit it on `spike/<slug>`; never push, never use the workspace
-       repo.
+       none → do not offer A, and C is recommended. Start point = `git -C <repo> symbolic-ref
+       --short refs/remotes/origin/HEAD` used as-is (e.g. `origin/main`; a local `main` may not
+       exist), else `HEAD`. Run `git -C <repo> worktree add --no-track
+       ../<repo-basename>-spike-<slug> -b spike/<slug> <start point>` (branch or worktree exists
+       → pick a new slug), write the code under `<worktree>/<slug>/` and commit it on
+       `spike/<slug>`; never push, never use the workspace repo.
      - **B)** Skip — append the question to `## Gaps` in `projects/<p>/wiki/open-questions.md` as
        "needs an experiment", per `skills/pavilio-wiki/CONVENTIONS.md` (file or section missing →
        create it); an item already on the same question gets the note instead.
