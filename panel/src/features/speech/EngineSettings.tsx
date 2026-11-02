@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react";
-import { listEngines, listVoices } from "anytts";
+import { listEngines } from "anytts";
 
 import { preferences, type CascadeEntry } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { groupVoices } from "./voiceGroups";
+import { voicesOf } from "./voicesOf";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import {
   getCascadeOrder,
@@ -15,6 +16,7 @@ import {
 } from "./voices";
 import {
   ENGINE_KEY_VARS,
+  isAddressEngine,
   isKeyedEngine,
   isKeyless,
   statusChip,
@@ -61,6 +63,11 @@ const GHOST_STYLE: CSSProperties = {
 const CELL_LABEL_CLASS = "block text-xs mb-1";
 const MUTED: CSSProperties = { color: "var(--text-muted)" };
 
+/** What a row's key cell holds: an API key, or for `openai` the server address. */
+function keyNoun(id: string): "key" | "address" {
+  return isAddressEngine(id) ? "address" : "key";
+}
+
 /** The error a key route answered with, as one line for the row. */
 async function keyRequest(engine: string, init: RequestInit): Promise<string | null> {
   try {
@@ -73,7 +80,7 @@ async function keyRequest(engine: string, init: RequestInit): Promise<string | n
     } catch {
       // Not JSON: the status line below has to do.
     }
-    return message || `Could not save the key (HTTP ${res.status}).`;
+    return message || `Could not save the ${keyNoun(engine)} (HTTP ${res.status}).`;
   } catch {
     return "Could not reach the panel server.";
   }
@@ -203,10 +210,13 @@ interface EngineRowProps {
 function EngineRow(props: EngineRowProps) {
   const { id, label, info, narrow } = props;
   const keyed = isKeyedEngine(id);
+  const address = isAddressEngine(id);
   const skipped = isKeyless(info);
   const chip = info ? statusChip(info.status) : null;
+  // The address engine's "key" is a server address: say so on its skip chip.
+  if (chip && address && info?.status.state === "no-key") chip.text = "no address · skipped";
   const groups = useMemo(
-    () => groupVoices(listVoices(id), typeof navigator === "undefined" ? "" : navigator.language),
+    () => groupVoices(voicesOf(id), typeof navigator === "undefined" ? "" : navigator.language),
     [id],
   );
   const voiceId = `speech-voice-${id}`;
@@ -325,7 +335,16 @@ function EngineRow(props: EngineRowProps) {
           In cascade
         </label>
       </div>
-      {keyed && (
+      {address && (
+        <p data-testid="engine-server-hint" className="text-xs mt-2" style={MUTED}>
+          Local server, started and stopped with the panel when{" "}
+          <code style={{ color: "var(--text-primary)" }}>PANEL_TTS_SERVER_CTL</code> is set; by hand:{" "}
+          <code style={{ color: "var(--text-primary)" }}>omnivoicectl start</code>. Give{" "}
+          <code style={{ color: "var(--text-primary)" }}>PANEL_TTS_SERVER_CTL</code> as an absolute
+          path — <code>~</code> is not expanded in <code>secrets.env</code>.
+        </p>
+      )}
+      {keyed && !address && (
         <p data-testid="engine-overage-hint" className="text-xs mt-2" style={MUTED}>
           Turn off overage billing at {label} (or set a hard spend limit), so a used-up free tier is
           skipped instead of billed.
@@ -345,7 +364,9 @@ interface KeyCellProps {
 
 /**
  * The API key: "set •••• 3f9a" with Change and Remove; a password input with
- * Save; or "from environment" naming the variable that wins. Azure adds its
+ * Save; or "from environment" naming the variable that wins. For the address
+ * engine (`openai`) the same cell holds the server address instead: a plain
+ * URL field, and the saved value shown in full — it is not a secret. Azure adds its
  * Region, sent with the key. When the engines list could not be loaded the
  * key's source is unknown, so the cell offers the input: the server refuses
  * (409) when an environment variable wins, and that shows inline. A failed request leaves the row as it was — the
@@ -357,6 +378,9 @@ function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
   const [region, setRegion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const address = isAddressEngine(id);
+  const noun = keyNoun(id);
+  const fieldLabel = address ? "Server address" : "API key";
   const source = info?.keySource;
   const showInput =
     source === "none" || (source === "file" && editing) || (source === undefined && unavailable);
@@ -375,7 +399,9 @@ function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
 
   const save = async () => {
     setBusy(true);
-    const body: { apiKey: string; region?: string } = { apiKey };
+    const body: { apiKey?: string; baseUrl?: string; region?: string } = address
+      ? { baseUrl: apiKey.trim() }
+      : { apiKey };
     if (id === "azure") body.region = region ?? info?.region ?? "";
     await finish(
       await keyRequest(id, {
@@ -396,11 +422,11 @@ function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
       <div data-testid="engine-key" style={{ minWidth: 0 }}>
         {showInput ? (
           <label htmlFor={keyInputId} className={CELL_LABEL_CLASS} style={MUTED}>
-            API key
+            {fieldLabel}
           </label>
         ) : (
           <span className={CELL_LABEL_CLASS} style={MUTED}>
-            API key
+            {fieldLabel}
           </span>
         )}
         {source === undefined && !unavailable && (
@@ -410,24 +436,24 @@ function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
         )}
         {source === "env" && (
           <>
-            <code className="text-xs px-2 py-1 rounded" style={{ background: "var(--bg-base)", border: "1px solid var(--border-subtle)" }}>
-              from environment
+            <code className="text-xs px-2 py-1 rounded" style={{ background: "var(--bg-base)", border: "1px solid var(--border-subtle)", overflowWrap: "anywhere" }}>
+              {address && info?.baseUrl ? info.baseUrl : "from environment"}
             </code>
             <p className="text-xs mt-1" style={MUTED}>
               <code style={{ color: "var(--text-primary)" }}>{ENGINE_KEY_VARS[id]}</code> is set on the
-              server and wins over a saved key.
+              server and wins over a saved {noun}.
             </p>
           </>
         )}
         {source === "file" && !editing && (
           <div className="flex items-center flex-wrap gap-1.5">
-            <code className="text-xs px-2 py-1 rounded" style={{ background: "var(--bg-base)", border: "1px solid var(--border-subtle)" }}>
-              {info?.keyLast4 ? `set •••• ${info.keyLast4}` : "set"}
+            <code className="text-xs px-2 py-1 rounded" style={{ background: "var(--bg-base)", border: "1px solid var(--border-subtle)", overflowWrap: "anywhere" }}>
+              {address ? (info?.baseUrl ?? "set") : info?.keyLast4 ? `set •••• ${info.keyLast4}` : "set"}
             </code>
-            <button type="button" data-testid={`engine-key-change-${id}`} aria-label={`Change ${label} key`} className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => setEditing(true)} disabled={busy}>
+            <button type="button" data-testid={`engine-key-change-${id}`} aria-label={`Change ${label} ${noun}`} className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => setEditing(true)} disabled={busy}>
               Change
             </button>
-            <button type="button" data-testid={`engine-key-remove-${id}`} aria-label={`Remove ${label} key`} className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => void remove()} disabled={busy}>
+            <button type="button" data-testid={`engine-key-remove-${id}`} aria-label={`Remove ${label} ${noun}`} className={BUTTON_CLASS} style={GHOST_STYLE} onClick={() => void remove()} disabled={busy}>
               Remove
             </button>
           </div>
@@ -442,15 +468,15 @@ function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
           >
             <input
               id={keyInputId}
-              type="password"
-              autoComplete="new-password"
-              placeholder={`Paste ${label} API key`}
+              {...(address
+                ? { type: "text", inputMode: "url" as const, autoComplete: "off", spellCheck: false, placeholder: "http://127.0.0.1:8890" }
+                : { type: "password", autoComplete: "new-password", placeholder: `Paste ${label} API key` })}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               className={CONTROL_CLASS}
               style={{ ...CONTROL_STYLE, width: "auto", flex: "1 1 10rem" }}
             />
-            <button type="submit" data-testid={`engine-key-save-${id}`} aria-label={`Save ${label} key`} className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={busy || apiKey.trim() === ""}>
+            <button type="submit" data-testid={`engine-key-save-${id}`} aria-label={`Save ${label} ${noun}`} className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={busy || apiKey.trim() === ""}>
               Save
             </button>
             {editing && (

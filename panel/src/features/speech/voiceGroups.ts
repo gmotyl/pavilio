@@ -34,7 +34,7 @@ function languageName(code: string): string {
  * Every voice lands in exactly one group, and each group keeps the catalog's
  * own order.
  */
-export function groupVoices(voices: VoiceInfo[], browserLanguage: string): VoiceGroup[] {
+export function groupVoices(voices: readonly VoiceInfo[], browserLanguage: string): VoiceGroup[] {
   const browser = primaryLanguage(browserLanguage);
   const multilingual: VoiceInfo[] = [];
   const byLanguage = new Map<string, VoiceInfo[]>();

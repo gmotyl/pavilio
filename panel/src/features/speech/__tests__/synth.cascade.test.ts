@@ -98,6 +98,7 @@ describe("cascade requests through the speech seam", () => {
       cartesia: CARTESIA_SECOND,
       speechify: voices.catalogDefaultVoice("speechify"),
       azure: voices.catalogDefaultVoice("azure"),
+      openai: voices.catalogDefaultVoice("openai"),
       edge: ANDREW,
     };
     // `toEqual` treats an undefined property as absent: a member whose default

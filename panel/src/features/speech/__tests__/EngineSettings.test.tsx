@@ -8,11 +8,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { listEngines } from "anytts";
+import { listEngines, listVoices } from "anytts";
 
 import AgentSettings from "../../agents/AgentSettings";
 import { EngineSettings } from "../EngineSettings";
 import { getCascadeOrder, getStoredVoices, setCascadeOrder } from "../voices";
+import { OPENAI_CATALOG } from "../openaiVoices";
+import { groupVoices } from "../voiceGroups";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 import { jsonResponse, stubFetch } from "../../../test-utils";
@@ -24,8 +26,26 @@ type EngineInfo = {
   keySource: "env" | "file" | "none";
   keyLast4?: string;
   region?: string;
+  baseUrl?: string;
   status: { state: string; until?: string };
 };
+
+/** The `openai` row as the server lists it while no address is saved. */
+const OPENAI_UNSET: EngineInfo = {
+  id: "openai",
+  label: "OpenAI-compatible (custom server)",
+  keyed: true,
+  keySource: "none",
+  status: { state: "no-key" },
+};
+
+/** A voice select's groups and options, in DOM order. */
+function selectGroups(select: HTMLSelectElement): { label: string; ids: string[] }[] {
+  return Array.from(select.querySelectorAll("optgroup")).map((group) => ({
+    label: group.label,
+    ids: Array.from(group.querySelectorAll("option")).map((option) => option.value),
+  }));
+}
 
 const LABELS = new Map(listEngines().map((engine) => [engine.id, engine.label]));
 
@@ -103,8 +123,10 @@ describe("EngineSettings", () => {
     const section = (await screen.findByRole("heading", { level: 2, name: "Speech" })).closest("section")!;
     const select = within(section).getByRole("combobox", { name: "Default engine" }) as HTMLSelectElement;
     const values = Array.from(select.options).map((option) => option.value);
-    expect(values).toEqual(expect.arrayContaining(["cascade", "edge", "elevenlabs", "cartesia", "speechify", "azure"]));
-    expect(values).toHaveLength(6);
+    expect(values).toEqual(
+      expect.arrayContaining(["cascade", "openai", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
+    );
+    expect(values).toHaveLength(7);
     expect(Array.from(select.options).find((o) => o.value === "cascade")!.textContent).toBe(
       LABELS.get("cascade"),
     );
@@ -468,5 +490,123 @@ describe("EngineSettings", () => {
     const error = await within(row("cartesia")).findByRole("alert");
     expect(error).toHaveTextContent("CARTESIA_API_KEY is set on the server");
     expect(within(row("cartesia")).getByLabelText("API key")).toHaveValue("sk-cartesia");
+  });
+
+  it("the openai row takes a server address", async () => {
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET]);
+
+    const scope = within(row("openai"));
+    const input = scope.getByLabelText("Server address") as HTMLInputElement;
+    // Not a secret: a plain URL field, never a password field.
+    expect(input.type).toBe("text");
+    expect(input).toHaveAttribute("inputmode", "url");
+    expect(input).toHaveAttribute("placeholder", "http://127.0.0.1:8890");
+    expect(scope.queryByLabelText("API key")).toBeNull();
+    expect(scope.getByRole("button", { name: `Save ${LABELS.get("openai")} address` })).toBeInTheDocument();
+    expect(scope.getByTestId("engine-status")).toHaveTextContent("no address · skipped");
+
+    const help = scope.getByTestId("engine-server-hint");
+    expect(help).toHaveTextContent("PANEL_TTS_SERVER_CTL");
+    expect(help).toHaveTextContent("omnivoicectl start");
+    expect(help).toHaveTextContent(/absolute path/i);
+    // A local server bills nothing.
+    expect(scope.queryByTestId("engine-overage-hint")).toBeNull();
+  });
+
+  it("saving the address calls PUT /keys/openai", async () => {
+    const user = userEvent.setup();
+    let saved = false;
+    let attempts = 0;
+    const fetchMock = stubFetch(
+      {
+        "/api/speech/keys/openai": (_url: string, init?: RequestInit) => {
+          if (init!.method === "DELETE") {
+            saved = false;
+            return new Response(null, { status: 204 });
+          }
+          attempts += 1;
+          // The first try is refused the way the route refuses a non-http(s) value.
+          if (attempts === 1) return jsonResponse({ error: "OPENAI_TTS_BASE_URL must be an http(s) URL" }, { status: 400 });
+          saved = true;
+          return new Response(null, { status: 204 });
+        },
+        "/api/speech/engines": () =>
+          jsonResponse([
+            ...mockupEngines(),
+            saved
+              ? { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } }
+              : OPENAI_UNSET,
+          ]),
+      },
+      null,
+    );
+    render(<EngineSettings />);
+    await waitFor(() => expect(within(row("openai")).getByTestId("engine-status")).toHaveTextContent("no address"));
+
+    const save = () =>
+      user.click(within(row("openai")).getByRole("button", { name: `Save ${LABELS.get("openai")} address` }));
+    await user.type(within(row("openai")).getByLabelText("Server address"), "http://127.0.0.1:8890");
+    await save();
+    expect(await within(row("openai")).findByRole("alert")).toHaveTextContent("must be an http(s) URL");
+    expect(within(row("openai")).getByLabelText("Server address")).toHaveValue("http://127.0.0.1:8890");
+
+    await save();
+
+    const puts = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/speech/keys/openai"));
+    expect(puts).toHaveLength(2);
+    expect(puts[1]![1]!.method).toBe("PUT");
+    expect(JSON.parse(String(puts[1]![1]!.body))).toEqual({ baseUrl: "http://127.0.0.1:8890" });
+
+    // Shown in full — it is not a secret — with Change and Remove.
+    await waitFor(() => expect(within(row("openai")).getByText("http://127.0.0.1:8890")).toBeInTheDocument());
+    expect(within(row("openai")).queryByLabelText("Server address")).toBeNull();
+    expect(within(row("openai")).getByRole("button", { name: `Change ${LABELS.get("openai")} address` })).toBeInTheDocument();
+    await user.click(within(row("openai")).getByRole("button", { name: `Remove ${LABELS.get("openai")} address` }));
+
+    await waitFor(() => expect(within(row("openai")).getByLabelText("Server address")).toHaveValue(""));
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/keys/openai") && init?.method === "DELETE")).toBe(true);
+  });
+
+  it("an address from the environment names the variable", async () => {
+    await renderLoaded([
+      ...mockupEngines(),
+      { ...OPENAI_UNSET, keySource: "env", baseUrl: "http://10.0.0.5:8890", status: { state: "ready" } },
+    ]);
+
+    const scope = within(row("openai"));
+    expect(scope.getByText("http://10.0.0.5:8890")).toBeInTheDocument();
+    expect(scope.getByText("OPENAI_TTS_BASE_URL")).toBeInTheDocument();
+    expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
+  });
+
+  it("openai voice selects list the panel catalog", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
+    await renderLoaded([...mockupEngines(), { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } }]);
+
+    const voice = within(row("openai")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
+    const values = Array.from(voice.options).map((option) => option.value);
+    expect(values).toHaveLength(14);
+    expect(new Set(values)).toEqual(new Set(OPENAI_CATALOG.map((v) => v.id)));
+    expect(values).not.toContain("auto");
+    expect(selectGroups(voice)).toEqual(
+      groupVoices([...OPENAI_CATALOG], "pl-PL").map((group) => ({ label: group.label, ids: group.voices.map((v) => v.id) })),
+    );
+    expect(selectGroups(voice).map((group) => group.label)).toEqual(["Polish", "English"]);
+
+    await user.selectOptions(voice, "cand-pl-m2");
+    expect(getStoredVoices().openai).toBe("cand-pl-m2");
+    expect(voice).toHaveValue("cand-pl-m2");
+  });
+
+  it("edge voice selects are unchanged", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET]);
+
+    const voice = within(row("edge")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
+    expect(selectGroups(voice)).toEqual(
+      groupVoices(listVoices("edge"), "pl-PL").map((group) => ({ label: group.label, ids: group.voices.map((v) => v.id) })),
+    );
+    expect(voice.options).toHaveLength(listVoices("edge").length);
   });
 });

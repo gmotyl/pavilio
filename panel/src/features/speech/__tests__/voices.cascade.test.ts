@@ -185,7 +185,7 @@ describe("per-engine voices and cascade preferences", () => {
     setProjectEngineVoice("p", "elevenlabs", SARAH);
     const voices = cascadeVoicesOf(voiceForProject("p"));
     expect(voices).toMatchObject({ elevenlabs: SARAH, edge: ANDREW });
-    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "speechify"]);
+    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "openai", "speechify"]);
     expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });
     expect(voiceForDocKey("doc:p/notes.md")).toBe(voiceForProject("p"));
   });

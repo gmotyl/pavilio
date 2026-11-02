@@ -18,6 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
+import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
 export const CASCADE = "cascade";
@@ -75,6 +76,11 @@ export const SPEECH_ENGINES: TtsConfig["engines"] = {
   cartesia: KEYED_RELAY,
   speechify: KEYED_RELAY,
   azure: KEYED_RELAY,
+  // The local OpenAI-compatible server, reached through the relay like the
+  // keyed engines. Always configured here: the browser cannot tell whether the
+  // server has the address, and the server drops `openai` when it has not.
+  // anytts types `catalog` as mutable, so it gets its own copy.
+  openai: { ...KEYED_RELAY, catalog: [...OPENAI_CATALOG], voices: OPENAI_VOICE_MAP },
 };
 
 /** The configured engine ids. */
