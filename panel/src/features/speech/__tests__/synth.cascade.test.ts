@@ -198,7 +198,7 @@ describe("cascade requests through the speech seam", () => {
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });
 
     expect(lastRequest()).toMatchObject({ engine: "elevenlabs", text: "hello", lang: "en", voice: GEORGE });
-    expect(relayed).toEqual([{ url: "/api/tts", body: { engine: "elevenlabs", text: "hello", voice: GEORGE } }]);
+    expect(relayed).toEqual([{ url: "/api/tts", body: { engine: "elevenlabs", text: "hello", voice: GEORGE, lang: "en" } }]);
     for (const id of ["elevenlabs", "cartesia", "speechify", "azure", "cascade"]) {
       expect(lastConfig().engines[id]).toMatchObject({ relayUrl: "/api/tts" });
       expect(lastConfig().engines[id]).not.toHaveProperty("mode");
