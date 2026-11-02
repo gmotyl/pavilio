@@ -419,12 +419,20 @@ describe("/api/speech openai address", () => {
       { baseUrl: "ftp://127.0.0.1:8890" },
       { baseUrl: "" },
       { baseUrl: "http://127.0.0.1:8890\nELEVENLABS_API_KEY=x" },
+      // `new URL` drops the newline and accepts this, so only the route's own
+      // newline check keeps a second line out of the secrets file.
+      { baseUrl: "http://h/\nX=y" },
+      { baseUrl: "http://h/\r\nX=y" },
       { apiKey: ADDRESS },
       {},
     ]) {
       const res = await put(app, body);
       expect(res.status).toBe(400);
+      // The address error, not the generic keyed-engine one.
+      expect(res.body).toEqual({ error: expect.stringMatching(/^baseUrl must be an http\(s\) URL/) });
       expect(res.text).not.toContain("localhost8890");
+      expect(secrets()).toBe("");
+      expect(configs).toHaveLength(1);
     }
     expect(secrets()).toBe("");
     expect(configs).toHaveLength(1);
