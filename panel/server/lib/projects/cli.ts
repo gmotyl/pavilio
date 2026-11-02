@@ -28,8 +28,8 @@ const USAGE = `usage: scripts/project <command> [args]
   spike-repo <name>                         {path, repo: created | existing, registered}
                                             creates or reuses the git repo
                                             <research.spikesRoot>/<name> and lists it in
-                                            projects/<name>/repos.json; <name> must be a
-                                            kind: research project
+                                            projects/<name>/repos.json; any existing
+                                            project, kind: knowledge is refused
                                             | exit 2 {ask, reason: occupied, path}
 
 Exit: 0 ok, 1 error {error}, 2 ask the user.

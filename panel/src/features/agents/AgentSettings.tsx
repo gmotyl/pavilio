@@ -128,9 +128,10 @@ function AlertsSettings() {
 }
 
 /**
- * The spikes root — where `scripts/project spike-repo` creates research projects'
- * spikes repos. Edited as text and committed on blur, trimmed; a blank field
- * stores the default, since a blank root names nothing. `~` is kept as typed.
+ * The spikes root — where `scripts/project spike-repo` creates each project's
+ * spikes repo (research or ordinary). Edited as text and committed on blur,
+ * trimmed; a blank field stores the default, since a blank root names nothing.
+ * `~` is kept as typed.
  */
 function ResearchSettings() {
   const [root, setRoot] = usePreference(preferences.researchSpikesRoot);
@@ -181,7 +182,7 @@ function ResearchSettings() {
         />
       </div>
       <p data-testid="research-spikes-root-help" className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-        Each research project&apos;s spikes repo is created here as <code>&lt;root&gt;/&lt;project&gt;</code>. A blank
+        Each project&apos;s spikes repo (research or ordinary) is created here as <code>&lt;root&gt;/&lt;project&gt;</code>. A blank
         field restores the default.
       </p>
     </div>
