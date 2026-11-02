@@ -20,7 +20,7 @@ writes source or knowledge pages itself. When a current project is set, step 0 o
 
 `-yolo` skips the source pick in step 4: the agent picks up to 10 sources per round itself and
 reports which ones it took; the user's seed links are always fetched on top and never count
-toward the 10. It does not skip step 0's target question nor the interview.
+toward the 10. It does not skip step 0's target question or the interview.
 
 Every `scripts/wiki` and `scripts/project` command runs from the workspace root and prints one
 JSON object; exit 0 ok, 1 error, 2 ask the user.
@@ -35,8 +35,9 @@ with their original URL.
 ## Steps
 
 0. **Target.** Current project = the one set earlier in the conversation (by
-   `/pavilio-session-start`, `/pavilio-wiki` or another project-scoped skill), else `<p>` of a
-   `pwd` inside `projects/<p>/`. Check its `kind` with `scripts/wiki project --name <p>`.
+   `/pavilio-session-start`, `/pavilio-wiki` or another project-scoped skill), else the project
+   of `pwd` (`scripts/wiki project --cwd <dir>`; exit 2 → none). `kind` from `scripts/wiki
+   project --name <p>`; `topic` = the frontmatter `topic` of its `PROJECT.md` (not returned).
    - None, `knowledge`, or a research project whose `topic` matches → ask nothing; step 1 as
      written (a matching one continues as a new round). `knowledge` is never a target.
    - An ordinary project, or a research project with another topic → ask per [[pavilio-ask]]
@@ -48,23 +49,24 @@ with their original URL.
 
      A on an ordinary project → **contribute mode**. A on a research project → its next round
      in today's research flow (step 1 keeps it, skipping topic matching). B → step 1 as written.
+
    **Contribute mode** (ordinary `<p>`): no project is scaffolded; `<p>`'s `PROJECT.md` is never
-   written nor committed. Steps 3–6 run unchanged against `<p>` (`/pavilio-wiki <p> ingest …`,
+   written or committed. Steps 3–6 run unchanged against `<p>` (`/pavilio-wiki <p> ingest …`,
    `/pavilio-wiki <p>: "…"`; a missing `wiki/` is created by that ingest); question pages and
    `## Gaps` are the round's durable record. Steps 1, 2, 7 and 8 note their contribute variant.
 
 1. **Resolve the project.** Contribute mode: the target is `<p>`; show the `## Gaps` of
-   `projects/<p>/wiki/open-questions.md` as seeds for this round's questions, then step 2.
-   Otherwise, for each `projects/<p>/` with a `PROJECT.md`,
-   `scripts/wiki project --name <p>` → `kind`; keep the `research` ones and compare their
-   frontmatter `topic` with the requested topic.
+   `projects/<p>/wiki/open-questions.md` as seeds for this round's questions (file missing or no
+   `## Gaps` → nothing to show), then step 2. A research project fixed by step 0 → continue it as
+   a new round (as one match below), without topic matching. Otherwise, for each `projects/<p>/`
+   with a `PROJECT.md`, `scripts/wiki project --name <p>` → `kind`; keep the `research` ones and
+   compare their frontmatter `topic` with the requested topic.
    - One match → continue it as a new round: show its `## Research questions` and `## Scope`,
      and its `## Gaps` from `wiki/open-questions.md` — the previous round's gaps seed this one.
    - Several plausible matches → ask which one, lettered (step 2's format), and stop.
    - None → pick a slug (`[a-z0-9][a-z0-9._-]*`, short, from the topic) and run
      `scripts/project new <slug> --kind research --topic "<topic>"`. Exit 2 `exists` → that slug
-     is taken: pick another; `archived` → ask. The scaffold writes
-     `PROJECT.md` and `wiki/` (with `wiki/raw/`).
+     is taken: pick another; `archived` → ask. The scaffold writes `PROJECT.md` and `wiki/`.
 2. **Interview** — one question per message, then stop and wait. Format every question per
    [[pavilio-ask]]: discrete choices lettered A)–C) plus D) Other, one markdown list item each
    after a blank line; a bare letter is that option; questions follow the user's language. Settle, in
@@ -90,33 +92,40 @@ with their original URL.
 6. **Answer** — each research question as a query: `/pavilio-wiki <p>: "<question>"`. It leaves
    the question page, cites every page as a panel link (`scripts/wiki panel-link <path>`) and
    records what the wiki cannot answer under `## Gaps`. Show the answers together.
-7. **Spike** — only when a question needs an experiment. `scripts/project spike-repo <p>` →
-   `path` (created and registered in `repos.json` on first use; exit 2 → ask). Write the code in
-   `<path>/<spike-slug>/` and commit it in that repo, never in the workspace. Write the findings
-   with [[pavilio-memo-explain]] to `projects/<p>/memo/`, then give `<spike-slug>/` a one-line
-   `README.md` linking the memo's `/project/<p>/memo?file=…` link that pavilio-memo-explain
-   returns — never a `FINDINGS.md`, never a `panel-link` one. Spike memos are wiki records, so
-   the next ingest picks them up — this round's answers do not include them; note them in step
-   8's gaps / next-round line.
-   Contribute mode (ordinary `<p>`) — ask per spike, lettered (letters fixed), then stop:
-   - **A)** Spike branch in a code repo *(recommended)* — repos from `projects/<p>/repos.json`
-     minus the spikes repo; several → the user picks one; none → do not offer A. Run
-     `git -C <repo> worktree add ../<repo-basename>-spike-<slug> -b spike/<slug> <default branch>`,
-     write the code under `<worktree>/<spike-slug>/` and commit it on `spike/<slug>`; never push,
-     never use the workspace repo.
-   - **B)** Skip — record the question under `## Gaps` as "needs an experiment".
-   - **C)** New spike folder — `scripts/project spike-repo <p>`, as in a research project.
+7. **Spike** — only when a question needs an experiment. One `<slug>` per spike (short, from
+   the question); the spikes repo is the `<p>-spikes` entry of `projects/<p>/repos.json`.
+   - **Research project:** `scripts/project spike-repo <p>` → `path` (created and registered in
+     `repos.json` on first use; exit 2 → ask). Write the code in `<path>/<slug>/` and commit it
+     in that repo, never in the workspace.
+   - **Contribute mode** (ordinary `<p>`): ask per spike (letters fixed), then stop:
 
-   Memo + one-line `README.md` as above for A and C (A: the README is committed on the branch).
+     - **A)** Spike branch in a code repo *(recommended)* — repos from `projects/<p>/repos.json`
+       minus the `<p>-spikes` entry; several → the user picks one; none → do not offer A, and C
+       is recommended. Default branch = `git -C <repo> symbolic-ref --short
+       refs/remotes/origin/HEAD` minus `origin/`, else the current branch. Run `git -C <repo>
+       worktree add ../<repo-basename>-spike-<slug> -b spike/<slug> <default branch>` (branch or
+       worktree exists → pick a new slug), write the code under `<worktree>/<slug>/` and commit it
+       on `spike/<slug>`; never push, never use the workspace repo.
+     - **B)** Skip — append the question to `## Gaps` in `projects/<p>/wiki/open-questions.md` as
+       "needs an experiment", per `skills/pavilio-wiki/CONVENTIONS.md`; an item already on the
+       same question gets the note instead of a second item.
+     - **C)** New spike folder — `scripts/project spike-repo <p>`, as in a research project.
+     - **D)** Other, tell me how
+
+   Every spike that ran: write the findings with [[pavilio-memo-explain]] to
+   `projects/<p>/memo/`, then give `<slug>/` a one-line `README.md` linking the memo's
+   `/project/<p>/memo?file=…` link that pavilio-memo-explain returns (A: committed on the
+   branch) — never a `FINDINGS.md`, never a `panel-link` one. Spike memos are wiki records, so
+   the next ingest picks them up, not this round's answers; note them in step 8's next-round line.
 8. **Commit + next round** — commit `projects/<p>/PROJECT.md` (plus `repos.json` and the spike
    memos after a spike) as `<p>: research round <topic>` (the wiki commits are pavilio-wiki's).
    On a new project's first round commit the whole `projects/<p>/` instead (the scaffold's
    `STATUS.md` and `progress/` with it), never `.projects.local.md` — the registry row is local
    and gitignored. End with the gaps as the next round's search (plus any spike memo awaiting
    ingest), and the one-line hint `/pavilio-wiki-research <topic>` to run it.
-   Contribute mode: commit only the spike memos this round wrote, as `<p>: research round
-   <topic>` (plus `repos.json` after C); never `PROJECT.md`. The next-round hint is the same —
-   run from `<p>` it hits step 0 again.
+   Contribute mode: commit the spike memos this round wrote, `projects/<p>/wiki/open-questions.md`
+   when B ran and `repos.json` when C ran, as `<p>: research round <topic>`; never `PROJECT.md`;
+   nothing staged → no commit. Same next-round hint — run from `<p>` it hits step 0 again.
 
 Report: target project (new, continued or contributed to), questions settled, sources fetched /
 dropped (with reasons), pages written, questions answered, gaps left (incl. "needs an
