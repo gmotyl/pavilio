@@ -21,6 +21,7 @@ import {
   setStoredEngine,
   voiceFor,
 } from "../voices";
+import { OPENAI_CATALOG } from "../openaiVoices";
 import { stubFetch } from "../../../test-utils";
 
 type EngineInfo = {
@@ -35,7 +36,7 @@ const LABELS = new Map(listEngines().map((engine) => [engine.id, engine.label]))
 
 /** Every member keyed and ready, except the ids in `keyless`. */
 function engineList(keyless: readonly string[] = []): EngineInfo[] {
-  return ["elevenlabs", "cartesia", "speechify", "azure", "edge"].map((id) => {
+  return ["elevenlabs", "cartesia", "speechify", "azure", "edge", "openai"].map((id) => {
     const keyed = id !== "edge";
     const none = keyless.includes(id);
     return {
@@ -166,6 +167,38 @@ describe("ProjectVoiceSelect under the cascade", () => {
       expect(rowSelect(id)).toBeEnabled();
       expect(within(row(id)).queryByTestId("project-voice-skipped")).toBeNull();
     }
+  });
+
+  it("the openai member lists the OmniVoice catalog", async () => {
+    setCascadeOrder([
+      { id: "openai", on: true },
+      { id: "edge", on: true },
+    ]);
+    await renderCascade();
+
+    const select = rowSelect("openai");
+    expect(select).toBeEnabled();
+    const options = within(select).getAllByRole("option") as HTMLOptionElement[];
+    expect(options[0]!.value).toBe("");
+    // The panel's catalog, not anytts's (empty) list for the engine, and no `auto`.
+    const ids = options.slice(1).map((o) => o.value);
+    expect(ids.sort()).toEqual(OPENAI_CATALOG.map((v) => v.id).sort());
+    expect(ids).toHaveLength(14);
+    expect(ids).not.toContain("auto");
+  });
+
+  it("an openai member with no address is skipped for want of one", async () => {
+    setCascadeOrder([
+      { id: "openai", on: true },
+      { id: "edge", on: true },
+    ]);
+    await renderCascade(["openai"]);
+
+    await waitFor(() => expect(row("openai")).toHaveAttribute("data-skipped", "true"));
+    expect(rowSelect("openai")).toBeDisabled();
+    expect(within(row("openai")).getByTestId("project-voice-skipped")).toHaveTextContent(
+      "skipped — no server address",
+    );
   });
 
   it("a failed status fetch greys no member", async () => {
