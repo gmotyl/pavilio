@@ -1063,9 +1063,9 @@ export const preferences = {
     portable: true,
   }),
   /**
-   * The directory under which `scripts/project spike-repo` creates each research
-   * project's spikes repo. Kept as written (`~` unexpanded); a blank value reads
-   * as the default. Portable: the CLI reads it off `.pavilio/preferences.json`.
+   * The directory under which `scripts/project spike-repo` creates each project's
+   * spikes repo (research or ordinary). Kept as written (`~` unexpanded); a
+   * blank value reads as the default. Portable: the CLI reads it off `.pavilio/preferences.json`.
    */
   researchSpikesRoot: definePreference({
     key: "research.spikesRoot", // was: nothing — new with spikes repos
