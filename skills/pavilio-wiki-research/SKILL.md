@@ -36,9 +36,10 @@ with their original URL.
 
 0. **Target.** Current project = the one set earlier in the conversation (by
    `/pavilio-session-start`, `/pavilio-wiki` or another project-scoped skill), else the project
-   of `pwd`: `scripts/wiki project --cwd "$PWD"` counts only with `"via": "cwd"` — `"cell"` (the
-   panel cell's project) or exit 2 → none. `kind` from that output or `scripts/wiki project
-   --name <p>`; `topic` = the frontmatter `topic` of its `PROJECT.md` (not returned).
+   of `pwd` read once at the round's start, before any `cd`: `scripts/wiki project --cwd <that
+   dir>` counts only with `"via": "cwd"` — `"cell"` (the panel cell's project) or exit 2 → none.
+   `kind` from that output or `scripts/wiki project --name <p>`; `topic` = the frontmatter
+   `topic` of its `PROJECT.md` (not returned).
    - None or `knowledge` → ask nothing; step 1 as written. `knowledge` is never a target. A
      research project whose `topic` matches → ask nothing; continue `<p>` as a new round.
    - An ordinary project, or a research project with another topic → ask per [[pavilio-ask]]
