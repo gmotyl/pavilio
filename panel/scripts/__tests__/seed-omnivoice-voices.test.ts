@@ -177,18 +177,31 @@ describe("seedVoices", () => {
   it("seeding stops at its overall budget and defers the voices it did not reach", async () => {
     for (const name of ["a-voice", "b-voice", "c-voice"]) addWorkspaceVoice(name);
     const posted: string[] = [];
-    // Each clone takes 150 ms unless its signal aborts first.
-    const fetchImpl = vi.fn((url: string, init: RequestInit = {}) => {
-      if ((init.method ?? "GET") === "GET") return Promise.resolve(Response.json({ voices: [{ id: "auto" }] }));
+    // A simulated clock: no real timer runs, so scheduling load cannot reorder anything.
+    let clock = 1_000;
+    const timeouts = new WeakMap<AbortSignal, { ms: number; abort: () => void }>();
+    const timeoutSignal = vi.fn((ms: number) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort(new DOMException("timed out", "TimeoutError"));
+      timeouts.set(controller.signal, { ms, abort });
+      return controller.signal;
+    });
+    // Each clone takes 150 ms of simulated time, unless its timeout is shorter: then the clock
+    // runs to that timeout and the signal aborts, exactly as AbortSignal.timeout would.
+    const CLONE_MS = 150;
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
+      if ((init.method ?? "GET") === "GET") return Response.json({ voices: [{ id: "auto" }] });
       const name = String((init.body as FormData).get("name"));
       posted.push(name);
-      return new Promise<Response>((resolve, reject) => {
-        const done = setTimeout(() => resolve(Response.json({ id: name, source: "custom" })), 150);
-        init.signal?.addEventListener("abort", () => {
-          clearTimeout(done);
-          reject(init.signal!.reason);
-        });
-      });
+      const timeout = init.signal ? timeouts.get(init.signal) : undefined;
+      if (!timeout) throw new Error("clone signal did not come from the injected timeoutSignal");
+      if (timeout.ms > CLONE_MS) {
+        clock += CLONE_MS;
+        return Response.json({ id: name, source: "custom" });
+      }
+      clock += timeout.ms;
+      timeout.abort();
+      throw init.signal!.reason;
     });
     const lines: string[] = [];
 
@@ -198,10 +211,15 @@ describe("seedVoices", () => {
       fetch: fetchImpl,
       log: (l: string) => lines.push(l),
       budgetMs: 250,
+      now: () => clock,
+      timeoutSignal,
     });
 
-    // a-voice lands; b-voice is cut off by the budget; c-voice is never started.
+    // a-voice lands at 150 ms; b-voice gets the 100 ms left and is cut off by the budget;
+    // c-voice is never started.
     expect(posted).toEqual(["a-voice", "b-voice"]);
+    // The listing gets the whole budget; each clone gets what is left of it.
+    expect(timeoutSignal.mock.calls.map(([ms]) => ms)).toEqual([250, 250, 100]);
     expect(result).toEqual({ seeded: 1, present: 0, failed: 0, deferred: 2 });
     expect(lines.at(-1)).toMatch(/^voices: seeded 1, already there 0, deferred 2 — run pnpm install:speech again/);
     expect(lines.some((l) => l.includes("failed"))).toBe(false);

@@ -119,6 +119,8 @@ function voiceForm(workspaceRoot, name) {
  * a server or voice problem; prints one line per problem and a final
  * `voices: seeded N, already there M` (plus failed / deferred counts when there are any).
  * Returns the counts, or `{ skipped }` with the reason when it could not run at all.
+ * `now` and `timeoutSignal` are the clock and the timeout-signal source (tests inject both, so the
+ * budget can be stepped through without real timers).
  */
 export async function seedVoices({
   workspaceRoot,
@@ -126,8 +128,10 @@ export async function seedVoices({
   fetch: fetchImpl = fetch,
   log = console.log,
   budgetMs = SEED_BUDGET_MS,
+  now = Date.now,
+  timeoutSignal = (ms) => AbortSignal.timeout(ms),
 }) {
-  const deadline = Date.now() + budgetMs;
+  const deadline = now() + budgetMs;
   if (!baseUrl) {
     const reason = `${ADDRESS_VAR} is not set (environment or ~/.panel/secrets.env)`;
     log(`voices: skipped — ${reason}`);
@@ -138,7 +142,7 @@ export async function seedVoices({
   let onServer;
   try {
     const res = await fetchImpl(`${address}/v1/voices`, {
-      signal: AbortSignal.timeout(Math.max(1, Math.min(LIST_TIMEOUT_MS, deadline - Date.now()))),
+      signal: timeoutSignal(Math.max(1, Math.min(LIST_TIMEOUT_MS, deadline - now()))),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
@@ -158,7 +162,7 @@ export async function seedVoices({
       present += 1;
       continue;
     }
-    const remaining = deadline - Date.now();
+    const remaining = deadline - now();
     if (remaining <= 0) {
       deferred += 1;
       continue;
@@ -169,7 +173,7 @@ export async function seedVoices({
       const res = await fetchImpl(`${address}/v1/voices`, {
         method: "POST",
         body: voiceForm(workspaceRoot, name),
-        signal: AbortSignal.timeout(Math.min(CLONE_TIMEOUT_MS, remaining)),
+        signal: timeoutSignal(Math.min(CLONE_TIMEOUT_MS, remaining)),
       });
       if (!res.ok) throw new Error(`${res.status} ${await detailOf(res)}`.trim());
       seeded += 1;
