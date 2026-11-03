@@ -6,6 +6,7 @@ import { usePreference } from "../../preferences/usePreference";
 import { groupVoices } from "./voiceGroups";
 import { useOpenaiVoices } from "./useOpenaiVoices";
 import { voicesOf } from "./voicesOf";
+import { VoicesSection } from "./VoicesSection";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import {
   getCascadeOrder,
@@ -359,6 +360,8 @@ function EngineRow(props: EngineRowProps) {
           path — <code>~</code> is not expanded in <code>secrets.env</code>.
         </p>
       )}
+      {/* The OmniVoice server's voices, once there is a server to ask. */}
+      {address && info !== undefined && info.keySource !== "none" && <VoicesSection address={info.baseUrl ?? ""} />}
       {keyed && !address && (
         <p data-testid="engine-overage-hint" className="text-xs mt-2" style={MUTED}>
           Turn off overage billing at {label} (or set a hard spend limit), so a used-up free tier is
