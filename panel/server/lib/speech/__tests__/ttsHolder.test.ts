@@ -1,9 +1,39 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTts } from "anytts/server";
-import type { TtsConfig } from "anytts";
+import { resolveVoice, type TtsConfig } from "anytts";
 import { createTtsHolder } from "../ttsHolder";
 import type { KeyVar, KeySource } from "../secrets";
-import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "../../../../src/features/speech/openaiVoices";
+import type { OmniVoiceInfo } from "../../../../src/features/speech/openaiVoices";
+
+/** A live catalog as the holder reads it: just `current()`. */
+function liveCatalog(voices: OmniVoiceInfo[]) {
+  return { current: () => voices };
+}
+
+const PL_FEMALE: OmniVoiceInfo = {
+  id: "pl-female",
+  locale: "pl-PL",
+  gender: "female",
+  label: "Polish, young",
+  multilingual: false,
+  source: "bundled",
+};
+const EN_MALE: OmniVoiceInfo = {
+  id: "en-male",
+  locale: "en-US",
+  gender: "male",
+  label: "American, low",
+  multilingual: false,
+  source: "bundled",
+};
+const MY_VOICE: OmniVoiceInfo = {
+  id: "my-voice",
+  locale: "pl-PL",
+  gender: "male",
+  label: "My voice (own recording)",
+  multilingual: true,
+  source: "custom",
+};
 
 /** A `resolveKey` over a fixed table, standing in for env + secrets file. */
 function keys(table: Partial<Record<KeyVar, string>>) {
@@ -88,28 +118,53 @@ describe("server Tts holder", () => {
       warn.mockRestore();
     }
   });
-  it("configures openai when OPENAI_TTS_BASE_URL is set", () => {
+  it("holder configures openai with the live catalog and resolved map", () => {
     const configs: TtsConfig[] = [];
+    let voices = [EN_MALE, PL_FEMALE];
     const holder = createTtsHolder({
       createTts: (config) => {
         configs.push(config);
         return createTts(config);
       },
       resolveKey: keys({ OPENAI_TTS_BASE_URL: "http://127.0.0.1:8890" }),
+      catalog: { current: () => voices },
     });
 
-    const { engines } = configs[0]!;
-    expect(engines.openai).toEqual({
+    // No `my-voice` on this server: every default falls back against the live catalog.
+    expect(configs[0]!.engines.openai).toEqual({
       baseUrl: "http://127.0.0.1:8890",
-      catalog: OPENAI_CATALOG,
-      voices: OPENAI_VOICE_MAP,
+      catalog: [EN_MALE, PL_FEMALE],
+      voices: { pl: "pl-female", en: "en-male", default: "en-male" },
       languageField: "language",
     });
     // A local server needs no key: it leads the cascade, ready.
-    expect(engines.cascade).toEqual({
+    expect(configs[0]!.engines.cascade).toEqual({
       order: ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
     });
     expect(holder.engineStatus("openai")).toEqual({ state: "ready" });
+
+    // A rebuild reads the catalog as it is now: `my-voice` arrived, so it speaks every language.
+    voices = [EN_MALE, PL_FEMALE, MY_VOICE];
+    holder.rebuild();
+    expect(configs[1]!.engines.openai).toMatchObject({
+      catalog: [EN_MALE, PL_FEMALE, MY_VOICE],
+      voices: { pl: "my-voice", en: "my-voice", default: "my-voice" },
+    });
+    expect(resolveVoice(holder.current(), { engine: "openai", lang: "pl" }).voice).toBe("my-voice");
+
+    // An empty catalog (server down at boot): anytts needs at least one voice, so openai stays
+    // out of the instance until a refresh brings voices and the holder is rebuilt.
+    const empty = createTtsHolder({
+      createTts: (config) => {
+        configs.push(config);
+        return createTts(config);
+      },
+      resolveKey: keys({ OPENAI_TTS_BASE_URL: "http://127.0.0.1:8890" }),
+      catalog: liveCatalog([]),
+    });
+    expect(Object.hasOwn(configs[2]!.engines, "openai")).toBe(false);
+    expect(configs[2]!.engines.cascade).toEqual({ order: ["elevenlabs", "cartesia", "speechify", "azure", "edge"] });
+    expect(() => empty.engineStatus("openai")).toThrow(RangeError);
   });
 
   it("leaves openai out when the address is unset", () => {

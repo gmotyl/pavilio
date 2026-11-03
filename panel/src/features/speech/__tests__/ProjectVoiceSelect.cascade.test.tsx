@@ -21,7 +21,6 @@ import {
   setStoredEngine,
   voiceFor,
 } from "../voices";
-import { OPENAI_CATALOG } from "../openaiVoices";
 import { stubFetch } from "../../../test-utils";
 
 type EngineInfo = {
@@ -169,7 +168,7 @@ describe("ProjectVoiceSelect under the cascade", () => {
     }
   });
 
-  it("the openai member lists the OmniVoice catalog", async () => {
+  it("the openai member lists no voices until the browser reads the server's catalog", async () => {
     setCascadeOrder([
       { id: "openai", on: true },
       { id: "edge", on: true },
@@ -178,13 +177,9 @@ describe("ProjectVoiceSelect under the cascade", () => {
 
     const select = rowSelect("openai");
     expect(select).toBeEnabled();
+    // Only the default: the catalog lives on the OmniVoice server, and the server picks the voice.
     const options = within(select).getAllByRole("option") as HTMLOptionElement[];
-    expect(options[0]!.value).toBe("");
-    // The panel's catalog, not anytts's (empty) list for the engine, and no `auto`.
-    const ids = options.slice(1).map((o) => o.value);
-    expect(ids.sort()).toEqual(OPENAI_CATALOG.map((v) => v.id).sort());
-    expect(ids).toHaveLength(14);
-    expect(ids).not.toContain("auto");
+    expect(options.map((o) => o.value)).toEqual([""]);
   });
 
   it("an openai member with no address is skipped for want of one", async () => {

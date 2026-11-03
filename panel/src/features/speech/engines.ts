@@ -10,7 +10,7 @@
  * A module of its own, below the seam, so the many suites that mock
  * `synth.ts` wholesale still get the real list.
  */
-import type { TtsConfig } from "anytts";
+import type { TtsConfig, VoiceInfo } from "anytts";
 import {
   DEFAULT_CASCADE_ORDER,
   DEFAULT_SPEECH_VOICE,
@@ -18,7 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
-import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "./openaiVoices";
+import { OPENAI_VOICE_MAP } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
 export const CASCADE = "cascade";
@@ -57,6 +57,23 @@ const KEYED_RELAY = {
   stallMs: SPEECH_STREAM_STALL_TIMEOUT_MS,
 };
 
+/**
+ * The browser's `openai` catalog. The real one lives on the OmniVoice server and only the panel
+ * server holds it; anytts still needs a non-empty catalog that holds every voice the map names, so
+ * the browser gets one entry per default. A cascade request names no openai voice (none can be
+ * picked, see `voicesOf`), so the panel server speaks with its own default, resolved against the
+ * live catalog; a request to `openai` alone names `my-voice`, which the server must have.
+ */
+function openaiRelayCatalog(): VoiceInfo[] {
+  return [...new Set(Object.values(OPENAI_VOICE_MAP))].map((id) => ({
+    id,
+    label: id,
+    locale: "und",
+    gender: "male",
+    multilingual: true,
+  }));
+}
+
 export const SPEECH_ENGINES: TtsConfig["engines"] = {
   edge: {
     voices: { default: DEFAULT_SPEECH_VOICE },
@@ -79,8 +96,7 @@ export const SPEECH_ENGINES: TtsConfig["engines"] = {
   // The local OpenAI-compatible server, reached through the relay like the
   // keyed engines. Always configured here: the browser cannot tell whether the
   // server has the address, and the server drops `openai` when it has not.
-  // anytts types `catalog` as mutable, so it gets its own copy.
-  openai: { ...KEYED_RELAY, catalog: [...OPENAI_CATALOG], voices: OPENAI_VOICE_MAP },
+  openai: { ...KEYED_RELAY, catalog: openaiRelayCatalog(), voices: OPENAI_VOICE_MAP },
 };
 
 /** The configured engine ids. */

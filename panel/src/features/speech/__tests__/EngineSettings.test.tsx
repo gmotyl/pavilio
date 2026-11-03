@@ -13,7 +13,6 @@ import { listEngines, listVoices } from "anytts";
 import AgentSettings from "../../agents/AgentSettings";
 import { EngineSettings } from "../EngineSettings";
 import { getCascadeOrder, getStoredVoices, setCascadeOrder } from "../voices";
-import { OPENAI_CATALOG } from "../openaiVoices";
 import { groupVoices } from "../voiceGroups";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
@@ -579,24 +578,13 @@ describe("EngineSettings", () => {
     expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
   });
 
-  it("openai voice selects list the panel catalog", async () => {
-    const user = userEvent.setup();
+  it("openai voice select lists no voices until the browser reads the server's catalog", async () => {
     vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
     await renderLoaded([...mockupEngines(), { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } }]);
 
+    // The catalog lives on the OmniVoice server now; there is no voice list in code.
     const voice = within(row("openai")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
-    const values = Array.from(voice.options).map((option) => option.value);
-    expect(values).toHaveLength(14);
-    expect(new Set(values)).toEqual(new Set(OPENAI_CATALOG.map((v) => v.id)));
-    expect(values).not.toContain("auto");
-    expect(selectGroups(voice)).toEqual(
-      groupVoices([...OPENAI_CATALOG], "pl-PL").map((group) => ({ label: group.label, ids: group.voices.map((v) => v.id) })),
-    );
-    expect(selectGroups(voice).map((group) => group.label)).toEqual(["Polish", "English"]);
-
-    await user.selectOptions(voice, "cand-pl-m2");
-    expect(getStoredVoices().openai).toBe("cand-pl-m2");
-    expect(voice).toHaveValue("cand-pl-m2");
+    expect(Array.from(voice.options).map((option) => option.value)).toEqual([]);
   });
 
   it("edge voice selects are unchanged", async () => {

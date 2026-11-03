@@ -81,7 +81,18 @@ interface Loaded {
   app: Express;
   /** Every config the holder built an instance from, oldest first. */
   configs: TtsConfig[];
+  /** The live OmniVoice catalog's `refresh`. */
+  refresh: ReturnType<typeof vi.fn>;
 }
+
+/** One OmniVoice voice, so the holder can configure `openai` once an address is set. */
+const OMNIVOICE_VOICE = {
+  id: "pl-female",
+  locale: "pl-PL",
+  gender: "female" as const,
+  label: "Polish, young",
+  multilingual: false,
+};
 
 /** Mirrors the production mount: global parser and both auth gates ahead of the router. */
 function loadApp(
@@ -93,13 +104,15 @@ function loadApp(
       configs.push(config);
       return fakeTts(config, options.windows ?? {});
     },
+    catalog: { current: () => [OMNIVOICE_VOICE] },
   });
+  const refresh = vi.fn(async () => ({ changed: false }));
   const app = express();
   app.use(express.json());
   app.use(mobileAuthMiddleware);
   app.use(authMiddleware);
-  app.use("/api/speech", createSpeechEnginesRouter({ holder, writeKeys: options.writeKeys }));
-  return { app, configs };
+  app.use("/api/speech", createSpeechEnginesRouter({ holder, writeKeys: options.writeKeys, catalog: { refresh } }));
+  return { app, configs, refresh };
 }
 
 type Engine = {
@@ -297,13 +310,14 @@ describe("/api/speech engines and keys", () => {
     expect(secrets()).toBe("");
     expect(configs).toHaveLength(1);
 
-    // The production file mounts the router after the global auth gate, with the server's one holder.
+    // The production file mounts the router after the global auth gate, with the server's one holder
+    // and its one OmniVoice catalog.
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(resolve(here, "../../panel-server.ts"), "utf8");
     const gate = /app\s*\.\s*use\s*\(\s*authMiddleware\s*\)/.exec(source);
     const mobileGate = /app\s*\.\s*use\s*\(\s*mobileAuthMiddleware\s*\)/.exec(source);
     const mount =
-      /app\s*\.\s*use\s*\(\s*["']\/api\/speech["']\s*,\s*createSpeechEnginesRouter\s*\(\s*\{\s*holder\s*:\s*ttsHolder\s*\}\s*\)\s*\)/.exec(
+      /app\s*\.\s*use\s*\(\s*["']\/api\/speech["']\s*,\s*createSpeechEnginesRouter\s*\(\s*\{\s*holder\s*:\s*ttsHolder\s*,\s*catalog\s*:\s*openaiCatalog\s*\}\s*\)\s*\)/.exec(
         source,
       );
     expect(gate, "the global authMiddleware mount").not.toBeNull();
@@ -402,10 +416,11 @@ describe("/api/speech openai address", () => {
     expect(row.keyLast4).toBeUndefined();
   });
 
-  it("saves a valid address and rebuilds", async () => {
-    const { app, configs } = loadApp();
+  it("saves a valid address, rebuilds and refreshes the voice catalog", async () => {
+    const { app, configs, refresh } = loadApp();
     const res = await put(app, { baseUrl: `  ${ADDRESS}  ` });
     expect(res.status).toBe(204);
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(secrets()).toBe(`OPENAI_TTS_BASE_URL=${ADDRESS}\n`);
     expect(configs).toHaveLength(2);
     expect(configs[1]!.engines.openai).toMatchObject({ baseUrl: ADDRESS });
@@ -413,7 +428,7 @@ describe("/api/speech openai address", () => {
   });
 
   it("rejects an address that is not a URL", async () => {
-    const { app, configs } = loadApp();
+    const { app, configs, refresh } = loadApp();
     for (const body of [
       { baseUrl: "localhost8890" },
       { baseUrl: "ftp://127.0.0.1:8890" },
@@ -436,6 +451,7 @@ describe("/api/speech openai address", () => {
     }
     expect(secrets()).toBe("");
     expect(configs).toHaveLength(1);
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("answers 409 when the environment sets the address", async () => {

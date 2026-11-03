@@ -2,6 +2,7 @@ import { Router, type Response } from "express";
 import { listEngines, type EngineStatus } from "anytts";
 import { resolveKey, writeKeys as writeSecrets, type KeySource, type KeyVar } from "../lib/speech/secrets.js";
 import { CASCADE_ORDER, KEYED_ENGINES, isHttpUrl, type KeyedEngineId, type TtsHolder } from "../lib/speech/ttsHolder.js";
+import type { OpenaiCatalog } from "../lib/speech/openaiCatalog.js";
 
 /**
  * Engine status and API keys for Settings → Speech:
@@ -20,7 +21,9 @@ import { CASCADE_ORDER, KEYED_ENGINES, isHttpUrl, type KeyedEngineId, type TtsHo
  * `openai` (an OpenAI-compatible server) is always listed, so its address can be
  * set from Settings: its "key" is `OPENAI_TTS_BASE_URL`, which is not a secret,
  * so GET returns it in full and never a `keyLast4`. Until the holder configures
- * it (no address, or one that is not an http(s) URL) its status is `no-key`.
+ * it (no address, one that is not an http(s) URL, or no voices fetched from the
+ * server yet) its status is `no-key`. A saved address refreshes the live voice
+ * catalog before answering, so the next GET sees the server's voices.
  */
 
 export interface SpeechEngineInfo {
@@ -40,6 +43,8 @@ export interface SpeechEnginesOptions {
   holder: TtsHolder;
   /** Default: the secrets store's `writeKeys`; tests inject a failing one. */
   writeKeys?: typeof writeSecrets;
+  /** The OpenAI-compatible engine's live catalog, refreshed after its address is saved. */
+  catalog?: Pick<OpenaiCatalog, "refresh">;
 }
 
 /** The Azure engine's own region check (anytts), applied to the lowercased value. */
@@ -61,7 +66,7 @@ function last4(value: string | undefined): string | undefined {
 }
 
 export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router {
-  const { holder, writeKeys = writeSecrets } = options;
+  const { holder, writeKeys = writeSecrets, catalog } = options;
   const labels = new Map(listEngines().map((e) => [e.id, e.label]));
   const router = Router();
 
@@ -138,7 +143,11 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
       res.status(409).json({ error: "the address is set in the server environment" });
       return;
     }
-    if (await save({ OPENAI_TTS_BASE_URL: baseUrl }, res)) res.status(204).end();
+    if (!(await save({ OPENAI_TTS_BASE_URL: baseUrl }, res))) return;
+    // The new address may be a different server: fetch its voices. A changed list rebuilds the
+    // holder through the catalog's onChange; refresh never rejects (3 s timeout at worst).
+    await catalog?.refresh();
+    res.status(204).end();
   });
 
   router.delete("/keys/openai", async (_req, res) => {

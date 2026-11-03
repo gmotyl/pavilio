@@ -10,7 +10,6 @@ import { ProjectVoiceSelect } from "../ProjectVoiceSelect";
 import { listVoices } from "anytts";
 
 import { groupVoices } from "../voiceGroups";
-import { OPENAI_CATALOG } from "../openaiVoices";
 import {
   DEFAULT_SPEECH_VOICE,
   getProjectVoice,
@@ -128,32 +127,14 @@ describe("ProjectVoiceSelect", () => {
     expect(select().selectedOptions[0]!.textContent).toBe(`Default — ${labelOf(DEFAULT_SPEECH_VOICE)}`);
   });
 
-  it("project voice select lists openai catalog voices", async () => {
+  it("project voice select lists no openai voices until the browser reads the server's catalog", () => {
     vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
     expect(setStoredEngine("openai")).toBe("openai");
-    const user = userEvent.setup();
     render(<ProjectVoiceSelect project="p" />);
 
+    // Only "Default": the catalog lives on the OmniVoice server, and the server picks the voice.
     const options = within(select()).getAllByRole("option") as HTMLOptionElement[];
-    expect(options[0]!.value).toBe("");
-    // "Default" names the catalog voice the engine falls back to.
-    const labels = new Set(OPENAI_CATALOG.map((v) => v.label));
-    expect(labels.has(options[0]!.textContent!.replace(/^Default — /, ""))).toBe(true);
-    const values = options.slice(1).map((option) => option.value);
-    expect(values).toHaveLength(14);
-    expect(new Set(values)).toEqual(new Set(OPENAI_CATALOG.map((v) => v.id)));
-    expect(values).not.toContain("auto");
-    const expected = groupVoices([...OPENAI_CATALOG], "pl-PL");
-    const groups = Array.from(select().querySelectorAll("optgroup"));
-    expect(groups.map((group) => group.label)).toEqual(expected.map((group) => group.label));
-    groups.forEach((group, index) => {
-      expect(Array.from(group.querySelectorAll("option")).map((option) => option.value)).toEqual(
-        expected[index]!.voices.map((v) => v.id),
-      );
-    });
-
-    await user.selectOptions(select(), "cand-pl-m3");
-    expect(getProjectVoice("p")).toBe("cand-pl-m3");
-    expect(screen.getByText("overrides default")).toBeTruthy();
+    expect(options.map((option) => option.value)).toEqual([""]);
+    expect(options[0]!.textContent).toMatch(/^Default/);
   });
 });
