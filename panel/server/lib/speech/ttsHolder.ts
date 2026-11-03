@@ -1,6 +1,9 @@
 import type { EdgeEngineOptions, EngineStatus, Tts, TtsConfig, VoiceInfo } from "anytts";
 import { createTts as createServerTts } from "anytts/server";
-import { OPENAI_VOICE_MAP } from "../../../src/features/speech/openaiVoices";
+import {
+  OPENAI_FIRST_BYTE_TIMEOUT_MS,
+  OPENAI_VOICE_MAP,
+} from "../../../src/features/speech/openaiVoices";
 import { resolveVoiceMap } from "./openaiCatalog.js";
 import { resolveKey as resolveSecret, type KeyVar } from "./secrets.js";
 
@@ -118,6 +121,7 @@ function configFrom(
       // Defaults the server lacks fall back to a voice it has, never an unknown-voice error.
       voices: resolveVoiceMap(OPENAI_VOICE_MAP, catalog),
       languageField: "language",
+      firstByteMs: OPENAI_FIRST_BYTE_TIMEOUT_MS,
     };
   }
 

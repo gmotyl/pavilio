@@ -18,7 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
-import { OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
+import { OPENAI_FIRST_BYTE_TIMEOUT_MS, OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
 export const CASCADE = "cascade";
@@ -78,7 +78,13 @@ export function openaiEngineConfig(live: readonly VoiceInfo[]): TtsConfig["engin
           gender: "male",
           multilingual: true,
         }));
-  return { ...KEYED_RELAY, catalog, voices: resolveVoiceMap(OPENAI_VOICE_MAP, live) };
+  return {
+    ...KEYED_RELAY,
+    // Outlasts the panel server's own wait on the OmniVoice server, so the server's verdict lands.
+    firstByteMs: OPENAI_FIRST_BYTE_TIMEOUT_MS + 15000,
+    catalog,
+    voices: resolveVoiceMap(OPENAI_VOICE_MAP, live),
+  };
 }
 
 export const SPEECH_ENGINES: TtsConfig["engines"] = {
