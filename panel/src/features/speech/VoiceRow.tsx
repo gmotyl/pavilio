@@ -96,6 +96,7 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
               )}
             </span>
             <button
+              data-testid={`voice-cancel-delete-${voice.id}`}
               ref={cancelRef}
               type="button"
               className={BUTTON_CLASS}
@@ -106,6 +107,7 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
               Cancel
             </button>
             <button
+              data-testid={`voice-confirm-delete-${voice.id}`}
               type="button"
               className={BUTTON_CLASS}
               style={{ ...BUTTON_STYLE, color: "var(--red)", borderColor: "var(--red)" }}
@@ -119,6 +121,7 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
       ) : (
         <>
           <button
+            data-testid={`voice-play-${voice.id}`}
             type="button"
             aria-label={`${playing ? "Stop" : "Play"} sample of ${voice.label}`}
             className={GHOST_CLASS}
@@ -158,6 +161,7 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
           </span>
           {custom ? (
             <button
+              data-testid={`voice-delete-${voice.id}`}
               ref={deleteRef}
               type="button"
               aria-label={`Delete ${voice.label}`}

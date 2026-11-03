@@ -164,6 +164,7 @@ export function VoicesSection({ address }: { address: string }) {
           />
         )}
         <button
+          data-testid="voices-add"
           type="button"
           className={BUTTON_CLASS}
           style={BUTTON_STYLE}
@@ -180,7 +181,7 @@ export function VoicesSection({ address }: { address: string }) {
         <div role="alert" data-testid="voices-unreachable" className={BANNER_CLASS} style={BANNER_STYLE}>
           Can't reach the OmniVoice server at <code style={CODE}>{address}</code>. Start it (
           <code style={CODE}>omnivoicectl start</code>) — the list reloads on its own when it answers.
-          <button type="button" className={BUTTON_CLASS} style={{ ...BUTTON_STYLE, marginLeft: 6 }} onClick={() => void reload()}>
+          <button data-testid="voices-retry" type="button" className={BUTTON_CLASS} style={{ ...BUTTON_STYLE, marginLeft: 6 }} onClick={() => void reload()}>
             Retry
           </button>
         </div>

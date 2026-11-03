@@ -185,7 +185,7 @@ export function AddVoiceForm({ voices, onAdded, onCancel, onError, narrow }: Add
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
           <div className="flex items-center flex-wrap gap-2">
-            <button type="button" className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => fileRef.current?.click()}>
+            <button data-testid="voice-add-choose-file" type="button" className={BUTTON_CLASS} style={BUTTON_STYLE} onClick={() => fileRef.current?.click()}>
               Choose file…
             </button>
             <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
@@ -258,10 +258,10 @@ export function AddVoiceForm({ voices, onAdded, onCancel, onError, narrow }: Add
             </span>
           )
         )}
-        <button type="button" className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={busy} onClick={onCancel}>
+        <button data-testid="voice-add-cancel" type="button" className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={busy} onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className={BUTTON_CLASS} style={PRIMARY_STYLE} disabled={busy}>
+        <button data-testid="voice-add-submit" type="submit" className={BUTTON_CLASS} style={PRIMARY_STYLE} disabled={busy}>
           {busy ? (replacing ? "Replacing…" : "Adding…") : action}
         </button>
       </div>
