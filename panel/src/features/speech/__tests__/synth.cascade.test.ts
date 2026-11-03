@@ -98,12 +98,14 @@ describe("cascade requests through the speech seam", () => {
       cartesia: CARTESIA_SECOND,
       speechify: voices.catalogDefaultVoice("speechify"),
       azure: voices.catalogDefaultVoice("azure"),
+      openai: voices.catalogDefaultVoice("openai"),
       edge: ANDREW,
     };
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
     expect(Object.values(expectedVoices).every(Boolean)).toBe(true);
-    const order = ["elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    // `openai` leads the default order; the server drops it when it has no address.
+    const order = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
     expect(request).toEqual({
@@ -142,6 +144,7 @@ describe("cascade requests through the speech seam", () => {
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "azure", on: false },
+      { id: "openai", on: false },
     ]);
 
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });
@@ -198,7 +201,7 @@ describe("cascade requests through the speech seam", () => {
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });
 
     expect(lastRequest()).toMatchObject({ engine: "elevenlabs", text: "hello", lang: "en", voice: GEORGE });
-    expect(relayed).toEqual([{ url: "/api/tts", body: { engine: "elevenlabs", text: "hello", voice: GEORGE } }]);
+    expect(relayed).toEqual([{ url: "/api/tts", body: { engine: "elevenlabs", text: "hello", voice: GEORGE, lang: "en" } }]);
     for (const id of ["elevenlabs", "cartesia", "speechify", "azure", "cascade"]) {
       expect(lastConfig().engines[id]).toMatchObject({ relayUrl: "/api/tts" });
       expect(lastConfig().engines[id]).not.toHaveProperty("mode");

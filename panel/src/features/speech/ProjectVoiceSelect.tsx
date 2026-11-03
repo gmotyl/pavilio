@@ -1,12 +1,13 @@
 import { useMemo, useRef, type CSSProperties } from "react";
-import { listEngines, listVoices } from "anytts";
+import { listEngines } from "anytts";
 
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { CASCADE } from "./engines";
-import { isKeyless, useEngineInfo, type EngineInfo } from "./useEngineInfo";
+import { isAddressEngine, isKeyless, useEngineInfo, type EngineInfo } from "./useEngineInfo";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import { groupVoices } from "./voiceGroups";
+import { voicesOf } from "./voicesOf";
 import {
   catalogDefaultVoice,
   getCascadeOrder,
@@ -69,7 +70,7 @@ function SingleEngineVoiceSelect({ project }: { project: string }) {
   usePreference(preferences.speechVoiceByProject);
 
   const engine = getStoredEngine();
-  const catalog = useMemo(() => listVoices(engine), [engine]);
+  const catalog = useMemo(() => voicesOf(engine), [engine]);
   const groups = useMemo(() => groupVoices(catalog, browserLanguage()), [catalog]);
   const defaultVoice = resolveStoredVoice(storedDefault).voice;
   const defaultLabel = catalog.find((voice) => voice.id === defaultVoice)?.label ?? defaultVoice;
@@ -197,7 +198,7 @@ interface MemberVoiceRowProps {
 function MemberVoiceRow(props: MemberVoiceRowProps) {
   const { project, engine, label, narrow, override } = props;
   const skipped = isKeyless(props.info);
-  const catalog = useMemo(() => listVoices(engine), [engine]);
+  const catalog = useMemo(() => voicesOf(engine), [engine]);
   const groups = useMemo(() => groupVoices(catalog, browserLanguage()), [catalog]);
   const defaultLabel =
     catalog.find((voice) => voice.id === props.defaultVoice)?.label ?? props.defaultVoice ?? "";
@@ -267,7 +268,7 @@ function MemberVoiceRow(props: MemberVoiceRowProps) {
           className="text-xs"
           style={{ gridColumn: detailColumn, color: "var(--text-tertiary)" }}
         >
-          skipped — no API key
+          {isAddressEngine(engine) ? "skipped — no server address" : "skipped — no API key"}
         </span>
       )}
     </li>

@@ -16,7 +16,9 @@ export type KeyVar =
   | "CARTESIA_API_KEY"
   | "SPEECHIFY_API_KEY"
   | "AZURE_SPEECH_KEY"
-  | "AZURE_SPEECH_REGION";
+  | "AZURE_SPEECH_REGION"
+  // Not a secret: the address of an OpenAI-compatible TTS server (e.g. a local OmniVoice).
+  | "OPENAI_TTS_BASE_URL";
 
 export type KeySource = "env" | "file" | "none";
 
@@ -26,6 +28,7 @@ const KEY_VARS: ReadonlySet<string> = new Set<KeyVar>([
   "SPEECHIFY_API_KEY",
   "AZURE_SPEECH_KEY",
   "AZURE_SPEECH_REGION",
+  "OPENAI_TTS_BASE_URL",
 ]);
 
 function stateDir(): string {
@@ -75,7 +78,7 @@ export function resolveKey(name: KeyVar): { value?: string; source: KeySource } 
 
 /**
  * Set (string) or remove (null) keys in the secrets file; an `undefined` entry
- * is skipped. Only the five key variables are accepted. Every other line,
+ * is skipped. Only the engine variables of `KeyVar` are accepted. Every other line,
  * comments included, stays as it was. Written to a temp file in the same
  * directory, then renamed over the old one, so a reader never sees half a file.
  */

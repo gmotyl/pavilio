@@ -1,13 +1,14 @@
 import { Router, type Response } from "express";
 import { listEngines, type EngineStatus } from "anytts";
 import { resolveKey, writeKeys as writeSecrets, type KeySource, type KeyVar } from "../lib/speech/secrets.js";
-import { CASCADE_ORDER, KEYED_ENGINES, type KeyedEngineId, type TtsHolder } from "../lib/speech/ttsHolder.js";
+import { CASCADE_ORDER, KEYED_ENGINES, isHttpUrl, type KeyedEngineId, type TtsHolder } from "../lib/speech/ttsHolder.js";
 
 /**
  * Engine status and API keys for Settings → Speech:
  *
  *   GET    /api/speech/engines      every cascade member: label, key source, status
  *   PUT    /api/speech/keys/:engine { apiKey, region? } → 204 | 400 | 409 | 500
+ *   PUT    /api/speech/keys/openai  { baseUrl }         → 204 | 400 | 409 | 500
  *   DELETE /api/speech/keys/:engine → 204 | 400 | 500
  *
  * A saved key goes to the secrets store and the server's Tts is rebuilt from
@@ -15,6 +16,11 @@ import { CASCADE_ORDER, KEYED_ENGINES, type KeyedEngineId, type TtsHolder } from
  * errors never echo the request body. A key set in the environment wins over
  * the file, so writing one there would change nothing — that answers 409.
  * DELETE always removes the file entries; an environment key stays in force.
+ *
+ * `openai` (an OpenAI-compatible server) is always listed, so its address can be
+ * set from Settings: its "key" is `OPENAI_TTS_BASE_URL`, which is not a secret,
+ * so GET returns it in full and never a `keyLast4`. Until the holder configures
+ * it (no address, or one that is not an http(s) URL) its status is `no-key`.
  */
 
 export interface SpeechEngineInfo {
@@ -25,6 +31,8 @@ export interface SpeechEngineInfo {
   keyLast4?: string;
   /** Azure only; the region is not a secret. */
   region?: string;
+  /** `openai` only: the server address, in full (not a secret). */
+  baseUrl?: string;
   status: EngineStatus;
 }
 
@@ -38,6 +46,9 @@ export interface SpeechEnginesOptions {
 const AZURE_REGION = /^[a-z0-9]+$/;
 
 const isKeyed = (id: string): id is KeyedEngineId => Object.hasOwn(KEYED_ENGINES, id);
+
+/** The member whose "key" is a server address rather than an API key. */
+const OPENAI = "openai";
 
 /** The variables an engine's key occupies: Azure's region travels with its key. */
 function varsOf(id: KeyedEngineId): KeyVar[] {
@@ -54,16 +65,36 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
   const labels = new Map(listEngines().map((e) => [e.id, e.label]));
   const router = Router();
 
+  /** The member's status, or undefined when the holder does not configure it. */
+  const statusOf = (id: string): EngineStatus | undefined => {
+    try {
+      return holder.engineStatus(id);
+    } catch (error) {
+      if (error instanceof RangeError) return undefined;
+      throw error;
+    }
+  };
+
   router.get("/engines", (_req, res) => {
     // The cascade members only: `cascade` itself has no key and its status is its members'.
-    const list = CASCADE_ORDER.map((id): SpeechEngineInfo => {
+    // `openai` is listed even while the holder leaves it out, so its address can be set;
+    // any other member the holder does not configure is skipped.
+    const list = CASCADE_ORDER.flatMap((id): SpeechEngineInfo[] => {
+      const status = statusOf(id) ?? (id === OPENAI ? { state: "no-key" as const } : undefined);
+      if (!status) return [];
       const info: SpeechEngineInfo = {
         id,
         label: labels.get(id) ?? id,
-        keyed: isKeyed(id),
+        keyed: isKeyed(id) || id === OPENAI,
         keySource: "none",
-        status: holder.engineStatus(id),
+        status,
       };
+      if (id === OPENAI) {
+        // Shown even when it is not a URL (a hand-edited file), so it can be fixed.
+        const address = resolveKey("OPENAI_TTS_BASE_URL");
+        info.keySource = address.source;
+        if (address.value) info.baseUrl = address.value;
+      }
       if (isKeyed(id)) {
         const key = resolveKey(KEYED_ENGINES[id]);
         info.keySource = key.source;
@@ -74,7 +105,7 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
           if (region) info.region = region;
         }
       }
-      return info;
+      return [info];
     });
     res.json(list);
   });
@@ -95,6 +126,24 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
       return false;
     }
   }
+
+  router.put("/keys/openai", async (req, res) => {
+    const body = (req.body ?? {}) as { baseUrl?: unknown };
+    const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+    if (!baseUrl || /[\r\n]/.test(baseUrl) || !isHttpUrl(baseUrl)) {
+      res.status(400).json({ error: "baseUrl must be an http(s) URL, e.g. http://127.0.0.1:8890" });
+      return;
+    }
+    if (resolveKey("OPENAI_TTS_BASE_URL").source === "env") {
+      res.status(409).json({ error: "the address is set in the server environment" });
+      return;
+    }
+    if (await save({ OPENAI_TTS_BASE_URL: baseUrl }, res)) res.status(204).end();
+  });
+
+  router.delete("/keys/openai", async (_req, res) => {
+    if (await save({ OPENAI_TTS_BASE_URL: null }, res)) res.status(204).end();
+  });
 
   router.put("/keys/:engine", async (req, res) => {
     const id = req.params.engine;

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { listVoices } from "anytts";
 
 import ttsHolderSource from "../../../../server/lib/speech/ttsHolder.ts?raw";
-import { preferences } from "../../../preferences/declarations";
+import { DEFAULT_CASCADE_ORDER, preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 import { storageKey } from "../../../preferences/types";
 import {
@@ -20,6 +20,7 @@ import {
   resolveStoredVoice,
   setEngineVoice,
   setProjectEngineVoice,
+  setCascadeOrder,
   setStoredEngine,
   voiceFor,
   voiceForDocKey,
@@ -109,6 +110,7 @@ describe("per-engine voices and cascade preferences", () => {
 
   it("cascade order defaults to all engines on", () => {
     expect(getCascadeOrder()).toEqual([
+      { id: "openai", on: true },
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "speechify", on: true },
@@ -139,6 +141,35 @@ describe("per-engine voices and cascade preferences", () => {
     expect(preferences.speechPronunciationByEngine.key).toBe("speech.pronunciationByEngine");
   });
 
+  it("openai leads the default cascade order", () => {
+    const expected = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    expect(DEFAULT_CASCADE_ORDER).toEqual(expected);
+    // The drift guard: the server's copy is the same list.
+    const server = /CASCADE_ORDER\s*=\s*(\[[^\]]*\])/.exec(ttsHolderSource);
+    expect(server, "CASCADE_ORDER in ttsHolder.ts").not.toBeNull();
+    expect(JSON.parse(server![1]!)).toEqual(expected);
+    expect(getCascadeOrder()[0]).toEqual({ id: "openai", on: true });
+  });
+
+  it("a stored order without openai gets it appended", () => {
+    // An existing workspace stored its order before openai existed.
+    setCascadeOrder([
+      { id: "edge", on: true },
+      { id: "elevenlabs", on: false },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: false },
+    ]);
+    expect(getCascadeOrder()).toEqual([
+      { id: "edge", on: true },
+      { id: "elevenlabs", on: false },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: false },
+      { id: "openai", on: true },
+    ]);
+  });
+
   it("cascade as the engine resolves no single voice", () => {
     // anytts throws asking `cascade` for a voice: every reader must stay clear of it.
     setEngineVoice("edge", ANDREW);
@@ -154,7 +185,7 @@ describe("per-engine voices and cascade preferences", () => {
     setProjectEngineVoice("p", "elevenlabs", SARAH);
     const voices = cascadeVoicesOf(voiceForProject("p"));
     expect(voices).toMatchObject({ elevenlabs: SARAH, edge: ANDREW });
-    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "speechify"]);
+    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "openai", "speechify"]);
     expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });
     expect(voiceForDocKey("doc:p/notes.md")).toBe(voiceForProject("p"));
   });

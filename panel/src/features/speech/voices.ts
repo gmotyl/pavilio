@@ -11,7 +11,6 @@
  * multilingual voices are grouped first for that reason.
  */
 
-import { listVoices } from "anytts";
 // One source of truth, in the lower layer: the preference registry declares
 // this value as `speech.voice`'s default. Re-exported so this module's
 // existing importers are untouched. The import points DOWN — registry →
@@ -28,6 +27,7 @@ import { projectOfDocKey } from "./docKey";
 import { CASCADE, cascadeVoiceKey, getCascadeOrder, speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
+import { voicesOf } from "./voicesOf";
 
 export { DEFAULT_SPEECH_VOICE, getCascadeOrder };
 export type { CascadeEntry, EngineVoices };
@@ -60,7 +60,7 @@ export function setStoredEngine(id: string): string {
 }
 
 function isCatalogVoice(engine: string, id: unknown): id is string {
-  return typeof id === "string" && listVoices(engine).some((voice) => voice.id === id);
+  return typeof id === "string" && voicesOf(engine).some((voice) => voice.id === id);
 }
 
 /** `value` as a record, or `{}`: the hand-editable records below may hold anything. */
@@ -88,7 +88,7 @@ function catalogVoices(voices: unknown): EngineVoices {
  * voice gets the same default from anytts on the server anyway.
  */
 export function catalogDefaultVoice(engine: string): string | undefined {
-  if (!isKnownEngine(engine) || listVoices(engine).length === 0) return undefined;
+  if (!isKnownEngine(engine) || voicesOf(engine).length === 0) return undefined;
   return resolveSpeechVoice({ engine }).voice;
 }
 

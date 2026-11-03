@@ -133,6 +133,107 @@ panel_build() {
   (cd "$REPO_ROOT" && pm_in panel build)
 }
 
+# The optional control script of a local TTS server (omnivoicectl, or anything
+# else with `start|stop`): $PANEL_TTS_SERVER_CTL, else the last
+# `PANEL_TTS_SERVER_CTL=` line of the panel secrets file. That file is read with
+# grep and never sourced — it holds API keys written by the panel, and sourcing
+# it would run whatever else a line in it says. Optional single or double quotes
+# around the value, and a Windows `\r`, are stripped. Empty output: none set.
+tts_server_ctl_path() {
+  if [ -n "${PANEL_TTS_SERVER_CTL:-}" ]; then
+    printf '%s' "$PANEL_TTS_SERVER_CTL"
+    return 0
+  fi
+  local file="${PANEL_AUTH_STATE_DIR:-$HOME/.panel}/secrets.env" value
+  [ -f "$file" ] || return 0
+  value="$(grep -E '^PANEL_TTS_SERVER_CTL=' "$file" 2>/dev/null | tail -n 1)"
+  value="${value#PANEL_TTS_SERVER_CTL=}"
+  value="${value%$'\r'}"
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+  printf '%s' "$value"
+}
+
+# `timeout <secs> <cmd...>` for hosts without coreutils timeout, with its
+# semantics: the command's exit status, or 124 when it ran past the limit and was
+# killed (TERM, then KILL after a short grace).
+#
+# The command runs in a process group of its own (`set -m` around the launch),
+# and the whole group is signalled — what GNU timeout does too, so a child the
+# script is waiting on (a `sleep`, a `curl`) dies with it rather than lingering.
+# A daemon the script detached with setsid lives in a new session and process
+# group, so it is out of reach and survives, as it should. Waiting is a
+# foreground poll on quarter-second sleeps, not a background sleeper racing the
+# command, so nothing is left behind whichever finishes first.
+run_with_limit() {
+  local limit="$1" pid ticks=0 grace=0
+  shift
+  set -m
+  "$@" &
+  pid=$!
+  set +m
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$ticks" -ge $((limit * 4)) ]; then
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      # Two seconds for a clean exit, then no more asking.
+      while kill -0 "$pid" 2>/dev/null && [ "$grace" -lt 8 ]; do
+        sleep "$POLL_INTERVAL"
+        grace=$((grace + 1))
+      done
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep "$POLL_INTERVAL"
+    ticks=$((ticks + 1))
+  done
+  wait "$pid"
+}
+
+# Run `<ctl> start|stop` when a control script is configured; a no-op, with no
+# output at all, when it is not. Never fails the panel verb: the panel works
+# without a local TTS server (the engine cascade moves on), so a missing script,
+# a non-zero exit or a hang past the limit costs one warning line and nothing
+# else. The limit is $PANEL_TTS_SERVER_CTL_TIMEOUT seconds (a positive integer;
+# anything else means the default, 60).
+# The script's own output goes to the panel log, not the terminal — and not to
+# a pipe a caller may be reading, which a daemon it spawns could hold open.
+tts_server_ctl() {
+  local verb="$1" ctl rc
+  ctl="$(tts_server_ctl_path)"
+  [ -n "$ctl" ] || return 0
+  if [ ! -e "$ctl" ]; then
+    echo "warning: PANEL_TTS_SERVER_CTL $ctl does not exist — skipping TTS server $verb" >&2
+    return 0
+  fi
+  if [ ! -f "$ctl" ] || [ ! -x "$ctl" ]; then
+    echo "warning: PANEL_TTS_SERVER_CTL $ctl is not executable — skipping TTS server $verb" >&2
+    return 0
+  fi
+  mkdir -p "$(dirname "$LOG_FILE")"
+  echo "--- tts server $verb $(date -Is 2>/dev/null) ---" >>"$LOG_FILE"
+  local limit="${PANEL_TTS_SERVER_CTL_TIMEOUT:-60}"
+  case "$limit" in
+    '' | *[!0-9]* | 0*) limit=60 ;;
+  esac
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$limit" "$ctl" "$verb" >>"$LOG_FILE" 2>&1 </dev/null
+    rc=$?
+  else
+    # No coreutils timeout (stock macOS): the same bound, in bash.
+    run_with_limit "$limit" "$ctl" "$verb" >>"$LOG_FILE" 2>&1 </dev/null
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    local why=""
+    [ "$rc" -eq 124 ] && why=", timed out after ${limit}s"
+    echo "warning: PANEL_TTS_SERVER_CTL $ctl $verb exited $rc$why (see $LOG_REL)" >&2
+  fi
+  return 0
+}
+
 cmd_start() {
   if panel_port_open; then
     local pid
@@ -163,6 +264,11 @@ cmd_start() {
       pm_in panel start
     ' _ "$SCRIPT_DIR" "$REPO_ROOT"
   )
+  # The local TTS server first, so the panel's first utterance can reach it.
+  # Only here, past the already-running and build checks: a panel that is not
+  # being started leaves the server alone.
+  tts_server_ctl start
+
   mkdir -p "$(dirname "$LOG_FILE")"
   echo "--- panel start $(date -Is 2>/dev/null) ---" >>"$LOG_FILE"
   if command -v setsid >/dev/null 2>&1; then
@@ -214,6 +320,9 @@ cmd_start() {
 cmd_stop() {
   if ! panel_port_open; then
     echo "panel not running (nothing to stop on port $PANEL_PORT)"
+    # Still stopped: the server can outlive a panel that died or was killed
+    # some other way, and `stop` is the one verb that would reach it.
+    tts_server_ctl stop
     return 0
   fi
 
@@ -239,6 +348,9 @@ cmd_stop() {
     return 1
   fi
   echo "panel stopped (was pid $(echo "$pids" | head -n 1))"
+  # After the panel is down, so no utterance in flight loses its engine. A panel
+  # that would not die (above) keeps its server.
+  tts_server_ctl stop
 }
 
 cmd_restart() {

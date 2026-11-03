@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SynthesisRequest, Tts, TtsConfig } from "anytts";
+import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "../openaiVoices";
 
 /**
  * `synth.ts` is the panel's one seam over anytts. These tests swap the
@@ -110,6 +111,8 @@ describe("the anytts seam", () => {
         cartesia: keyed,
         speechify: keyed,
         azure: keyed,
+        // The local OpenAI-compatible server: a relay client with the panel's own catalog.
+        openai: { ...keyed, catalog: [...OPENAI_CATALOG], voices: OPENAI_VOICE_MAP },
       },
       defaultEngine: "edge",
       scheduler: {

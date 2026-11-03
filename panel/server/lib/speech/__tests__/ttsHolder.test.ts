@@ -3,6 +3,7 @@ import { createTts } from "anytts/server";
 import type { TtsConfig } from "anytts";
 import { createTtsHolder } from "../ttsHolder";
 import type { KeyVar, KeySource } from "../secrets";
+import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "../../../../src/features/speech/openaiVoices";
 
 /** A `resolveKey` over a fixed table, standing in for env + secrets file. */
 function keys(table: Partial<Record<KeyVar, string>>) {
@@ -83,6 +84,78 @@ describe("server Tts holder", () => {
       });
       createTtsHolder({ createTts, resolveKey: keys({ AZURE_SPEECH_REGION: "nope!" }) });
       expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  it("configures openai when OPENAI_TTS_BASE_URL is set", () => {
+    const configs: TtsConfig[] = [];
+    const holder = createTtsHolder({
+      createTts: (config) => {
+        configs.push(config);
+        return createTts(config);
+      },
+      resolveKey: keys({ OPENAI_TTS_BASE_URL: "http://127.0.0.1:8890" }),
+    });
+
+    const { engines } = configs[0]!;
+    expect(engines.openai).toEqual({
+      baseUrl: "http://127.0.0.1:8890",
+      catalog: OPENAI_CATALOG,
+      voices: OPENAI_VOICE_MAP,
+      languageField: "language",
+    });
+    // A local server needs no key: it leads the cascade, ready.
+    expect(engines.cascade).toEqual({
+      order: ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
+    });
+    expect(holder.engineStatus("openai")).toEqual({ state: "ready" });
+  });
+
+  it("leaves openai out when the address is unset", () => {
+    const configs: TtsConfig[] = [];
+    const holder = createTtsHolder({
+      createTts: (config) => {
+        configs.push(config);
+        return createTts(config);
+      },
+      resolveKey: keys({}),
+    });
+
+    const { engines } = configs[0]!;
+    expect(Object.hasOwn(engines, "openai")).toBe(false);
+    // The cascade holds only configured engines; anytts would throw on an unknown member.
+    expect(engines.cascade).toEqual({ order: ["elevenlabs", "cartesia", "speechify", "azure", "edge"] });
+    expect(() => holder.engineStatus("openai")).toThrow(RangeError);
+  });
+
+  it("an invalid address warns without the value and leaves openai out", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const configs: TtsConfig[] = [];
+      const build = () =>
+        createTtsHolder({
+          createTts: (config) => {
+            configs.push(config);
+            return createTts(config);
+          },
+          resolveKey: keys({ OPENAI_TTS_BASE_URL: "not a url" }),
+        });
+      expect(build).not.toThrow();
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]![0]);
+      expect(message).toContain("OPENAI_TTS_BASE_URL");
+      expect(message).not.toContain("not a url");
+      expect(Object.hasOwn(configs[0]!.engines, "openai")).toBe(false);
+      expect(configs[0]!.engines.cascade).toEqual({
+        order: ["elevenlabs", "cartesia", "speechify", "azure", "edge"],
+      });
+
+      // Not http(s) is no better than not a URL.
+      warn.mockClear();
+      createTtsHolder({ createTts, resolveKey: keys({ OPENAI_TTS_BASE_URL: "ftp://127.0.0.1:8890" }) });
+      expect(warn).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore();
     }

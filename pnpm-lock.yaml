@@ -35,8 +35,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       anytts:
-        specifier: 0.4.0
-        version: 0.4.0
+        specifier: 0.6.0
+        version: 0.6.0
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -1255,8 +1255,8 @@ packages:
     resolution: {integrity: sha512-Cxwpt2SfTzTtXcfOlzGEee8O+c+MmUgGrNiBcXnuWxuFJHe6a5Hz7qwhwe5OgaSYI0IJvkLqWX1ASG+cJOkEiA==}
     engines: {node: '>=10'}
 
-  anytts@0.4.0:
-    resolution: {integrity: sha512-BwL7FTTVans41h7KPMqma8wYpk7XBbbFgLgTqgGuLslxyZqwV7qu4z3wtObXp1w7u1QmIZMa/ozhk+/BQtbBKQ==}
+  anytts@0.6.0:
+    resolution: {integrity: sha512-s0GCNj9fb6IfmbZOC/KLgljClf+/iNS7PfDKA0R/Mib2coitZ58QQmEzdfOs8SYBkfuf8jx4zPZO+lLG0IeXXg==}
     engines: {node: '>=22'}
 
   append-field@1.0.0:
@@ -4019,7 +4019,7 @@ snapshots:
 
   ansi-styles@5.2.0: {}
 
-  anytts@0.4.0: {}
+  anytts@0.6.0: {}
 
   append-field@1.0.0: {}
 

@@ -6,7 +6,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +38,8 @@ let sandbox: string;
 let repo: string;
 let stubBin: string;
 let serverJs: string;
+/** PANEL_AUTH_STATE_DIR for every run: where scripts/panel looks for secrets.env. */
+let stateDir: string;
 let port: number;
 /** Further sandbox ports a case may have put a listener on; reaped in afterEach. */
 let extraPorts: number[] = [];
@@ -128,12 +132,17 @@ const BUILD_FAILS = ['echo "stub pnpm build: TS2345 the bundle is broken" >&2', 
 );
 
 function runPanel(command: string, extraEnv: Record<string, string> = {}) {
+  // The developer's own PANEL_TTS_SERVER_CTL, and the one in their real
+  // ~/.panel/secrets.env, must never reach the sandbox: either would start or
+  // stop the real local TTS server. The state dir is the sandbox's own.
+  const { PANEL_TTS_SERVER_CTL: _ignored, ...inherited } = process.env;
   const res = spawnSync("bash", [join(repo, "scripts", "panel"), command], {
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...inherited,
       PATH: `${stubBin}:${process.env.PATH ?? ""}`,
       PANEL_PORT: String(port),
+      PANEL_AUTH_STATE_DIR: stateDir,
       ...extraEnv,
     },
     timeout: 60000,
@@ -151,6 +160,8 @@ beforeEach(() => {
   repo = join(sandbox, "repo");
   stubBin = join(sandbox, "bin");
   serverJs = join(sandbox, "server.cjs");
+  stateDir = join(sandbox, "state");
+  mkdirSync(stateDir, { recursive: true });
   mkdirSync(join(repo, "scripts"), { recursive: true });
   mkdirSync(join(repo, "panel"), { recursive: true });
   mkdirSync(stubBin, { recursive: true });
@@ -398,5 +409,261 @@ describe("scripts/panel process control", () => {
     // both are the script's job now.
     expect(pkg.scripts.start).not.toContain("&");
     expect(pkg.scripts.stop).not.toContain("lsof");
+  });
+});
+
+/**
+ * PANEL_TTS_SERVER_CTL: a control script for a local TTS server (omnivoicectl)
+ * that scripts/panel starts before the panel and stops after it.
+ *
+ * The fake control script records its argument *and* whether the panel port
+ * was open at that moment — so "before the panel comes up" and "after it goes
+ * down" are asserted as observed state, not inferred from line order.
+ */
+describe("scripts/panel local TTS server control", () => {
+  let ctl: string;
+  let ctlLog: string;
+
+  function writeCtl(path: string, exitCode = 0, mode = 0o755) {
+    writeFileSync(
+      path,
+      [
+        "#!/usr/bin/env bash",
+        `if (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null; then state=up; else state=down; fi`,
+        `echo "$1 panel=$state" >> "${ctlLog}"`,
+        `exit ${exitCode}`,
+        "",
+      ].join("\n"),
+      { mode },
+    );
+  }
+
+  function ctlCalls(): string[] {
+    return existsSync(ctlLog) ? readFileSync(ctlLog, "utf8").split("\n").filter(Boolean) : [];
+  }
+
+  beforeEach(() => {
+    ctl = join(sandbox, "fake-ttsctl");
+    ctlLog = join(sandbox, "ttsctl.log");
+  });
+
+  it("panel start and stop drive PANEL_TTS_SERVER_CTL", async () => {
+    writeCtl(ctl);
+    const env = { PANEL_TTS_SERVER_CTL: ctl };
+
+    const started = runPanel("start", env);
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    // Called once, while the port was still closed: before the panel came up.
+    expect(ctlCalls()).toEqual(["start panel=down"]);
+
+    const stopped = runPanel("stop", env);
+    expect(stopped.status).toBe(0);
+    expect(portOpen(port)).toBe(false);
+    // Called after the panel went down, not while it was still serving.
+    expect(ctlCalls()).toEqual(["start panel=down", "stop panel=down"]);
+
+    // restart goes through stop and start: the server is stopped after the
+    // panel is down and started again before the panel comes back.
+    expect(runPanel("start", env).status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    const restarted = runPanel("restart", env);
+    expect(restarted.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(ctlCalls().slice(-3)).toEqual([
+      "start panel=down",
+      "stop panel=down",
+      "start panel=down",
+    ]);
+
+    // Stop with no panel running still stops the server: it may have outlived
+    // a panel that was killed some other way.
+    runPanel("stop", env);
+    const idle = runPanel("stop", env);
+    expect(idle.status).toBe(0);
+    expect(idle.output).toMatch(/not running/);
+    expect(ctlCalls().slice(-2)).toEqual(["stop panel=down", "stop panel=down"]);
+  });
+
+  it("reads PANEL_TTS_SERVER_CTL from the secrets file without sourcing it", async () => {
+    writeCtl(ctl);
+    const sourcedMarker = join(sandbox, "secrets-were-sourced");
+    writeFileSync(
+      join(stateDir, "secrets.env"),
+      [
+        "EDGE_TTS_UNUSED=1",
+        `touch "${sourcedMarker}"`,
+        // Repeated: the last line wins. Quotes around the value are stripped.
+        `PANEL_TTS_SERVER_CTL=${join(sandbox, "an-older-ctl-that-does-not-exist")}`,
+        `PANEL_TTS_SERVER_CTL="${ctl}"\r`,
+        "",
+      ].join("\n"),
+    );
+
+    const started = runPanel("start");
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(runPanel("stop").status).toBe(0);
+
+    expect(ctlCalls()).toEqual(["start panel=down", "stop panel=down"]);
+    expect(started.output).not.toMatch(/warning/i);
+    expect(existsSync(sourcedMarker)).toBe(false);
+  });
+
+  it("a failing TTS control script does not fail the panel", async () => {
+    writeCtl(ctl, 1);
+
+    const started = runPanel("start", { PANEL_TTS_SERVER_CTL: ctl });
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toContain("panel started");
+    const warnings = started.output.split("\n").filter((line) => line.includes(ctl));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/warning/i);
+    expect(warnings[0]).toMatch(/\bstart\b/);
+    expect(warnings[0]).toMatch(/exit(ed)?( with)?( code)? 1\b/);
+  });
+
+  /** A control script that never returns, and records its pid so a case can check it was reaped. */
+  function writeHangingCtl(pidFile: string) {
+    writeFileSync(
+      ctl,
+      ["#!/usr/bin/env bash", `echo $$ > "${pidFile}"`, "while :; do sleep 1; done", ""].join("\n"),
+      { mode: 0o755 },
+    );
+  }
+
+  /**
+   * A PATH with every tool the developer's PATH offers *except* `timeout`: one
+   * directory of symlinks, first name wins, as `command -v` would resolve it.
+   * The pnpm stub still goes first, exactly as runPanel arranges it.
+   */
+  function pathWithoutTimeout(): string {
+    const bin = join(sandbox, "bin-no-timeout");
+    mkdirSync(bin, { recursive: true });
+    const seen = new Set<string>(["timeout"]);
+    for (const dir of (process.env.PATH ?? "").split(":")) {
+      if (!dir || dir === stubBin) continue;
+      let names: string[];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        symlinkSync(join(dir, name), join(bin, name));
+      }
+    }
+    return `${stubBin}:${bin}`;
+  }
+
+  it("a hanging TTS control script is cut off without timeout", async () => {
+    const pidFile = join(sandbox, "ctl.pid");
+    writeHangingCtl(pidFile);
+    const PATH = pathWithoutTimeout();
+    // The arranged PATH really has no `timeout` on it.
+    const probe = spawnSync("bash", ["-c", "command -v timeout || echo none"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH },
+    });
+    expect(probe.stdout.trim()).toBe("none");
+
+    const t0 = Date.now();
+    const started = runPanel("start", {
+      PANEL_TTS_SERVER_CTL: ctl,
+      PANEL_TTS_SERVER_CTL_TIMEOUT: "2",
+      PATH,
+    });
+    const elapsed = Date.now() - t0;
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toContain("panel started");
+    const warnings = started.output.split("\n").filter((line) => line.includes(ctl));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/warning/i);
+    expect(warnings[0]).toMatch(/timed out after 2s/);
+    // Two seconds of patience, a short kill grace and the panel's own start.
+    expect(elapsed).toBeLessThan(20000);
+    // The control script itself was killed, not left running in the background.
+    const ctlPid = Number(readFileSync(pidFile, "utf8").trim());
+    expect(await waitUntil(() => !alive(ctlPid), 5000)).toBe(true);
+  });
+
+  it("the coreutils timeout path honours PANEL_TTS_SERVER_CTL_TIMEOUT", async () => {
+    const pidFile = join(sandbox, "ctl.pid");
+    writeHangingCtl(pidFile);
+    // Only meaningful where coreutils `timeout` exists; this suite runs on Linux.
+    expect(spawnSync("bash", ["-c", "command -v timeout"]).status).toBe(0);
+
+    const t0 = Date.now();
+    const started = runPanel("start", {
+      PANEL_TTS_SERVER_CTL: ctl,
+      PANEL_TTS_SERVER_CTL_TIMEOUT: "2",
+    });
+    const elapsed = Date.now() - t0;
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    const warnings = started.output.split("\n").filter((line) => line.includes(ctl));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/timed out after 2s/);
+    expect(elapsed).toBeLessThan(20000);
+    const ctlPid = Number(readFileSync(pidFile, "utf8").trim());
+    expect(await waitUntil(() => !alive(ctlPid), 5000)).toBe(true);
+  });
+
+  it("a non-executable TTS control script is skipped with a warning", async () => {
+    writeCtl(ctl, 0, 0o644);
+
+    const started = runPanel("start", { PANEL_TTS_SERVER_CTL: ctl });
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toMatch(new RegExp(`warning.*${ctl}.*not executable`, "i"));
+    expect(ctlCalls()).toEqual([]);
+
+    // A missing file is the same: a warning, and the verb still does its job.
+    const missing = join(sandbox, "no-such-ctl");
+    const stopped = runPanel("stop", { PANEL_TTS_SERVER_CTL: missing });
+    expect(stopped.status).toBe(0);
+    expect(portOpen(port)).toBe(false);
+    expect(stopped.output).toContain("panel stopped");
+    expect(stopped.output).toMatch(new RegExp(`warning.*${missing}`, "i"));
+  });
+
+  it("no TTS control script leaves panel verbs unchanged", async () => {
+    // Unset in the environment (runPanel strips it), and a secrets file that
+    // holds other keys but not this one.
+    writeFileSync(join(stateDir, "secrets.env"), "ELEVENLABS_API_KEY=sk-test\n");
+    // A bundle already in place, so the output is the start/stop lines alone.
+    mkdirSync(join(repo, "panel", "dist"), { recursive: true });
+    writeFileSync(join(repo, "panel", "dist", "index.html"), "<!doctype html>");
+    const quiet = (output: string) => {
+      expect(output).not.toMatch(/warning|TTS|PANEL_TTS_SERVER_CTL/i);
+    };
+
+    const started = runPanel("start");
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toMatch(/^Starting panel\.* ready\.\npanel started \(pid \d+\)/);
+    quiet(started.output);
+
+    const restarted = runPanel("restart");
+    expect(restarted.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(restarted.output).toMatch(/^panel stopped \(was pid \d+\)\nStarting panel/);
+    quiet(restarted.output);
+
+    const stopped = runPanel("stop");
+    expect(stopped.status).toBe(0);
+    expect(stopped.output).toMatch(/^panel stopped \(was pid \d+\)\n$/);
+    quiet(stopped.output);
+
+    const idle = runPanel("stop");
+    expect(idle.output).toBe(`panel not running (nothing to stop on port ${port})\n`);
   });
 });
