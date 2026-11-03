@@ -25,9 +25,11 @@ export interface OpenaiVoices {
   unreachable: boolean;
   /** Workspace voice copies the server does not have (the empty-state hint). */
   workspaceOnly: number;
+  /** A route answer has landed: until then an empty list means "not asked yet", not "none". */
+  loaded: boolean;
 }
 
-const INITIAL: OpenaiVoices = { voices: [], unreachable: false, workspaceOnly: 0 };
+const INITIAL: OpenaiVoices = { voices: [], unreachable: false, workspaceOnly: 0, loaded: false };
 
 // Replaced, never mutated: `useSyncExternalStore` compares snapshots by identity.
 let state: OpenaiVoices = INITIAL;
@@ -62,9 +64,9 @@ function toStoredVoice({ id, label, locale, gender, multilingual, source }: Omni
 /** The state a route answer leads to, or undefined to keep the current one. */
 async function stateFrom(res: Response): Promise<OpenaiVoices | undefined> {
   // The OmniVoice server is down: the panel server's catalog keeps its last list, and so does this.
-  if (res.status === 502) return { ...state, unreachable: true };
+  if (res.status === 502) return { ...state, unreachable: true, loaded: true };
   // No address: the panel server has no openai engine, so there is nothing to pick.
-  if (res.status === 409) return INITIAL;
+  if (res.status === 409) return { ...INITIAL, loaded: true };
   if (!res.ok) return undefined;
   const body = (await res.json().catch(() => null)) as Partial<OpenaiVoices> | null;
   if (!body || !Array.isArray(body.voices)) return undefined;
@@ -72,6 +74,7 @@ async function stateFrom(res: Response): Promise<OpenaiVoices | undefined> {
     voices: body.voices.filter(isVoice).map(toStoredVoice),
     unreachable: body.unreachable === true,
     workspaceOnly: typeof body.workspaceOnly === "number" ? body.workspaceOnly : 0,
+    loaded: true,
   };
 }
 

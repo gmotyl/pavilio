@@ -89,7 +89,7 @@ export function VoicesSection({ address }: { address: string }) {
   const width = usePaneWidth(rootRef);
   const compact = width > 0 && width < LOCALE_HIDDEN_BELOW;
   const narrow = width > 0 && width < SPEECH_ROWS_NARROW_BELOW;
-  const { voices, unreachable, workspaceOnly, reload } = useOpenaiVoices();
+  const { voices, unreachable, workspaceOnly, loaded, reload } = useOpenaiVoices();
   const [globalVoice] = usePreference(preferences.speechVoice);
   const [byProject] = usePreference(preferences.speechVoiceByProject);
   const [filter, setFilter] = useState("");
@@ -105,6 +105,14 @@ export function VoicesSection({ address }: { address: string }) {
   const shown = needle
     ? voices.filter((voice) => voice.label.toLowerCase().includes(needle) || voice.id.includes(needle))
     : voices;
+
+  // While the add form is open a refusal shows right above it: the form sits below the 300 px
+  // list, so a banner at the top of the section can be scrolled out of sight.
+  const errorBanner = error !== null && (
+    <div role="alert" data-testid="voices-error" className={adding ? `${BANNER_CLASS} mt-2.5` : BANNER_CLASS} style={BANNER_STYLE}>
+      {error}
+    </div>
+  );
 
   const remove = async (id: string) => {
     setDeleting(true);
@@ -138,7 +146,7 @@ export function VoicesSection({ address }: { address: string }) {
         <h4 id="voices-heading" className="font-semibold" style={{ fontSize: 13, margin: 0, color: "var(--text-primary)" }}>
           Voices
         </h4>
-        {!unreachable && (
+        {!unreachable && loaded && (
           <span data-testid="voices-count" className="text-xs" style={{ color: "var(--text-tertiary)" }}>
             {voices.length - custom} bundled · {custom} custom
           </span>
@@ -155,7 +163,16 @@ export function VoicesSection({ address }: { address: string }) {
             style={{ ...BUTTON_STYLE, width: 160, maxWidth: "100%", padding: "3px 8px" }}
           />
         )}
-        <button type="button" className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={unreachable || adding} onClick={() => setAdding(true)}>
+        <button
+          type="button"
+          className={BUTTON_CLASS}
+          style={BUTTON_STYLE}
+          disabled={unreachable || adding}
+          onClick={() => {
+            setError(null);
+            setAdding(true);
+          }}
+        >
           ＋ Add voice
         </button>
       </div>
@@ -168,11 +185,7 @@ export function VoicesSection({ address }: { address: string }) {
           </button>
         </div>
       )}
-      {error !== null && (
-        <div role="alert" data-testid="voices-error" className={BANNER_CLASS} style={BANNER_STYLE}>
-          {error}
-        </div>
-      )}
+      {!adding && errorBanner}
       {!unreachable && (
         <ul
           data-testid="voices-list"
@@ -201,7 +214,10 @@ export function VoicesSection({ address }: { address: string }) {
                   : null
               }
               onDelete={() => setConfirming(voice.id)}
-              onCancelDelete={() => setConfirming(null)}
+              onCancelDelete={() => {
+                setConfirming(null);
+                setError(null);
+              }}
               onConfirmDelete={() => void remove(voice.id)}
             />
           ))}
@@ -210,7 +226,12 @@ export function VoicesSection({ address }: { address: string }) {
               No voice matches “{filter.trim()}”.
             </li>
           )}
-          {custom === 0 && (
+          {!loaded && (
+            <li data-testid="voices-loading" className="text-xs px-3 py-3 text-center" style={{ color: "var(--text-tertiary)" }}>
+              Loading voices…
+            </li>
+          )}
+          {loaded && custom === 0 && (
             <li data-testid="voices-empty" className="text-center" style={{ padding: "18px 12px", fontSize: 13, color: "var(--text-secondary)" }}>
               No custom voices on this server yet.
               {workspaceOnly > 0 && (
@@ -224,6 +245,7 @@ export function VoicesSection({ address }: { address: string }) {
           )}
         </ul>
       )}
+      {adding && errorBanner}
       {adding && (
         <AddVoiceForm
           voices={voices}

@@ -179,6 +179,8 @@ export function AddVoiceForm({ voices, onAdded, onCancel, onError, narrow }: Add
             type="file"
             accept="audio/*"
             className="sr-only"
+            // The "Choose file…" button below is the one tab stop for the sample.
+            tabIndex={-1}
             aria-invalid={errors.file ? "true" : undefined}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />

@@ -59,6 +59,31 @@ describe("useOpenaiVoices", () => {
     expect(result.current.voices).toEqual(LIVE_VOICES);
   });
 
+  it("loaded turns true once the first answer lands, a 502 or a 409 included", async () => {
+    let status = 502;
+    let answer: (res: Response) => void = () => {};
+    stubFetch({
+      [OPENAI_VOICES_URL]: () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const { result } = renderHook(() => useOpenaiVoices());
+    expect(result.current.loaded).toBe(false);
+    await act(async () => answer(jsonResponse({ error: "unreachable" }, { status })));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.unreachable).toBe(true);
+
+    status = 409;
+    const reloading = result.current.reload();
+    await act(async () => {
+      answer(jsonResponse({ error: "no-address" }, { status }));
+      await reloading;
+    });
+    expect(result.current.loaded).toBe(true);
+    expect(result.current.voices).toEqual([]);
+  });
+
   it("no address empties the list", async () => {
     let address = true;
     stubFetch({

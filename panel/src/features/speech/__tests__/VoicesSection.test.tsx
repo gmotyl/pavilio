@@ -69,7 +69,7 @@ function measureAt(width: number): void {
 
 /** Stubs the voice routes: GET answers `list()`, POST and DELETE their own handlers. */
 function stubVoices(
-  list: () => Response,
+  list: () => Response | Promise<Response>,
   handlers: { post?: FetchHandler; del?: FetchHandler } = {},
 ) {
   return stubFetch(
@@ -418,5 +418,107 @@ describe("VoicesSection", () => {
     expect(dels).toHaveLength(1);
     expect(String(dels[0]![0])).toBe("/api/speech/openai/voices/my-voice");
     await waitFor(() => expect(screen.queryByTestId("voice-row-my-voice")).toBeNull());
+  });
+
+  it("a server refusal shows directly above the open add form, not above the list", async () => {
+    const user = userEvent.setup();
+    stubVoices(() => jsonResponse(voicesBody(ALL)), {
+      post: () => jsonResponse({ error: "upstream", detail: "ffmpeg could not decode the file" }, { status: 400 }),
+    });
+    render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+
+    await user.click(screen.getByRole("button", { name: "＋ Add voice" }));
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: "Add voice" }));
+    const error = await screen.findByTestId("voices-error");
+    const form = screen.getByRole("group", { name: "Add voice" });
+    // Below the 300 px list, right on top of the form the user is looking at.
+    expect(screen.getByTestId("voices-list").compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(error.nextElementSibling).toBe(form);
+  });
+
+  it("the delete confirm takes focus, is announced, and Cancel gives focus back to 🗑", async () => {
+    const user = userEvent.setup();
+    await renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Delete My voice" }));
+    const bar = within(voiceRow("my-voice")).getByTestId("voice-confirm");
+    expect(within(bar).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(within(bar).getByRole("alert")).toHaveTextContent("Delete “My voice”?");
+
+    await user.click(within(bar).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Delete My voice" })).toHaveFocus();
+  });
+
+  it("a delete refusal clears when the confirm is cancelled or the add form opens", async () => {
+    const user = userEvent.setup();
+    stubVoices(() => jsonResponse(voicesBody(ALL)), {
+      del: () => jsonResponse({ error: "upstream", detail: "voice is busy" }, { status: 400 }),
+    });
+    render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+
+    await user.click(screen.getByRole("button", { name: "Delete My voice" }));
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByTestId("voices-error")).toHaveTextContent("voice is busy");
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("voices-error")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Delete My voice" }));
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByTestId("voices-error")).toHaveTextContent("voice is busy");
+    await user.click(screen.getByRole("button", { name: "＋ Add voice" }));
+    expect(screen.queryByTestId("voices-error")).toBeNull();
+  });
+
+  it("before the first answer lands it shows a quiet loading line, not the empty state", async () => {
+    stubVoices(() => new Promise<Response>(() => {}));
+    render(<VoicesSection address={ADDRESS} />);
+
+    expect(await screen.findByTestId("voices-loading")).toHaveTextContent("Loading voices…");
+    expect(screen.queryByTestId("voices-empty")).toBeNull();
+    expect(screen.queryByText(/No custom voices/)).toBeNull();
+  });
+
+  it("the hidden file input is not a tab stop; Choose file… is", async () => {
+    const user = userEvent.setup();
+    await renderSection();
+    await user.click(screen.getByRole("button", { name: "＋ Add voice" }));
+
+    expect(screen.getByLabelText("Sample")).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "Choose file…" })).not.toHaveAttribute("tabindex");
+  });
+
+  it("unmounting pauses the playing sample", async () => {
+    const user = userEvent.setup();
+    stubVoices(() => jsonResponse(voicesBody(ALL)));
+    const { unmount } = render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Play sample of My voice" }));
+    expect(FakeAudio.all[0]!.paused).toBe(false);
+    unmount();
+    expect(FakeAudio.all[0]!.paused).toBe(true);
+  });
+
+  it("submitting in Replace mode sends the POST and closes the form", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubVoices(() => jsonResponse(voicesBody(ALL)), {
+      post: () => jsonResponse({ id: "my-voice" }, { status: 201 }),
+    });
+    render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+
+    await user.click(screen.getByRole("button", { name: "＋ Add voice" }));
+    await fillValid(user, "my-voice");
+    expect(screen.getByText("⚠ “my-voice” exists — saving replaces it")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Replace voice" }));
+
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Add voice" })).toBeNull());
+    const posts = calls(fetchMock, "POST");
+    expect(posts).toHaveLength(1);
+    expect((posts[0]![1]!.body as FormData).get("name")).toBe("my-voice");
+    expect(screen.getByTestId("voice-row-my-voice")).toBeInTheDocument();
   });
 });

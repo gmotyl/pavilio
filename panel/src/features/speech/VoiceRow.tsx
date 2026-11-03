@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 import type { OmniVoiceInfo } from "./openaiVoices";
 import { BUTTON_CLASS, BUTTON_STYLE } from "./voicesSectionUi";
@@ -42,9 +42,28 @@ interface VoiceRowProps {
   onConfirmDelete: () => void;
 }
 
-/** ▶ | label + mono name | locale · gender · badges | 🗑 (custom only), or its confirm bar. */
+/**
+ * ▶ | label + mono name | locale · gender · badges | 🗑 (custom only), or its confirm bar. The bar
+ * takes focus on its Cancel button when it opens; Cancel hands focus back to 🗑.
+ */
 export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }: VoiceRowProps) {
   const custom = voice.source === "custom";
+  const confirming = confirm !== null;
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const deleteRef = useRef<HTMLButtonElement>(null);
+  const refocusDelete = useRef(false);
+  useEffect(() => {
+    if (confirming) {
+      cancelRef.current?.focus();
+    } else if (refocusDelete.current) {
+      refocusDelete.current = false;
+      deleteRef.current?.focus();
+    }
+  }, [confirming]);
+  const cancel = () => {
+    refocusDelete.current = true;
+    on.onCancelDelete();
+  };
   return (
     <li
       data-testid={`voice-row-${voice.id}`}
@@ -70,13 +89,20 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
             className="flex items-center justify-end flex-wrap gap-2 text-xs"
             style={{ gridColumn: "2 / -1", color: "var(--text-primary)" }}
           >
-            <span>
+            <span role="alert">
               Delete “{voice.label}”?
               {confirm.uses.length > 0 && (
                 <> It is the voice {joinUses(confirm.uses)} — that falls back to the default.</>
               )}
             </span>
-            <button type="button" className={BUTTON_CLASS} style={BUTTON_STYLE} disabled={confirm.busy} onClick={on.onCancelDelete}>
+            <button
+              ref={cancelRef}
+              type="button"
+              className={BUTTON_CLASS}
+              style={BUTTON_STYLE}
+              disabled={confirm.busy}
+              onClick={cancel}
+            >
               Cancel
             </button>
             <button
@@ -131,7 +157,14 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
             )}
           </span>
           {custom ? (
-            <button type="button" aria-label={`Delete ${voice.label}`} className={GHOST_CLASS} style={GHOST_STYLE} onClick={on.onDelete}>
+            <button
+              ref={deleteRef}
+              type="button"
+              aria-label={`Delete ${voice.label}`}
+              className={GHOST_CLASS}
+              style={GHOST_STYLE}
+              onClick={on.onDelete}
+            >
               🗑
             </button>
           ) : (
