@@ -1,26 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { listVoices } from "anytts";
-import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "../openaiVoices";
+import { OPENAI_VOICE_MAP } from "../openaiVoices";
+import { __resetOpenaiVoicesForTests, reloadOpenaiVoices } from "../useOpenaiVoices";
 import { voicesOf } from "../voicesOf";
+import { jsonResponse, stubFetch } from "../../../test-utils";
+import { LIVE_VOICES, OPENAI_VOICES_URL, voicesBody } from "./openaiVoiceFixtures";
+
+afterEach(() => {
+  __resetOpenaiVoicesForTests();
+});
 
 describe("voicesOf", () => {
-  it("voicesOf returns the OmniVoice catalog for openai", () => {
-    const voices = voicesOf("openai");
-    expect(voices).toEqual(OPENAI_CATALOG);
-    expect(voices).toHaveLength(14);
-    expect(voices.some((voice) => voice.id === "auto")).toBe(false);
-    expect(voices.every((voice) => voice.multilingual === false)).toBe(true);
-  });
-
-  it("voicesOf defers to listVoices for other engines", () => {
-    expect(voicesOf("edge")).toEqual(listVoices("edge"));
+  it("voicesOf returns the live list for openai and anytts for others", () => {
+    expect(voicesOf("openai", LIVE_VOICES)).toBe(LIVE_VOICES);
+    expect(voicesOf("edge", LIVE_VOICES)).toEqual(listVoices("edge"));
     expect(voicesOf("edge").length).toBeGreaterThan(0);
   });
 
-  it("the OpenAI voice map points into the catalog", () => {
-    const ids = OPENAI_CATALOG.map((voice) => voice.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(OPENAI_VOICE_MAP).toEqual({ pl: "cand-pl-f2", en: "cand-en-gb-f2", default: "cand-pl-f2" });
-    for (const id of Object.values(OPENAI_VOICE_MAP)) expect(ids).toContain(id);
+  it("voicesOf reads the last loaded list when none is passed", async () => {
+    expect(voicesOf("openai")).toEqual([]);
+    stubFetch({ [OPENAI_VOICES_URL]: () => jsonResponse(voicesBody()) });
+    await reloadOpenaiVoices();
+    expect(voicesOf("openai")).toEqual(LIVE_VOICES);
+  });
+
+  it("the OpenAI voice map defaults every language to my-voice", () => {
+    expect(OPENAI_VOICE_MAP).toEqual({ pl: "my-voice", en: "my-voice", default: "my-voice" });
   });
 });

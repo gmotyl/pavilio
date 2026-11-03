@@ -9,6 +9,11 @@
  * go. See `App.tsx`.
  */
 import type { ReactNode } from "react";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
+import { CASCADE } from "../speech/engines";
+import { usePrimeOpenaiVoices } from "../speech/useOpenaiVoices";
+import { getCascadeOrder, getStoredEngine } from "../speech/voices";
 import {
   SpeechHostProvider,
   type FocusedCellPort,
@@ -71,8 +76,23 @@ const focusedCell: FocusedCellPort = {
   },
 };
 
+/**
+ * Whether speech may synthesize with the OpenAI-compatible engine: it is the
+ * engine, or a cascade member that is on. Then the OmniVoice list is loaded
+ * at app level, so a saved openai voice is known after a page reload.
+ */
+function speaksWithOpenai(): boolean {
+  const engine = getStoredEngine();
+  if (engine === "openai") return true;
+  return engine === CASCADE && getCascadeOrder().some((entry) => entry.id === "openai" && entry.on);
+}
+
 export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   const drawerVisible = useTerminalDrawerVisible();
+  // Subscriptions only: `speaksWithOpenai` reads both through `voices.ts`.
+  usePreference(preferences.speechEngine);
+  usePreference(preferences.speechCascadeOrder);
+  usePrimeOpenaiVoices(speaksWithOpenai());
   return (
     <SpeechHostProvider
       sessionOf={sessionOf}

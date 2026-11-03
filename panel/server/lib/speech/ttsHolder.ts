@@ -1,6 +1,7 @@
-import type { EdgeEngineOptions, EngineStatus, Tts, TtsConfig } from "anytts";
+import type { EdgeEngineOptions, EngineStatus, Tts, TtsConfig, VoiceInfo } from "anytts";
 import { createTts as createServerTts } from "anytts/server";
-import { OPENAI_CATALOG, OPENAI_VOICE_MAP } from "../../../src/features/speech/openaiVoices";
+import { OPENAI_VOICE_MAP } from "../../../src/features/speech/openaiVoices";
+import { resolveVoiceMap } from "./openaiCatalog.js";
 import { resolveKey as resolveSecret, type KeyVar } from "./secrets.js";
 
 /**
@@ -48,6 +49,11 @@ export interface TtsHolderOptions {
   resolveKey?: typeof resolveSecret;
   /** Read-aloud WebSocket factory for the instance's `edge`; route tests inject a fake one. */
   transport?: EdgeEngineOptions["transport"];
+  /**
+   * The OpenAI-compatible engine's live catalog (`openaiCatalog`), read on every build. Default:
+   * none, so `openai` stays out until the server wires its catalog in.
+   */
+  catalog?: { current(): readonly VoiceInfo[] };
 }
 
 export interface TtsHolder {
@@ -62,6 +68,7 @@ export interface TtsHolder {
 function configFrom(
   resolveKey: typeof resolveSecret,
   transport: EdgeEngineOptions["transport"] | undefined,
+  catalog: readonly VoiceInfo[],
 ): TtsConfig {
   const key = (name: KeyVar): string | undefined => resolveKey(name).value;
   const keyed = (name: KeyVar) => {
@@ -100,12 +107,16 @@ function configFrom(
     azure,
     edge: transport ? { transport } : {},
   };
-  if (baseUrl && baseUrlOk) {
+  // anytts needs at least one voice: until the first refresh brings the server's list (or while
+  // a server that was down at boot stays down) `openai` is left out, and the refresh that brings
+  // voices rebuilds the holder.
+  if (baseUrl && baseUrlOk && catalog.length > 0) {
     members.openai = {
       baseUrl,
-      // anytts takes a mutable array; the shared catalog stays read-only.
-      catalog: [...OPENAI_CATALOG],
-      voices: OPENAI_VOICE_MAP,
+      // anytts takes a mutable array; the live catalog stays read-only.
+      catalog: [...catalog],
+      // Defaults the server lacks fall back to a voice it has, never an unknown-voice error.
+      voices: resolveVoiceMap(OPENAI_VOICE_MAP, catalog),
       languageField: "language",
     };
   }
@@ -123,8 +134,8 @@ function configFrom(
 }
 
 export function createTtsHolder(options: TtsHolderOptions = {}): TtsHolder {
-  const { createTts = createServerTts, resolveKey = resolveSecret, transport } = options;
-  const build = (): Tts => createTts(configFrom(resolveKey, transport));
+  const { createTts = createServerTts, resolveKey = resolveSecret, transport, catalog } = options;
+  const build = (): Tts => createTts(configFrom(resolveKey, transport, catalog?.current() ?? []));
   let instance = build();
   return {
     current: () => instance,

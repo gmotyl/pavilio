@@ -98,12 +98,13 @@ describe("cascade requests through the speech seam", () => {
       cartesia: CARTESIA_SECOND,
       speechify: voices.catalogDefaultVoice("speechify"),
       azure: voices.catalogDefaultVoice("azure"),
-      openai: voices.catalogDefaultVoice("openai"),
       edge: ANDREW,
     };
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
     expect(Object.values(expectedVoices).every(Boolean)).toBe(true);
+    // No openai voice: the browser lists none until it reads the OmniVoice server's catalog,
+    // so the server speaks with its own default.
     // `openai` leads the default order; the server drops it when it has no address.
     const order = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
@@ -118,6 +119,9 @@ describe("cascade requests through the speech seam", () => {
       pronunciation,
     });
     expect(request.voice).toBeUndefined();
+    // No openai voice: the browser lists none until it reads the OmniVoice server's catalog,
+    // so the server speaks with its own default.
+    expect(Object.hasOwn(request.voices ?? {}, "openai")).toBe(false);
 
     // One relay call carries the whole walk; the text is not respelled here.
     expect(relayed).toEqual([

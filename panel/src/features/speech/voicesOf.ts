@@ -1,7 +1,14 @@
 import { listVoices, type VoiceInfo } from "anytts";
-import { OPENAI_CATALOG } from "./openaiVoices";
+import { currentOpenaiVoices } from "./useOpenaiVoices";
 
-/** The voices an engine offers: the panel's OmniVoice catalog for `openai`, anytts's list otherwise. */
-export function voicesOf(engine: string): readonly VoiceInfo[] {
-  return engine === "openai" ? OPENAI_CATALOG : listVoices(engine);
+/**
+ * The voices an engine offers. For `openai` that is the OmniVoice server's live list: a caller
+ * that renders passes the `useOpenaiVoices()` list (so it re-renders when the list changes), and
+ * the settings boundary reads the last loaded one. Every other engine lists anytts's catalog.
+ */
+export function voicesOf(
+  engine: string,
+  openaiVoices: readonly VoiceInfo[] = currentOpenaiVoices(),
+): readonly VoiceInfo[] {
+  return engine === "openai" ? openaiVoices : listVoices(engine);
 }

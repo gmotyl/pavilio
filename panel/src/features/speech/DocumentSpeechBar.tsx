@@ -6,6 +6,7 @@ import { formatBytes } from "./formatBytes";
 import { clearPage, loadPageList, pageCachedShare, subscribePageCache } from "./pageCache";
 import { SpeechTransport } from "./SpeechTransport";
 import { usePageSpeech, usePanelSpeech } from "./SpeechHostProvider";
+import { useOpenaiVoicesSnapshot } from "./useOpenaiVoices";
 import { voiceForDocKey } from "./voices";
 
 const LABEL_STYLE = {
@@ -72,8 +73,10 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
   // Resolved by the same speech-side rule the terminal's `voiceForSession`
   // uses for a `doc:` key (speech may not import terminal); both voice
   // preferences are subscribed to only so a change re-reads it.
+  // So is the live OmniVoice list, which a saved openai voice waits for.
   usePreference(preferences.speechVoice);
   usePreference(preferences.speechVoiceByProject);
+  useOpenaiVoicesSnapshot();
   const voice = voiceForDocKey(docKey);
 
   // One string snapshot, so `useSyncExternalStore` sees an unchanged share as

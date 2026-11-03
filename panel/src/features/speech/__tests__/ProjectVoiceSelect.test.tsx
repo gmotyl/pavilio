@@ -3,14 +3,13 @@
  * option labelled with the voice it resolves to, and an override shows a tag.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ProjectVoiceSelect } from "../ProjectVoiceSelect";
 import { listVoices } from "anytts";
 
 import { groupVoices } from "../voiceGroups";
-import { OPENAI_CATALOG } from "../openaiVoices";
 import {
   DEFAULT_SPEECH_VOICE,
   getProjectVoice,
@@ -20,6 +19,9 @@ import {
 } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
+import { stubFetch } from "../../../test-utils";
+import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { EN_MALE, LIVE_VOICES, MY_VOICE, OPENAI_VOICES_URL, voicesBody } from "./openaiVoiceFixtures";
 
 const ANDREW = "en-US-AndrewMultilingualNeural";
 const EMMA = "en-US-EmmaMultilingualNeural";
@@ -37,6 +39,8 @@ function select(): HTMLSelectElement {
 describe("ProjectVoiceSelect", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    __resetOpenaiVoicesForTests();
   });
 
   it("with no override the select shows the default voice by name", () => {
@@ -128,23 +132,21 @@ describe("ProjectVoiceSelect", () => {
     expect(select().selectedOptions[0]!.textContent).toBe(`Default — ${labelOf(DEFAULT_SPEECH_VOICE)}`);
   });
 
-  it("project voice select lists openai catalog voices", async () => {
+  it("project voice select lists openai live catalog voices", async () => {
     vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
+    stubFetch({ [OPENAI_VOICES_URL]: voicesBody() });
     expect(setStoredEngine("openai")).toBe("openai");
     const user = userEvent.setup();
     render(<ProjectVoiceSelect project="p" />);
 
+    await waitFor(() => expect(within(select()).getAllByRole("option")).toHaveLength(LIVE_VOICES.length + 1));
     const options = within(select()).getAllByRole("option") as HTMLOptionElement[];
     expect(options[0]!.value).toBe("");
-    // "Default" names the catalog voice the engine falls back to.
-    const labels = new Set(OPENAI_CATALOG.map((v) => v.label));
-    expect(labels.has(options[0]!.textContent!.replace(/^Default — /, ""))).toBe(true);
-    const values = options.slice(1).map((option) => option.value);
-    expect(values).toHaveLength(14);
-    expect(new Set(values)).toEqual(new Set(OPENAI_CATALOG.map((v) => v.id)));
-    expect(values).not.toContain("auto");
-    const expected = groupVoices([...OPENAI_CATALOG], "pl-PL");
+    // "Default" names the live voice the engine falls back to: the map's my-voice.
+    expect(options[0]!.textContent).toBe(`Default — ${MY_VOICE.label}`);
+    const expected = groupVoices([...LIVE_VOICES], "pl-PL");
     const groups = Array.from(select().querySelectorAll("optgroup"));
+    expect(groups.map((group) => group.label)).toEqual(["Multilingual", "Polish", "English"]);
     expect(groups.map((group) => group.label)).toEqual(expected.map((group) => group.label));
     groups.forEach((group, index) => {
       expect(Array.from(group.querySelectorAll("option")).map((option) => option.value)).toEqual(
@@ -152,8 +154,8 @@ describe("ProjectVoiceSelect", () => {
       );
     });
 
-    await user.selectOptions(select(), "cand-pl-m3");
-    expect(getProjectVoice("p")).toBe("cand-pl-m3");
+    await user.selectOptions(select(), EN_MALE.id);
+    expect(getProjectVoice("p")).toBe(EN_MALE.id);
     expect(screen.getByText("overrides default")).toBeTruthy();
   });
 });

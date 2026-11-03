@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import type { SpeechHostProvider } from "../../speech/SpeechHostProvider";
 
@@ -31,6 +31,12 @@ vi.mock("../useTerminalDrawer", async (importOriginal) => ({
   useTerminalDrawerVisible: () => state.drawerVisible,
 }));
 
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
+import { jsonResponse, stubFetch } from "../../../test-utils";
+import { __resetOpenaiVoicesForTests } from "../../speech/useOpenaiVoices";
+import { voiceForProject } from "../../speech/voices";
+import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "../../speech/__tests__/openaiVoiceFixtures";
 import { TerminalSpeechHost } from "../TerminalSpeechHost";
 import { dismissAttentionOnArrival } from "../attentionArrival";
 import { getAnswerWaiting, holdAnswer, isAnswerHeld, noteTransport, releaseAnswer } from "../answerWaiting";
@@ -46,6 +52,8 @@ afterEach(() => {
   state.sessions = [];
   state.drawerVisible = false;
   publishStandaloneTerminalFocus(null);
+  __resetOpenaiVoicesForTests();
+  vi.unstubAllGlobals();
 });
 
 describe("TerminalSpeechHost", () => {
@@ -95,5 +103,34 @@ describe("TerminalSpeechHost", () => {
       noteTransport,
       isHeld: isAnswerHeld,
     });
+  });
+
+  it("primes the OmniVoice list, so a saved openai voice resolves after a reload", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoice, { openai: PL_FEMALE.id });
+    const fetchMock = stubFetch({ [OPENAI_VOICES_URL]: () => jsonResponse(voicesBody(LIVE_VOICES)) });
+
+    render(<TerminalSpeechHost>child</TerminalSpeechHost>);
+
+    await waitFor(() => expect(voiceForProject(undefined)).toBe(PL_FEMALE.id));
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith(OPENAI_VOICES_URL))).toHaveLength(1);
+  });
+
+  it("primes the list under a cascade that runs openai, and asks for nothing otherwise", async () => {
+    const fetchMock = stubFetch({ [OPENAI_VOICES_URL]: () => jsonResponse(voicesBody(LIVE_VOICES)) });
+    const listed = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(OPENAI_VOICES_URL));
+
+    writePreference(preferences.speechEngine, "edge");
+    const edge = render(<TerminalSpeechHost>child</TerminalSpeechHost>);
+    expect(listed()).toHaveLength(0);
+    edge.unmount();
+
+    writePreference(preferences.speechEngine, "cascade");
+    writePreference(preferences.speechCascadeOrder, [
+      { id: "edge", on: true },
+      { id: "openai", on: true },
+    ]);
+    render(<TerminalSpeechHost>child</TerminalSpeechHost>);
+    await waitFor(() => expect(listed()).toHaveLength(1));
   });
 });

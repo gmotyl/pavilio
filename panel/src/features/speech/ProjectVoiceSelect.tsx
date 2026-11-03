@@ -1,5 +1,5 @@
 import { useMemo, useRef, type CSSProperties } from "react";
-import { listEngines } from "anytts";
+import { listEngines, type VoiceInfo } from "anytts";
 
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
@@ -7,6 +7,7 @@ import { CASCADE } from "./engines";
 import { isAddressEngine, isKeyless, useEngineInfo, type EngineInfo } from "./useEngineInfo";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import { groupVoices } from "./voiceGroups";
+import { useOpenaiVoices } from "./useOpenaiVoices";
 import { voicesOf } from "./voicesOf";
 import {
   catalogDefaultVoice,
@@ -70,7 +71,9 @@ function SingleEngineVoiceSelect({ project }: { project: string }) {
   usePreference(preferences.speechVoiceByProject);
 
   const engine = getStoredEngine();
-  const catalog = useMemo(() => voicesOf(engine), [engine]);
+  const { voices: openaiVoices } = useOpenaiVoices(engine === "openai");
+
+  const catalog = useMemo(() => voicesOf(engine, openaiVoices), [engine, openaiVoices]);
   const groups = useMemo(() => groupVoices(catalog, browserLanguage()), [catalog]);
   const defaultVoice = resolveStoredVoice(storedDefault).voice;
   const defaultLabel = catalog.find((voice) => voice.id === defaultVoice)?.label ?? defaultVoice;
@@ -143,6 +146,7 @@ function CascadeProjectVoices({ project }: { project: string }) {
   usePreference(preferences.speechVoiceByProject);
 
   const members = getCascadeOrder().filter((entry) => entry.on);
+  const { voices: openaiVoices } = useOpenaiVoices(members.some((entry) => entry.id === "openai"));
   const own = getProjectVoices(project);
   const defaults = getStoredVoices();
   const labels = useMemo(() => new Map(listEngines().map((engine) => [engine.id, engine.label])), []);
@@ -173,6 +177,7 @@ function CascadeProjectVoices({ project }: { project: string }) {
             info={engines?.[entry.id]}
             override={own[entry.id] ?? null}
             defaultVoice={defaults[entry.id] ?? catalogDefaultVoice(entry.id)}
+            openaiVoices={openaiVoices}
           />
         ))}
       </ol>
@@ -193,12 +198,14 @@ interface MemberVoiceRowProps {
   info: EngineInfo | undefined;
   override: string | null;
   defaultVoice: string | undefined;
+  /** The OmniVoice server's live list, for the `openai` member. */
+  openaiVoices: readonly VoiceInfo[];
 }
 
 function MemberVoiceRow(props: MemberVoiceRowProps) {
   const { project, engine, label, narrow, override } = props;
   const skipped = isKeyless(props.info);
-  const catalog = useMemo(() => voicesOf(engine), [engine]);
+  const catalog = useMemo(() => voicesOf(engine, props.openaiVoices), [engine, props.openaiVoices]);
   const groups = useMemo(() => groupVoices(catalog, browserLanguage()), [catalog]);
   const defaultLabel =
     catalog.find((voice) => voice.id === props.defaultVoice)?.label ?? props.defaultVoice ?? "";

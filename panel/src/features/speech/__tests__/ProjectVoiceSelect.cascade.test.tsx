@@ -21,8 +21,10 @@ import {
   setStoredEngine,
   voiceFor,
 } from "../voices";
-import { OPENAI_CATALOG } from "../openaiVoices";
 import { stubFetch } from "../../../test-utils";
+import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { groupVoices } from "../voiceGroups";
+import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "./openaiVoiceFixtures";
 
 type EngineInfo = {
   id: string;
@@ -70,8 +72,8 @@ function rowSelect(id: string): HTMLSelectElement {
 }
 
 /** Renders the card's voice control and waits for the engines list to land. */
-async function renderCascade(keyless: readonly string[] = []) {
-  const fetchMock = stubFetch({ "/api/speech/engines": engineList(keyless) }, null);
+async function renderCascade(keyless: readonly string[] = [], extra: Record<string, unknown> = {}) {
+  const fetchMock = stubFetch({ "/api/speech/engines": engineList(keyless), ...extra }, null);
   render(<ProjectVoiceSelect project="p" />);
   await waitFor(() =>
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/speech/engines"))).toBe(true),
@@ -86,6 +88,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  __resetOpenaiVoicesForTests();
 });
 
 describe("ProjectVoiceSelect under the cascade", () => {
@@ -169,22 +172,28 @@ describe("ProjectVoiceSelect under the cascade", () => {
     }
   });
 
-  it("the openai member lists the OmniVoice catalog", async () => {
+  it("the openai member lists the live catalog", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
     setCascadeOrder([
       { id: "openai", on: true },
       { id: "edge", on: true },
     ]);
-    await renderCascade();
+    await renderCascade([], { [OPENAI_VOICES_URL]: voicesBody() });
 
     const select = rowSelect("openai");
     expect(select).toBeEnabled();
+    await waitFor(() => expect(within(select).getAllByRole("option")).toHaveLength(LIVE_VOICES.length + 1));
     const options = within(select).getAllByRole("option") as HTMLOptionElement[];
     expect(options[0]!.value).toBe("");
-    // The panel's catalog, not anytts's (empty) list for the engine, and no `auto`.
-    const ids = options.slice(1).map((o) => o.value);
-    expect(ids.sort()).toEqual(OPENAI_CATALOG.map((v) => v.id).sort());
-    expect(ids).toHaveLength(14);
-    expect(ids).not.toContain("auto");
+    // The server's list, not anytts's (empty) list for the engine, in the Settings groups.
+    expect(Array.from(select.querySelectorAll("optgroup")).map((group) => group.label)).toEqual(
+      groupVoices([...LIVE_VOICES], "pl-PL").map((group) => group.label),
+    );
+    expect(options.slice(1).map((o) => o.value).sort()).toEqual(LIVE_VOICES.map((v) => v.id).sort());
+
+    await userEvent.setup().selectOptions(select, PL_FEMALE.id);
+    expect(getProjectVoices("p").openai).toBe(PL_FEMALE.id);
+    expect(voiceFor("openai", "p")).toBe(PL_FEMALE.id);
   });
 
   it("an openai member with no address is skipped for want of one", async () => {

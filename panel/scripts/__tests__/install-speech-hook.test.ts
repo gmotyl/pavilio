@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -97,11 +98,26 @@ let opencodeRoot: string;
 let opencodePluginsDir: string;
 let opencodeLinkPath: string;
 
+/**
+ * The installer's environment: HOME redirected into the sandbox, and no OmniVoice
+ * address, so the voice-seeding step after the hooks always skips with one line
+ * instead of posting the workspace's voices to a real server.
+ */
+function childEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    PANEL_AUTH_STATE_DIR: join(home, ".panel"),
+    OPENAI_TTS_BASE_URL: "",
+  };
+}
+
 function run(...args: string[]) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     // The installer resolves the settings file from HOME, so redirecting HOME
     // keeps every run inside the sandbox and away from the real ~/.claude.
-    env: { ...process.env, HOME: home, USERPROFILE: home },
+    env: childEnv(),
     encoding: "utf8",
   });
 }
@@ -153,7 +169,7 @@ path.resolve = (...parts) => {
     process.execPath,
     ["--import", pathToFileURL(stub).href, SCRIPT],
     {
-      env: { ...process.env, HOME: home, USERPROFILE: home },
+      env: childEnv(),
       encoding: "utf8",
     },
   );
@@ -448,6 +464,8 @@ function runWithRetiredRegistration(...args: string[]) {
   const stagedDir = join(home, "staged-repo", "panel", "scripts");
   mkdirSync(stagedDir, { recursive: true });
   const staged = join(stagedDir, "install-speech-hook.mjs");
+  // The installer imports its seeding step from a sibling file.
+  copyFileSync(join(TEST_DIR, "..", "seed-omnivoice-voices.mjs"), join(stagedDir, "seed-omnivoice-voices.mjs"));
   writeFileSync(
     staged,
     source.replace(
@@ -458,7 +476,7 @@ function runWithRetiredRegistration(...args: string[]) {
     ),
   );
   return spawnSync(process.execPath, [staged, ...args], {
-    env: { ...process.env, HOME: home, USERPROFILE: home },
+    env: childEnv(),
     encoding: "utf8",
   });
 }

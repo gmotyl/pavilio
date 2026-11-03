@@ -39,8 +39,11 @@ import autoSyncRouter from "./routes/auto-sync.js";
 import systemRouter from "./routes/system.js";
 import speechRouter, { MAX_UTTERANCE_BYTES } from "./routes/speech.js";
 import { createTtsHandler } from "./routes/tts.js";
-import { createTtsHolder } from "./lib/speech/ttsHolder.js";
+import { createTtsHolder, isHttpUrl } from "./lib/speech/ttsHolder.js";
+import { createOpenaiCatalog } from "./lib/speech/openaiCatalog.js";
+import { resolveKey } from "./lib/speech/secrets.js";
 import { createSpeechEnginesRouter } from "./routes/speechEngines.js";
+import { createSpeechVoicesRouter } from "./routes/speechVoices.js";
 import { createSpeechUsageRouter } from "./routes/speechUsage.js";
 import { createUsageStore } from "./lib/speech/usage-store.js";
 import { createPageCacheRouter } from "./routes/pageCache.js";
@@ -197,9 +200,21 @@ export async function startPanel(
   // mounts below. `app.all` rather than a path-scoped `app.use`: `use` strips
   // the mount path from `req.path`, and both gates only 401 paths that start
   // with `/api/`, so under `use` they would wave every request through.
-  // One anytts instance for the whole server, built from the secrets store;
-  // the speech engine routes rebuild it when a key changes.
-  const ttsHolder = createTtsHolder();
+  // One anytts instance for the whole server, built from the secrets store and
+  // the OmniVoice server's live voice list; the speech engine routes rebuild it
+  // when a key changes, and the catalog rebuilds it when the list changes.
+  const openaiBaseUrl = () => {
+    const address = resolveKey("OPENAI_TTS_BASE_URL").value;
+    return address && isHttpUrl(address) ? address : undefined;
+  };
+  const openaiCatalog = createOpenaiCatalog({
+    baseUrl: openaiBaseUrl,
+    onChange: () => ttsHolder.rebuild(),
+  });
+  const ttsHolder = createTtsHolder({ catalog: openaiCatalog });
+  // Async: the first build has no OmniVoice voices, so `openai` sits out until
+  // this lands and its onChange rebuilds the holder. It never rejects.
+  void openaiCatalog.refresh();
   // One usage store for the whole server: its record chain only serializes callers
   // that share the instance, so every writer must use this one.
   const usageStore = createUsageStore();
@@ -236,7 +251,9 @@ export async function startPanel(
   app.use("/api/system", systemRouter);
   app.use("/api", preferencesRouter);
   app.use("/api/speech", speechRouter);
-  app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder }));
+  app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder, catalog: openaiCatalog }));
+  // The OmniVoice server's voices (list, clone, delete, sample) and the workspace voice copy.
+  app.use("/api/speech", createSpeechVoicesRouter({ catalog: openaiCatalog, baseUrl: openaiBaseUrl }));
   app.use("/api/speech", createSpeechUsageRouter({ store: usageStore }));
   // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
   app.use("/api/speech/page-cache", createPageCacheRouter());
