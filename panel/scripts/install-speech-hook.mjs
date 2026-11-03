@@ -23,6 +23,9 @@
  * execute-plan run) and `Notification` belongs to peon-ping, so neither is ever
  * written. `CLAUDE_REGISTRATIONS` below is the complete list.
  *
+ * After the hooks, an install also seeds missing custom OmniVoice voices (see
+ * seed-omnivoice-voices.mjs); `--uninstall` skips that.
+ *
  * Run from the repo root as `pnpm install:speech` (add `--uninstall` to remove).
  */
 import {
@@ -32,6 +35,7 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   renameSync,
   statSync,
   symlinkSync,
@@ -41,6 +45,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { seedFromEnvironment } from "./seed-omnivoice-voices.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -654,24 +659,49 @@ const opencodeTarget = {
 
 const TARGETS = [claudeTarget, codexTarget, opencodeTarget];
 
-const uninstalling = process.argv.slice(2).includes("--uninstall");
+/**
+ * The walk, then voice seeding (install only). Returns the exit code instead of
+ * exiting, so a test can import this file and drive it with injected targets
+ * and an injected seed step, without touching any real agent config.
+ *
+ * Only `--uninstall` changes the mode; any other argument still installs.
+ * Seeding never affects the exit code: it reports its own problems in one line.
+ */
+export async function main(argv, { targets = TARGETS, seed = seedFromEnvironment } = {}) {
+  const uninstalling = argv.includes("--uninstall");
 
-let anyFailed = false;
+  let anyFailed = false;
 
-for (const target of TARGETS) {
-  // The root is what proves the agent exists on this machine. Absent root ⇒
-  // skipped and said so, never an error: not having codex installed is normal.
-  if (!existsSync(target.root)) {
-    console.log(`${target.name}: skipped — ${target.root} does not exist`);
-    continue;
+  for (const target of targets) {
+    // The root is what proves the agent exists on this machine. Absent root ⇒
+    // skipped and said so, never an error: not having codex installed is normal.
+    if (!existsSync(target.root)) {
+      console.log(`${target.name}: skipped — ${target.root} does not exist`);
+      continue;
+    }
+    try {
+      console.log(`${target.name}: ${uninstalling ? target.uninstall() : target.install()}`);
+    } catch (err) {
+      anyFailed = true;
+      console.error(`install-speech-hook: ${target.name}: ${err.message}`);
+    }
   }
-  try {
-    console.log(`${target.name}: ${uninstalling ? target.uninstall() : target.install()}`);
-  } catch (err) {
-    anyFailed = true;
-    console.error(`install-speech-hook: ${target.name}: ${err.message}`);
+
+  // Clone the workspace's custom OmniVoice voices onto the configured server.
+  // Uninstalling removes hooks only; it never touches the server's voices.
+  if (!uninstalling) {
+    try {
+      await seed({ workspaceRoot: resolve(scriptDir, "..", "..") });
+    } catch (err) {
+      console.log(`voices: skipped — ${err.message}`);
+    }
   }
+
+  // Every agent got its turn; the exit status still reports that something broke.
+  return anyFailed ? 1 : 0;
 }
 
-// Every agent got its turn; the exit status still reports that something broke.
-process.exit(anyFailed ? 1 : 0);
+// Run only when executed directly (node / scripts/install:speech), never on import.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+  process.exit(await main(process.argv.slice(2)));
+}
