@@ -28,14 +28,14 @@ a wiki result is told apart from a launcher that never started:
 ```
 /pavilio-wiki [project | <project>:] "<question>"        # query (default)
 /pavilio-wiki [project] ingest [<input>…]                 # ingest; no inputs = all pending records
-/pavilio-wiki ingest knowledge [-yolo]                    # knowledge harvest (§ 5)
+/pavilio-wiki ingest knowledge [-yolo | --min <n>]        # knowledge harvest (§ 5)
 /pavilio-wiki knowledge ingest <input>…                   # ordinary ingest into the knowledge project
 /pavilio-wiki [project] lint                              # report only
 ```
 
 `ingest knowledge` (verb first) is the harvest; `knowledge ingest` (project first) is a plain
-ingest whose project happens to be `knowledge`. `/pavilio-wiki-ingest-knowledge [-yolo]` is the
-shortcut for the harvest.
+ingest whose project happens to be `knowledge`. `/pavilio-wiki-ingest-knowledge` is the
+shortcut for the harvest (it runs `--min 3` by default).
 
 Every `scripts/wiki` command runs from the workspace root and prints one JSON object; exit 0 ok,
 1 error, 2 ask the user.
@@ -54,7 +54,7 @@ is optional, and only its `## Archived Projects` rows are refused.
 
 ## 2. Pick the mode
 
-- `ingest knowledge [-yolo]` with no project argument before the verb → **Knowledge harvest**.
+- `ingest knowledge [-yolo | --min <n>]` with no project argument before the verb → **Knowledge harvest**.
 - `<p> ingest knowledge …` (a project before the verb) → refuse: `knowledge` as the first word
   after `ingest` is never an ordinary input. Point at `/pavilio-wiki ingest knowledge` for the
   harvest, or `/pavilio-wiki knowledge ingest <input>…` to ingest into the knowledge project.
@@ -285,7 +285,7 @@ Inputs:
 
 Moves generic findings from every project's `## Knowledge candidates` into topic knowledge pages
 of the shared `knowledge` project, linked both ways. Run only when the user asks
-(`/pavilio-wiki ingest knowledge [-yolo]` or `/pavilio-wiki-ingest-knowledge [-yolo]`); nothing
+(`/pavilio-wiki ingest knowledge [-yolo | --min <n>]` or `/pavilio-wiki-ingest-knowledge`); nothing
 moves on its own. Selection is the promotion: the ≥2-source rule does not apply here.
 
 1. **Target** — no `projects/knowledge/` → `scripts/project new knowledge --kind knowledge`
@@ -329,6 +329,10 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
 
      (counts illustrative). The user picks one; that batch is taken without per-item picking.
      For the rest the user chooses: drop it, or continue into manual mode with what is left.
+   - *`--min <n>`:* no question at all. Every cluster with count ≥ n is picked. Every cluster
+     below n is **kept**: not shown, not written, not cleared in step 7, so its items stay as
+     candidates and can reach n origins at a later harvest, when a new source repeats the finding.
+     No cluster meets n → release the lock, report the cluster counts and stop without a commit.
 5. **Page writers** — one `page_writer` per subject in knowledge-wiki mode
    (`agents/page_writer.md § Knowledge-wiki mode`), given the slug (`entities/<name>` for a tool,
    library or platform, `concepts/<name>` for a technique — reuse an existing `knowledge` page or
@@ -339,18 +343,19 @@ moves on its own. Selection is the promotion: the ≥2-source rule does not appl
    (idempotent; adds `- [[knowledge:wiki/<slug>]]` under the source page's `## Knowledge`). A
    failed writer's items get no back-link.
 7. **Clear** — write every id the harvest saw (picked, skipped and dropped) except the items of a
-   failed page writer to a JSON array file and run `scripts/wiki clear-candidates --ids
+   failed page writer and the items of clusters `--min` kept to a JSON array file and run `scripts/wiki clear-candidates --ids
    <file.json>`; `removed` must equal the number of ids in that file. A failed writer's items
    stay as candidates for the next harvest.
 8. **Index + overview** — `scripts/wiki index knowledge`, an `overview_writer` when pages changed,
    `index` again (exit 1 → stop before the commit, as in § Ingest).
 9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) listing
-   picked, skipped and dropped items with their origin project.
+   picked, skipped and dropped items with their origin project (with `--min`, the threshold and
+   the number of clusters kept instead of the skipped list).
 10. **Commit** — one commit for the whole harvest: `git add projects/knowledge` plus every
     origin project's `wiki/open-questions.md` and back-linked source pages, message
     `knowledge: wiki harvest <n> picked`. Then `lock release`.
 
-Report: clusters picked / skipped / dropped, knowledge pages created/updated, back-links added,
+Report: clusters picked / skipped (or kept, with `--min`) / dropped, knowledge pages created/updated, back-links added,
 failures — each failed writer's subject, its items left as candidates (steps 6–7).
 
 Steps 6–7 edit other projects' `open-questions.md` and source pages while holding only the
