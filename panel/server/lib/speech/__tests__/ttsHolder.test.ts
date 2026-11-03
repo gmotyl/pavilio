@@ -140,6 +140,7 @@ describe("server Tts holder", () => {
       voices: { pl: "pl-female", en: "en-male", default: "en-male" },
       languageField: "language",
       firstByteMs: OPENAI_FIRST_BYTE_TIMEOUT_MS,
+      retries: 0,
     });
     // A local server needs no key: it leads the cascade, ready.
     expect(configs[0]!.engines.cascade).toEqual({

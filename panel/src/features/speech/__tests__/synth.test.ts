@@ -108,7 +108,7 @@ describe("the anytts seam", () => {
           mode: "auto",
         },
         // The keyed engines and the cascade are relay clients, on every route.
-        cascade: { relayUrl: "/api/tts", firstByteMs: 60_000, stallMs: 15_000 },
+        cascade: { relayUrl: "/api/tts", firstByteMs: 120_000, stallMs: 15_000 },
         elevenlabs: keyed,
         cartesia: keyed,
         speechify: keyed,

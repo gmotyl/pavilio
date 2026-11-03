@@ -122,6 +122,8 @@ function configFrom(
       voices: resolveVoiceMap(OPENAI_VOICE_MAP, catalog),
       languageField: "language",
       firstByteMs: OPENAI_FIRST_BYTE_TIMEOUT_MS,
+      // A retry re-spends the whole wait on a server that synthesizes one clip at a time.
+      retries: 0,
     };
   }
 
