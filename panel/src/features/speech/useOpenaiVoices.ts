@@ -164,8 +164,12 @@ export function usePrimeOpenaiVoices(active: boolean): void {
     if (!active) return;
     // Several callers mount together: they share one request.
     void (inFlight ?? startLoad());
-    window.addEventListener("focus", reloadIfUnreachable);
-    return () => window.removeEventListener("focus", reloadIfUnreachable);
+    // Each caller registers its own listener: a shared function reference would be deduped by
+    // addEventListener, so one caller unmounting would remove it for every caller still mounted.
+    // Several listeners firing on one focus still share one request through `inFlight`.
+    const onFocus = () => reloadIfUnreachable();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [active]);
 }
 

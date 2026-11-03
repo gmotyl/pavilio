@@ -111,6 +111,29 @@ describe("useOpenaiVoices", () => {
     expect(calls()).toBe(2);
   });
 
+  it("unmounting one of two active consumers keeps the focus reload for the other", async () => {
+    let down = true;
+    const fetchMock = stubFetch({
+      [OPENAI_VOICES_URL]: () =>
+        down ? jsonResponse({ error: "unreachable" }, { status: 502 }) : jsonResponse(voicesBody()),
+    });
+    const calls = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(OPENAI_VOICES_URL)).length;
+    const settings = renderHook(() => useOpenaiVoices());
+    const host = renderHook(() => useOpenaiVoices());
+    await waitFor(() => expect(host.result.current.unreachable).toBe(true));
+    expect(calls()).toBe(1);
+
+    // Settings closes; the still-mounted consumer (TerminalSpeechHost) must keep listening.
+    settings.unmount();
+    down = false;
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(host.result.current.voices).toEqual(LIVE_VOICES));
+    // Both listeners firing on one focus still share a single request.
+    expect(calls()).toBe(2);
+  });
+
   it("a failed first load (no answer, a 500, an unreadable body) completes with failed set", async () => {
     let mode: "reject" | "500" | "malformed" | "up" = "reject";
     stubFetch({
