@@ -180,7 +180,8 @@ export function VoicesSection({ address }: { address: string }) {
       {unreachable && (
         <div role="alert" data-testid="voices-unreachable" className={BANNER_CLASS} style={BANNER_STYLE}>
           Can't reach the OmniVoice server at <code style={CODE}>{address}</code>. Start it (
-          <code style={CODE}>omnivoicectl start</code>) — the list reloads on its own when it answers.
+          <code style={CODE}>omnivoicectl start</code>) — speech picks it up within about a minute; this list
+          reloads when you return to the window or press Retry.
           <button data-testid="voices-retry" type="button" className={BUTTON_CLASS} style={{ ...BUTTON_STYLE, marginLeft: 6 }} onClick={() => void reload()}>
             Retry
           </button>

@@ -136,14 +136,24 @@ export function useOpenaiVoices(active = true): OpenaiVoices & { reload: () => P
   return { ...snapshot, reload: reloadOpenaiVoices };
 }
 
+/** A window focus while the last load found the OmniVoice server down asks again. */
+function reloadIfUnreachable(): void {
+  if (state.unreachable && !inFlight) void startLoad();
+}
+
 /**
  * Loads the list when the caller mounts (or turns `active` on), without subscribing to it: the
  * app-level primer, so a saved openai voice is known after a page reload without Settings open.
+ * While the server is unreachable, coming back to the window loads it again (the panel server
+ * retries on its own, so a server started meanwhile has usually answered by then).
  */
 export function usePrimeOpenaiVoices(active: boolean): void {
   useEffect(() => {
+    if (!active) return;
     // Several callers mount together: they share one request.
-    if (active) void (inFlight ?? startLoad());
+    void (inFlight ?? startLoad());
+    window.addEventListener("focus", reloadIfUnreachable);
+    return () => window.removeEventListener("focus", reloadIfUnreachable);
   }, [active]);
 }
 

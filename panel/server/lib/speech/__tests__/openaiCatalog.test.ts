@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { VoiceInfo } from "anytts";
-import { createOpenaiCatalog, resolveVoiceMap } from "../openaiCatalog";
+import { createOpenaiCatalog, resolveVoiceMap, type OpenaiCatalog } from "../openaiCatalog";
 import type { OmniVoiceRecord } from "../../../../src/features/speech/openaiVoices";
 
 const BASE = "http://127.0.0.1:8890";
@@ -42,6 +42,18 @@ const voice = (id: string, locale: string, multilingual = false): VoiceInfo => (
   multilingual,
 });
 
+// Every catalog a test builds, disposed after it so no recovery timer outlives the test.
+const built: OpenaiCatalog[] = [];
+function track(catalog: OpenaiCatalog): OpenaiCatalog {
+  built.push(catalog);
+  return catalog;
+}
+const create: typeof createOpenaiCatalog = (options) => track(createOpenaiCatalog(options));
+afterEach(() => {
+  for (const catalog of built.splice(0)) catalog.dispose();
+  vi.useRealTimers();
+});
+
 describe("openaiCatalog", () => {
   it("refresh maps records to voices and drops auto", async () => {
     const records = Array.from({ length: 18 }, (_, i) => record(`voice-${i}`));
@@ -54,7 +66,7 @@ describe("openaiCatalog", () => {
     });
     const fetch = jsonFetch(listing(records));
     const onChange = vi.fn();
-    const catalog = createOpenaiCatalog({ baseUrl: () => `${BASE}/`, fetch, onChange });
+    const catalog = create({ baseUrl: () => `${BASE}/`, fetch, onChange });
 
     expect(catalog.current()).toEqual([]);
     const result = await catalog.refresh();
@@ -81,7 +93,7 @@ describe("openaiCatalog", () => {
   it("identical refresh reports no change", async () => {
     const fetch = jsonFetch(listing([record("pl-female"), record("en-male", { locale: "en-US" })]));
     const onChange = vi.fn();
-    const catalog = createOpenaiCatalog({ baseUrl: () => BASE, fetch, onChange });
+    const catalog = create({ baseUrl: () => BASE, fetch, onChange });
 
     expect(await catalog.refresh()).toEqual({ changed: true });
     expect(await catalog.refresh()).toEqual({ changed: false });
@@ -101,7 +113,7 @@ describe("openaiCatalog", () => {
       });
     }) as unknown as typeof globalThis.fetch;
     const onChange = vi.fn();
-    const catalog = createOpenaiCatalog({ baseUrl: () => BASE, fetch, onChange, timeoutMs: 20 });
+    const catalog = create({ baseUrl: () => BASE, fetch, onChange, timeoutMs: 20 });
 
     await catalog.refresh();
     expect(catalog.current().map((v) => v.id)).toEqual(["pl-female"]);
@@ -124,7 +136,7 @@ describe("openaiCatalog", () => {
     let address: string | undefined;
     const fetch = jsonFetch(listing([record("pl-female")]));
     const onChange = vi.fn();
-    const catalog = createOpenaiCatalog({ baseUrl: () => address, fetch, onChange });
+    const catalog = create({ baseUrl: () => address, fetch, onChange });
 
     expect(await catalog.refresh()).toEqual({ changed: false });
     expect(fetch).not.toHaveBeenCalled();
@@ -150,7 +162,7 @@ describe("openaiCatalog", () => {
       return Promise.reject(new TypeError("fetch failed"));
     }) as unknown as typeof globalThis.fetch;
     const onChange = vi.fn();
-    const catalog = createOpenaiCatalog({ baseUrl: () => address, fetch, onChange });
+    const catalog = create({ baseUrl: () => address, fetch, onChange });
 
     await catalog.refresh();
     expect(catalog.current().map((v) => v.id)).toEqual(["a-only"]);
@@ -166,6 +178,61 @@ describe("openaiCatalog", () => {
     // Still down at the same address: nothing more to drop.
     expect(await catalog.refresh()).toEqual({ changed: false });
     expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("a server down at startup is picked up by the recovery retries", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let up = false;
+    const fetch = vi.fn(() =>
+      up
+        ? Promise.resolve(new Response(JSON.stringify(listing([record("pl-female")]))))
+        : Promise.reject(new TypeError("fetch failed")),
+    ) as unknown as typeof globalThis.fetch & ReturnType<typeof vi.fn>;
+    const onChange = vi.fn();
+    const catalog = create({ baseUrl: () => BASE, fetch, onChange });
+
+    await catalog.refresh();
+    expect(catalog.unreachable()).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    // Backoff: 15 s, 30 s, then every 60 s.
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(5);
+    expect(onChange).not.toHaveBeenCalled();
+
+    // The server comes up: the next retry lands its voices and rebuilds the holder.
+    up = true;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(6);
+    expect(catalog.unreachable()).toBe(false);
+    expect(catalog.current().map((v) => v.id)).toEqual(["pl-female"]);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    // Reachable: the retries stop.
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fetch).toHaveBeenCalledTimes(6);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("no address or a reachable server schedules no recovery", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let address: string | undefined;
+    const fetch = jsonFetch(listing([record("pl-female")]));
+    const catalog = create({ baseUrl: () => address, fetch, onChange: vi.fn() });
+
+    await catalog.refresh();
+    expect(vi.getTimerCount()).toBe(0);
+    address = BASE;
+    await catalog.refresh();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("resolveVoiceMap falls back by language then first voice", () => {

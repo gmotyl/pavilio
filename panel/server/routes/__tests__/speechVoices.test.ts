@@ -104,7 +104,8 @@ interface Loaded {
 function loadApp(address: string | null = fake.url): Loaded {
   const onChange = vi.fn();
   const baseUrl = () => address ?? undefined;
-  const catalog = createOpenaiCatalog({ baseUrl, onChange, timeoutMs: 1000 });
+  // No recovery retries: a test asks explicitly, and no timer may outlive it.
+  const catalog = createOpenaiCatalog({ baseUrl, onChange, timeoutMs: 1000, retryDelaysMs: [] });
   const app = express();
   app.use(express.json());
   app.use("/api/speech", createSpeechVoicesRouter({ catalog, baseUrl, workspaceRoot: root }));

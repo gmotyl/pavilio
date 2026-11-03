@@ -84,6 +84,33 @@ describe("useOpenaiVoices", () => {
     expect(result.current.voices).toEqual([]);
   });
 
+  it("a window focus while unreachable reloads the list", async () => {
+    let down = true;
+    const fetchMock = stubFetch({
+      [OPENAI_VOICES_URL]: () =>
+        down ? jsonResponse({ error: "unreachable" }, { status: 502 }) : jsonResponse(voicesBody()),
+    });
+    const calls = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(OPENAI_VOICES_URL)).length;
+    const { result } = renderHook(() => useOpenaiVoices());
+    await waitFor(() => expect(result.current.unreachable).toBe(true));
+    expect(calls()).toBe(1);
+
+    // OmniVoice started meanwhile: coming back to the window picks it up.
+    down = false;
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(result.current.voices).toEqual(LIVE_VOICES));
+    expect(result.current.unreachable).toBe(false);
+    expect(calls()).toBe(2);
+
+    // Reachable: a focus asks for nothing.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(calls()).toBe(2);
+  });
+
   it("no address empties the list", async () => {
     let address = true;
     stubFetch({

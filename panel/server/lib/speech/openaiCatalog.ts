@@ -18,6 +18,11 @@ export { resolveVoiceMap } from "../../../src/features/speech/openaiVoices";
  * `openai` on a network error. The last good list is kept only for the address that produced it:
  * a failed refresh at a different address drops it, so one server's voice ids are never sent to
  * another. With no address set there is nothing to ask, so the list is empty.
+ *
+ * Recovery: while the server is unreachable at a set address, the catalog asks again on its own
+ * on a backoff (15 s, 30 s, then every 60 s) until it answers, so an OmniVoice server started
+ * after the panel joins the cascade without a Settings visit. The timer is unref'd: it never
+ * keeps the process alive.
  */
 export interface OpenaiCatalog {
   /** The last good list, `auto` dropped. */
@@ -26,6 +31,8 @@ export interface OpenaiCatalog {
   unreachable(): boolean;
   /** Fetches the list again; never rejects. */
   refresh(): Promise<{ changed: boolean }>;
+  /** Cancels a pending recovery retry; a later failed refresh schedules one again. */
+  dispose(): void;
 }
 
 export interface OpenaiCatalogOptions {
@@ -37,9 +44,12 @@ export interface OpenaiCatalogOptions {
   onChange: () => void;
   /** How long one refresh may take. Default 3 s. */
   timeoutMs?: number;
+  /** Recovery delays while unreachable; the last one repeats. Default 15 s, 30 s, 60 s. */
+  retryDelaysMs?: readonly number[];
 }
 
 const DEFAULT_TIMEOUT_MS = 3000;
+const DEFAULT_RETRY_DELAYS_MS = [15_000, 30_000, 60_000];
 
 /** omnivoice-server's built-in voice: the model picks a voice per call, so it is not a catalog voice. */
 const AUTO_VOICE = "auto";
@@ -61,7 +71,13 @@ function voicesFrom(body: unknown): OmniVoiceInfo[] | undefined {
 }
 
 export function createOpenaiCatalog(options: OpenaiCatalogOptions): OpenaiCatalog {
-  const { baseUrl, fetch: fetchImpl = fetch, onChange, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const {
+    baseUrl,
+    fetch: fetchImpl = fetch,
+    onChange,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    retryDelaysMs = DEFAULT_RETRY_DELAYS_MS,
+  } = options;
   let voices: readonly OmniVoiceInfo[] = [];
   let key = JSON.stringify(voices);
   let isUnreachable = false;
@@ -70,6 +86,25 @@ export function createOpenaiCatalog(options: OpenaiCatalogOptions): OpenaiCatalo
   // Refreshes can overlap (boot, a key write, Settings opening); only the latest one may land,
   // so a slow earlier answer never overwrites a newer list.
   let generation = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryStep = 0;
+
+  function scheduleRecovery(): void {
+    if (retryTimer || retryDelaysMs.length === 0) return;
+    const delay = retryDelaysMs[Math.min(retryStep, retryDelaysMs.length - 1)];
+    retryStep++;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      void refresh();
+    }, delay);
+    retryTimer.unref?.();
+  }
+
+  function stopRecovery(): void {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    retryStep = 0;
+  }
 
   /** Replaces the list; true when it differs from the one it replaces. */
   function apply(next: readonly OmniVoiceInfo[]): boolean {
@@ -91,30 +126,35 @@ export function createOpenaiCatalog(options: OpenaiCatalogOptions): OpenaiCatalo
     }
   }
 
+  async function refresh(): Promise<{ changed: boolean }> {
+    const mine = ++generation;
+    const address = baseUrl();
+    let next: readonly OmniVoiceInfo[] | undefined = [];
+    if (address) next = await fetchVoices(address);
+    if (mine !== generation) return { changed: false };
+
+    if (!next) {
+      isUnreachable = true;
+      scheduleRecovery();
+      if (address === source) return { changed: false };
+      // Another server's list: drop it rather than offer its voice ids to this one.
+      source = address;
+      const dropped = apply([]);
+      if (dropped) onChange();
+      return { changed: dropped };
+    }
+    stopRecovery();
+    isUnreachable = false;
+    source = address;
+    const changed = apply(next);
+    if (changed) onChange();
+    return { changed };
+  }
+
   return {
     current: () => voices,
     unreachable: () => isUnreachable,
-    async refresh() {
-      const mine = ++generation;
-      const address = baseUrl();
-      let next: readonly OmniVoiceInfo[] | undefined = [];
-      if (address) next = await fetchVoices(address);
-      if (mine !== generation) return { changed: false };
-
-      if (!next) {
-        isUnreachable = true;
-        if (address === source) return { changed: false };
-        // Another server's list: drop it rather than offer its voice ids to this one.
-        source = address;
-        const dropped = apply([]);
-        if (dropped) onChange();
-        return { changed: dropped };
-      }
-      isUnreachable = false;
-      source = address;
-      const changed = apply(next);
-      if (changed) onChange();
-      return { changed };
-    },
+    refresh,
+    dispose: stopRecovery,
   };
 }
