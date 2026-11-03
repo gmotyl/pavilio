@@ -51,7 +51,10 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
       data-playing={playing ? "true" : "false"}
       style={{
         display: "grid",
-        gridTemplateColumns: "26px minmax(0, 1fr) auto 26px",
+        // The meta column takes what it needs up to half the row, then wraps its badges: an
+        // `auto` column kept them on one line and, in a narrow pane, squeezed the label to
+        // nothing and pushed 🗑 past the list's edge (a horizontal scroll inside the list).
+        gridTemplateColumns: "26px minmax(0, 1fr) fit-content(50%) 26px",
         alignItems: "center",
         gap: 8,
         padding: "5px 8px",
@@ -106,7 +109,11 @@ export function VoiceRow({ voice, compact, isDefault, playing, confirm, ...on }:
               {voice.id}
             </span>
           </span>
-          <span className="flex items-center gap-1.5 text-xs" style={{ whiteSpace: "nowrap", color: "var(--text-secondary)" }}>
+          <span
+            data-testid="voice-meta"
+            className="flex items-center justify-end flex-wrap gap-1.5 text-xs"
+            style={{ whiteSpace: "nowrap", minWidth: 0, color: "var(--text-secondary)" }}
+          >
             {!compact && <span data-testid="voice-locale">{voice.locale}</span>}
             <span>{voice.gender}</span>
             {voice.multilingual && (

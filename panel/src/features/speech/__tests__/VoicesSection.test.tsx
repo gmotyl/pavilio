@@ -183,6 +183,12 @@ describe("VoicesSection", () => {
     expect(screen.getByTestId("voices-section")).toHaveAttribute("data-compact", "true");
     expect(screen.queryAllByTestId("voice-locale")).toHaveLength(0);
     expect(within(voiceRow("my-voice")).getByText("male")).toBeInTheDocument();
+    // In a narrow pane the badges wrap inside a column capped at half the row, so the label
+    // keeps its width and 🗑 stays inside the list (no horizontal scroll in the list).
+    expect(voiceRow("my-voice").style.gridTemplateColumns).toBe("26px minmax(0, 1fr) fit-content(50%) 26px");
+    const meta = within(voiceRow("my-voice")).getByTestId("voice-meta");
+    expect(meta).toHaveClass("flex-wrap", "justify-end");
+    expect(meta).toHaveTextContent("custom");
   });
 
   it("play toggles one sample at a time", async () => {
