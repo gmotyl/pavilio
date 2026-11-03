@@ -178,7 +178,8 @@ function engine(): string {
  * respells in the browser from `lang`, by its configured switch.
  *
  * `openai` never names a voice the live OmniVoice list lacks (the server would
- * refuse it as unknown): one outside the list is dropped, so anytts takes the
+ * refuse it as unknown): one outside the list is dropped — from a cascade's
+ * `voices` too, once the list has loaded — so anytts takes the
  * map's default, resolved against the list. With no list loaded yet the
  * browser cannot know any voice, so the request goes out as a cascade of
  * `openai` alone, which names none, and the panel server picks its default.
@@ -198,6 +199,11 @@ function request(text: string, options: SpeechSynthesisOptions): SynthesisReques
   }
   if (id === CASCADE) {
     const voices = cascadeVoicesOf(options.voice);
+    // The same rule as a single openai request: never a voice a loaded list lacks.
+    const listed = currentOpenaiVoices();
+    if (voices?.openai !== undefined && listed.length > 0 && !listed.some((v) => v.id === voices.openai)) {
+      delete voices.openai;
+    }
     return {
       text,
       engine: id,

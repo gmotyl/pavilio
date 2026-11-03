@@ -18,9 +18,7 @@ import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { GridSpeech, SpeechMode } from "../speech/types";
-import { voiceForSession } from "./sessionVoice";
-import { preferences } from "../../preferences/declarations";
-import { usePreference } from "../../preferences/usePreference";
+import { useVoiceForSession } from "./sessionVoice";
 
 export interface SpeechControlBarProps {
   sessionId: string;
@@ -362,10 +360,8 @@ export function SpeechControlBar({
 
   // The voice the cell's units were synthesized in — its project's — or a
   // cached unit reads as cold: the cache keys on voice + text. Both voice
-  // preferences are subscribed to only so a change re-reads it here.
-  usePreference(preferences.speechVoice);
-  usePreference(preferences.speechVoiceByProject);
-  const voice = voiceForSession(sessionId);
+  // preferences and the live OmniVoice list re-read it — `useVoiceForSession`.
+  const voice = useVoiceForSession(sessionId);
 
   return (
     <div

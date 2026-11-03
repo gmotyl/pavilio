@@ -425,6 +425,36 @@ describe("the openai engine and the live catalog", () => {
     expect(req.voices).toBeUndefined();
     expect(lib.fake.state).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "cascade", order: ["openai"] }));
   });
+  it("a cascade request drops an openai voice the live list lacks", async () => {
+    prefs.engine = "cascade";
+    const { cascadeVoiceKey } = await import("../engines");
+    await loadLive([PL_FEMALE, EN_MALE]);
+
+    await synth.synthesizeSpeech("hello", { voice: cascadeVoiceKey({ edge: "en-US-EmmaMultilingualNeural", openai: MY_VOICE.id }) });
+    expect((lib.fake.synthesize.mock.calls.at(-1)![0] as SynthesisRequest).voices).toEqual({
+      edge: "en-US-EmmaMultilingualNeural",
+    });
+
+    // A listed voice is forwarded as before.
+    await synth.synthesizeSpeech("hello", { voice: cascadeVoiceKey({ openai: EN_MALE.id }) });
+    expect((lib.fake.synthesize.mock.calls.at(-1)![0] as SynthesisRequest).voices).toEqual({ openai: EN_MALE.id });
+  });
+
+  it("extra voice record fields neither rebuild the instance nor reach anytts", async () => {
+    prefs.engine = "openai";
+    const withExtras = { ...PL_FEMALE, ref_text: "Dzień dobry", description: "a" } as OmniVoiceInfo;
+    await loadLive([withExtras, EN_MALE]);
+    await synth.synthesizeSpeech("cześć", { voice: PL_FEMALE.id });
+    expect((lib.createTts.mock.calls.at(-1)![0] as TtsConfig).engines.openai).toMatchObject({
+      catalog: [PL_FEMALE, EN_MALE],
+    });
+    expect(((lib.createTts.mock.calls.at(-1)![0] as TtsConfig).engines.openai!.catalog as unknown[])[0]).toEqual(PL_FEMALE);
+
+    // Only the extras changed: the same instance, so the audio cache survives.
+    await loadLive([{ ...withExtras, ref_text: "Cześć" } as OmniVoiceInfo, EN_MALE]);
+    await synth.synthesizeSpeech("cześć", { voice: PL_FEMALE.id });
+    expect(lib.createTts).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("toSpeechBlob", () => {

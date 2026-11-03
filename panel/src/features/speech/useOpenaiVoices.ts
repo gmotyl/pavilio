@@ -8,7 +8,10 @@
  * joins a load already in flight; `reload()` always asks again, and only the latest answer lands.
  *
  * The list starts empty and stays so until the first load: no openai voice can be picked, every
- * stored one reads as stale, and the seam lets the panel server pick the voice.
+ * stored one reads as stale, and the seam lets the panel server pick the voice. Stale is a READ:
+ * every write goes through the raw preference, so a saved voice survives until the list lands.
+ * `TerminalSpeechHost` primes the list at app level ({@link usePrimeOpenaiVoices}), and a
+ * render-time voice reader subscribes ({@link useOpenaiVoicesSnapshot}) so it re-reads then.
  */
 import { useEffect, useSyncExternalStore } from "react";
 import type { OmniVoiceInfo } from "./openaiVoices";
@@ -48,6 +51,14 @@ function isVoice(value: unknown): value is OmniVoiceInfo {
   );
 }
 
+/**
+ * Only the `VoiceInfo` fields: anything else the server adds to a record (`ref_text`, a
+ * description) would change the seam's instance key, rebuild anytts and empty the audio cache.
+ */
+function toStoredVoice({ id, label, locale, gender, multilingual, source }: OmniVoiceInfo): OmniVoiceInfo {
+  return { id, label, locale, gender, multilingual, source };
+}
+
 /** The state a route answer leads to, or undefined to keep the current one. */
 async function stateFrom(res: Response): Promise<OpenaiVoices | undefined> {
   // The OmniVoice server is down: the panel server's catalog keeps its last list, and so does this.
@@ -58,7 +69,7 @@ async function stateFrom(res: Response): Promise<OpenaiVoices | undefined> {
   const body = (await res.json().catch(() => null)) as Partial<OpenaiVoices> | null;
   if (!body || !Array.isArray(body.voices)) return undefined;
   return {
-    voices: body.voices.filter(isVoice),
+    voices: body.voices.filter(isVoice).map(toStoredVoice),
     unreachable: body.unreachable === true,
     workspaceOnly: typeof body.workspaceOnly === "number" ? body.workspaceOnly : 0,
   };
@@ -117,10 +128,27 @@ export function __resetOpenaiVoicesForTests(): void {
  * it asks the server for nothing.
  */
 export function useOpenaiVoices(active = true): OpenaiVoices & { reload: () => Promise<void> } {
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const snapshot = useOpenaiVoicesSnapshot();
+  usePrimeOpenaiVoices(active);
+  return { ...snapshot, reload: reloadOpenaiVoices };
+}
+
+/**
+ * Loads the list when the caller mounts (or turns `active` on), without subscribing to it: the
+ * app-level primer, so a saved openai voice is known after a page reload without Settings open.
+ */
+export function usePrimeOpenaiVoices(active: boolean): void {
   useEffect(() => {
-    // Several selects mount together: they share one request.
+    // Several callers mount together: they share one request.
     if (active) void (inFlight ?? startLoad());
   }, [active]);
-  return { ...snapshot, reload: reloadOpenaiVoices };
+}
+
+/**
+ * The store's snapshot, subscribed: a component that resolves a voice during render (through
+ * `voices.ts`, which reads {@link currentOpenaiVoices}) calls it so it re-renders when the list
+ * lands or changes. Loads nothing.
+ */
+export function useOpenaiVoicesSnapshot(): OpenaiVoices {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

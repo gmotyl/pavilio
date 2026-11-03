@@ -102,7 +102,9 @@ export function EngineSettings() {
   const width = usePaneWidth(rootRef);
   const narrow = width > 0 && width < SPEECH_ROWS_NARROW_BELOW;
   const { engines, failed, refresh } = useEngineInfo();
-  const { voices: openaiVoices, reload: reloadOpenaiVoices } = useOpenaiVoices();
+  // Only a row with an address has voices to list; saving one reloads below.
+  const openaiHasAddress = engines?.openai !== undefined && engines.openai.keySource !== "none";
+  const { voices: openaiVoices, reload: reloadOpenaiVoices } = useOpenaiVoices(openaiHasAddress);
   // Subscriptions: each value below is read through `voices.ts`, which repairs
   // and catalog-checks it; the hooks are here so a write re-renders the rows.
   usePreference(preferences.speechCascadeOrder);

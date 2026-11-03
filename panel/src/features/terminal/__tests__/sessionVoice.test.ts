@@ -5,10 +5,16 @@
  * path starts with.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
+import { jsonResponse, stubFetch } from "../../../test-utils";
+import { __resetOpenaiVoicesForTests, reloadOpenaiVoices } from "../../speech/useOpenaiVoices";
 import { setProjectVoice } from "../../speech/voices";
+import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "../../speech/__tests__/openaiVoiceFixtures";
 import { refreshSessions } from "../sessionStore";
-import { voiceForSession } from "../sessionVoice";
+import { useVoiceForSession, voiceForSession } from "../sessionVoice";
 import type { SessionMeta } from "../useTerminalSessions";
 
 const VIVIENNE = "fr-FR-VivienneMultilingualNeural";
@@ -43,6 +49,7 @@ async function seedSessions(sessions: SessionMeta[]): Promise<void> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  __resetOpenaiVoicesForTests();
 });
 
 describe("session voice", () => {
@@ -79,5 +86,19 @@ describe("session voice", () => {
 
     expect(voiceForSession("sess-t")).toBe(EMMA);
     expect(voiceForSession("doc-sess")).toBe(VIVIENNE);
+  });
+
+  it("a render-time reader re-reads the saved openai voice once the live list lands", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoice, { openai: PL_FEMALE.id });
+    stubFetch({ [OPENAI_VOICES_URL]: () => jsonResponse(voicesBody(LIVE_VOICES)) });
+
+    const { result } = renderHook(() => useVoiceForSession("sess-reload"));
+    // Before the list lands the saved voice cannot be checked, but reading it loses nothing.
+    expect(readPreference(preferences.speechVoice)).toEqual({ openai: PL_FEMALE.id });
+
+    await act(() => reloadOpenaiVoices());
+    expect(result.current).toBe(PL_FEMALE.id);
+    expect(readPreference(preferences.speechVoice)).toEqual({ openai: PL_FEMALE.id });
   });
 });

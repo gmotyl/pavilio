@@ -24,7 +24,7 @@ import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
 import type { GridSpeech, SpeechUnit } from "../speech/types";
 import { unplayedSinceLastPlayed } from "../speech/unreadAnswers";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
-import { voiceForSession } from "./sessionVoice";
+import { useVoiceForSession } from "./sessionVoice";
 import { type UnitToBlocks, alignToSegments, layoutRail, matchableBlocks } from "./layoutRail";
 import { matchUnitsToBlocks } from "../speech/matchUnitsToBlocks";
 import { segmentStateFor } from "./segmentState";
@@ -368,11 +368,9 @@ export function AnswerPane({
   // subscribing IS the point.
   useSyncExternalStore(subscribeCacheVersion, readCacheVersion);
 
-  // The session's voice, as the bar reads it — see `voiceForSession`.
-  // Subscribed to only so a voice change re-reads it here.
-  usePreference(preferences.speechVoice);
-  usePreference(preferences.speechVoiceByProject);
-  const voice = voiceForSession(sessionId);
+  // The session's voice, as the bar reads it — see `useVoiceForSession`,
+  // which re-reads it when a voice preference or the OmniVoice list changes.
+  const voice = useVoiceForSession(sessionId);
   const text = answer?.text ?? "";
   const answerId = answer?.id ?? null;
 
