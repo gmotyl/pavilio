@@ -15,7 +15,9 @@ export { resolveVoiceMap } from "../../../src/features/speech/openaiVoices";
  *
  * A failed refresh (connection refused, timeout, a non-2xx answer, a body that is not a voice
  * listing) keeps the last good list and marks the catalog unreachable; the cascade already skips
- * `openai` on a network error. With no address set there is nothing to ask, so the list is empty.
+ * `openai` on a network error. The last good list is kept only for the address that produced it:
+ * a failed refresh at a different address drops it, so one server's voice ids are never sent to
+ * another. With no address set there is nothing to ask, so the list is empty.
  */
 export interface OpenaiCatalog {
   /** The last good list, `auto` dropped. */
@@ -63,6 +65,8 @@ export function createOpenaiCatalog(options: OpenaiCatalogOptions): OpenaiCatalo
   let voices: readonly OmniVoiceInfo[] = [];
   let key = JSON.stringify(voices);
   let isUnreachable = false;
+  // The address the current list came from: a failed refresh keeps the list only for it.
+  let source: string | undefined;
   // Refreshes can overlap (boot, a key write, Settings opening); only the latest one may land,
   // so a slow earlier answer never overwrites a newer list.
   let generation = 0;
@@ -99,9 +103,15 @@ export function createOpenaiCatalog(options: OpenaiCatalogOptions): OpenaiCatalo
 
       if (!next) {
         isUnreachable = true;
-        return { changed: false };
+        if (address === source) return { changed: false };
+        // Another server's list: drop it rather than offer its voice ids to this one.
+        source = address;
+        const dropped = apply([]);
+        if (dropped) onChange();
+        return { changed: dropped };
       }
       isUnreachable = false;
+      source = address;
       const changed = apply(next);
       if (changed) onChange();
       return { changed };

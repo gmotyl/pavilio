@@ -142,6 +142,32 @@ describe("openaiCatalog", () => {
     expect(catalog.current()).toEqual([]);
   });
 
+  it("an address switch with a failed first refresh drops the old server's voices", async () => {
+    let address = BASE;
+    const OTHER = "http://127.0.0.1:9999";
+    const fetch = vi.fn((url: string) => {
+      if (url.startsWith(BASE)) return Promise.resolve(new Response(JSON.stringify(listing([record("a-only")]))));
+      return Promise.reject(new TypeError("fetch failed"));
+    }) as unknown as typeof globalThis.fetch;
+    const onChange = vi.fn();
+    const catalog = createOpenaiCatalog({ baseUrl: () => address, fetch, onChange });
+
+    await catalog.refresh();
+    expect(catalog.current().map((v) => v.id)).toEqual(["a-only"]);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    // Server B's address is saved while B is down: A's voices must not be offered to B.
+    address = OTHER;
+    expect(await catalog.refresh()).toEqual({ changed: true });
+    expect(catalog.unreachable()).toBe(true);
+    expect(catalog.current()).toEqual([]);
+    expect(onChange).toHaveBeenCalledTimes(2);
+
+    // Still down at the same address: nothing more to drop.
+    expect(await catalog.refresh()).toEqual({ changed: false });
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
   it("resolveVoiceMap falls back by language then first voice", () => {
     const map = { pl: "my-voice", en: "my-voice", de: "my-voice", default: "my-voice" };
 
