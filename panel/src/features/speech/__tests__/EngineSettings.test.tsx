@@ -17,6 +17,8 @@ import { groupVoices } from "../voiceGroups";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 import { jsonResponse, stubFetch } from "../../../test-utils";
+import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "./openaiVoiceFixtures";
 
 type EngineInfo = {
   id: string;
@@ -112,6 +114,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  __resetOpenaiVoicesForTests();
 });
 
 describe("EngineSettings", () => {
@@ -578,11 +581,32 @@ describe("EngineSettings", () => {
     expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
   });
 
-  it("openai voice select lists no voices until the browser reads the server's catalog", async () => {
+  it("openai voice selects list the live catalog", async () => {
+    const user = userEvent.setup();
     vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
-    await renderLoaded([...mockupEngines(), { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } }]);
+    await renderLoaded(
+      [...mockupEngines(), { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } }],
+      { [OPENAI_VOICES_URL]: voicesBody() },
+    );
 
-    // The catalog lives on the OmniVoice server now; there is no voice list in code.
+    // The OmniVoice server's list, read through the panel server, grouped like every engine's.
+    const voice = within(row("openai")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
+    await waitFor(() => expect(voice.options).toHaveLength(LIVE_VOICES.length));
+    expect(selectGroups(voice)).toEqual(
+      groupVoices([...LIVE_VOICES], "pl-PL").map((group) => ({ label: group.label, ids: group.voices.map((v) => v.id) })),
+    );
+    expect(selectGroups(voice).map((group) => group.label)).toEqual(["Multilingual", "Polish", "English"]);
+
+    await user.selectOptions(voice, PL_FEMALE.id);
+    expect(getStoredVoices().openai).toBe(PL_FEMALE.id);
+    expect(voice).toHaveValue(PL_FEMALE.id);
+  });
+
+  it("openai voice select lists nothing while the server has no address", async () => {
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET], {
+      [OPENAI_VOICES_URL]: () => jsonResponse({ error: "no-address" }, { status: 409 }),
+    });
+
     const voice = within(row("openai")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
     expect(Array.from(voice.options).map((option) => option.value)).toEqual([]);
   });

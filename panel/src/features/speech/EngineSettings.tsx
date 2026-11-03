@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react";
-import { listEngines } from "anytts";
+import { listEngines, type VoiceInfo } from "anytts";
 
 import { preferences, type CascadeEntry } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { groupVoices } from "./voiceGroups";
+import { useOpenaiVoices } from "./useOpenaiVoices";
 import { voicesOf } from "./voicesOf";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import {
@@ -101,6 +102,7 @@ export function EngineSettings() {
   const width = usePaneWidth(rootRef);
   const narrow = width > 0 && width < SPEECH_ROWS_NARROW_BELOW;
   const { engines, failed, refresh } = useEngineInfo();
+  const { voices: openaiVoices, reload: reloadOpenaiVoices } = useOpenaiVoices();
   // Subscriptions: each value below is read through `voices.ts`, which repairs
   // and catalog-checks it; the hooks are here so a write re-renders the rows.
   usePreference(preferences.speechCascadeOrder);
@@ -171,7 +173,12 @@ export function EngineSettings() {
             lastInCascade={entry.on && inCascade === 1}
             onMove={(by) => move(index, by)}
             onToggleCascade={(on) => toggle(entry.id, on)}
-            onKeyChanged={refresh}
+            openaiVoices={openaiVoices}
+            // A saved or removed address changes what the OmniVoice server lists.
+            onKeyChanged={async () => {
+              await refresh();
+              if (entry.id === "openai") await reloadOpenaiVoices();
+            }}
           />
         ))}
       </ol>
@@ -205,6 +212,8 @@ interface EngineRowProps {
   onMove: (by: -1 | 1) => void;
   onToggleCascade: (on: boolean) => void;
   onKeyChanged: () => Promise<void>;
+  /** The OmniVoice server's live list, for the `openai` row. */
+  openaiVoices: readonly VoiceInfo[];
 }
 
 function EngineRow(props: EngineRowProps) {
@@ -216,8 +225,12 @@ function EngineRow(props: EngineRowProps) {
   // The address engine's "key" is a server address: say so on its skip chip.
   if (chip && address && info?.status.state === "no-key") chip.text = "no address · skipped";
   const groups = useMemo(
-    () => groupVoices(voicesOf(id), typeof navigator === "undefined" ? "" : navigator.language),
-    [id],
+    () =>
+      groupVoices(
+        voicesOf(id, props.openaiVoices),
+        typeof navigator === "undefined" ? "" : navigator.language,
+      ),
+    [id, props.openaiVoices],
   );
   const voiceId = `speech-voice-${id}`;
 

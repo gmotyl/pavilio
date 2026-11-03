@@ -18,7 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
-import { OPENAI_VOICE_MAP } from "./openaiVoices";
+import { OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
 export const CASCADE = "cascade";
@@ -58,20 +58,27 @@ const KEYED_RELAY = {
 };
 
 /**
- * The browser's `openai` catalog. The real one lives on the OmniVoice server and only the panel
- * server holds it; anytts still needs a non-empty catalog that holds every voice the map names, so
- * the browser gets one entry per default. A cascade request names no openai voice (none can be
- * picked, see `voicesOf`), so the panel server speaks with its own default, resolved against the
- * live catalog; a request to `openai` alone names `my-voice`, which the server must have.
+ * The browser's `openai` relay client for the live list (`useOpenaiVoices`). Its catalog is the
+ * OmniVoice server's list, and its map the defaults resolved against that list exactly as the
+ * panel server resolves them, so a voice picked from the list is accepted and a default the server
+ * lacks is never named.
+ *
+ * anytts refuses an empty catalog, so before the first load (and with no address) the client gets
+ * a placeholder entry per default. Nothing ever sends it: with no live list `synth.ts` turns an
+ * `openai` request into a one-member cascade that names no voice, and the panel server picks.
  */
-function openaiRelayCatalog(): VoiceInfo[] {
-  return [...new Set(Object.values(OPENAI_VOICE_MAP))].map((id) => ({
-    id,
-    label: id,
-    locale: "und",
-    gender: "male",
-    multilingual: true,
-  }));
+export function openaiEngineConfig(live: readonly VoiceInfo[]): TtsConfig["engines"][string] {
+  const catalog: VoiceInfo[] =
+    live.length > 0
+      ? [...live]
+      : [...new Set(Object.values(OPENAI_VOICE_MAP))].map((id) => ({
+          id,
+          label: id,
+          locale: "und",
+          gender: "male",
+          multilingual: true,
+        }));
+  return { ...KEYED_RELAY, catalog, voices: resolveVoiceMap(OPENAI_VOICE_MAP, live) };
 }
 
 export const SPEECH_ENGINES: TtsConfig["engines"] = {
@@ -96,7 +103,8 @@ export const SPEECH_ENGINES: TtsConfig["engines"] = {
   // The local OpenAI-compatible server, reached through the relay like the
   // keyed engines. Always configured here: the browser cannot tell whether the
   // server has the address, and the server drops `openai` when it has not.
-  openai: { ...KEYED_RELAY, catalog: openaiRelayCatalog(), voices: OPENAI_VOICE_MAP },
+  // `synth.ts` swaps in the live list (`openaiEngineConfig`) once it is loaded.
+  openai: openaiEngineConfig([]),
 };
 
 /** The configured engine ids. */

@@ -55,3 +55,27 @@ export function toVoiceInfo(record: OmniVoiceRecord): OmniVoiceInfo {
     source: record.source === "custom" ? "custom" : "bundled",
   };
 }
+
+/** The language a locale names: its primary subtag, lowercased (`pl-PL` → `pl`). */
+const languageOf = (locale: string): string => locale.split(/[-_]/)[0]!.toLowerCase();
+
+/**
+ * The voice map with every entry checked against the catalog. An entry whose voice the server
+ * lacks falls back to the first voice in that language — a multilingual voice counts for every
+ * language — then to the first voice overall. With an empty catalog there is nothing to pick from,
+ * so the map comes back unchanged.
+ *
+ * The panel server builds its `Tts` with it and the browser its relay client, from the same list,
+ * so both name the same voice and neither asks for one the server lacks.
+ */
+export function resolveVoiceMap(map: VoiceMap, catalog: readonly VoiceInfo[]): VoiceMap {
+  if (catalog.length === 0) return map;
+  const ids = new Set(catalog.map((voice) => voice.id));
+  const resolved: VoiceMap = { ...map };
+  for (const [lang, id] of Object.entries(map)) {
+    if (ids.has(id)) continue;
+    const match = catalog.find((voice) => voice.multilingual || languageOf(voice.locale) === lang);
+    resolved[lang] = (match ?? catalog[0]!).id;
+  }
+  return resolved;
+}

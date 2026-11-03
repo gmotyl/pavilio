@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SynthesisRequest, Tts, TtsConfig } from "anytts";
-import { OPENAI_VOICE_MAP } from "../openaiVoices";
+import { OPENAI_VOICE_MAP, type OmniVoiceInfo } from "../openaiVoices";
+import { stubFetch } from "../../../test-utils";
+import { EN_MALE, MY_VOICE, PL_FEMALE } from "./openaiVoiceFixtures";
 
 /**
  * `synth.ts` is the panel's one seam over anytts. These tests swap the
@@ -350,6 +352,78 @@ describe("the anytts seam", () => {
     expect(
       synth.resolveSpeechVoice({ engine: "edge", voice: "en-US-AvaMultilingualNeural" }),
     ).toEqual({ voice: "en-US-AvaMultilingualNeural", fellBack: false });
+  });
+});
+
+describe("the openai engine and the live catalog", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Loads `voices` into the browser's live list, in this test's module registry. */
+  async function loadLive(voices: readonly OmniVoiceInfo[]): Promise<void> {
+    stubFetch({ "/api/speech/openai/voices": { voices, unreachable: false, workspaceOnly: 0 } });
+    const store = await import("../useOpenaiVoices");
+    await store.reloadOpenaiVoices();
+  }
+
+  it("the browser's openai catalog follows the live list, its map resolved against it", async () => {
+    prefs.engine = "openai";
+    await loadLive([PL_FEMALE, EN_MALE]);
+    await synth.synthesizeSpeech("cześć", { voice: PL_FEMALE.id });
+
+    const config = lib.createTts.mock.calls.at(-1)![0] as TtsConfig;
+    expect(config.engines.openai).toMatchObject({
+      catalog: [PL_FEMALE, EN_MALE],
+      // my-voice is not listed: each entry falls back as the panel server's does.
+      voices: { pl: PL_FEMALE.id, en: EN_MALE.id, default: PL_FEMALE.id },
+    });
+    expect(lib.fake.synthesize).toHaveBeenLastCalledWith(
+      expect.objectContaining({ engine: "openai", voice: PL_FEMALE.id }),
+    );
+
+    // A voice added on the server: the next use rebuilds the instance around the new list.
+    await loadLive([MY_VOICE, PL_FEMALE, EN_MALE]);
+    await synth.synthesizeSpeech("cześć", { voice: MY_VOICE.id });
+    expect(lib.createTts).toHaveBeenCalledTimes(2);
+    expect((lib.createTts.mock.calls.at(-1)![0] as TtsConfig).engines.openai).toMatchObject({
+      catalog: [MY_VOICE, PL_FEMALE, EN_MALE],
+      voices: OPENAI_VOICE_MAP,
+    });
+  });
+
+  it("a voice picked from the live list is accepted by the real anytts", async () => {
+    const actual = await vi.importActual<typeof import("anytts")>("anytts");
+    lib.createTts.mockImplementation((config) => actual.createTts(config as TtsConfig) as Tts);
+    await loadLive([PL_FEMALE, EN_MALE]);
+    expect(synth.resolveSpeechVoice({ engine: "openai", voice: EN_MALE.id })).toEqual({
+      voice: EN_MALE.id,
+      fellBack: false,
+    });
+  });
+
+  it("an openai request never names a voice the live list lacks", async () => {
+    prefs.engine = "openai";
+    await loadLive([PL_FEMALE, EN_MALE]);
+    await synth.synthesizeSpeech("hello", { voice: MY_VOICE.id });
+
+    const req = lib.fake.synthesize.mock.calls.at(-1)![0] as SynthesisRequest;
+    expect(req.engine).toBe("openai");
+    // No voice: anytts takes the map's default, which the list holds.
+    expect(req.voice).toBeUndefined();
+  });
+
+  it("with no live list the server picks the openai voice", async () => {
+    prefs.engine = "openai";
+    await synth.synthesizeSpeech("hello", { voice: MY_VOICE.id, lang: "en" });
+    synth.speechCacheState("hello", { voice: MY_VOICE.id, lang: "en" });
+
+    // A one-member cascade names no voice, so the panel server resolves its own default.
+    const req = lib.fake.synthesize.mock.calls.at(-1)![0] as SynthesisRequest;
+    expect(req).toMatchObject({ text: "hello", engine: "cascade", lang: "en", order: ["openai"] });
+    expect(req.voice).toBeUndefined();
+    expect(req.voices).toBeUndefined();
+    expect(lib.fake.state).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "cascade", order: ["openai"] }));
   });
 });
 

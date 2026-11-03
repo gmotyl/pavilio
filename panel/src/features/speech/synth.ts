@@ -32,9 +32,12 @@ import {
   cascadeVoicesOf,
   getCascadeOrder,
   isCascadeVoiceKey,
+  openaiEngineConfig,
   speechEngines,
 } from "./engines";
+import type { OmniVoiceInfo } from "./openaiVoices";
 import { SPEECH_ROUTE_MODES, toSpeechRoute, type SpeechRoute } from "./route";
+import { currentOpenaiVoices } from "./useOpenaiVoices";
 
 export interface SpeechSynthesisOptions {
   /** One engine's voice id, or under the cascade the session's member voices as one key. */
@@ -74,13 +77,19 @@ const TTS_CONFIG: TtsConfig = {
 };
 
 /**
- * The config for `route` and the stored pronunciation switches: the edge
- * engine's `mode` is the route's, and an engine with a switch stored gets it
- * as its `pronunciation` (one without keeps anytts' default: Edge on, the
- * others off). The cascade's members are switched per request instead.
+ * The config for `route`, the stored pronunciation switches and the live
+ * OmniVoice list: the edge engine's `mode` is the route's, an engine with a
+ * switch stored gets it as its `pronunciation` (one without keeps anytts'
+ * default: Edge on, the others off), and `openai` lists the live voices. The
+ * cascade's members are switched per request instead.
  */
-function configFor(route: SpeechRoute, pronunciation: Readonly<Record<string, boolean>>): TtsConfig {
+function configFor(
+  route: SpeechRoute,
+  pronunciation: Readonly<Record<string, boolean>>,
+  openaiVoices: readonly OmniVoiceInfo[],
+): TtsConfig {
   const engines: TtsConfig["engines"] = { ...TTS_CONFIG.engines };
+  if (openaiVoices.length > 0) engines.openai = openaiEngineConfig(openaiVoices);
   for (const id of Object.keys(engines)) {
     if (id !== CASCADE && Object.hasOwn(pronunciation, id)) {
       engines[id] = { ...engines[id], pronunciation: pronunciation[id] };
@@ -91,11 +100,15 @@ function configFor(route: SpeechRoute, pronunciation: Readonly<Record<string, bo
 }
 
 /** What the instance is built from, as one comparable string. */
-function instanceKey(route: SpeechRoute, pronunciation: Readonly<Record<string, boolean>>): string {
+function instanceKey(
+  route: SpeechRoute,
+  pronunciation: Readonly<Record<string, boolean>>,
+  openaiVoices: readonly OmniVoiceInfo[],
+): string {
   const switches = Object.keys(pronunciation)
     .sort()
     .map((id) => [id, pronunciation[id]]);
-  return JSON.stringify([route, switches]);
+  return JSON.stringify([route, switches, openaiVoices]);
 }
 
 const cacheListeners = new Set<() => void>();
@@ -105,7 +118,8 @@ let instance: Tts | undefined;
 let instanceBuiltFrom: string | undefined;
 
 /**
- * The instance for the route and pronunciation switches stored now. A change
+ * The instance for the route and pronunciation switches stored now, and the
+ * live OmniVoice list (an add or a delete in Settings changes it). A change
  * lets the old instance go and builds a new one; the library subscription
  * moves with it, and the panel's listeners hear about the (now empty) cache
  * on a microtask, since this can run inside a render-time peek.
@@ -113,10 +127,11 @@ let instanceBuiltFrom: string | undefined;
 function tts(): Tts {
   const route = toSpeechRoute(readPreference(preferences.speechRoute));
   const pronunciation = readPreference(preferences.speechPronunciationByEngine);
-  const key = instanceKey(route, pronunciation);
+  const openaiVoices = currentOpenaiVoices();
+  const key = instanceKey(route, pronunciation, openaiVoices);
   if (instance && instanceBuiltFrom === key) return instance;
   const swapped = instance !== undefined;
-  instance = createTts(configFor(route, pronunciation));
+  instance = createTts(configFor(route, pronunciation, openaiVoices));
   instanceBuiltFrom = key;
   if (swapped && libraryUnsubscribe) {
     libraryUnsubscribe();
@@ -161,10 +176,26 @@ function engine(): string {
  * relay, the server respells per member. A single engine gets its `voice`
  * (never a cascade key, which a race with an engine change could hand it) and
  * respells in the browser from `lang`, by its configured switch.
+ *
+ * `openai` never names a voice the live OmniVoice list lacks (the server would
+ * refuse it as unknown): one outside the list is dropped, so anytts takes the
+ * map's default, resolved against the list. With no list loaded yet the
+ * browser cannot know any voice, so the request goes out as a cascade of
+ * `openai` alone, which names none, and the panel server picks its default.
  */
 function request(text: string, options: SpeechSynthesisOptions): SynthesisRequest {
   const id = engine();
   const lang = options.lang || undefined;
+  const openaiVoices = id === "openai" ? currentOpenaiVoices() : undefined;
+  if (openaiVoices?.length === 0) {
+    return {
+      text,
+      engine: CASCADE,
+      ...(lang ? { lang } : {}),
+      order: ["openai"],
+      pronunciation: { ...readPreference(preferences.speechPronunciationByEngine) },
+    };
+  }
   if (id === CASCADE) {
     const voices = cascadeVoicesOf(options.voice);
     return {
@@ -178,7 +209,8 @@ function request(text: string, options: SpeechSynthesisOptions): SynthesisReques
       pronunciation: { ...readPreference(preferences.speechPronunciationByEngine) },
     };
   }
-  const voice = options.voice && !isCascadeVoiceKey(options.voice) ? options.voice : undefined;
+  let voice = options.voice && !isCascadeVoiceKey(options.voice) ? options.voice : undefined;
+  if (openaiVoices && !openaiVoices.some((listed) => listed.id === voice)) voice = undefined;
   return { text, voice, engine: id, ...(lang ? { lang } : {}) };
 }
 
