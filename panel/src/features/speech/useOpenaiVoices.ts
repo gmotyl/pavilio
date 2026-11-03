@@ -27,9 +27,14 @@ export interface OpenaiVoices {
   workspaceOnly: number;
   /** A route answer has landed: until then an empty list means "not asked yet", not "none". */
   loaded: boolean;
+  /**
+   * The last load got no usable answer from the panel server itself (no answer, an error status,
+   * an unreadable body): the list shown is the last good one, and only a reload can fix it.
+   */
+  failed: boolean;
 }
 
-const INITIAL: OpenaiVoices = { voices: [], unreachable: false, workspaceOnly: 0, loaded: false };
+const INITIAL: OpenaiVoices = { voices: [], unreachable: false, workspaceOnly: 0, loaded: false, failed: false };
 
 // Replaced, never mutated: `useSyncExternalStore` compares snapshots by identity.
 let state: OpenaiVoices = INITIAL;
@@ -61,20 +66,26 @@ function toStoredVoice({ id, label, locale, gender, multilingual, source }: Omni
   return { id, label, locale, gender, multilingual, source };
 }
 
-/** The state a route answer leads to, or undefined to keep the current one. */
-async function stateFrom(res: Response): Promise<OpenaiVoices | undefined> {
+/** The last list kept, the load marked done and failed: a Retry can show instead of "Loading…". */
+function failedState(): OpenaiVoices {
+  return { ...state, loaded: true, failed: true };
+}
+
+/** The state a route answer leads to. */
+async function stateFrom(res: Response): Promise<OpenaiVoices> {
   // The OmniVoice server is down: the panel server's catalog keeps its last list, and so does this.
-  if (res.status === 502) return { ...state, unreachable: true, loaded: true };
+  if (res.status === 502) return { ...state, unreachable: true, loaded: true, failed: false };
   // No address: the panel server has no openai engine, so there is nothing to pick.
   if (res.status === 409) return { ...INITIAL, loaded: true };
-  if (!res.ok) return undefined;
+  if (!res.ok) return failedState();
   const body = (await res.json().catch(() => null)) as Partial<OpenaiVoices> | null;
-  if (!body || !Array.isArray(body.voices)) return undefined;
+  if (!body || !Array.isArray(body.voices)) return failedState();
   return {
     voices: body.voices.filter(isVoice).map(toStoredVoice),
     unreachable: body.unreachable === true,
     workspaceOnly: typeof body.workspaceOnly === "number" ? body.workspaceOnly : 0,
     loaded: true,
+    failed: false,
   };
 }
 
@@ -82,9 +93,10 @@ async function load(): Promise<void> {
   const mine = ++generation;
   try {
     const next = await stateFrom(await fetch(OPENAI_VOICES_URL));
-    if (next && mine === generation) publish(next);
+    if (mine === generation) publish(next);
   } catch {
-    // The panel server itself did not answer: keep what is shown; the next load retries.
+    // The panel server itself did not answer: keep the list shown, and say so.
+    if (mine === generation) publish(failedState());
   }
 }
 
@@ -136,9 +148,9 @@ export function useOpenaiVoices(active = true): OpenaiVoices & { reload: () => P
   return { ...snapshot, reload: reloadOpenaiVoices };
 }
 
-/** A window focus while the last load found the OmniVoice server down asks again. */
+/** A window focus while the last load found the OmniVoice server down (or failed) asks again. */
 function reloadIfUnreachable(): void {
-  if (state.unreachable && !inFlight) void startLoad();
+  if ((state.unreachable || state.failed) && !inFlight) void startLoad();
 }
 
 /**

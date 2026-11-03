@@ -89,7 +89,7 @@ export function VoicesSection({ address }: { address: string }) {
   const width = usePaneWidth(rootRef);
   const compact = width > 0 && width < LOCALE_HIDDEN_BELOW;
   const narrow = width > 0 && width < SPEECH_ROWS_NARROW_BELOW;
-  const { voices, unreachable, workspaceOnly, loaded, reload } = useOpenaiVoices();
+  const { voices, unreachable, workspaceOnly, loaded, failed, reload } = useOpenaiVoices();
   const [globalVoice] = usePreference(preferences.speechVoice);
   const [byProject] = usePreference(preferences.speechVoiceByProject);
   const [filter, setFilter] = useState("");
@@ -187,6 +187,14 @@ export function VoicesSection({ address }: { address: string }) {
           </button>
         </div>
       )}
+      {failed && !unreachable && (
+        <div role="alert" data-testid="voices-failed" className={BANNER_CLASS} style={BANNER_STYLE}>
+          Couldn't load the voices from the panel server.
+          <button data-testid="voices-failed-retry" type="button" className={BUTTON_CLASS} style={{ ...BUTTON_STYLE, marginLeft: 6 }} onClick={() => void reload()}>
+            Retry
+          </button>
+        </div>
+      )}
       {!adding && errorBanner}
       {!unreachable && (
         <ul
@@ -233,7 +241,7 @@ export function VoicesSection({ address }: { address: string }) {
               Loading voices…
             </li>
           )}
-          {loaded && custom === 0 && (
+          {loaded && !failed && custom === 0 && (
             <li data-testid="voices-empty" className="text-center" style={{ padding: "18px 12px", fontSize: 13, color: "var(--text-secondary)" }}>
               No custom voices on this server yet.
               {workspaceOnly > 0 && (

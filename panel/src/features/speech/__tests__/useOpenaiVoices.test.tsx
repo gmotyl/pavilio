@@ -111,6 +111,35 @@ describe("useOpenaiVoices", () => {
     expect(calls()).toBe(2);
   });
 
+  it("a failed first load (no answer, a 500, an unreadable body) completes with failed set", async () => {
+    let mode: "reject" | "500" | "malformed" | "up" = "reject";
+    stubFetch({
+      [OPENAI_VOICES_URL]: () => {
+        if (mode === "reject") return Promise.reject(new TypeError("Failed to fetch"));
+        if (mode === "500") return jsonResponse({ error: "boom" }, { status: 500 });
+        if (mode === "malformed") return jsonResponse({ nope: true });
+        return jsonResponse(voicesBody());
+      },
+    });
+    const { result } = renderHook(() => useOpenaiVoices());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.failed).toBe(true);
+    expect(result.current.unreachable).toBe(false);
+    expect(result.current.voices).toEqual([]);
+
+    for (const next of ["500", "malformed"] as const) {
+      mode = next;
+      await act(() => result.current.reload());
+      expect(result.current.loaded).toBe(true);
+      expect(result.current.failed).toBe(true);
+    }
+
+    mode = "up";
+    await act(() => result.current.reload());
+    expect(result.current.failed).toBe(false);
+    expect(result.current.voices).toEqual(LIVE_VOICES);
+  });
+
   it("no address empties the list", async () => {
     let address = true;
     stubFetch({

@@ -481,6 +481,22 @@ describe("VoicesSection", () => {
     expect(screen.queryByText(/No custom voices/)).toBeNull();
   });
 
+  it("a failed first load shows a Retry banner, not a loading line forever", async () => {
+    const user = userEvent.setup();
+    let fail = true;
+    stubVoices(() => (fail ? Promise.reject(new TypeError("Failed to fetch")) : jsonResponse(voicesBody(ALL))));
+    render(<VoicesSection address={ADDRESS} />);
+
+    const banner = await screen.findByTestId("voices-failed");
+    expect(screen.queryByTestId("voices-loading")).toBeNull();
+    expect(screen.queryByTestId("voices-empty")).toBeNull();
+
+    fail = false;
+    await user.click(within(banner).getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("voice-row-my-voice");
+    expect(screen.queryByTestId("voices-failed")).toBeNull();
+  });
+
   it("the hidden file input is not a tab stop; Choose file… is", async () => {
     const user = userEvent.setup();
     await renderSection();
