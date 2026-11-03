@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -172,6 +172,51 @@ describe("seedVoices", () => {
     expect(server.posts().map((p) => p.form?.get("name"))).toEqual(["bad-voice", "my-voice"]);
     expect(lines.some((l) => l.includes("bad-voice") && l.includes("could not decode audio"))).toBe(true);
     expect(lines.at(-1)).toMatch(/^voices: seeded 1, already there 0/);
+  });
+
+  it("seeding stops at its overall budget and defers the voices it did not reach", async () => {
+    for (const name of ["a-voice", "b-voice", "c-voice"]) addWorkspaceVoice(name);
+    const posted: string[] = [];
+    // Each clone takes 150 ms unless its signal aborts first.
+    const fetchImpl = vi.fn((url: string, init: RequestInit = {}) => {
+      if ((init.method ?? "GET") === "GET") return Promise.resolve(Response.json({ voices: [{ id: "auto" }] }));
+      const name = String((init.body as FormData).get("name"));
+      posted.push(name);
+      return new Promise<Response>((resolve, reject) => {
+        const done = setTimeout(() => resolve(Response.json({ id: name, source: "custom" })), 150);
+        init.signal?.addEventListener("abort", () => {
+          clearTimeout(done);
+          reject(init.signal!.reason);
+        });
+      });
+    });
+    const lines: string[] = [];
+
+    const result = await seedVoices({
+      workspaceRoot,
+      baseUrl: BASE_URL,
+      fetch: fetchImpl,
+      log: (l: string) => lines.push(l),
+      budgetMs: 250,
+    });
+
+    // a-voice lands; b-voice is cut off by the budget; c-voice is never started.
+    expect(posted).toEqual(["a-voice", "b-voice"]);
+    expect(result).toEqual({ seeded: 1, present: 0, failed: 0, deferred: 2 });
+    expect(lines.at(-1)).toMatch(/^voices: seeded 1, already there 0, deferred 2 — run pnpm install:speech again/);
+    expect(lines.some((l) => l.includes("failed"))).toBe(false);
+  });
+
+  it("the seed budget fits inside the Settings Install speech action's timeout", () => {
+    const seedSource = readFileSync(SEED_SCRIPT, "utf8");
+    const settings = readFileSync(join(TEST_DIR, "..", "..", "server", "routes", "agent-settings.ts"), "utf8");
+    const budget = Number(/const SEED_BUDGET_MS = ([\d_]+);/.exec(seedSource)?.[1]?.replaceAll("_", ""));
+    const actionTimeout = Number(/const DEFAULT_TIMEOUT_MS = ([\d_]+);/.exec(settings)?.[1]?.replaceAll("_", ""));
+    // install:speech runs on the default (not the long-running) budget.
+    expect(/LONG_RUNNING_IDS = new Set\(\[[^\]]*"install:speech"/.test(settings)).toBe(false);
+    expect(budget).toBeGreaterThan(0);
+    // Room left for node start-up and the hook walk.
+    expect(budget).toBeLessThanOrEqual(actionTimeout - 20_000);
   });
 });
 

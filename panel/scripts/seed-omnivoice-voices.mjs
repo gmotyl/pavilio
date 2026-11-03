@@ -10,6 +10,13 @@
  * It never fails the install: no address, a server that does not answer, or a voice
  * the server rejects is reported in one line each, and the exit code stays 0.
  *
+ * It runs on one overall budget (SEED_BUDGET_MS), not a per-voice one alone: Settings →
+ * "Install speech" runs install:speech under the panel's default 120 s action timeout
+ * (server/routes/agent-settings.ts), and sequential clones of several voices would
+ * outlast it and get the whole install killed. A voice the budget does not reach (or
+ * cuts off mid-clone) is reported as deferred; the next `pnpm install:speech` picks it
+ * up, since voices already on the server are skipped.
+ *
  * Plain node, no TS build: the layout mirrors panel/server/lib/speech/workspaceVoices.ts
  * and the address lookup mirrors panel/server/lib/speech/secrets.ts.
  */
@@ -24,6 +31,9 @@ const RECORD_FILE = "voice.json";
 const LIST_TIMEOUT_MS = 10_000;
 // Cloning encodes the reference audio on the server; the panel proxy allows the same.
 const CLONE_TIMEOUT_MS = 120_000;
+// The whole seed step, listing included: well inside the Settings action's 120 s, with room
+// for node start-up and the hook walk (a test checks it against agent-settings.ts).
+const SEED_BUDGET_MS = 90_000;
 // The record fields the server's POST takes besides `name` and `file`.
 const FORM_FIELDS = ["ref_text", "locale", "gender", "label", "multilingual"];
 
@@ -105,11 +115,19 @@ function voiceForm(workspaceRoot, name) {
 }
 
 /**
- * Seeds every workspace voice the server lacks. Never throws for a server or voice
- * problem; prints one line per problem and a final `voices: seeded N, already there M`.
+ * Seeds every workspace voice the server lacks, within `budgetMs` overall. Never throws for
+ * a server or voice problem; prints one line per problem and a final
+ * `voices: seeded N, already there M` (plus failed / deferred counts when there are any).
  * Returns the counts, or `{ skipped }` with the reason when it could not run at all.
  */
-export async function seedVoices({ workspaceRoot, baseUrl, fetch: fetchImpl = fetch, log = console.log }) {
+export async function seedVoices({
+  workspaceRoot,
+  baseUrl,
+  fetch: fetchImpl = fetch,
+  log = console.log,
+  budgetMs = SEED_BUDGET_MS,
+}) {
+  const deadline = Date.now() + budgetMs;
   if (!baseUrl) {
     const reason = `${ADDRESS_VAR} is not set (environment or ~/.panel/secrets.env)`;
     log(`voices: skipped — ${reason}`);
@@ -119,7 +137,9 @@ export async function seedVoices({ workspaceRoot, baseUrl, fetch: fetchImpl = fe
 
   let onServer;
   try {
-    const res = await fetchImpl(`${address}/v1/voices`, { signal: AbortSignal.timeout(LIST_TIMEOUT_MS) });
+    const res = await fetchImpl(`${address}/v1/voices`, {
+      signal: AbortSignal.timeout(Math.max(1, Math.min(LIST_TIMEOUT_MS, deadline - Date.now()))),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
     onServer = new Set((Array.isArray(body?.voices) ? body.voices : []).map((voice) => voice?.id));
@@ -132,26 +152,40 @@ export async function seedVoices({ workspaceRoot, baseUrl, fetch: fetchImpl = fe
   let seeded = 0;
   let present = 0;
   let failed = 0;
+  let deferred = 0;
   for (const name of listWorkspaceVoices(workspaceRoot)) {
     if (onServer.has(name)) {
       present += 1;
       continue;
     }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      deferred += 1;
+      continue;
+    }
+    // The budget, when it is the tighter limit, cuts the clone off as deferred, not failed.
+    const cutByBudget = remaining < CLONE_TIMEOUT_MS;
     try {
       const res = await fetchImpl(`${address}/v1/voices`, {
         method: "POST",
         body: voiceForm(workspaceRoot, name),
-        signal: AbortSignal.timeout(CLONE_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(CLONE_TIMEOUT_MS, remaining)),
       });
       if (!res.ok) throw new Error(`${res.status} ${await detailOf(res)}`.trim());
       seeded += 1;
     } catch (error) {
+      if (cutByBudget && error?.name === "TimeoutError") {
+        deferred += 1;
+        continue;
+      }
       failed += 1;
       log(`voices: ${name} failed — ${error.message}`);
     }
   }
-  log(`voices: seeded ${seeded}, already there ${present}${failed ? `, failed ${failed}` : ""}`);
-  return { seeded, present, failed };
+  const failedPart = failed ? `, failed ${failed}` : "";
+  const deferredPart = deferred ? `, deferred ${deferred} — run pnpm install:speech again` : "";
+  log(`voices: seeded ${seeded}, already there ${present}${failedPart}${deferredPart}`);
+  return { seeded, present, failed, deferred };
 }
 
 /** Seeding with the address from the environment / secrets file — what install:speech runs. */
