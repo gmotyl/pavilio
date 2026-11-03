@@ -420,6 +420,55 @@ describe("VoicesSection", () => {
     await waitFor(() => expect(screen.queryByTestId("voice-row-my-voice")).toBeNull());
   });
 
+  it("deleting the voice whose sample is playing stops it", async () => {
+    const user = userEvent.setup();
+    let list = voicesBody(ALL);
+    stubVoices(() => jsonResponse(list), {
+      del: () => {
+        list = voicesBody(BUNDLED);
+        return new Response(null, { status: 204 });
+      },
+    });
+    render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: /Play/ }));
+    const sample = FakeAudio.all.at(-1)!;
+    expect(sample.paused).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Delete My voice" }));
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByTestId("voice-row-my-voice")).toBeNull());
+    expect(sample.paused).toBe(true);
+  });
+
+  it("deleting voice A does not stop sample B started while the DELETE was pending", async () => {
+    const user = userEvent.setup();
+    let finishDelete: (res: Response) => void = () => {};
+    let list = voicesBody([MY_VOICE, { ...PL_FEMALE, id: "other-voice", label: "Other voice", source: "custom" }]);
+    stubVoices(() => jsonResponse(list), {
+      del: () =>
+        new Promise<Response>((resolve) => {
+          finishDelete = resolve;
+        }),
+    });
+    render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+
+    // A plays, its delete starts, then B is played while the DELETE is still pending.
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: /Play/ }));
+    await user.click(screen.getByRole("button", { name: "Delete My voice" }));
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Delete" }));
+    await user.click(within(voiceRow("other-voice")).getByRole("button", { name: /Play/ }));
+    const sampleB = FakeAudio.all.at(-1)!;
+    expect(sampleB.src).toContain("other-voice");
+    expect(sampleB.paused).toBe(false);
+
+    list = voicesBody([{ ...PL_FEMALE, id: "other-voice", label: "Other voice", source: "custom" }]);
+    await act(async () => finishDelete(new Response(null, { status: 204 })));
+    await waitFor(() => expect(screen.queryByTestId("voice-row-my-voice")).toBeNull());
+    expect(sampleB.paused).toBe(false);
+  });
+
   it("a server refusal shows directly above the open add form, not above the list", async () => {
     const user = userEvent.setup();
     stubVoices(() => jsonResponse(voicesBody(ALL)), {

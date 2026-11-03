@@ -47,9 +47,14 @@ function usesOf(id: string, global: EngineVoices, byProject: Record<string, Engi
   return uses;
 }
 
-/** One sample at a time: `toggle` starts a voice's sample (stopping any other) or stops it. */
+/**
+ * One sample at a time: `toggle` starts a voice's sample (stopping any other) or stops it;
+ * `stopIf` stops it only if that voice is the one playing now, not when a stale render read it.
+ */
 function useSamplePlayer() {
   const audio = useRef<HTMLAudioElement | null>(null);
+  // The voice the audio ref belongs to, read when an async action completes.
+  const playingId = useRef<string | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   useEffect(() => {
     const current = audio;
@@ -59,7 +64,11 @@ function useSamplePlayer() {
   const stop = () => {
     audio.current?.pause();
     audio.current = null;
+    playingId.current = null;
     setPlaying(null);
+  };
+  const stopIf = (id: string) => {
+    if (playingId.current === id) stop();
   };
   const toggle = (id: string) => {
     const wasPlaying = playing === id;
@@ -69,14 +78,16 @@ function useSamplePlayer() {
     const finish = () => {
       if (audio.current !== sample) return;
       audio.current = null;
+      playingId.current = null;
       setPlaying(null);
     };
     sample.onended = finish;
     audio.current = sample;
+    playingId.current = id;
     setPlaying(id);
     sample.play().catch(finish);
   };
-  return { playing, toggle, stop };
+  return { playing, toggle, stopIf };
 }
 
 /**
@@ -130,7 +141,8 @@ export function VoicesSection({ address }: { address: string }) {
       return;
     }
     setConfirming(null);
-    if (player.playing === id) player.stop();
+    // The player as it is now: another sample may have started while the DELETE was pending.
+    player.stopIf(id);
     await reload();
   };
 
