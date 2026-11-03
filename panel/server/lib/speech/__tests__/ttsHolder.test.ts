@@ -3,7 +3,10 @@ import { createTts } from "anytts/server";
 import { resolveVoice, type TtsConfig } from "anytts";
 import { createTtsHolder } from "../ttsHolder";
 import type { KeyVar, KeySource } from "../secrets";
-import type { OmniVoiceInfo } from "../../../../src/features/speech/openaiVoices";
+import {
+  OPENAI_FIRST_BYTE_TIMEOUT_MS,
+  type OmniVoiceInfo,
+} from "../../../../src/features/speech/openaiVoices";
 
 /** A live catalog as the holder reads it: just `current()`. */
 function liveCatalog(voices: OmniVoiceInfo[]) {
@@ -136,6 +139,8 @@ describe("server Tts holder", () => {
       catalog: [EN_MALE, PL_FEMALE],
       voices: { pl: "pl-female", en: "en-male", default: "en-male" },
       languageField: "language",
+      firstByteMs: OPENAI_FIRST_BYTE_TIMEOUT_MS,
+      retries: 0,
     });
     // A local server needs no key: it leads the cascade, ready.
     expect(configs[0]!.engines.cascade).toEqual({

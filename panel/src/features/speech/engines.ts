@@ -18,7 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
-import { OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
+import { OPENAI_FIRST_BYTE_TIMEOUT_MS, OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
 export const CASCADE = "cascade";
@@ -42,9 +42,10 @@ export const SPEECH_FIRST_BYTE_TIMEOUT_MS = 25000;
  * Max wait for a cascade relay call's first byte. One call walks the members
  * on the server until one speaks, so it covers several members' first-byte
  * waits (a member that times out costs the server's 8s) before the one that
- * answers synthesizes its whole clip.
+ * answers synthesizes its whole clip. `openai` leads the cascade and may hold
+ * it for its whole wait, so the minute the other members need comes on top.
  */
-export const SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS = 60000;
+export const SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS = OPENAI_FIRST_BYTE_TIMEOUT_MS + 60000;
 
 /**
  * A keyed engine in the browser: a relay client of the panel server, which
@@ -78,7 +79,13 @@ export function openaiEngineConfig(live: readonly VoiceInfo[]): TtsConfig["engin
           gender: "male",
           multilingual: true,
         }));
-  return { ...KEYED_RELAY, catalog, voices: resolveVoiceMap(OPENAI_VOICE_MAP, live) };
+  return {
+    ...KEYED_RELAY,
+    // Outlasts the panel server's own wait on the OmniVoice server, so the server's verdict lands.
+    firstByteMs: OPENAI_FIRST_BYTE_TIMEOUT_MS + 15000,
+    catalog,
+    voices: resolveVoiceMap(OPENAI_VOICE_MAP, live),
+  };
 }
 
 export const SPEECH_ENGINES: TtsConfig["engines"] = {

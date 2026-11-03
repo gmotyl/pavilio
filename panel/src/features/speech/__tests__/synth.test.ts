@@ -108,7 +108,7 @@ describe("the anytts seam", () => {
           mode: "auto",
         },
         // The keyed engines and the cascade are relay clients, on every route.
-        cascade: { relayUrl: "/api/tts", firstByteMs: 60_000, stallMs: 15_000 },
+        cascade: { relayUrl: "/api/tts", firstByteMs: 120_000, stallMs: 15_000 },
         elevenlabs: keyed,
         cartesia: keyed,
         speechify: keyed,
@@ -117,6 +117,8 @@ describe("the anytts seam", () => {
         // the browser holds only the map's default, which anytts needs to accept the map.
         openai: {
           ...keyed,
+          // Outlasts the server's 60 s wait on a whole-clip synthesis.
+          firstByteMs: 75_000,
           catalog: [{ id: "my-voice", label: "my-voice", locale: "und", gender: "male", multilingual: true }],
           voices: OPENAI_VOICE_MAP,
         },

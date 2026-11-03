@@ -15,6 +15,13 @@ export type VoiceMap = NonNullable<EngineConfig["voices"]>;
  */
 export const OPENAI_VOICE_MAP: VoiceMap = { pl: "my-voice", en: "my-voice", default: "my-voice" };
 
+/**
+ * The panel server's wait for the OmniVoice server's first byte. The server answers only after it
+ * has synthesized the whole clip, so the wait covers synthesis: a paragraph takes ~20 s on Apple
+ * MPS and longer on CPU. anytts' 15 s default timed every such paragraph out.
+ */
+export const OPENAI_FIRST_BYTE_TIMEOUT_MS = 60000;
+
 /** Where a voice lives on the server: tracked in its repo, or cloned from Settings. */
 export type VoiceSource = "bundled" | "custom";
 
