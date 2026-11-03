@@ -301,6 +301,21 @@ describe("/api/speech engines and keys", () => {
     expect(engine(await engines(app), "elevenlabs")).toMatchObject({ keySource: "env", keyLast4: "ENVK" });
   });
 
+  it("the server refreshes the OmniVoice catalog at boot and rebuilds the holder on a change", () => {
+    // The first holder build has no OmniVoice voices; only the boot refresh, through an onChange
+    // that rebuilds the holder, gets `openai` into the cascade without a Settings visit.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(resolve(here, "../../panel-server.ts"), "utf8");
+    const catalog = /const\s+openaiCatalog\s*=\s*createOpenaiCatalog\s*\(\s*\{([\s\S]*?)\}\s*\)\s*;/.exec(source);
+    expect(catalog, "the openaiCatalog construction").not.toBeNull();
+    expect(catalog![1]).toMatch(/onChange\s*:\s*\(\s*\)\s*=>\s*ttsHolder\s*\.\s*rebuild\s*\(\s*\)/);
+    const holder = /const\s+ttsHolder\s*=\s*createTtsHolder\s*\(\s*\{\s*catalog\s*:\s*openaiCatalog\s*\}\s*\)/.exec(source);
+    expect(holder, "the holder built from the catalog").not.toBeNull();
+    const boot = /^\s*void\s+openaiCatalog\s*\.\s*refresh\s*\(\s*\)\s*;/m.exec(source);
+    expect(boot, "the boot refresh").not.toBeNull();
+    expect(boot!.index).toBeGreaterThan(holder!.index);
+  });
+
   it("behind auth", async () => {
     const { app, configs } = loadApp();
 
