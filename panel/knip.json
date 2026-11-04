@@ -6,6 +6,7 @@
     "hooks/speak-response-codex.mjs",
     "scripts/install-speech-hook.mjs",
     "public/sw.js",
-    "server/lib/sync-role-cli.ts"
+    "server/lib/sync-role-cli.ts",
+    "server/lib/machine-id-cli.ts"
   ]
 }
