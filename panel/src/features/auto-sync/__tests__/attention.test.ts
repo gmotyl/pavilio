@@ -69,8 +69,9 @@ describe("blocked is an attention state", () => {
   });
   it("names the local changes in its message", () => {
     expect(attentionMessage("blocked", "")).toBe("Auto-sync blocked by local changes — commit or discard them");
-    expect(attentionMessage("blocked", "a.md")).toBe(
-      "Auto-sync blocked by local changes — commit or discard them (a.md)",
-    );
+    const detail = "Local changes to a.md block the sync — commit or discard them.";
+    const msg = attentionMessage("blocked", detail);
+    expect(msg).toBe(`Auto-sync blocked: ${detail}`);
+    expect(msg.match(/commit or discard them/g)).toHaveLength(1);
   });
 });

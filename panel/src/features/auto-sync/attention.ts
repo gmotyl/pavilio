@@ -11,6 +11,8 @@ const ATTENTION_TEXT: Record<string, string> = {
 
 /** The alert text for an attention state just entered, with the status detail appended. */
 export function attentionMessage(state: string, detail: string): string {
+  // syncRepo's blocked detail already names the files and the remedy — don't repeat it.
+  if (state === "blocked" && detail) return `Auto-sync blocked: ${detail}`;
   return `${ATTENTION_TEXT[state]}${detail ? ` (${detail})` : ""}`;
 }
 

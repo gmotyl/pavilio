@@ -46,8 +46,9 @@ export interface PanelConfig {
      *  auto-sync — used only to classify conflicts in the resolution prompt. */
     generatedPaths?: string[];
     /** Optional shell command fired when sync needs attention (conflict/push-failed/blocked/stale).
-     *  Gets SYNC_STATE + SYNC_DETAIL env vars. Example (macOS):
-     *  `osascript -e "display notification \"$SYNC_DETAIL\" with title \"Pavilio sync: $SYNC_STATE\""` */
+     *  Gets SYNC_STATE + SYNC_DETAIL env vars. Pass them as argv, never splice them into a
+     *  script string — the detail can name files containing quotes. Example (macOS):
+     *  `osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title ("Pavilio sync: " & item 1 of argv)' -e 'end run' "$SYNC_STATE" "$SYNC_DETAIL"` */
     notifyCmd?: string;
   };
 }
