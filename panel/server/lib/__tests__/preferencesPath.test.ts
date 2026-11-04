@@ -6,7 +6,8 @@ import { join } from "path";
 import { WORKSPACE_ROOT } from "../../../panel.config";
 import { loadConfig, mergeLocalConfig } from "../../config";
 import { machineId } from "../hostname";
-import { LEGACY_PREFERENCES, preferencesPathFor } from "../preferencesPath";
+import { LEGACY_PREFERENCES, preferenceSeedsFor, preferencesPathFor } from "../preferencesPath";
+import { readMirrorIdSync } from "../syncRole";
 import { loadSpikesRoot } from "../projects/spikesRoot";
 import { main } from "../wiki/cli";
 
@@ -72,5 +73,32 @@ describe("preferencesPathFor", () => {
     expect(
       mergeLocalConfig({ machineId: "hal", preferencesPath: "/custom/prefs.json" }).preferencesPath,
     ).toBe("/custom/prefs.json");
+  });
+});
+
+describe("preference seeds", () => {
+  it("seed from the mirror's file, then the legacy one; never from self", () => {
+    expect(preferenceSeedsFor("/ws", "mac", "spock")).toEqual({
+      mirrorPath: "/ws/.pavilio/preferences/spock.json",
+      legacyPath: "/ws/.pavilio/preferences.json",
+    });
+    // The mirror itself, or no mirror recorded: only the legacy file.
+    expect(preferenceSeedsFor("/ws", "spock", "spock")).toEqual({
+      legacyPath: "/ws/.pavilio/preferences.json",
+    });
+    expect(preferenceSeedsFor("/ws", "mac", undefined)).toEqual({
+      legacyPath: "/ws/.pavilio/preferences.json",
+    });
+  });
+
+  it("the mirror id is read from the working tree's sync-mirror.json", () => {
+    expect(readMirrorIdSync(dir)).toBeUndefined();
+    mkdirSync(join(dir, ".pavilio"), { recursive: true });
+    writeFileSync(join(dir, ".pavilio", "sync-mirror.json"), JSON.stringify({ mirror: "SPOCK Box" }));
+    expect(readMirrorIdSync(dir)).toBe("spock-box");
+    writeFileSync(join(dir, ".pavilio", "sync-mirror.json"), "{ not json");
+    expect(readMirrorIdSync(dir)).toBeUndefined();
+    writeFileSync(join(dir, ".pavilio", "sync-mirror.json"), JSON.stringify({ mirror: "" }));
+    expect(readMirrorIdSync(dir)).toBeUndefined();
   });
 });

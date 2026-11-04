@@ -75,6 +75,16 @@ vi.mock("../lib/agent-registry.js", () => ({ pruneDeadAgents: vi.fn() }));
 vi.mock("../lib/panel-listener.js", () => ({ registerPanelServer: vi.fn() }));
 vi.mock("../lib/os-users.js", () => ({ listOsUsers: vi.fn(() => []) }));
 
+// Boot must not read or seed the real workspace's preferences: capture the call.
+vi.mock("../lib/preferences-store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/preferences-store.js")>()),
+  loadPreferences: vi.fn(() => ({ version: 1 })),
+}));
+vi.mock("../lib/syncRole.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/syncRole.js")>()),
+  readMirrorIdSync: vi.fn(() => undefined),
+}));
+
 vi.mock("../lib/terminal-identity.js", () => ({ sweepNames: vi.fn() }));
 vi.mock("../lib/terminal-manager.js", () => ({ listSessions: vi.fn(() => []) }));
 
@@ -104,6 +114,11 @@ import { startScheduler } from "../lib/autoSyncScheduler.js";
 import { isEnabled } from "../lib/autoSyncState.js";
 import { sweepNames } from "../lib/terminal-identity.js";
 import { listSessions } from "../lib/terminal-manager.js";
+import { loadPreferences } from "../lib/preferences-store.js";
+import { readMirrorIdSync } from "../lib/syncRole.js";
+import { LEGACY_PREFERENCES, preferencesPathFor } from "../lib/preferencesPath.js";
+import { WORKSPACE_ROOT } from "../../panel.config.js";
+import { join } from "node:path";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -174,5 +189,40 @@ describe("startPanel machine identity", () => {
         machinePaths: [".pavilio/preferences/override-box.json", ".pavilio/voices/"],
       }),
     );
+  });
+});
+
+describe("startPanel preferences seeding", () => {
+  const withOwnPath = (preferencesPath: string) =>
+    vi.mocked(getConfig).mockReturnValue({
+      port: 0,
+      projectsDir: "/tmp/pavilio-startup-sweep-projects",
+      machineId: "Override Box",
+      preferencesPath,
+    } as unknown as ReturnType<typeof getConfig>);
+
+  it("seeds the own path from the mirror's file, then the legacy one", async () => {
+    // A local preferencesPath override is still the own path the seed lands in.
+    withOwnPath("/custom/prefs.json");
+    vi.mocked(readMirrorIdSync).mockReturnValue("spock");
+
+    await startPanel(() => {});
+
+    expect(readMirrorIdSync).toHaveBeenCalledWith(WORKSPACE_ROOT);
+    expect(loadPreferences).toHaveBeenCalledWith("/custom/prefs.json", {
+      mirrorPath: preferencesPathFor(WORKSPACE_ROOT, "spock"),
+      legacyPath: join(WORKSPACE_ROOT, LEGACY_PREFERENCES),
+    });
+  });
+
+  it("the mirror machine seeds only from the legacy file", async () => {
+    withOwnPath("/tmp/.pavilio/preferences/override-box.json");
+    vi.mocked(readMirrorIdSync).mockReturnValue("override-box");
+
+    await startPanel(() => {});
+
+    expect(loadPreferences).toHaveBeenCalledWith("/tmp/.pavilio/preferences/override-box.json", {
+      legacyPath: join(WORKSPACE_ROOT, LEGACY_PREFERENCES),
+    });
   });
 });

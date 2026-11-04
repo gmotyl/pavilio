@@ -19,7 +19,7 @@
 //   - a document written by a newer panel is never rewritten in an older
 //     panel's format.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -54,26 +54,70 @@ const unstorableWarned = new Set<string>();
  * `{ version: CURRENT_VERSION }`, because a broken preferences file must not
  * keep the panel from starting.
  *
+ * `path` is this machine's own file. When it does not exist yet, `seed` names
+ * where a first boot copies from (design D5), in order: the mirror machine's
+ * committed per-machine file, then the legacy shared `.pavilio/preferences.json`
+ * (migration). The first one that parses to a JSON object is loaded and written
+ * to `path` straight away; a missing or malformed seed falls through to the
+ * next, ending at the defaults. A seed file is only ever read — every later
+ * write goes to `path`. An own file that exists is loaded as-is (malformed
+ * included) and no seed is read.
+ *
  * A `version` this panel does not know (any integer above `CURRENT_VERSION`)
  * is kept exactly as found and makes the store read-only — see `isReadOnly`.
  */
-export function loadPreferences(path: string): PreferencesDoc {
+export function loadPreferences(
+  path: string,
+  seed?: { mirrorPath?: string; legacyPath?: string },
+): PreferencesDoc {
   targetPath = path;
   doc = emptyDoc();
   refusalLogged = false;
   unstorableWarned.clear();
-  try {
-    if (existsSync(path)) {
-      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const record = parsed as Record<string, unknown>;
-        doc = { ...record, version: normalizeVersion(record.version) };
-      }
-    }
-  } catch {
-    /* unreadable or malformed — fall back to the empty doc */
+  if (!path) return doc;
+  if (existsSync(path)) {
+    doc = readDoc(path) ?? emptyDoc();
+    return doc;
+  }
+  for (const source of [seed?.mirrorPath, seed?.legacyPath]) {
+    if (!source || source === path) continue;
+    const seeded = readDoc(source);
+    if (!seeded) continue;
+    doc = seeded;
+    seedOwnFile(path, source);
+    break;
   }
   return doc;
+}
+
+/** The document at `path`, or undefined when it is missing, unreadable or not a JSON object. */
+function readDoc(path: string): PreferencesDoc | undefined {
+  try {
+    if (!existsSync(path)) return undefined;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    return { ...record, version: normalizeVersion(record.version) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist a freshly seeded doc to the own path, synchronously (boot). A copy,
+ *  not a rewrite, so it is written whatever its version. On failure the doc
+ *  stays pending and the next flush retries — the panel still starts. */
+function seedOwnFile(path: string, source: string): void {
+  const tmp = `${path}.tmp.${process.pid}.${++tmpSeq}`;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(tmp, serialize(doc), "utf8");
+    renameSync(tmp, path);
+    console.log(`[preferences] seeded ${path} from ${source}`);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    dirty = true;
+    console.error(`[preferences] seeding ${path} from ${source} failed:`, err);
+  }
 }
 
 /** The in-memory document. */

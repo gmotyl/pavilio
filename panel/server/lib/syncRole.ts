@@ -2,6 +2,8 @@
 // practice origin/main), never from the working tree: a promotion pushed from
 // another machine counts as soon as it has been fetched.
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { gitSafeEnv } from "./gitEnv.js";
 import { sanitizeHostname } from "./hostname.js";
 
@@ -33,13 +35,32 @@ async function readMirror(repo: string, ref: string): Promise<string | undefined
   if ((await git(repo, ["cat-file", "-e", spec])).code !== 0) return undefined;
   const shown = await git(repo, ["show", spec]);
   if (shown.code !== 0) return null;
+  return parseMirror(shown.stdout);
+}
+
+/** The sanitized mirror id in a mirror file's text, or null when it is malformed. */
+function parseMirror(text: string): string | null {
   try {
-    const parsed: unknown = JSON.parse(shown.stdout);
+    const parsed: unknown = JSON.parse(text);
     const mirror = (parsed as { mirror?: unknown } | null)?.mirror;
     if (typeof mirror !== "string" || mirror.trim() === "") return null;
     return sanitizeHostname(mirror);
   } catch {
     return null;
+  }
+}
+
+/**
+ * The mirror id recorded in the workspace *working tree* — boot-time and
+ * synchronous, no git. Good enough for seeding a first boot's preferences
+ * (design D5): the role itself is still resolved from the committed ref.
+ * Undefined when the file is missing, unreadable or malformed.
+ */
+export function readMirrorIdSync(workspaceRoot: string): string | undefined {
+  try {
+    return parseMirror(readFileSync(join(workspaceRoot, SYNC_MIRROR_FILE), "utf8")) ?? undefined;
+  } catch {
+    return undefined;
   }
 }
 

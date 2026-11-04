@@ -10,6 +10,9 @@ import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { loadConfig, getConfig, isPortExplicit } from "./config.js";
 import { loadPreferences } from "./lib/preferences-store.js";
+import { preferenceSeedsFor } from "./lib/preferencesPath.js";
+import { readMirrorIdSync } from "./lib/syncRole.js";
+import { WORKSPACE_ROOT } from "../panel.config.js";
 import { importLegacyColors } from "./lib/import-legacy-colors.js";
 import {
   authMiddleware,
@@ -120,7 +123,13 @@ export async function startPanel(
   // later read is synchronous, and `GET /api/preferences.js` — which the page
   // blocks on — never touches the disk. Deliberately before `listen()`, so no
   // request can observe an unloaded document.
-  loadPreferences(getConfig().preferencesPath);
+  // A first boot (no own file yet) seeds it from the mirror machine's file, or
+  // from the legacy shared one — see loadPreferences. A `preferencesPath`
+  // override in local config is still the own path the seed is written to.
+  loadPreferences(
+    getConfig().preferencesPath,
+    preferenceSeedsFor(WORKSPACE_ROOT, machineId(), readMirrorIdSync(WORKSPACE_ROOT)),
+  );
   // One-way fill of project colours from the old `.panel/project-colors.json`.
   try {
     importLegacyColors();
