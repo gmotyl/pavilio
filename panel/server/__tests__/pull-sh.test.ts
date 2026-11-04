@@ -184,12 +184,80 @@ describe("scripts/pull", () => {
     expect(status).not.toBe(0);
     expect(output).toMatch(/would be overwritten/i);
     expect(output).toMatch(/notes\.md/);
+    expect(output).toMatch(/Commit or move the files git named above/);
     // Nothing moved, the edit survived, and nothing was installed or built.
     expect(git(dest, "rev-parse", "HEAD")).toBe(head);
     expect(readFileSync(join(dest, "notes.md"), "utf8")).toBe("half-written\n");
     expect(git(dest, "stash", "list")).toBe("");
     expect(invocations(pnpmCalled)).not.toMatch(/build/);
     expect(invocations(pnpmCalled)).not.toMatch(/install/);
+  });
+
+  it("pull merges the workspace origin even when main tracks upstream", () => {
+    // A bootstrapped clone-mode workspace: bootstrap renames origin→upstream (git
+    // rewrites branch.main.remote to upstream), then adds the notes `origin`
+    // without -u. A bare `git pull` would follow the tracking remote instead.
+    const canonical = join(sandbox, "canonical.git");
+    git(sandbox, "clone", "--quiet", "--bare", wsOrigin, canonical);
+    const upstreamWork = join(sandbox, "canonical-work");
+    git(sandbox, "clone", "--quiet", canonical, upstreamWork);
+    writeFileSync(join(upstreamWork, "from-upstream.md"), "canonical\n");
+    git(upstreamWork, "add", "-A");
+    git(upstreamWork, "commit", "-q", "-m", "upstream only");
+    git(upstreamWork, "push", "-q", "origin", "HEAD:main");
+    git(dest, "remote", "rename", "origin", "upstream");
+    git(dest, "remote", "set-url", "upstream", canonical);
+    git(dest, "remote", "add", "origin", wsOrigin);
+    expect(git(dest, "config", "branch.main.remote")).toBe("upstream");
+    pushFromAnotherMachine("remote note", { "remote.md": "theirs\n" });
+    const remote = git(wsOrigin, "rev-parse", "main");
+    stubCommand("pnpm");
+
+    const { status, output } = runPull();
+
+    expect(status, output).toBe(0);
+    expect(git(dest, "rev-parse", "HEAD")).toBe(remote);
+    expect(existsSync(join(dest, "remote.md"))).toBe(true);
+    expect(existsSync(join(dest, "from-upstream.md"))).toBe(false);
+  });
+
+  it("pull refuses without an origin remote and points at bootstrap", () => {
+    git(dest, "remote", "rename", "origin", "upstream");
+    const head = git(dest, "rev-parse", "HEAD");
+    const pnpmCalled = stubCommand("pnpm");
+
+    const { status, output } = runPull();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/no `origin` remote/i);
+    expect(output).toMatch(/pnpm bootstrap/);
+    expect(output).not.toMatch(/Commit or move the files/);
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
+    expect(invocations(pnpmCalled)).toBe("");
+  });
+
+  it("pull refuses on a detached HEAD", () => {
+    git(dest, "checkout", "-q", "--detach");
+    const pnpmCalled = stubCommand("pnpm");
+
+    const { status, output } = runPull();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/detached HEAD/i);
+    expect(output).not.toMatch(/Commit or move the files/);
+    expect(invocations(pnpmCalled)).toBe("");
+  });
+
+  it("pull failing for another reason prints a generic hint", () => {
+    git(dest, "remote", "set-url", "origin", join(sandbox, "gone.git"));
+    const pnpmCalled = stubCommand("pnpm");
+
+    const { status, output } = runPull();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/see git's message above/);
+    expect(output).not.toMatch(/Commit or move the files/);
+    expect(invocations(pnpmCalled)).not.toMatch(/build/);
   });
 
   it("pull exits non-zero when the build fails", () => {
