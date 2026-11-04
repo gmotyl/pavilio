@@ -177,7 +177,10 @@ promote_to_mirror() {
     fi
     mkdir -p "$REPO_ROOT/.pavilio"
     printf '{ "mirror": "%s" }\n' "$me" >"$REPO_ROOT/$SYNC_MIRROR_FILE"
-    git -C "$REPO_ROOT" add -- "$SYNC_MIRROR_FILE"
+    # Forced, and only for this one path: a Quick Start clone carries pavilio's
+    # own .gitignore, which ignores the mirror file, so the first promotion
+    # would otherwise be refused before it could commit anything.
+    git -C "$REPO_ROOT" add -f -- "$SYNC_MIRROR_FILE"
     # Pathspec commit: only the mirror file, whatever else the user has staged.
     if ! git -C "$REPO_ROOT" diff --cached --quiet -- "$SYNC_MIRROR_FILE"; then
       git -C "$REPO_ROOT" commit --quiet -m "chore(sync): promote $me to mirror" -- "$SYNC_MIRROR_FILE"

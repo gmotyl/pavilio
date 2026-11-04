@@ -1032,6 +1032,25 @@ describe("scripts/update.sh mirror guard", () => {
     expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
   });
 
+  it("promote commits and pushes the mirror file even when the workspace gitignores it", () => {
+    // A Quick Start clone carries pavilio's own .gitignore, which ignores the
+    // mirror file; the first promotion still has to record it.
+    initDestRepo();
+    writeFileSync(join(dest, ".gitignore"), "node_modules/\ndist/\n.pavilio/sync-mirror.json\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "ignore the mirror file");
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("auto-sync other-box 2026-11-03T13:38:28.980Z", {
+      "projects/p/time/other-box.jsonl": "{}\n",
+    });
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status, output).toBe(0);
+    expect(JSON.parse(remoteMirrorFile() ?? "null")).toEqual({ mirror: me });
+    expect(git(wsOrigin, "log", "-1", "--pretty=%s", "main")).toBe(`chore(sync): promote ${me} to mirror`);
+  });
+
   it("promote pulls, re-checks and retries after one rejected push", () => {
     initDestRepo();
     addWorkspaceOrigin();
