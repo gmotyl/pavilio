@@ -156,15 +156,16 @@ function parseOverwrittenFiles(stderr: string): string[] {
 }
 
 /**
- * The machine paths git can be handed as pathspecs: present on disk, or still tracked
- * (a deletion to commit). A pathspec matching neither makes `git add` and `git commit`
- * fail outright — e.g. a machine with no `.pavilio/voices/` yet.
+ * The machine paths git can be handed as pathspecs: tracked (including a deletion to
+ * commit) or untracked and not ignored. A pathspec matching nothing — a machine with no
+ * `.pavilio/voices/` yet, or a workspace that gitignores the path — makes
+ * `git commit -- <paths>` fail outright and would take the data paths down with it.
  */
 async function presentPaths(repo: string, machinePaths: string[], timeoutMs: number): Promise<string[]> {
   const present: string[] = [];
   for (const p of machinePaths.filter((m) => m && m.trim().length > 0)) {
-    if (existsSync(resolve(repo, p))) present.push(p);
-    else if ((await git(repo, ["ls-files", "--", p], timeoutMs)).stdout.trim()) present.push(p);
+    const known = await git(repo, ["ls-files", "--cached", "--others", "--exclude-standard", "--", p], timeoutMs);
+    if (known.stdout.trim()) present.push(p);
   }
   return present;
 }

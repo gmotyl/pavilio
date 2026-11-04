@@ -100,6 +100,18 @@ describe("syncRepo", () => {
     expect(git(mac, "rev-parse", "origin/main").trim()).toBe(git(mac, "rev-parse", "HEAD").trim());
   });
 
+  it("a gitignored machine path does not fail the data commit", async () => {
+    writeFileSync(join(mac, ".git/info/exclude"), ".pavilio/voices/\n");
+    mkdirSync(join(mac, ".pavilio/voices/gomes"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/voices/gomes/voice.json"), "{}\n");
+    writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
+
+    const r = await syncRepo(mac, machineOpts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(headFiles(mac)).toEqual(["projects/p/mac-note.md"]);
+  });
+
   it("another machine's preferences file is never staged", async () => {
     mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
     writeFileSync(join(mac, ".pavilio/preferences/mac.json"), "{}\n");
