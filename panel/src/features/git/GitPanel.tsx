@@ -3,7 +3,7 @@ import GitChanges from "./GitChanges";
 import { useAutoSyncStatus } from "../auto-sync/useAutoSyncStatus";
 import { SyncConflictBanner } from "../auto-sync/SyncConflictBanner";
 
-const ATTENTION = new Set(["conflict", "push-failed"]);
+const ATTENTION = new Set(["conflict", "push-failed", "blocked"]);
 
 export default function GitPanel() {
   // Same hook the sidebar uses, so this control reflects background ticks too —
