@@ -26,7 +26,12 @@ const mocks = vi.hoisted(() => ({
 }));
 // The real lib/hostname resolves machineId() from this mocked config.
 vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: mocks.autoSync, machineId: mocks.machineId }),
+  getConfig: () => ({
+    projectsDir: "/tmp/projects",
+    autoSync: mocks.autoSync,
+    machineId: mocks.machineId,
+    preferencesPath: "/tmp/.pavilio/preferences/testhost.json",
+  }),
 }));
 
 import { syncRepo } from "../../lib/syncRepo";
@@ -48,11 +53,33 @@ describe("auto-sync routes", () => {
     expect(syncRepo).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ hostname: "override-box" }));
   });
 
-  it("falls back to a 15-minute interval when autoSync is not configured", async () => {
+  it("default auto-sync interval is 60 minutes", async () => {
     mocks.autoSync = undefined;
-    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).get("/api/auto-sync/status");
+    const app = makeApp(autoSyncRouter, "/api/auto-sync");
+    const res = await request(app).get("/api/auto-sync/status");
     expect(res.status).toBe(200);
-    expect(res.body.intervalMinutes).toBe(15);
+    expect(res.body.intervalMinutes).toBe(60);
+    // the scheduler runs on the same default
+    await request(app).post("/api/auto-sync/enable");
+    expect(sched.startScheduler).toHaveBeenCalledWith(expect.objectContaining({ intervalMinutes: 60 }));
+    // …also when autoSync is set but names no interval
+    mocks.autoSync = { dataPaths: ["projects/"] } as unknown as typeof mocks.autoSync;
+    expect((await request(app).get("/api/auto-sync/status")).body.intervalMinutes).toBe(60);
+  });
+
+  it("syncs this machine's own preferences file and the voices", async () => {
+    await request(makeApp(autoSyncRouter, "/api/auto-sync")).post("/api/auto-sync/now");
+    expect(syncRepo).toHaveBeenCalledWith(
+      "/tmp",
+      expect.objectContaining({
+        dataPaths: ["projects/"],
+        machinePaths: [".pavilio/preferences/testhost.json", ".pavilio/voices/"],
+      }),
+    );
+    await request(makeApp(autoSyncRouter, "/api/auto-sync")).post("/api/auto-sync/enable");
+    expect(sched.startScheduler).toHaveBeenCalledWith(
+      expect.objectContaining({ machinePaths: [".pavilio/preferences/testhost.json", ".pavilio/voices/"] }),
+    );
   });
 
   it("GET /status returns enabled + status + interval", async () => {

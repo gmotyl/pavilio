@@ -25,6 +25,12 @@ export interface SyncOpts {
   dataPaths: string[]; // e.g. ["projects/"]
   /** Paths rsynced in by update.sh. Used only to classify conflicts in the prompt. */
   generatedPaths?: string[];
+  /**
+   * This machine's own non-data paths (relative to repo root), committed with the data
+   * paths: its preferences file and `.pavilio/voices/` (design D11). Never another
+   * machine's preferences file. A path that neither exists nor is tracked is skipped.
+   */
+  machinePaths?: string[];
   hostname: string;
   /** Hard per-git-command timeout. On expiry the whole process group (git + ssh) is SIGKILLed. */
   gitTimeoutMs?: number;
@@ -149,6 +155,20 @@ function parseOverwrittenFiles(stderr: string): string[] {
   return [...new Set(files)];
 }
 
+/**
+ * The machine paths git can be handed as pathspecs: present on disk, or still tracked
+ * (a deletion to commit). A pathspec matching neither makes `git add` and `git commit`
+ * fail outright — e.g. a machine with no `.pavilio/voices/` yet.
+ */
+async function presentPaths(repo: string, machinePaths: string[], timeoutMs: number): Promise<string[]> {
+  const present: string[] = [];
+  for (const p of machinePaths.filter((m) => m && m.trim().length > 0)) {
+    if (existsSync(resolve(repo, p))) present.push(p);
+    else if ((await git(repo, ["ls-files", "--", p], timeoutMs)).stdout.trim()) present.push(p);
+  }
+  return present;
+}
+
 export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus> {
   const watchdog = opts.watchdogMs ?? DEFAULT_WATCHDOG_MS;
   if (running) {
@@ -205,14 +225,15 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       }
       // commits about to be pulled from remote (for summary)
       const behind = (await git(repo, ["rev-list", "--count", "HEAD..@{u}"], t)).stdout.trim() || "0";
-      // scoped auto-commit: stage AND commit only data paths, so a user's
+      // scoped auto-commit: stage AND commit only data + machine paths, so a user's
       // manually-staged files (e.g. half-edited panel code) are never swept in.
-      await git(repo, ["add", "--", ...paths], t);
-      const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...paths], t);
+      const scoped = [...paths, ...(await presentPaths(repo, opts.machinePaths ?? [], t))];
+      await git(repo, ["add", "--", ...scoped], t);
+      const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...scoped], t);
       const didCommit = staged.status === 1;
       if (staged.status === 1) {
         const ts = new Date().toISOString();
-        const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...paths], t);
+        const commit = await git(repo, ["commit", "-m", `auto-sync ${opts.hostname} ${ts}`, "--", ...scoped], t);
         if (!commit.ok) {
           setStatusFor(myGen, { state: "push-failed", detail: `Commit failed: ${commit.stderr.trim() || "unknown error"}`, conflictFiles: [], conflictPrompt: "" });
           return status;

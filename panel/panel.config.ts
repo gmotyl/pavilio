@@ -38,8 +38,8 @@ export interface PanelConfig {
   tlsKey?: string;
   /** Auto-sync settings for the data repo. Enabled flag lives in .autosync-state.json (default on). */
   autoSync?: {
-    /** Minutes between automatic syncs */
-    intervalMinutes: number;
+    /** Minutes between automatic syncs. Default 60 (DEFAULT_AUTO_SYNC_INTERVAL_MINUTES). */
+    intervalMinutes?: number;
     /** Paths (relative to repo root) auto-committed each tick */
     dataPaths: string[];
     /** Paths (relative to repo root) rsynced in by scripts/update.sh. Never committed by
@@ -97,7 +97,7 @@ const defaults: PanelConfig = {
     "**/log/*.txt",
   ],
   autoSync: {
-    intervalMinutes: 15,
+    intervalMinutes: 60,
     dataPaths: ["projects/"],
     generatedPaths: [
       "panel/",

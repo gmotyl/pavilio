@@ -156,6 +156,7 @@ describe("startPanel machine identity", () => {
       port: 0,
       projectsDir: "/tmp/pavilio-startup-sweep-projects",
       machineId: "Override Box",
+      preferencesPath: "/tmp/.pavilio/preferences/override-box.json",
     } as unknown as ReturnType<typeof getConfig>);
     vi.mocked(isEnabled).mockReturnValue(true);
 
@@ -165,6 +166,13 @@ describe("startPanel machine identity", () => {
       expect.anything(),
       expect.objectContaining({ hostname: "override-box" }),
     );
-    expect(startScheduler).toHaveBeenCalledWith(expect.objectContaining({ hostname: "override-box" }));
+    expect(startScheduler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostname: "override-box",
+        // no autoSync in the config: the defaults apply (design D11)
+        intervalMinutes: 60,
+        machinePaths: [".pavilio/preferences/override-box.json", ".pavilio/voices/"],
+      }),
+    );
   });
 });

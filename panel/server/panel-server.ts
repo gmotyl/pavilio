@@ -4,7 +4,6 @@ import express, {
   type Response,
   type NextFunction,
 } from "express";
-import { resolve } from "path";
 import { createServer as createHttpServer, type Server as HttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
@@ -51,6 +50,7 @@ import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
 import { machineId } from "./lib/hostname.js";
+import { autoSyncSettings } from "./lib/autoSyncConfig.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
 import { isEnabled } from "./lib/autoSyncState.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
@@ -309,15 +309,15 @@ export async function startPanel(
   setInterval(pruneDeadAgents, 30_000);
 
   if (isEnabled()) {
-    const c = getConfig();
-    const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
+    const s = autoSyncSettings();
     startScheduler({
-      repo: resolve(c.projectsDir, ".."),
-      hostname: machineId(),
-      dataPaths: autoSync.dataPaths,
-      generatedPaths: autoSync.generatedPaths,
-      intervalMinutes: autoSync.intervalMinutes,
-      notifyCmd: autoSync.notifyCmd,
+      repo: s.repo,
+      hostname: s.hostname,
+      dataPaths: s.dataPaths,
+      generatedPaths: s.generatedPaths,
+      machinePaths: s.machinePaths,
+      intervalMinutes: s.intervalMinutes,
+      notifyCmd: s.notifyCmd,
     });
   }
 }

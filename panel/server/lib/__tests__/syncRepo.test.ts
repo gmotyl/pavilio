@@ -49,12 +49,71 @@ describe("syncRepo", () => {
     writeFileSync(join(seed, ".gitattributes"), "projects/**/time/*.jsonl merge=union\n");
     // A tracked file outside the data paths (stands in for panel code / config).
     writeFileSync(join(seed, "tool.txt"), "tool v1\n");
+    // Another machine's committed preferences file (design D11: never staged here).
+    mkdirSync(join(seed, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(join(seed, ".pavilio/preferences/win.json"), "{}\n");
     git(seed, "add", "-A"); git(seed, "commit", "-qm", "seed"); git(seed, "push", "-q", "origin", "HEAD:main");
     mac = clone("mac"); win = clone("win");
   }, 30_000);
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   const opts = (h: string) => ({ dataPaths: ["projects/"], hostname: h });
+  // What panel-server passes: this machine's own preferences file and the voices.
+  const machineOpts = (h: string) => ({
+    ...opts(h),
+    machinePaths: [`.pavilio/preferences/${h}.json`, ".pavilio/voices/"],
+  });
+  /** Paths changed by the HEAD commit. */
+  const headFiles = (dir: string) =>
+    git(dir, "show", "--name-only", "--format=", "HEAD").split("\n").filter(Boolean).sort();
+  /** `git status --porcelain` lines (XY + path), sorted. */
+  const dirty = (dir: string) => git(dir, "status", "--porcelain").split("\n").filter(Boolean).sort();
+
+  it("own preferences file is committed with the data paths", async () => {
+    writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
+    mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/preferences/mac.json"), '{"theme":"dark"}\n');
+
+    // No .pavilio/voices/ on this machine: a missing machine path must not fail the add.
+    const r = await syncRepo(mac, machineOpts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(git(mac, "log", "-1", "--format=%s")).toMatch(/^auto-sync mac /);
+    expect(headFiles(mac)).toEqual([".pavilio/preferences/mac.json", "projects/p/mac-note.md"]);
+    expect(dirty(mac)).toEqual([]);
+    // …and it travels to the other machine.
+    expect((await syncRepo(win, machineOpts("win"))).state).toBe("synced");
+    expect(readFileSync(join(win, ".pavilio/preferences/mac.json"), "utf-8")).toBe('{"theme":"dark"}\n');
+  });
+
+  it("voices are committed with the data paths", async () => {
+    mkdirSync(join(mac, ".pavilio/voices/gomes"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/voices/gomes/voice.json"), '{"name":"gomes"}\n');
+    writeFileSync(join(mac, ".pavilio/voices/gomes/sample.wav"), "RIFF\n");
+
+    const r = await syncRepo(mac, machineOpts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(headFiles(mac)).toEqual([".pavilio/voices/gomes/sample.wav", ".pavilio/voices/gomes/voice.json"]);
+    expect(dirty(mac)).toEqual([]);
+    git(mac, "fetch", "--quiet");
+    expect(git(mac, "rev-parse", "origin/main").trim()).toBe(git(mac, "rev-parse", "HEAD").trim());
+  });
+
+  it("another machine's preferences file is never staged", async () => {
+    mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/preferences/mac.json"), "{}\n");
+    writeFileSync(join(mac, ".pavilio/preferences/win.json"), '{"edited":"on mac"}\n');
+    writeFileSync(join(mac, ".pavilio/preferences.json"), "{}\n"); // legacy file, not ours to commit
+    writeFileSync(join(mac, "tool.txt"), "mac local tool\n");
+
+    const r = await syncRepo(mac, machineOpts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(headFiles(mac)).toEqual([".pavilio/preferences/mac.json"]);
+    // left exactly as they were: modified / untracked, nothing staged
+    expect(dirty(mac)).toEqual([" M .pavilio/preferences/win.json", " M tool.txt", "?? .pavilio/preferences.json"]);
+  });
 
   it("disjoint edits converge through a merge", async () => {
     writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
