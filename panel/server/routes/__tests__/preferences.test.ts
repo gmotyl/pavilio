@@ -10,6 +10,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -426,6 +427,28 @@ describe("copy preferences from another machine", () => {
     }
 
     expect(getPreferences()).toEqual(before);
+    await flushPreferences();
+    expect(readFileSync(own, "utf8")).toBe(ownText);
+  });
+
+  it("a symlinked or non-file machine entry is neither listed nor copied", async () => {
+    const ownText = '{"version":1,"theme":"light"}';
+    const { prefsDir, own } = workspace({ "spock.json": ownText, "mac.json": '{"version":1,"theme":"dark"}' });
+    const outside = join(dir, "secret.json");
+    writeFileSync(outside, '{"version":1,"theme":"evil"}', "utf8");
+    symlinkSync(outside, join(prefsDir, "link.json"));
+    mkdirSync(join(prefsDir, "dir.json"));
+    machines.tracked = ["dir.json", "link.json", "mac.json", "spock.json"];
+    const app = makeApp(preferencesRouter);
+
+    const list = await request(app).get("/api/preferences/machines");
+    expect(list.body).toEqual({ self: "spock", machines: ["mac"] });
+
+    for (const machine of ["link", "dir"]) {
+      const res = await request(app).post("/api/preferences/copy-from").send({ machine });
+      expect(res.status, machine).toBe(404);
+    }
+    expect(getPreferences()).toEqual({ version: 1, theme: "light" });
     await flushPreferences();
     expect(readFileSync(own, "utf8")).toBe(ownText);
   });

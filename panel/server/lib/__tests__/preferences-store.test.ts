@@ -19,6 +19,7 @@ import {
   patchPreferences,
   flushPreferences,
   isReadOnly,
+  replacePreferences,
   _resetPreferencesForTests,
 } from "../preferences-store.js";
 
@@ -479,6 +480,25 @@ describe("a failed write", () => {
     expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({ version: 1, theme: "dark" });
 
     // and nothing is left behind from the failed attempt
+    expect(filesUnder(dir)).toEqual(["preferences.json"]);
+  });
+});
+
+describe("replacePreferences", () => {
+  it("a patch flushed during a slow replace write is not overtaken by it", async () => {
+    freshDir();
+    loadPreferences(file());
+
+    // A large copied document makes the replace write slow; the patch then drops
+    // that key again, so the flush has a small, fast document to write.
+    const replacing = replacePreferences({ version: 1, big: "x".repeat(16 * 1024 * 1024) });
+    patchPreferences({ big: null, theme: "dark" });
+    await flushPreferences();
+    await replacing;
+
+    expect(getPreferences()).toStrictEqual({ version: 1, theme: "dark" });
+    // The file on disk ends at the in-memory state, not the replace's stale copy.
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toStrictEqual({ version: 1, theme: "dark" });
     expect(filesUnder(dir)).toEqual(["preferences.json"]);
   });
 });

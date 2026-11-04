@@ -150,12 +150,18 @@ export async function replacePreferences(next: Record<string, unknown>): Promise
   refusalLogged = false;
   unstorableWarned.clear();
   if (!targetPath) return doc;
-  try {
-    await writeNow(targetPath, serialize(doc));
-  } catch (err) {
-    dirty = true;
-    throw err;
-  }
+  // Registered as the in-flight write, like flushPreferences' own: a patch that
+  // lands meanwhile flushes only after this rename, so it is never overtaken.
+  const write = writeNow(targetPath, serialize(doc))
+    .catch((err: unknown) => {
+      dirty = true;
+      throw err;
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+  inFlight = write.catch(() => {});
+  await write;
   return doc;
 }
 

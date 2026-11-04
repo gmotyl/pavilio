@@ -19,6 +19,7 @@
 // `/api/preferences.js`.
 
 import { Router } from "express";
+import { lstatSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -145,7 +146,8 @@ const MACHINE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * This machine's id and the other machines a copy may come from: the
  * `<id>.json` siblings of this machine's own file that git tracks — a
  * *committed* file, since that is what another machine's sync brought here, not
- * a stray local one — and that are still on disk to be read. Outside a git
+ * a stray local one — and that are still on disk to be read, as a regular file
+ * (never a symlink or a directory). Outside a git
  * repository there is no "committed", so every per-machine file on disk counts.
  *
  * Empty when the own file is not a per-machine file (a `preferencesPath`
@@ -159,11 +161,20 @@ async function otherMachines(): Promise<{ self: string; dir: string; machines: s
   const onDisk = new Set(await readdir(dir).catch(() => [] as string[]));
   const candidates = (await trackedFileNames(dir)) ?? [...onDisk];
   const machines = candidates
-    .filter((name) => name.endsWith(".json") && onDisk.has(name))
+    .filter((name) => name.endsWith(".json") && onDisk.has(name) && isRegularFile(join(dir, name)))
     .map((name) => name.slice(0, -".json".length))
     .filter((id) => id !== self && MACHINE_ID.test(id))
     .sort();
   return { self, dir, machines };
+}
+
+/** A regular file, not a symlink: a committed link could point a copy anywhere on disk. */
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 preferencesRouter.get("/preferences/machines", async (_req, res) => {
