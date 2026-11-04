@@ -1,9 +1,15 @@
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { machineHostname } from "./server/lib/machineName.js";
+import { preferencesPathFor } from "./server/lib/preferencesPath.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/** One level above panel/ — the repo root in a source clone, the workspace
+ *  root in the rsync mirror where panel/ is itself a synced copy. */
+export const WORKSPACE_ROOT = resolve(__dirname, "..");
 
 export interface PanelConfig {
   /** Absolute path to the projects directory (contains project subfolders with PROJECT.md) */
@@ -15,7 +21,9 @@ export interface PanelConfig {
   machineId?: string;
   /** Path to agent registry file */
   agentRegistryPath: string;
-  /** Path to the workspace preferences document (read once at boot) */
+  /** Path to this machine's workspace preferences document (read once at boot).
+   *  Defaults to `.pavilio/preferences/<machineId>.json` under WORKSPACE_ROOT,
+   *  recomputed by loadConfig() once a local `machineId` override is known. */
   preferencesPath: string;
   /** File watching debounce in ms */
   watchDebounceMs: number;
@@ -78,9 +86,8 @@ const defaults: PanelConfig = {
   projectsDir: resolve(__dirname, "../projects"),
   port: 3010,
   agentRegistryPath: resolve(process.env.HOME || "~", ".agent-registry.json"),
-  // One level above panel/ — the repo root in a source clone, the workspace
-  // root in the rsync mirror where panel/ is itself a synced copy.
-  preferencesPath: resolve(__dirname, "../.pavilio/preferences.json"),
+  // The hostname stands in for machineId until panel.config.local.ts is merged.
+  preferencesPath: preferencesPathFor(WORKSPACE_ROOT, machineHostname()),
   watchDebounceMs: 300,
   answerWaveDebounceMs: answerWaveDebounceMsFromEnv(),
   ignorePatterns: [

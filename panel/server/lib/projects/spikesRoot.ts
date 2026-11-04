@@ -1,9 +1,7 @@
 import { existsSync, readFileSync } from "fs";
-import { dirname, join, resolve } from "path";
-import { fileURLToPath } from "url";
 
 import { preferences } from "../../../src/preferences/declarations";
-import { getConfig, loadConfig } from "../../config";
+import { preferencesFileFor } from "../../config";
 
 /**
  * The spikes root (`research.spikesRoot`), read from the workspace preferences document.
@@ -15,9 +13,6 @@ import { getConfig, loadConfig } from "../../config";
 const ROOT = preferences.researchSpikesRoot;
 
 export const SPIKES_ROOT_DEFAULT: string = ROOT.default;
-
-/** The workspace this panel lives in — the one `panel.config.ts` describes. */
-const DEFAULT_WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 /** Spikes root from an already-parsed preferences document (any shape). */
 export function spikesRootFrom(doc: unknown): string {
@@ -39,21 +34,7 @@ export function readSpikesRoot(prefsPath: string): string {
   return spikesRootFrom(doc);
 }
 
-/**
- * The preferences file for `workspaceRoot`, located the way the wiki CLI's `config` command
- * does: a workspace other than this panel's has its own `.pavilio/preferences.json`; this
- * panel's own workspace uses `preferencesPath` from `panel.config.ts` (as overridden by
- * `panel.config.local.ts`).
- */
-export async function preferencesPathFor(workspaceRoot: string): Promise<string> {
-  if (resolve(workspaceRoot) !== DEFAULT_WORKSPACE_ROOT) {
-    return join(workspaceRoot, ".pavilio", "preferences.json");
-  }
-  await loadConfig();
-  return getConfig().preferencesPath;
-}
-
-/** Spikes root for `workspaceRoot`, from the preferences file `preferencesPathFor` locates. */
+/** Spikes root for `workspaceRoot`, from this machine's preferences file there. */
 export async function loadSpikesRoot(workspaceRoot: string): Promise<string> {
-  return readSpikesRoot(await preferencesPathFor(workspaceRoot));
+  return readSpikesRoot(await preferencesFileFor(workspaceRoot));
 }
