@@ -1017,6 +1017,23 @@ describe("scripts/update.sh mirror guard", () => {
     expect(invocations(rsyncCalled)).toBe("");
   });
 
+  it("sync refreshes origin/main even when the remote has no default fetch refspec", () => {
+    // origin/main exists but is stale, and `git fetch origin main` alone would
+    // only fill FETCH_HEAD: the role must still come from origin's current main.
+    initDestRepo();
+    addWorkspaceOrigin();
+    git(dest, "fetch", "-q", "origin");
+    git(dest, "config", "--unset-all", "remote.origin.fetch");
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/another machine is the mirror/);
+    expect(invocations(rsyncCalled)).toBe("");
+  });
+
   it("promote writes, commits and pushes the mirror file", () => {
     initDestRepo();
     addWorkspaceOrigin();

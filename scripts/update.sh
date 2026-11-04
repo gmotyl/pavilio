@@ -120,6 +120,10 @@ fi
 # Printed verbatim at the end of every update and with every refusal below.
 SYNC_REMINDER='With several instances, run `pnpm sync` only on the mirror machine; every other machine runs `pnpm pull`.'
 SYNC_MIRROR_FILE=".pavilio/sync-mirror.json"
+# Spelled out rather than `origin main`: a bare branch name refreshes
+# origin/main only through the remote's configured fetch refspec, and a remote
+# without the default one would leave the role check reading a stale origin/main.
+ORIGIN_MAIN_REFSPEC="+refs/heads/main:refs/remotes/origin/main"
 
 # The role of this machine, read from the workspace's origin/main by
 # scripts/sync-role (mirror, consumer, single or unassigned). Exits on failure:
@@ -161,7 +165,7 @@ promote_to_mirror() {
   echo "Promoting $me to mirror..."
   for attempt in 1 2; do
     [ "$attempt" = 2 ] && echo "  Push rejected — pulling origin/main, then retrying once..."
-    if ! git -C "$REPO_ROOT" pull --quiet --no-rebase --no-edit origin main; then
+    if ! git -C "$REPO_ROOT" pull --quiet --no-rebase --no-edit origin "$ORIGIN_MAIN_REFSPEC"; then
       git -C "$REPO_ROOT" merge --abort >/dev/null 2>&1 || true
       echo "Error: could not pull origin/main into the workspace (see above) — a conflict or local changes in the way."
       failure="pull"
@@ -239,7 +243,7 @@ guard_sync_role() {
     return 0
   fi
   echo "Checking this machine's sync role on origin/main..."
-  if ! git -C "$REPO_ROOT" fetch --quiet origin main; then
+  if ! git -C "$REPO_ROOT" fetch --quiet origin "$ORIGIN_MAIN_REFSPEC"; then
     echo "Error: could not fetch origin — cannot confirm this machine is the mirror, so nothing was synced."
     echo "Re-run once origin is reachable."
     exit 1
