@@ -112,8 +112,31 @@ describe("scripts/install-git-hooks", () => {
     expect(r.stdout).toMatch(/removed core\.hooksPath/);
   });
 
+  it("replaces a local core.hooksPath that points at a directory that does not exist", () => {
+    // The real-world shape: an absolute path to a husky dir that was since deleted.
+    git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
+    const missing = join(sandbox, "gone", ".husky", "_");
+    git(["config", "core.hooksPath", missing]);
+    const r = runPrepare();
+    expect(r.status).toBe(0);
+    expect(git(["config", "--local", "--get", "core.hooksPath"]).stdout).toBe("scripts/git-hooks");
+    expect(r.stdout).toContain(`replaced core.hooksPath=${missing}`);
+    expect(r.stderr).not.toMatch(/warning/i);
+  });
+
+  it("overrides a global core.hooksPath that points at a missing directory, leaving the global alone", () => {
+    git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
+    git(["config", "--global", "core.hooksPath", "~/no-such-hooks"]);
+    const r = runPrepare();
+    expect(r.status).toBe(0);
+    expect(git(["config", "--local", "--get", "core.hooksPath"]).stdout).toBe("scripts/git-hooks");
+    expect(git(["config", "--global", "--get", "core.hooksPath"]).stdout).toBe("~/no-such-hooks");
+    expect(r.stdout).toContain("replaced core.hooksPath=~/no-such-hooks");
+  });
+
   it("install-git-hooks keeps a user-set hooksPath", () => {
     git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
+    mkdirSync(join(repo, ".githooks"));
     git(["config", "core.hooksPath", ".githooks"]);
     const r = runPrepare();
     expect(r.status).toBe(0);
