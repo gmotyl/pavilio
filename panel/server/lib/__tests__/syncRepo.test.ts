@@ -145,6 +145,52 @@ describe("syncRepo", () => {
     expect(() => git(win, "status")).not.toThrow();
   });
 
+  it("merges a divergence even when pull.ff=only is configured", async () => {
+    git(win, "config", "pull.ff", "only");
+    writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+    writeFileSync(join(win, "projects/p/win-note.md"), "win\n");
+
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("synced");
+    expect(git(win, "rev-list", "--merges", "--count", "HEAD").trim()).toBe("1");
+    expect(readFileSync(join(win, "projects/p/mac-note.md"), "utf-8")).toBe("mac\n");
+  });
+
+  it("a same-line conflict in a linked worktree aborts the merge and names the files", async () => {
+    // .git is a file in a linked worktree, so <repo>/.git/MERGE_HEAD never exists.
+    const base = clone("base");
+    git(base, "checkout", "-q", "--detach");
+    const wt = join(root, "wt");
+    git(base, "worktree", "add", "-q", wt, "main");
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+    writeFileSync(join(wt, "projects/p/note.md"), "wt edit\n");
+
+    const r = await syncRepo(wt, opts("wt"));
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
+    // the abort ran: no merge in progress, no conflict markers left behind
+    const mergeHead = spawnSync("git", ["rev-parse", "-q", "--verify", "MERGE_HEAD"], { cwd: wt });
+    expect(mergeHead.status).not.toBe(0);
+    expect(readFileSync(join(wt, "projects/p/note.md"), "utf-8")).toBe("wt edit\n");
+  });
+
+  it("names a non-ASCII conflicting file unescaped", async () => {
+    const name = "projects/p/zażółć.md";
+    writeFileSync(join(mac, name), "mac\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+    writeFileSync(join(win, name), "win\n");
+
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual([name]);
+    expect(r.conflictPrompt).toContain(name);
+  });
+
   it("a repo already mid-merge is reported, not aborted", async () => {
     writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
     await syncRepo(mac, opts("mac"));

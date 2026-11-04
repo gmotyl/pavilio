@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { broadcast } from "../watcher.js";
 import { gitSafeEnv } from "./gitEnv.js";
 import { buildConflictPrompt } from "./buildConflictPrompt.js";
@@ -74,7 +74,9 @@ function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): P
     // env: GIT_DIR and friends outrank cwd, so an inherited one would point every
     // sync at whichever repository launched us. See gitEnv.ts.
     // LC_ALL=C: the overwrite refusal is recognised by its message, which git localises.
-    const child = spawn("git", args, {
+    // core.quotePath=false: path lists (unmerged files, overwrite refusals) come back
+    // verbatim instead of octal-escaped, so Polish filenames stay readable.
+    const child = spawn("git", ["-c", "core.quotePath=false", ...args], {
       cwd,
       env: { ...gitSafeEnv(), LC_ALL: "C" },
       detached: true,
@@ -101,9 +103,27 @@ function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): P
   });
 }
 
-function midOperation(repo: string): "merge" | "rebase" | null {
-  if (existsSync(join(repo, ".git/rebase-merge")) || existsSync(join(repo, ".git/rebase-apply"))) return "rebase";
-  if (existsSync(join(repo, ".git/MERGE_HEAD"))) return "merge";
+interface OpPaths { mergeHead: string; rebaseMerge: string; rebaseApply: string; }
+
+/**
+ * Where git keeps its in-progress markers. Asked of git rather than joined onto
+ * "<repo>/.git": in a linked worktree .git is a file and the markers live under
+ * the main repo's .git/worktrees/<name>/. Resolved once per tick.
+ */
+async function opPaths(repo: string, timeoutMs: number): Promise<OpPaths> {
+  const r = await git(repo, ["rev-parse", "--git-path", "MERGE_HEAD", "--git-path", "rebase-merge", "--git-path", "rebase-apply"], timeoutMs);
+  const [mergeHead, rebaseMerge, rebaseApply] = r.stdout.split("\n").map((s) => s.trim());
+  if (!r.ok || !mergeHead || !rebaseMerge || !rebaseApply) {
+    const dotGit = resolve(repo, ".git");
+    return { mergeHead: resolve(dotGit, "MERGE_HEAD"), rebaseMerge: resolve(dotGit, "rebase-merge"), rebaseApply: resolve(dotGit, "rebase-apply") };
+  }
+  // --git-path answers relative to cwd unless the git dir is elsewhere
+  return { mergeHead: resolve(repo, mergeHead), rebaseMerge: resolve(repo, rebaseMerge), rebaseApply: resolve(repo, rebaseApply) };
+}
+
+function midOperation(p: OpPaths): "merge" | "rebase" | null {
+  if (existsSync(p.rebaseMerge) || existsSync(p.rebaseApply)) return "rebase";
+  if (existsSync(p.mergeHead)) return "merge";
   return null;
 }
 
@@ -143,12 +163,13 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
     const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
     const t = opts.gitTimeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
 
-    const inProgress = midOperation(repo);
+    const ops = await opPaths(repo, t);
+    const inProgress = midOperation(ops);
     if (inProgress) {
       // Name the files and hand over a prompt here too — otherwise this path is the
-      // "no files, no route out" dead-end. Do NOT abort: this rebase is not ours (a
-      // crashed earlier tick, or a human mid-resolve), and aborting would discard
-      // their work. buildConflictPrompt's aborted:false branch says so.
+      // "no files, no route out" dead-end. Do NOT abort: this merge or rebase is not
+      // ours (a crashed earlier tick, or a human mid-resolve), and aborting would
+      // discard their work. buildConflictPrompt's aborted:false branch says so.
       const unmerged = (await git(repo, ["diff", "--name-only", "--diff-filter=U"], t)).stdout
         .split("\n")
         .map((s) => s.trim())
@@ -202,11 +223,12 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       // Merge upstream in. Never rebase: a human's merge resolution must survive the
       // tick instead of being linearised (and re-conflicted) away. No --autostash: a
       // dirty non-data file the merge would overwrite makes git refuse untouched, and
-      // that refusal surfaces as "blocked" rather than as a hidden stash.
-      const pull = await git(repo, ["pull", "--no-rebase", "--no-edit"], t);
+      // that refusal surfaces as "blocked" rather than as a hidden stash. --ff overrides
+      // a configured pull.ff=only, which would turn every divergence into "offline".
+      const pull = await git(repo, ["pull", "--no-rebase", "--no-edit", "--ff"], t);
       if (!pull.ok) {
         const overwritten = parseOverwrittenFiles(pull.stderr);
-        if (midOperation(repo) === "merge") {
+        if (midOperation(ops) === "merge") {
           // Unmerged paths exist only while the merge is in progress — read them
           // before the abort wipes them, so the UI can name what broke.
           const unmerged = (await git(repo, ["diff", "--name-only", "--diff-filter=U"], t)).stdout
