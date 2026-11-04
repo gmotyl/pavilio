@@ -10,6 +10,9 @@ export interface PanelConfig {
   projectsDir: string;
   /** Port for the dev server */
   port: number;
+  /** This machine's id in per-host files and the sync role (sanitized like a hostname).
+   *  Set only in the machine's own panel.config.local.ts; defaults to the hostname. */
+  machineId?: string;
   /** Path to agent registry file */
   agentRegistryPath: string;
   /** Path to the workspace preferences document (read once at boot) */
