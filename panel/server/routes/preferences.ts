@@ -7,14 +7,32 @@
 //                              never flashes a default layout first;
 //   PATCH /api/preferences     a shallow patch (a null value deletes a key).
 //
+// And the two behind Settings' "Copy preferences from <machine>" (design D4):
+//
+//   GET  /api/preferences/machines   this machine's id and the other machines
+//                                    with a committed per-machine file;
+//   POST /api/preferences/copy-from  { machine } — replace this machine's
+//                                    document with that machine's file.
+//
 // Mounted under `/api`, not `/api/preferences` — express splits a mount prefix
 // on `/` only, so a router mounted at `/api/preferences` would never see
 // `/api/preferences.js`.
 
 import { Router } from "express";
+import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { getConfig } from "../config.js";
-import { getPreferences, isReadOnly, patchPreferences } from "../lib/preferences-store.js";
+import { machineId } from "../lib/hostname.js";
+import {
+  getPreferences,
+  getPreferencesPath,
+  isReadOnly,
+  patchPreferences,
+  readDoc,
+  replacePreferences,
+} from "../lib/preferences-store.js";
+import { trackedFileNames } from "../lib/trackedFiles.js";
 import { broadcast } from "../watcher.js";
 
 const preferencesRouter = Router();
@@ -118,6 +136,62 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // they learn which keys to re-read.
   broadcast({ type: "preferences-change", keys });
   res.json({ ok: true, persisted: !isReadOnly() });
+});
+
+/** A machine id as `sanitizeHostname` produces it — no dots, no slashes, so never a path. */
+const MACHINE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * This machine's id and the other machines a copy may come from: the
+ * `<id>.json` siblings of this machine's own file that git tracks — a
+ * *committed* file, since that is what another machine's sync brought here, not
+ * a stray local one — and that are still on disk to be read. Outside a git
+ * repository there is no "committed", so every per-machine file on disk counts.
+ *
+ * Empty when the own file is not a per-machine file (a `preferencesPath`
+ * override, or the legacy shared file): its directory holds no machines.
+ */
+async function otherMachines(): Promise<{ self: string; dir: string; machines: string[] }> {
+  const self = machineId();
+  const own = getPreferencesPath();
+  const dir = dirname(own);
+  if (!own || basename(own) !== `${self}.json`) return { self, dir, machines: [] };
+  const onDisk = new Set(await readdir(dir).catch(() => [] as string[]));
+  const candidates = (await trackedFileNames(dir)) ?? [...onDisk];
+  const machines = candidates
+    .filter((name) => name.endsWith(".json") && onDisk.has(name))
+    .map((name) => name.slice(0, -".json".length))
+    .filter((id) => id !== self && MACHINE_ID.test(id))
+    .sort();
+  return { self, dir, machines };
+}
+
+preferencesRouter.get("/preferences/machines", async (_req, res) => {
+  const { self, machines } = await otherMachines();
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ self, machines });
+});
+
+preferencesRouter.post("/preferences/copy-from", async (req, res) => {
+  const machine: unknown = (req.body as { machine?: unknown } | undefined)?.machine;
+  // Validated before any path is built from it: only an id from the list —
+  // which is already sanitized, never this machine, never `../x` — is served.
+  const { dir, machines } = await otherMachines();
+  if (typeof machine !== "string" || !MACHINE_ID.test(machine) || !machines.includes(machine)) {
+    return res.status(404).json({ error: "no other machine with committed preferences by that id" });
+  }
+  const copied = readDoc(join(dir, `${machine}.json`));
+  if (!copied) {
+    return res.status(422).json({ error: `${machine}'s preferences file is not a JSON object` });
+  }
+  try {
+    await replacePreferences(copied);
+  } catch (err) {
+    return res.status(500).json({ error: `could not write this machine's preferences: ${String(err)}` });
+  }
+  // No broadcast: the copying tab reloads, and preferences are read once at
+  // boot (ADR-0015) — another open tab picks the copy up on its next reload.
+  res.status(204).end();
 });
 
 export default preferencesRouter;

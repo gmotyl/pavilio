@@ -91,7 +91,7 @@ export function loadPreferences(
 }
 
 /** The document at `path`, or undefined when it is missing, unreadable or not a JSON object. */
-function readDoc(path: string): PreferencesDoc | undefined {
+export function readDoc(path: string): PreferencesDoc | undefined {
   try {
     if (!existsSync(path)) return undefined;
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
@@ -122,6 +122,40 @@ function seedOwnFile(path: string, source: string): void {
 
 /** The in-memory document. */
 export function getPreferences(): PreferencesDoc {
+  return doc;
+}
+
+/** This machine's own file — where every write goes ("" before a load). */
+export function getPreferencesPath(): string {
+  return targetPath;
+}
+
+/**
+ * Replace the whole in-memory document with `next` and write it to the own
+ * file now — "Copy preferences from <machine>" (design D4). Not a merge: a key
+ * only the old document had is gone. Like a boot seed it is a copy, so it is
+ * written whatever its version (a newer one then makes the store read-only).
+ * Any pending patch is superseded. Resolves once the file is on disk, because
+ * the caller reloads the page next and preferences are read once (ADR-0015);
+ * rejects when the write fails, with the document kept pending for a retry.
+ */
+export async function replacePreferences(next: Record<string, unknown>): Promise<PreferencesDoc> {
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  while (inFlight) await inFlight;
+  doc = { ...next, version: normalizeVersion(next.version) };
+  dirty = false;
+  refusalLogged = false;
+  unstorableWarned.clear();
+  if (!targetPath) return doc;
+  try {
+    await writeNow(targetPath, serialize(doc));
+  } catch (err) {
+    dirty = true;
+    throw err;
+  }
   return doc;
 }
 
