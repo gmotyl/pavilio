@@ -512,8 +512,10 @@ pushing to the same `origin`. Upstream pavilio must then enter the workspace
 through exactly one of them; two machines each copying (or rebasing onto) their
 own upstream version fight over the result.
 
-- The **mirror machine** runs `pnpm sync`: it takes upstream, commits the result
-  and pushes it.
+- The **mirror machine** runs `pnpm sync`: it takes upstream and commits the
+  result. `pnpm sync` does not push that commit — the next auto-sync tick does,
+  or `git push` it yourself (always, when auto-sync is off) before the other
+  machines pull.
 - Every other machine is a **consumer machine**: it gets that result with
   `pnpm pull` — `git pull --no-rebase` from `origin`, then install, command
   refresh and build. `pnpm pull` never rsyncs, never rebases and never commits
