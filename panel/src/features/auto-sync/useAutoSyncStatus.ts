@@ -4,7 +4,7 @@ import { observeTransition } from "./attention";
 
 export interface AutoSyncStatus {
   enabled: boolean;
-  state: "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy";
+  state: "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy" | "blocked";
   stale?: boolean;
   lastSync: string | null;
   detail: string;
@@ -12,10 +12,12 @@ export interface AutoSyncStatus {
   intervalMinutes: number;
   conflictFiles: string[];
   conflictPrompt: string;
+  /** Uncommitted non-data files blocking the merge. Empty unless state is "blocked". */
+  blockedFiles: string[];
 }
 
 const ATTENTION_TEXT: Record<string, string> = {
-  conflict: "Auto-sync: rebase conflict — repo needs manual attention",
+  conflict: "Auto-sync: merge conflict — repo needs manual attention",
   "push-failed": "Auto-sync: push failed — repo needs manual attention",
   stale: "Auto-sync: no successful sync for a long time — check the panel",
 };

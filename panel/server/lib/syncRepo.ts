@@ -6,17 +6,19 @@ import { gitSafeEnv } from "./gitEnv.js";
 import { buildConflictPrompt } from "./buildConflictPrompt.js";
 
 export type SyncState =
-  | "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy";
+  | "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy" | "blocked";
 
 export interface SyncStatus {
   state: SyncState;
   lastSync: string | null; // ISO of last successful sync
   detail: string;
   summary: string; // e.g. "↑2 ↓1"
-  /** Paths left unmerged by a failed rebase, read before the abort. Empty in every other state. */
+  /** Paths left unmerged by a failed merge, read before the abort. Empty in every other state. */
   conflictFiles: string[];
   /** Ready-to-paste resolution instructions. Empty unless state is "conflict". */
   conflictPrompt: string;
+  /** Uncommitted non-data files the incoming merge would overwrite. Empty unless state is "blocked". */
+  blockedFiles: string[];
 }
 
 export interface SyncOpts {
@@ -33,7 +35,9 @@ export interface SyncOpts {
 let running = false;
 let runningSince = 0;
 let generation = 0;
-let status: SyncStatus = { state: "idle", lastSync: null, detail: "", summary: "", conflictFiles: [], conflictPrompt: "" };
+let status: SyncStatus = {
+  state: "idle", lastSync: null, detail: "", summary: "", conflictFiles: [], conflictPrompt: "", blockedFiles: [],
+};
 
 export function getSyncStatus(): SyncStatus {
   return status;
@@ -46,7 +50,8 @@ export function isStale(intervalMinutes: number, now = Date.now()): boolean {
 }
 
 function setStatus(next: Partial<SyncStatus>) {
-  status = { ...status, ...next };
+  // blockedFiles belongs to the "blocked" state alone; every other outcome clears it.
+  status = { ...status, blockedFiles: [], ...next };
   broadcast({ type: "sync-status", ...status });
 }
 
@@ -68,9 +73,10 @@ function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): P
   return new Promise((done) => {
     // env: GIT_DIR and friends outrank cwd, so an inherited one would point every
     // sync at whichever repository launched us. See gitEnv.ts.
+    // LC_ALL=C: the overwrite refusal is recognised by its message, which git localises.
     const child = spawn("git", args, {
       cwd,
-      env: gitSafeEnv(),
+      env: { ...gitSafeEnv(), LC_ALL: "C" },
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -95,8 +101,32 @@ function git(cwd: string, args: string[], timeoutMs = DEFAULT_GIT_TIMEOUT_MS): P
   });
 }
 
-function midRebase(repo: string): boolean {
-  return existsSync(join(repo, ".git/rebase-merge")) || existsSync(join(repo, ".git/rebase-apply"));
+function midOperation(repo: string): "merge" | "rebase" | null {
+  if (existsSync(join(repo, ".git/rebase-merge")) || existsSync(join(repo, ".git/rebase-apply"))) return "rebase";
+  if (existsSync(join(repo, ".git/MERGE_HEAD"))) return "merge";
+  return null;
+}
+
+/**
+ * Files named by git's refusal to merge over local changes, e.g.
+ *   error: Your local changes to the following files would be overwritten by merge:
+ *   \ttool.txt
+ *   Please commit your changes or stash them before you merge.
+ * (and the "untracked working tree files would be overwritten" variant). Needs LC_ALL=C.
+ */
+function parseOverwrittenFiles(stderr: string): string[] {
+  const files: string[] = [];
+  let inList = false;
+  for (const line of stderr.split("\n")) {
+    if (/would be overwritten by (merge|checkout)/.test(line)) {
+      inList = true;
+      continue;
+    }
+    if (!inList) continue;
+    if (/^\s/.test(line) && line.trim()) files.push(line.trim());
+    else inList = false;
+  }
+  return [...new Set(files)];
 }
 
 export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus> {
@@ -113,7 +143,8 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
     const paths = opts.dataPaths.filter((p) => p && p.trim().length > 0);
     const t = opts.gitTimeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
 
-    if (midRebase(repo)) {
+    const inProgress = midOperation(repo);
+    if (inProgress) {
       // Name the files and hand over a prompt here too — otherwise this path is the
       // "no files, no route out" dead-end. Do NOT abort: this rebase is not ours (a
       // crashed earlier tick, or a human mid-resolve), and aborting would discard
@@ -126,7 +157,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       const rebasing = (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
       setStatusFor(myGen, {
         state: "conflict",
-        detail: "Repo is mid-rebase — resolve manually.",
+        detail: `Repo is mid-${inProgress} — resolve manually.`,
         conflictFiles: unmerged,
         conflictPrompt: buildConflictPrompt({
           repoRoot: repo,
@@ -135,6 +166,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
           dataPaths: paths,
           generatedPaths: opts.generatedPaths ?? [],
           aborted: false,
+          operation: inProgress,
         }),
       });
       return status;
@@ -167,27 +199,25 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       }
       // local commits to push (for summary)
       const ahead = (await git(repo, ["rev-list", "--count", "@{u}..HEAD"], t)).stdout.trim() || "0";
-      // rebase onto upstream
-      const pull = await git(repo, ["pull", "--rebase", "--autostash"], t);
+      // Merge upstream in. Never rebase: a human's merge resolution must survive the
+      // tick instead of being linearised (and re-conflicted) away. No --autostash: a
+      // dirty non-data file the merge would overwrite makes git refuse untouched, and
+      // that refusal surfaces as "blocked" rather than as a hidden stash.
+      const pull = await git(repo, ["pull", "--no-rebase", "--no-edit"], t);
       if (!pull.ok) {
-        if (midRebase(repo)) {
-          // Unmerged paths exist only while the rebase is in progress — read them
+        const overwritten = parseOverwrittenFiles(pull.stderr);
+        if (midOperation(repo) === "merge") {
+          // Unmerged paths exist only while the merge is in progress — read them
           // before the abort wipes them, so the UI can name what broke.
           const unmerged = (await git(repo, ["diff", "--name-only", "--diff-filter=U"], t)).stdout
             .split("\n")
             .map((s) => s.trim())
             .filter(Boolean);
-          // Read the branch while the rebase is still active: mid-rebase HEAD is detached,
-          // so ask for the branch being rebased and fall back to the plain symbolic name.
-          const rebasing = (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
-          await git(repo, ["rebase", "--abort"], t);
-          const branch =
-            rebasing && rebasing !== "HEAD"
-              ? rebasing
-              : (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
+          await git(repo, ["merge", "--abort"], t);
+          const branch = (await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], t)).stdout.trim();
           setStatusFor(myGen, {
             state: "conflict",
-            detail: "Rebase conflict — manual sync needed.",
+            detail: "Merge conflict — manual sync needed.",
             conflictFiles: unmerged,
             conflictPrompt: buildConflictPrompt({
               repoRoot: repo,
@@ -195,7 +225,16 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
               conflictFiles: unmerged,
               dataPaths: paths,
               generatedPaths: opts.generatedPaths ?? [],
+              operation: "merge",
             }),
+          });
+        } else if (overwritten.length > 0) {
+          setStatusFor(myGen, {
+            state: "blocked",
+            detail: `Local changes to ${overwritten.join(", ")} block the sync — commit or discard them.`,
+            conflictFiles: [],
+            conflictPrompt: "",
+            blockedFiles: overwritten,
           });
         } else if (pull.timedOut) {
           setStatusFor(myGen, { state: "offline", detail: "Pull timed out — will retry next tick.", conflictFiles: [], conflictPrompt: "" });
@@ -216,7 +255,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
         conflictFiles: [],
         conflictPrompt: "",
       });
-      // The working tree moved (we committed, or the rebase brought commits in), so any
+      // The working tree moved (we committed, or the merge brought commits in), so any
       // open file list is now stale. sync-status alone does not tell views that; without
       // this the /git page keeps showing files that are already committed until a reload.
       // Skipped on a no-op sync so an idle tick does not make every client refetch.
@@ -228,7 +267,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
 
     const first = await attempt();
     if (first) return first;
-    // push rejected (remote moved) → one retry
+    // push rejected (remote moved) → one retry: fetch, merge again, push again
     const second = await attempt();
     if (second) return second;
     setStatusFor(myGen, { state: "push-failed", detail: "Push rejected after retry.", conflictFiles: [], conflictPrompt: "" });

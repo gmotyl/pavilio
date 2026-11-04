@@ -3,7 +3,7 @@ export interface ConflictPromptInput {
   repoRoot: string;
   /** Branch the conflict happened on. */
   branch: string;
-  /** Unmerged paths, captured before the rebase was aborted. */
+  /** Unmerged paths, captured before the merge/rebase was aborted. */
   conflictFiles: string[];
   /** Paths auto-sync commits (project data). */
   dataPaths: string[];
@@ -15,6 +15,8 @@ export interface ConflictPromptInput {
    * conflict markers, so the instructions must not claim a clean HEAD.
    */
   aborted?: boolean;
+  /** Which git operation conflicted. Auto-sync merges; "rebase" is a repo found mid-rebase. */
+  operation?: "merge" | "rebase";
 }
 
 /** A trailing slash means "this directory and everything under it"; anything else is an exact path. */
@@ -33,11 +35,11 @@ function section(title: string, files: string[], guidance: string): string {
 }
 
 /**
- * Turns an aborted-rebase conflict into instructions an agent can act on.
+ * Turns an aborted merge (or a stuck rebase) conflict into instructions an agent can act on.
  * Returns "" when there is nothing to resolve, so callers can store it unconditionally.
  */
 export function buildConflictPrompt(input: ConflictPromptInput): string {
-  const { repoRoot, branch, conflictFiles, dataPaths, generatedPaths, aborted = true } = input;
+  const { repoRoot, branch, conflictFiles, dataPaths, generatedPaths, aborted = true, operation = "rebase" } = input;
   if (conflictFiles.length === 0) return "";
 
   const generated = conflictFiles.filter((f) => matches(f, generatedPaths));
@@ -47,14 +49,20 @@ export function buildConflictPrompt(input: ConflictPromptInput): string {
   const quotedGenerated = generated.map(shellQuote).join(" ");
 
   const header = aborted
-    ? `Auto-sync hit a rebase conflict in ${repoRoot} (branch ${branch}). The rebase was ` +
+    ? `Auto-sync hit a ${operation} conflict in ${repoRoot} (branch ${branch}). The ${operation} was ` +
       `already aborted, so the repo is clean at HEAD — nothing is half-applied. Resolve the ` +
       `divergence and get it synced again.\n\n`
-    : `Auto-sync found ${repoRoot} (branch ${branch}) already mid-rebase — an earlier tick ` +
-      `crashed before finishing, or a human is resolving it right now. The working tree is ` +
-      `NOT clean: conflict markers are still in place and HEAD is detached. Auto-sync did ` +
-      `not abort it, because aborting someone else's in-progress resolve would throw away ` +
-      `their work. Decide first whether to finish or abandon that rebase.\n\n`;
+    : operation === "merge"
+      ? `Auto-sync found ${repoRoot} (branch ${branch}) already mid-merge — an earlier tick ` +
+        `crashed before finishing, or a human is resolving it right now. The working tree is ` +
+        `NOT clean: conflict markers are still in place. Auto-sync did not abort it, because ` +
+        `aborting someone else's in-progress resolve would throw away their work. Decide ` +
+        `first whether to finish or abandon that merge.\n\n`
+      : `Auto-sync found ${repoRoot} (branch ${branch}) already mid-rebase — an earlier tick ` +
+        `crashed before finishing, or a human is resolving it right now. The working tree is ` +
+        `NOT clean: conflict markers are still in place and HEAD is detached. Auto-sync did ` +
+        `not abort it, because aborting someone else's in-progress resolve would throw away ` +
+        `their work. Decide first whether to finish or abandon that rebase.\n\n`;
 
   const generatedGuidance =
     `Resolve these WHOLESALE from one host's tree, never per-hunk. A per-hunk merge takes the\n` +
@@ -77,10 +85,15 @@ export function buildConflictPrompt(input: ConflictPromptInput): string {
 
   const resumeStep = aborted
     ? ""
-    : `0. Deal with the in-progress rebase first. Inspect it — git -C ${repoRoot} status and\n` +
-      `   git -C ${repoRoot} rebase --show-current-patch — then either finish it\n` +
-      `   (resolve, git add, git rebase --continue) or, if it is stale wreckage from a crashed\n` +
-      `   tick and nobody is mid-resolve, git -C ${repoRoot} rebase --abort and continue below.\n`;
+    : operation === "merge"
+      ? `0. Deal with the in-progress merge first. Inspect it — git -C ${repoRoot} status and\n` +
+        `   git -C ${repoRoot} diff — then either finish it (resolve, git add, git commit) or,\n` +
+        `   if it is stale wreckage from a crashed tick and nobody is mid-resolve,\n` +
+        `   git -C ${repoRoot} merge --abort and continue below.\n`
+      : `0. Deal with the in-progress rebase first. Inspect it — git -C ${repoRoot} status and\n` +
+        `   git -C ${repoRoot} rebase --show-current-patch — then either finish it\n` +
+        `   (resolve, git add, git rebase --continue) or, if it is stale wreckage from a crashed\n` +
+        `   tick and nobody is mid-resolve, git -C ${repoRoot} rebase --abort and continue below.\n`;
 
   const steps =
     `Steps:\n` +

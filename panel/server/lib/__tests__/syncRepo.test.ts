@@ -47,6 +47,8 @@ describe("syncRepo", () => {
     writeFileSync(join(seed, "projects/p/note.md"), "base\n");
     writeFileSync(join(seed, "projects/p/time/mac.jsonl"), "0\n");
     writeFileSync(join(seed, ".gitattributes"), "projects/**/time/*.jsonl merge=union\n");
+    // A tracked file outside the data paths (stands in for panel code / config).
+    writeFileSync(join(seed, "tool.txt"), "tool v1\n");
     git(seed, "add", "-A"); git(seed, "commit", "-qm", "seed"); git(seed, "push", "-q", "origin", "HEAD:main");
     mac = clone("mac"); win = clone("win");
   }, 30_000);
@@ -54,19 +56,180 @@ describe("syncRepo", () => {
 
   const opts = (h: string) => ({ dataPaths: ["projects/"], hostname: h });
 
-  it("converges disjoint edits on two machines with linear history", async () => {
+  it("disjoint edits converge through a merge", async () => {
     writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
     writeFileSync(join(win, "projects/p/win-note.md"), "win\n");
     const r1 = await syncRepo(mac, opts("mac"));
     expect(r1.state).toBe("synced");
+    // win holds its own unpushed commit AND is behind → the tick must merge, not rebase
     const r2 = await syncRepo(win, opts("win"));
     expect(r2.state).toBe("synced");
-    const r3 = await syncRepo(mac, opts("mac")); // pull win's commit
-    expect(r3.summary).toContain("↓1");
-    // both files present on mac, history is linear (no merge commits)
+    expect(r2.blockedFiles).toEqual([]);
+    expect(readFileSync(join(win, "projects/p/mac-note.md"), "utf-8")).toBe("mac\n");
+    expect(git(win, "rev-list", "--merges", "--count", "HEAD").trim()).toBe("1");
+    // the merge reached the remote
+    git(win, "fetch", "--quiet");
+    expect(git(win, "rev-parse", "origin/main").trim()).toBe(git(win, "rev-parse", "HEAD").trim());
+    const r3 = await syncRepo(mac, opts("mac")); // pull win's commit + merge
+    expect(r3.state).toBe("synced");
     expect(readFileSync(join(mac, "projects/p/win-note.md"), "utf-8")).toBe("win\n");
-    const merges = git(mac, "rev-list", "--merges", "--count", "HEAD").trim();
-    expect(merges).toBe("0");
+  });
+
+  it("an unpushed manual merge survives the next tick", async () => {
+    writeFileSync(join(mac, "projects/p/note.md"), "MAC\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+    // win resolves a same-line conflict by hand and has not pushed yet
+    writeFileSync(join(win, "projects/p/note.md"), "WIN\n");
+    git(win, "commit", "-qam", "win edit");
+    try {
+      git(win, "pull", "--no-rebase", "--no-edit");
+    } catch {
+      // expected: the merge stops on the conflict
+    }
+    writeFileSync(join(win, "projects/p/note.md"), "MAC+WIN\n");
+    git(win, "add", "projects/p/note.md");
+    git(win, "commit", "-q", "--no-edit");
+    const manualMerge = git(win, "rev-parse", "HEAD").trim();
+    // meanwhile the remote moves on
+    writeFileSync(join(mac, "projects/p/later.md"), "later\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("synced");
+    expect(readFileSync(join(win, "projects/p/note.md"), "utf-8")).toBe("MAC+WIN\n");
+    expect(readFileSync(join(win, "projects/p/later.md"), "utf-8")).toBe("later\n");
+    // the human's resolution is in the pushed history, not linearised away
+    git(win, "fetch", "--quiet");
+    expect(() => git(win, "merge-base", "--is-ancestor", manualMerge, "origin/main")).not.toThrow();
+  });
+
+  it("uncommitted non-data files block without stashing", async () => {
+    // the remote changes a non-data file …
+    writeFileSync(join(mac, "tool.txt"), "tool v2\n");
+    git(mac, "commit", "-qam", "tool v2");
+    git(mac, "push", "-q");
+    // … that win has edited and not committed
+    writeFileSync(join(win, "tool.txt"), "win local tool\n");
+    const headBefore = git(win, "rev-parse", "HEAD").trim();
+    const stashBefore = git(win, "stash", "list");
+
+    const r = await syncRepo(win, opts("win"));
+
+    expect(r.state).toBe("blocked");
+    expect(r.blockedFiles).toEqual(["tool.txt"]);
+    expect(r.detail).toContain("tool.txt");
+    expect(r.conflictFiles).toEqual([]);
+    // nothing touched: local edit intact, HEAD unmoved, no merge in progress, no stash
+    expect(readFileSync(join(win, "tool.txt"), "utf-8")).toBe("win local tool\n");
+    expect(git(win, "rev-parse", "HEAD").trim()).toBe(headBefore);
+    expect(existsSync(join(win, ".git/MERGE_HEAD"))).toBe(false);
+    expect(git(win, "stash", "list")).toBe(stashBefore);
+  });
+
+  it("a same-line conflict aborts the merge and names the files", async () => {
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+
+    const r = await syncRepo(win, { ...opts("win"), generatedPaths: ["panel/"] });
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
+    expect(r.blockedFiles).toEqual([]);
+    expect(r.conflictPrompt).toContain("projects/p/note.md");
+    expect(r.conflictPrompt).toContain("merge conflict");
+    // the abort ran: no merge in progress, no conflict markers left behind
+    expect(existsSync(join(win, ".git/MERGE_HEAD"))).toBe(false);
+    expect(readFileSync(join(win, "projects/p/note.md"), "utf-8")).toBe("win edit\n");
+    expect(() => git(win, "status")).not.toThrow();
+  });
+
+  it("a repo already mid-merge is reported, not aborted", async () => {
+    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
+    await syncRepo(mac, opts("mac"));
+    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
+    git(win, "commit", "-qam", "win edit");
+    try {
+      git(win, "pull", "--no-rebase", "--no-edit");
+    } catch {
+      // expected: the merge stops on the conflict
+    }
+    expect(existsSync(join(win, ".git/MERGE_HEAD"))).toBe(true);
+
+    const r = await syncRepo(win, { ...opts("win"), generatedPaths: ["panel/"] });
+
+    expect(r.state).toBe("conflict");
+    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
+    expect(r.blockedFiles).toEqual([]);
+    expect(r.conflictPrompt).toContain("already mid-merge");
+    expect(r.conflictPrompt).toContain("merge --abort");
+    // someone else's in-progress merge is left alone
+    expect(existsSync(join(win, ".git/MERGE_HEAD"))).toBe(true);
+    expect(readFileSync(join(win, "projects/p/note.md"), "utf-8")).toContain("<<<<<<<");
+  });
+
+  it("a rejected push is retried once after a merge", async () => {
+    // win's commit is parked on the remote; the first push from mac moves main to it
+    // and is rejected, exactly like a peer pushing between our pull and our push.
+    writeFileSync(join(win, "projects/p/win-note.md"), "win\n");
+    git(win, "add", "-A");
+    git(win, "commit", "-qm", "win note");
+    git(win, "push", "-q", "origin", "HEAD:refs/staged/win");
+    const counter = join(root, "push-count");
+    const hook = join(remote, "hooks/pre-receive");
+    writeFileSync(
+      hook,
+      `#!/bin/sh\n` +
+        `n=$(cat "${counter}" 2>/dev/null || echo 0)\n` +
+        `echo $((n + 1)) > "${counter}"\n` +
+        `if [ "$n" = 0 ]; then\n` +
+        `  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main refs/staged/win\n` +
+        `  exit 1\n` +
+        `fi\n` +
+        `exit 0\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
+
+    const r = await syncRepo(mac, opts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(readFileSync(counter, "utf-8").trim()).toBe("2");
+    expect(readFileSync(join(mac, "projects/p/win-note.md"), "utf-8")).toBe("win\n");
+    expect(git(mac, "rev-list", "--merges", "--count", "HEAD").trim()).toBe("1");
+    git(mac, "fetch", "--quiet");
+    expect(git(mac, "rev-parse", "origin/main").trim()).toBe(git(mac, "rev-parse", "HEAD").trim());
+
+    // rejected twice → push-failed
+    writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(mac, "projects/p/mac-note2.md"), "mac2\n");
+    const r2 = await syncRepo(mac, opts("mac"));
+    expect(r2.state).toBe("push-failed");
+    expect(r2.blockedFiles).toEqual([]);
+  });
+
+  it("blockedFiles is cleared on any other outcome", async () => {
+    writeFileSync(join(mac, "tool.txt"), "tool v2\n");
+    git(mac, "commit", "-qam", "tool v2");
+    git(mac, "push", "-q");
+    writeFileSync(join(win, "tool.txt"), "win local tool\n");
+    expect((await syncRepo(win, opts("win"))).blockedFiles).toEqual(["tool.txt"]);
+
+    // offline clears it
+    const url = git(win, "remote", "get-url", "origin").trim();
+    git(win, "remote", "set-url", "origin", join(root, "does-not-exist.git"));
+    const off = await syncRepo(win, opts("win"));
+    expect(off.state).toBe("offline");
+    expect(off.blockedFiles).toEqual([]);
+
+    // blocked again, then the user discards the edit → synced clears it
+    git(win, "remote", "set-url", "origin", url);
+    expect((await syncRepo(win, opts("win"))).state).toBe("blocked");
+    git(win, "checkout", "--", "tool.txt");
+    const ok = await syncRepo(win, opts("win"));
+    expect(ok.state).toBe("synced");
+    expect(ok.blockedFiles).toEqual([]);
   });
 
   it("auto-merges append-only jsonl on both sides via union driver", async () => {
@@ -79,32 +242,6 @@ describe("syncRepo", () => {
     const body = readFileSync(join(win, "projects/p/time/mac.jsonl"), "utf-8");
     expect(body).toContain("mac1");
     expect(body).toContain("win1");
-  });
-
-  it("on a real same-line conflict, aborts cleanly and reports conflict (no half-rebase)", async () => {
-    writeFileSync(join(mac, "projects/p/note.md"), "MAC EDIT\n");
-    writeFileSync(join(win, "projects/p/note.md"), "WIN EDIT\n");
-    await syncRepo(mac, opts("mac"));
-    const r = await syncRepo(win, opts("win"));
-    expect(r.state).toBe("conflict");
-    // repo not left mid-rebase: a normal status must succeed
-    expect(() => git(win, "status")).not.toThrow();
-    const status = git(win, "status", "--porcelain=v2", "--branch");
-    expect(status).not.toContain("rebase");
-  });
-
-  it("captures the conflicted paths before aborting the rebase", async () => {
-    writeFileSync(join(mac, "projects/p/note.md"), "mac edit\n");
-    expect((await syncRepo(mac, opts("mac"))).state).toBe("synced");
-
-    writeFileSync(join(win, "projects/p/note.md"), "win edit\n");
-    const r = await syncRepo(win, opts("win"));
-
-    expect(r.state).toBe("conflict");
-    expect(r.conflictFiles).toEqual(["projects/p/note.md"]);
-    // the abort still ran: nothing is half-applied
-    expect(existsSync(join(win, ".git/rebase-merge"))).toBe(false);
-    expect(existsSync(join(win, ".git/rebase-apply"))).toBe(false);
   });
 
   it("clears conflictFiles once a later sync succeeds", async () => {
@@ -270,7 +407,7 @@ describe("syncRepo", () => {
     git(mac, "remote", "set-url", "origin", join(root, "gone.git"));
     const r = await syncRepo(mac, opts("mac"));
     expect(["offline"]).toContain(r.state);
-    expect(r.detail).not.toMatch(/Rebase conflict/);
+    expect(r.detail).not.toMatch(/conflict/i);
   });
 
   it("watchdog: a stuck previous run does not block syncing forever", async () => {
