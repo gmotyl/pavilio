@@ -112,6 +112,22 @@ describe("syncRepo", () => {
     expect(headFiles(mac)).toEqual(["projects/p/mac-note.md"]);
   });
 
+  it("a .gitignore that ignores the preferences dir does not fail the tick", async () => {
+    // A clone-mode workspace inherits pavilio's .gitignore, which ignores .pavilio/preferences/.
+    writeFileSync(join(mac, ".gitignore"), ".pavilio/preferences/\n");
+    git(mac, "add", ".gitignore");
+    git(mac, "commit", "-qm", "ignore preferences");
+    mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/preferences/mac.json"), "{}\n");
+    writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
+
+    const r = await syncRepo(mac, machineOpts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(headFiles(mac)).toEqual(["projects/p/mac-note.md"]);
+    expect(git(mac, "ls-files", ".pavilio/preferences/mac.json").trim()).toBe("");
+  });
+
   it("another machine's preferences file is never staged", async () => {
     mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
     writeFileSync(join(mac, ".pavilio/preferences/mac.json"), "{}\n");
