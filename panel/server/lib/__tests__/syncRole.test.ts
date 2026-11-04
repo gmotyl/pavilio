@@ -99,6 +99,17 @@ describe("resolveSyncRole", () => {
     expect(await role("spock")).toBe("single");
   });
 
+  it("detects another machine from a time file under a non-ASCII project path", async () => {
+    commit("notes", { "projects/żółw/time/mac.jsonl": "{}\n" }, 5);
+    expect(await role("spock")).toBe("unassigned");
+  });
+
+  it("scripts/sync-role treats a flag value that is itself a flag as a usage error", () => {
+    const res = spawnSync("bash", [SCRIPT, "--ref", "--repo", repo], { cwd: repo, encoding: "utf8", env: gitSafeEnv() });
+    expect(res.status, res.stderr).toBe(2);
+    expect(res.stderr).toMatch(/--ref needs a value/);
+  });
+
   it("rejects a ref that does not exist", async () => {
     await expect(resolveSyncRole({ repo, ref: "origin/nope", machineId: "spock" })).rejects.toThrow(/origin\/nope/);
   });

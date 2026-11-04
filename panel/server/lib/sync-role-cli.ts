@@ -20,7 +20,9 @@ for (let i = 0; i < args.length; i++) {
   const flag = args[i];
   const value = args[i + 1];
   if (flag !== "--ref" && flag !== "--repo") usage(`unknown argument ${flag}`);
-  if (value === undefined || value === "") usage(`${flag} needs a value`);
+  // A value that starts with "--" is the next flag, not a value: `--ref --repo x`
+  // would otherwise read the role from a ref named "--repo".
+  if (value === undefined || value === "" || value.startsWith("--")) usage(`${flag} needs a value`);
   if (flag === "--ref") ref = value;
   else repo = value;
   i++;

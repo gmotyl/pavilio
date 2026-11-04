@@ -45,7 +45,9 @@ async function readMirror(repo: string, ref: string): Promise<string | undefined
 
 /** Machine ids (sanitized) that left auto-sync commits or time files on `ref` in the last `days`. */
 async function recentMachineIds(repo: string, ref: string, days: number): Promise<Set<string>> {
-  const res = await git(repo, ["log", `--since=${days}.days.ago`, "--format=%x00%s", "--name-only", ref, "--"]);
+  // core.quotePath=false: otherwise git prints a non-ASCII path ("projects/żółw/…")
+  // quoted and octal-escaped, and the time-file pattern never matches it.
+  const res = await git(repo, ["-c", "core.quotePath=false", "log", `--since=${days}.days.ago`, "--format=%x00%s", "--name-only", ref, "--"]);
   if (res.code !== 0) throw new Error(`git log ${ref} failed in ${repo}: ${res.stderr.trim()}`);
   const ids = new Set<string>();
   for (const entry of res.stdout.split("\0").slice(1)) {
