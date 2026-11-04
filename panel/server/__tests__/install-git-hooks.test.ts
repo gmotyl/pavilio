@@ -8,6 +8,8 @@ import { join, resolve } from "node:path";
  * scripts/install-git-hooks is panel/package.json's "prepare". It must install
  * pavilio's husky gates into a pavilio clone and nowhere else: a sync-mode
  * workspace gets panel/ rsync'd in and runs the same prepare on `pnpm install`.
+ * There it points core.hooksPath at scripts/git-hooks (the consumer pre-push
+ * guard) unless the user set a hooksPath; rerere is enabled in every repo.
  *
  * Each case runs a copy of the script (plus scripts/remotes) inside a sandbox
  * git repo. `husky` is a stub on a sandbox PATH that records its argv and cwd,
@@ -33,7 +35,7 @@ function env() {
 
 function git(args: string[]) {
   const r = spawnSync("git", args, { cwd: repo, env: env(), encoding: "utf8" });
-  return { status: r.status, stdout: r.stdout.trim() };
+  return { status: r.status, stdout: r.stdout.trim(), stderr: r.stderr };
 }
 
 function runPrepare() {
@@ -53,6 +55,7 @@ beforeEach(() => {
   huskyLog = join(sandbox, "husky.log");
   mkdirSync(join(repo, "scripts"), { recursive: true });
   mkdirSync(join(repo, "panel"), { recursive: true });
+  mkdirSync(join(repo, "scripts", "git-hooks"), { recursive: true });
   mkdirSync(stubBin);
   copyFileSync(SCRIPT, join(repo, "scripts", "install-git-hooks"));
   copyFileSync(REMOTES_LIB, join(repo, "scripts", "remotes"));
@@ -79,28 +82,56 @@ describe("scripts/install-git-hooks", () => {
     expect(existsSync(huskyLog)).toBe(true);
   });
 
-  it("does not install husky into a sync-mode workspace", () => {
+  it("install-git-hooks points a sync-mode workspace at scripts/git-hooks", () => {
     git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
     const r = runPrepare();
     expect(r.status).toBe(0);
+    // pavilio's own husky gates never reach a workspace — only the consumer guard.
     expect(existsSync(huskyLog)).toBe(false);
+    expect(git(["config", "--local", "--get", "core.hooksPath"]).stdout).toBe("scripts/git-hooks");
+    // Idempotent and quiet on a second run.
+    const again = runPrepare();
+    expect(again.status).toBe(0);
+    expect(again.stderr).not.toMatch(/warning/i);
+    expect(git(["config", "--local", "--get", "core.hooksPath"]).stdout).toBe("scripts/git-hooks");
+  });
+
+  it("does not point a workspace at scripts/git-hooks it does not have", () => {
+    git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
+    rmSync(join(repo, "scripts", "git-hooks"), { recursive: true, force: true });
+    expect(runPrepare().status).toBe(0);
     expect(git(["config", "--local", "--get", "core.hooksPath"]).status).not.toBe(0);
   });
 
-  it("removes a core.hooksPath an earlier install pointed at panel/.husky/_", () => {
+  it("replaces a core.hooksPath an earlier install pointed at panel/.husky/_", () => {
     git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
     git(["config", "core.hooksPath", "panel/.husky/_"]);
     const r = runPrepare();
     expect(r.status).toBe(0);
-    expect(git(["config", "--local", "--get", "core.hooksPath"]).status).not.toBe(0);
+    expect(git(["config", "--local", "--get", "core.hooksPath"]).stdout).toBe("scripts/git-hooks");
     expect(r.stdout).toMatch(/removed core\.hooksPath/);
   });
 
-  it("leaves a hooksPath the user set themselves", () => {
+  it("install-git-hooks keeps a user-set hooksPath", () => {
     git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
     git(["config", "core.hooksPath", ".githooks"]);
-    expect(runPrepare().status).toBe(0);
+    const r = runPrepare();
+    expect(r.status).toBe(0);
     expect(git(["config", "--local", "--get", "core.hooksPath"]).stdout).toBe(".githooks");
+    expect(r.stderr).toMatch(/warning.*core\.hooksPath=\.githooks.*scripts\/git-hooks\/pre-push/is);
+  });
+
+  it("install-git-hooks enables rerere", () => {
+    // A sync-mode workspace and a pavilio clone alike.
+    git(["remote", "add", "origin", "git@github.com:someone/projects.git"]);
+    expect(runPrepare().status).toBe(0);
+    expect(git(["config", "--local", "--get", "rerere.enabled"]).stdout).toBe("true");
+
+    git(["config", "--local", "--unset", "rerere.enabled"]);
+    git(["remote", "set-url", "origin", "git@github.com:gmotyl/pavilio.git"]);
+    expect(runPrepare().status).toBe(0);
+    expect(existsSync(huskyLog)).toBe(true);
+    expect(git(["config", "--local", "--get", "rerere.enabled"]).stdout).toBe("true");
   });
 
   it("is a no-op outside a git checkout", () => {
