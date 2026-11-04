@@ -125,9 +125,17 @@ SYNC_MIRROR_FILE=".pavilio/sync-mirror.json"
 # scripts/sync-role (mirror, consumer, single or unassigned). Exits on failure:
 # a check that cannot run is a refusal, never a pass.
 read_sync_role() {
+  if ! try_read_sync_role; then
+    exit 1
+  fi
+}
+
+# The same check, returning 1 instead of exiting — for a caller that has to clean
+# up first (promote_to_mirror withdraws an unpushed promotion).
+try_read_sync_role() {
   if ! SYNC_ROLE="$(bash "$SCRIPT_DIR/sync-role" --repo "$REPO_ROOT" --ref origin/main)"; then
     echo "Error: the sync role check failed (scripts/sync-role, see above) — nothing was synced."
-    exit 1
+    return 1
   fi
 }
 
@@ -135,11 +143,12 @@ read_sync_role() {
 # counts only once the push lands. Each attempt first pulls origin/main (merge,
 # never rebase), so the promotion commit sits on top of whatever is there —
 # including another machine's mirror file, which it then simply replaces — and
-# re-checks the role; a rejected push gets one more attempt. Giving up withdraws
-# the local commit, so a later push — auto-sync's — cannot land a promotion the
-# user saw fail.
+# re-checks the role; a rejected push gets one more attempt. Giving up — on a
+# failed pull, a failed role check or a second rejected push — withdraws the
+# local commit, so a later push (auto-sync's) cannot land a promotion the user
+# saw fail.
 promote_to_mirror() {
-  local me branch attempt promoted_sha=""
+  local me branch attempt promoted_sha="" failure="push"
   if ! me="$(bash "$SCRIPT_DIR/machine-id")"; then
     echo "Error: could not read this machine's id (scripts/machine-id, see above) — not promoted."
     exit 1
@@ -154,9 +163,14 @@ promote_to_mirror() {
     [ "$attempt" = 2 ] && echo "  Push rejected — pulling origin/main, then retrying once..."
     if ! git -C "$REPO_ROOT" pull --quiet --no-rebase --no-edit origin main; then
       git -C "$REPO_ROOT" merge --abort >/dev/null 2>&1 || true
+      echo "Error: could not pull origin/main into the workspace (see above) — a conflict or local changes in the way."
+      failure="pull"
       break
     fi
-    read_sync_role
+    if ! try_read_sync_role; then
+      failure="role"
+      break
+    fi
     if [ "$SYNC_ROLE" = "mirror" ]; then
       echo "  ✓ $me is the mirror on origin/main"
       return 0
@@ -187,8 +201,20 @@ promote_to_mirror() {
       git -C "$REPO_ROOT" commit --quiet -m "chore(sync): withdraw unpushed promotion of $me" -- "$SYNC_MIRROR_FILE"
     fi
   fi
-  echo "Error: the promotion could not be pushed — $me is not promoted, and the mirror on origin/main is unchanged."
-  echo "Nothing was synced. Check that origin accepts pushes, then re-run: pnpm sync --promote"
+  case "$failure" in
+    pull)
+      echo "$me is not promoted, and the mirror on origin/main is unchanged. Nothing was synced."
+      echo "Resolve it with: git pull --no-rebase origin main — then re-run: pnpm sync --promote"
+      ;;
+    role)
+      echo "$me is not promoted, and the mirror on origin/main is unchanged."
+      echo "Re-run once scripts/sync-role works: pnpm sync --promote"
+      ;;
+    *)
+      echo "Error: the promotion could not be pushed — $me is not promoted, and the mirror on origin/main is unchanged."
+      echo "Nothing was synced. Check that origin accepts pushes, then re-run: pnpm sync --promote"
+      ;;
+  esac
   exit 1
 }
 

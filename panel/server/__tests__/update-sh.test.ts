@@ -968,6 +968,33 @@ describe("scripts/update.sh mirror guard", () => {
     expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
   });
 
+  it("sync runs on a single machine with an origin", () => {
+    // An origin, but no mirror file and no other machine in its history.
+    initDestRepo();
+    addWorkspaceOrigin();
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/sync role: single/);
+    expect(output).toMatch(/Syncing panel/);
+    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+  });
+
+  it("sync runs on a single machine whose only history is its own auto-sync", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine(`auto-sync ${me} 2026-11-03T13:38:28.980Z`, {
+      [`projects/p/time/${me}.jsonl`]: "{}\n",
+    });
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/sync role: single/);
+    expect(output).toMatch(/Syncing panel/);
+  });
+
   it("sync reads the role from origin, not the working tree", () => {
     // This clone still says it is the mirror — committed and pushed — but
     // another machine has since pushed a promotion this clone has not pulled.
@@ -1037,6 +1064,61 @@ describe("scripts/update.sh mirror guard", () => {
     expect(invocations(rsyncCalled)).toBe("");
     // The unpushed promotion is withdrawn locally too, so a later push (auto-sync)
     // cannot land it behind the user's back.
+    expect(git(dest, "show", "HEAD:.pavilio/sync-mirror.json")).toBe(before?.trim());
+  });
+
+  it("promote names the failed pull, not the push, when origin/main cannot be merged", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    // The same file changed on both sides: the pull inside --promote conflicts.
+    mkdirSync(join(dest, "projects", "p"), { recursive: true });
+    writeFileSync(join(dest, "projects", "p", "note.md"), "mine\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "local note");
+    pushFromAnotherMachine("their note", { "projects/p/note.md": "theirs\n" });
+    const head = git(dest, "rev-parse", "HEAD");
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/could not pull origin\/main/);
+    expect(output).not.toMatch(/Check that origin accepts pushes/);
+    expect(output).toMatch(/not promoted/i);
+    expect(remoteMirrorFile()).toBeNull();
+    expect(invocations(rsyncCalled)).toBe("");
+    // The aborted merge leaves the workspace as it was.
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
+    expect(destStatus()).toBe("");
+  });
+
+  it("promote withdraws its commit when the role check fails on the retry", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    const before = remoteMirrorFile();
+    rejectPushes(1);
+    // The role check passes on the first attempt and fails on the second.
+    const calls = join(sandbox, "sync-role-calls");
+    writeFileSync(
+      join(dest, "scripts", "sync-role"),
+      [
+        "#!/bin/bash",
+        `n=$(($(cat "${calls}" 2>/dev/null || echo 0) + 1)); echo "$n" >"${calls}"`,
+        `if [ "$n" -ge 2 ]; then echo "sync-role: broken by test" >&2; exit 1; fi`,
+        `exec bash "${SYNC_ROLE_SH}" "$@"`,
+      ].join("\n") + "\n",
+      { mode: 0o755 },
+    );
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/sync role check failed/);
+    expect(output).toMatch(/not promoted/i);
+    expect(remoteMirrorFile()).toBe(before);
+    expect(invocations(rsyncCalled)).toBe("");
     expect(git(dest, "show", "HEAD:.pavilio/sync-mirror.json")).toBe(before?.trim());
   });
 
