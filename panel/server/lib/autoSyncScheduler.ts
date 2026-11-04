@@ -7,12 +7,12 @@ let lastNotified: string | null = null;
 interface SchedulerOpts extends SyncOpts {
   repo: string;
   intervalMinutes: number;
-  /** Shell command run on transition into an attention state (conflict|push-failed|stale).
+  /** Shell command run on transition into an attention state (conflict|push-failed|blocked|stale).
    *  Receives SYNC_STATE and SYNC_DETAIL env vars. Unset → no notification. */
   notifyCmd?: string;
 }
 
-const ATTENTION = new Set(["conflict", "push-failed"]);
+const ATTENTION = new Set(["conflict", "push-failed", "blocked"]);
 
 function runNotifyCmd(cmd: string, state: string, detail: string): void {
   exec(cmd, {

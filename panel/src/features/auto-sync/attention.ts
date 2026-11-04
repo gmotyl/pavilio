@@ -1,7 +1,21 @@
-const ATTENTION = new Set(["conflict", "push-failed", "stale"]);
+/** Concrete states that need a person; they win over `stale`. */
+const CONCRETE = new Set(["conflict", "push-failed", "blocked"]);
+const ATTENTION = new Set([...CONCRETE, "stale"]);
+
+const ATTENTION_TEXT: Record<string, string> = {
+  conflict: "Auto-sync: merge conflict — repo needs manual attention",
+  "push-failed": "Auto-sync: push failed — repo needs manual attention",
+  blocked: "Auto-sync blocked by local changes — commit or discard them",
+  stale: "Auto-sync: no successful sync for a long time — check the panel",
+};
+
+/** The alert text for an attention state just entered, with the status detail appended. */
+export function attentionMessage(state: string, detail: string): string {
+  return `${ATTENTION_TEXT[state]}${detail ? ` (${detail})` : ""}`;
+}
 
 export function effectiveState(s: { state: string; stale?: boolean }): string {
-  if (s.state === "conflict" || s.state === "push-failed") return s.state;
+  if (CONCRETE.has(s.state)) return s.state;
   return s.stale ? "stale" : s.state;
 }
 

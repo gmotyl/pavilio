@@ -80,4 +80,16 @@ describe("autoSyncScheduler notify", () => {
     expect(linesOf(out)).toEqual(["conflict", "push-failed"]);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("fires notifyCmd on transition into blocked while not stale", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "notify-"));
+    const out = join(dir, "fired.log");
+    await _notifyForTest({ state: "blocked", detail: "local changes" } as never, {
+      notifyCmd: `echo "$SYNC_STATE" >> ${out}`,
+      intervalMinutes: 30,
+    });
+    await waitForLines(out, 1);
+    expect(linesOf(out)).toEqual(["blocked"]);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

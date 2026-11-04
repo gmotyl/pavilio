@@ -45,7 +45,7 @@ export interface PanelConfig {
     /** Paths (relative to repo root) rsynced in by scripts/update.sh. Never committed by
      *  auto-sync — used only to classify conflicts in the resolution prompt. */
     generatedPaths?: string[];
-    /** Optional shell command fired when sync needs attention (conflict/push-failed/stale).
+    /** Optional shell command fired when sync needs attention (conflict/push-failed/blocked/stale).
      *  Gets SYNC_STATE + SYNC_DETAIL env vars. Example (macOS):
      *  `osascript -e "display notification \"$SYNC_DETAIL\" with title \"Pavilio sync: $SYNC_STATE\""` */
     notifyCmd?: string;

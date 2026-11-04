@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { attentionTransition, effectiveState, observeTransition, resetAttentionForTest } from "../attention";
+import {
+  attentionMessage,
+  attentionTransition,
+  effectiveState,
+  observeTransition,
+  resetAttentionForTest,
+} from "../attention";
 
 describe("attentionTransition", () => {
   it("fires on entering an attention state", () => {
@@ -53,5 +59,18 @@ describe("attentionTransition: conflict/push-failed precedence over stale", () =
 
   it("reports conflict, not stale, when both are set", () => {
     expect(attentionTransition("synced", { state: "conflict", stale: true })).toBe("conflict");
+  });
+});
+
+describe("blocked is an attention state", () => {
+  it("fires on entering blocked, ahead of stale", () => {
+    expect(attentionTransition("synced", { state: "blocked" })).toBe("blocked");
+    expect(effectiveState({ state: "blocked", stale: true })).toBe("blocked");
+  });
+  it("names the local changes in its message", () => {
+    expect(attentionMessage("blocked", "")).toBe("Auto-sync blocked by local changes — commit or discard them");
+    expect(attentionMessage("blocked", "a.md")).toBe(
+      "Auto-sync blocked by local changes — commit or discard them (a.md)",
+    );
   });
 });
