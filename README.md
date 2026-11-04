@@ -354,6 +354,8 @@ There is **one file per machine**, written only by that machine's panel; nothing
 
 The files are gitignored in this repository (they would carry your project names and absolute repo paths); `.pavilio/preferences.example.json` is shipped in their place, so you can see the format. The panel reads its file **once at boot** — after pulling a change to it, restart the panel.
 
+In a Quick Start clone (clone mode) that ignore stays in force: the workspace *is* a pavilio clone, so `.pavilio/preferences/` is never committed there, per-machine files do not travel between machines, and seeding from the mirror or **Copy preferences from another machine** has nothing to offer. The multi-machine setup is a sync-mode workspace (see **Teams: a private workspace tracking upstream**).
+
 ## Agent Tracking
 
 The `scripts/cc` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.
