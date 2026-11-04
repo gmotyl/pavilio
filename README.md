@@ -350,7 +350,7 @@ export default {
 
 `.pavilio/preferences/<machineId>.json` — one level above `panel/`, at your workspace root — is where the panel remembers the choices that are worth keeping: sidebar and pane state, sort orders, favorites, the speech voice, per-project and per-repo toggles. It belongs to the workspace, not to the browser, so it travels with your private repo. Anything that names a live session — a focused terminal, a grid layout — stays in browser storage instead and never lands here.
 
-There is **one file per machine**, written only by that machine's panel; nothing is merged between machines behind your back. A machine with no file of its own is seeded at boot from the mirror machine's file (see **Two machines** below). A workspace that still has the old single shared `.pavilio/preferences.json` seeds the mirror's file from it once; the legacy file is never written again. To take another machine's choices later, use **Copy preferences from another machine** in Settings: it replaces this machine's file with that machine's committed one and reloads the page.
+There is **one file per machine**, written only by that machine's panel; nothing is merged between machines behind your back. A machine with no file of its own is seeded at boot from the mirror machine's file (see **Two machines** below). Any machine that has neither its own file nor a mirror's file to copy — the mirror itself on its first boot after the upgrade, or a consumer whose pull has not brought the mirror's file yet — seeds once from the old single shared `.pavilio/preferences.json`, if the workspace still has one; the legacy file is never written again. To take another machine's choices later, use **Copy preferences from another machine** in Settings: it replaces this machine's file with that machine's committed one and reloads the page.
 
 The files are gitignored in this repository (they would carry your project names and absolute repo paths); `.pavilio/preferences.example.json` is shipped in their place, so you can see the format. The panel reads its file **once at boot** — after pulling a change to it, restart the panel.
 
@@ -565,6 +565,20 @@ with a warning.
 **Preferences** are one file per machine — see **Workspace preferences** above.
 A new machine starts from the mirror's file, and Settings can copy any other
 machine's file over its own.
+
+> **Rolling out per-machine preferences.** After `pnpm pull` on a consumer,
+> check that `.pavilio/preferences/<mirror>.json` exists before restarting the
+> panel. If it does not (the mirror has not booted or auto-synced since the
+> upgrade), the consumer seeds its own file from its local legacy
+> `.pavilio/preferences.json` instead. To fix that, delete this machine's own
+> `.pavilio/preferences/<machineId>.json` and restart once the mirror's file is
+> there, or use Settings → **Copy preferences from <mirror>**.
+
+**Changing a machine id later.** Setting `machineId` in
+`panel/panel.config.local.ts` on a machine that already has history starts new
+per-machine files under the new id: preferences, `time/<id>.jsonl` and the TTS
+usage file (`.panel/tts-usage/<id>.json`). Totals still sum the old files, but manual time entries recorded under
+the old id can no longer be edited from that machine.
 
 **Auto-sync merges.** Each tick commits the data paths (`projects/` by default),
 this machine's own preferences file and `.pavilio/voices/` — never another

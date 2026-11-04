@@ -143,6 +143,31 @@ describe("syncRepo", () => {
     expect(dirty(mac)).toEqual([" M .pavilio/preferences/win.json", " M tool.txt", "?? .pavilio/preferences.json"]);
   });
 
+  it("own preferences file deleted after being tracked is committed as a deletion", async () => {
+    mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/preferences/mac.json"), "{}\n");
+    expect((await syncRepo(mac, machineOpts("mac"))).state).toBe("synced");
+    rmSync(join(mac, ".pavilio/preferences/mac.json"));
+
+    const r = await syncRepo(mac, machineOpts("mac"));
+
+    expect(r.state).toBe("synced");
+    expect(git(mac, "show", "--name-status", "--format=", "HEAD").trim()).toBe("D\t.pavilio/preferences/mac.json");
+    expect(dirty(mac)).toEqual([]);
+  });
+
+  it("a glob in a machine path matches only that literal file", async () => {
+    mkdirSync(join(mac, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(join(mac, ".pavilio/preferences/win.json"), '{"edited":"on mac"}\n');
+    writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
+
+    const r = await syncRepo(mac, { ...opts("mac"), machinePaths: [".pavilio/preferences/*.json"] });
+
+    expect(r.state).toBe("synced");
+    expect(headFiles(mac)).toEqual(["projects/p/mac-note.md"]);
+    expect(dirty(mac)).toEqual([" M .pavilio/preferences/win.json"]);
+  });
+
   it("disjoint edits converge through a merge", async () => {
     writeFileSync(join(mac, "projects/p/mac-note.md"), "mac\n");
     writeFileSync(join(win, "projects/p/win-note.md"), "win\n");

@@ -47,6 +47,15 @@ describe("AutoSyncModal", () => {
     expect(screen.getByTestId("auto-sync-sync-now")).toHaveTextContent("Sync now");
   });
 
+  it("blocked state without file names falls back to a generic phrase", () => {
+    mockStatus = status({ state: "blocked", blockedFiles: [] });
+    render(<AutoSyncModal onClose={() => {}} />);
+    const banner = screen.getByTestId("sync-blocked-banner");
+    expect(banner).toHaveTextContent(/local changes to uncommitted files block the sync/i);
+    expect(banner.textContent).not.toMatch(/to {2}block/);
+    expect(banner).toHaveTextContent(/staged changes also block the sync/i);
+  });
+
   it("blocked banner is absent in other states", () => {
     for (const state of ["idle", "syncing", "synced", "offline", "conflict", "push-failed", "busy"]) {
       mockStatus = status({ state, blockedFiles: [] });

@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 import { WORKSPACE_ROOT } from "../../../panel.config";
-import { loadConfig, mergeLocalConfig } from "../../config";
-import { machineId } from "../hostname";
+import { getConfig, loadConfig, mergeLocalConfig, preferencesFileFor } from "../../config";
+import { machineHostname, machineId } from "../hostname";
 import { LEGACY_PREFERENCES, preferenceSeedsFor, preferencesPathFor } from "../preferencesPath";
 import { readMirrorIdSync } from "../syncRole";
 import { loadSpikesRoot } from "../projects/spikesRoot";
@@ -61,9 +61,10 @@ describe("preferencesPathFor", () => {
   });
 
   it("a local preferencesPath override still wins", () => {
-    // No override: the per-machine path under this panel's workspace.
+    // No override: the per-machine path under this panel's workspace, named by the
+    // hostname (not machineId(), which follows this machine's own local config).
     expect(mergeLocalConfig(undefined).preferencesPath).toBe(
-      preferencesPathFor(WORKSPACE_ROOT, machineId()),
+      preferencesPathFor(WORKSPACE_ROOT, machineHostname()),
     );
     // A machineId override moves the file to that machine's name.
     expect(mergeLocalConfig({ machineId: "HAL 9000!" }).preferencesPath).toBe(
@@ -73,6 +74,16 @@ describe("preferencesPathFor", () => {
     expect(
       mergeLocalConfig({ machineId: "hal", preferencesPath: "/custom/prefs.json" }).preferencesPath,
     ).toBe("/custom/prefs.json");
+  });
+});
+
+describe("preferencesFileFor", () => {
+  it("a symlinked path to this panel's workspace counts as its own", async () => {
+    const link = join(dir, "workspace-link");
+    symlinkSync(WORKSPACE_ROOT, link);
+    expect(await preferencesFileFor(link)).toBe(getConfig().preferencesPath);
+    // Another workspace gets this machine's per-machine file inside it.
+    expect(await preferencesFileFor(dir)).toBe(preferencesPathFor(dir, machineId()));
   });
 });
 

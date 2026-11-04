@@ -1,7 +1,7 @@
 import defaults, { WORKSPACE_ROOT, type PanelConfig } from "../panel.config.js";
 import { machineIdFrom } from "./lib/machineName.js";
 import { preferencesPathFor } from "./lib/preferencesPath.js";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -54,14 +54,24 @@ export function mergeLocalConfig(local: Partial<PanelConfig> | undefined): Panel
   return merged;
 }
 
+/** `path` with symlinks resolved, so `/root/git/x` and `/srv/git/x` compare equal; plain resolve() when it does not exist. */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
 /**
  * The preferences file for `workspaceRoot`: this panel's own workspace uses
- * `preferencesPath` from the loaded config (so a local override wins); any other
+ * `preferencesPath` from the loaded config (so a local override wins) — compared by
+ * real path, so a symlinked spelling of the same workspace counts as its own; any other
  * workspace uses this machine's per-machine file inside it.
  */
 export async function preferencesFileFor(workspaceRoot: string): Promise<string> {
   await loadConfig();
-  if (resolve(workspaceRoot) === WORKSPACE_ROOT) return config.preferencesPath;
+  if (canonicalPath(workspaceRoot) === canonicalPath(WORKSPACE_ROOT)) return config.preferencesPath;
   return preferencesPathFor(workspaceRoot, machineIdFrom(config.machineId));
 }
 

@@ -29,6 +29,7 @@ export interface SyncOpts {
    * This machine's own non-data paths (relative to repo root), committed with the data
    * paths: its preferences file and `.pavilio/voices/` (design D11). Never another
    * machine's preferences file. A path that neither exists nor is tracked is skipped.
+   * Matched literally: glob characters in them are not expanded.
    */
   machinePaths?: string[];
   hostname: string;
@@ -163,11 +164,20 @@ function parseOverwrittenFiles(stderr: string): string[] {
  */
 async function presentPaths(repo: string, machinePaths: string[], timeoutMs: number): Promise<string[]> {
   const present: string[] = [];
-  for (const p of machinePaths.filter((m) => m && m.trim().length > 0)) {
+  for (const p of machinePaths.filter((m) => m && m.trim().length > 0).map(literal)) {
     const known = await git(repo, ["ls-files", "--cached", "--others", "--exclude-standard", "--", p], timeoutMs);
     if (known.stdout.trim()) present.push(p);
   }
   return present;
+}
+
+/**
+ * A machine path as a literal pathspec. The preferences path can be set by hand in
+ * panel.config.local.ts; a `*` or `?` in it must name that one file, never widen the
+ * commit to another machine's files.
+ */
+function literal(path: string): string {
+  return `:(literal)${path}`;
 }
 
 export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus> {
@@ -228,6 +238,7 @@ export async function syncRepo(repo: string, opts: SyncOpts): Promise<SyncStatus
       const behind = (await git(repo, ["rev-list", "--count", "HEAD..@{u}"], t)).stdout.trim() || "0";
       // scoped auto-commit: stage AND commit only data + machine paths, so a user's
       // manually-staged files (e.g. half-edited panel code) are never swept in.
+      // presentPaths returns the machine paths already as literal pathspecs.
       const scoped = [...paths, ...(await presentPaths(repo, opts.machinePaths ?? [], t))];
       await git(repo, ["add", "--", ...scoped], t);
       const staged = await git(repo, ["diff", "--cached", "--quiet", "--", ...scoped], t);

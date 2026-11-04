@@ -16,16 +16,18 @@ function SyncBlockedBanner({ files }: { files: string[] }) {
       <div className="font-medium mb-1" style={{ color: "var(--red)" }}>Blocked</div>
       <p style={{ color: "var(--text-secondary)" }}>
         Local changes to{" "}
-        {files.map((f, i) => (
-          <span key={f}>
-            <code className="font-mono">{f}</code>
-            {i < files.length - 1 ? ", " : ""}
-          </span>
-        ))}{" "}
+        {files.length === 0
+          ? "uncommitted files"
+          : files.map((f, i) => (
+              <span key={f}>
+                <code className="font-mono">{f}</code>
+                {i < files.length - 1 ? ", " : ""}
+              </span>
+            ))}{" "}
         block the sync — commit or discard them
       </p>
       <p className="mt-1.5" style={{ color: "var(--text-muted)" }}>
-        Staged files count too. Nothing was changed — sync again once they are resolved.
+        Staged changes also block the sync. Nothing was changed — sync again once they are resolved.
       </p>
     </div>
   );

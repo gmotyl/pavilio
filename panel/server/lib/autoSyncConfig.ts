@@ -42,6 +42,7 @@ export function autoSyncSettings(): AutoSyncSettings {
 function ownPreferencesPath(repo: string, preferencesPath: string | undefined): string[] {
   if (!preferencesPath) return [];
   const rel = relative(repo, resolve(repo, preferencesPath));
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return [];
+  // Segment check, not a prefix one: "..prefs.json" is a file inside the repo.
+  if (!rel || rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) return [];
   return [rel.split(sep).join("/")];
 }
