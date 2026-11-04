@@ -52,6 +52,11 @@ projects/*/wiki/.ingest.lock*
 # and absolute repo paths. The FILE only, never the directory: the shipped
 # .pavilio/preferences.example.json sits beside it and must stay tracked.
 .pavilio/preferences.json
+# The per-machine preferences files (.pavilio/preferences/<machineId>.json) and
+# the mirror record are workspace files too: committed in a private workspace,
+# never in this repository.
+.pavilio/preferences/
+.pavilio/sync-mirror.json
 
 # Panel
 panel/node_modules/
