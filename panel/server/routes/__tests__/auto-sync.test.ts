@@ -22,11 +22,12 @@ const mocks = vi.hoisted(() => ({
   autoSync: { intervalMinutes: 15, dataPaths: ["projects/"], notifyCmd: "echo hi" } as
     | { intervalMinutes: number; dataPaths: string[]; notifyCmd?: string }
     | undefined,
+  machineId: "testhost" as string | undefined,
 }));
+// The real lib/hostname resolves machineId() from this mocked config.
 vi.mock("../../config", () => ({
-  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: mocks.autoSync }),
+  getConfig: () => ({ projectsDir: "/tmp/projects", autoSync: mocks.autoSync, machineId: mocks.machineId }),
 }));
-vi.mock("../../lib/hostname", () => ({ machineHostname: () => "testhost" }));
 
 import { syncRepo } from "../../lib/syncRepo";
 import * as state from "../../lib/autoSyncState";
@@ -37,6 +38,14 @@ describe("auto-sync routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.autoSync = { intervalMinutes: 15, dataPaths: ["projects/"], notifyCmd: "echo hi" };
+    mocks.machineId = "testhost";
+  });
+
+  it("auto-sync commits under the machine id override", async () => {
+    mocks.machineId = "Override Box";
+    const res = await request(makeApp(autoSyncRouter, "/api/auto-sync")).post("/api/auto-sync/now");
+    expect(res.status).toBe(200);
+    expect(syncRepo).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ hostname: "override-box" }));
   });
 
   it("falls back to a 15-minute interval when autoSync is not configured", async () => {

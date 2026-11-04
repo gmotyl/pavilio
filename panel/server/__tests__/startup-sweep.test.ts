@@ -62,9 +62,10 @@ vi.mock("../routes/archive.js", () => ({ default: passRouter() }));
 vi.mock("../routes/time.js", () => ({ mountTimeRoutes: vi.fn() }));
 
 vi.mock("../lib/file-index.js", () => ({ rebuildIndex: vi.fn() }));
-vi.mock("../lib/hostname.js", () => ({ machineHostname: vi.fn(() => "test-host") }));
 vi.mock("../lib/autoSyncScheduler.js", () => ({ startScheduler: vi.fn() }));
 vi.mock("../lib/autoSyncState.js", () => ({ isEnabled: vi.fn(() => false) }));
+// The real lib/hostname.js runs against the mocked config above, so a test can
+// set `machineId` there and see which name startPanel() hands to its writers.
 vi.mock("../watcher.js", () => ({
   setupWebSocket: vi.fn(),
   setupFileWatcher: vi.fn(),
@@ -97,6 +98,10 @@ vi.mock("https", async (importOriginal) => ({
 }));
 
 import { startPanel } from "../panel-server.js";
+import { getConfig } from "../config.js";
+import { mountTimeRoutes } from "../routes/time.js";
+import { startScheduler } from "../lib/autoSyncScheduler.js";
+import { isEnabled } from "../lib/autoSyncState.js";
 import { sweepNames } from "../lib/terminal-identity.js";
 import { listSessions } from "../lib/terminal-manager.js";
 
@@ -139,5 +144,27 @@ describe("startPanel terminal identity sweep", () => {
     expect(listSessions).toHaveBeenCalled();
     expect(sweepNames).toHaveBeenCalledWith([]);
     expect(mountOrder).toEqual(["mount", "sweep"]);
+  });
+});
+
+describe("startPanel machine identity", () => {
+  it("keys time files and auto-sync commits by the configured machine id", async () => {
+    // A machineId override differs from the OS hostname; every per-machine writer
+    // must use the override, or the sync role reads this machine's own history
+    // as another machine's.
+    vi.mocked(getConfig).mockReturnValue({
+      port: 0,
+      projectsDir: "/tmp/pavilio-startup-sweep-projects",
+      machineId: "Override Box",
+    } as unknown as ReturnType<typeof getConfig>);
+    vi.mocked(isEnabled).mockReturnValue(true);
+
+    await startPanel(() => {});
+
+    expect(mountTimeRoutes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ hostname: "override-box" }),
+    );
+    expect(startScheduler).toHaveBeenCalledWith(expect.objectContaining({ hostname: "override-box" }));
   });
 });

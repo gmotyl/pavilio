@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { resolve } from "path";
 import { getConfig } from "../config.js";
-import { machineHostname } from "../lib/hostname.js";
+import { machineId } from "../lib/hostname.js";
 import { syncRepo, getSyncStatus, isStale } from "../lib/syncRepo.js";
 import { isEnabled, setEnabled } from "../lib/autoSyncState.js";
 import { startScheduler, stopScheduler } from "../lib/autoSyncScheduler.js";
@@ -12,7 +12,7 @@ function cfg() {
   const c = getConfig();
   const repo = resolve(c.projectsDir, "..");
   const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
-  return { repo, autoSync, hostname: machineHostname() };
+  return { repo, autoSync, hostname: machineId() };
 }
 
 router.get("/status", (_req, res) => {

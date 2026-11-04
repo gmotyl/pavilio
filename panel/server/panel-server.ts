@@ -50,7 +50,7 @@ import { createPageCacheRouter } from "./routes/pageCache.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
-import { machineHostname } from "./lib/hostname.js";
+import { machineId } from "./lib/hostname.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
 import { isEnabled } from "./lib/autoSyncState.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
@@ -258,7 +258,7 @@ export async function startPanel(
   // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
   app.use("/api/speech/page-cache", createPageCacheRouter());
   app.use("/api", scriptsRouter);
-  mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
+  mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineId() });
 
   await mountFrontend(app);
 
@@ -313,7 +313,7 @@ export async function startPanel(
     const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
     startScheduler({
       repo: resolve(c.projectsDir, ".."),
-      hostname: machineHostname(),
+      hostname: machineId(),
       dataPaths: autoSync.dataPaths,
       generatedPaths: autoSync.generatedPaths,
       intervalMinutes: autoSync.intervalMinutes,
