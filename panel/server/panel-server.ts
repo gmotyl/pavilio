@@ -4,13 +4,15 @@ import express, {
   type Response,
   type NextFunction,
 } from "express";
-import { resolve } from "path";
 import { createServer as createHttpServer, type Server as HttpServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { loadConfig, getConfig, isPortExplicit } from "./config.js";
 import { loadPreferences } from "./lib/preferences-store.js";
+import { preferenceSeedsFor } from "./lib/preferencesPath.js";
+import { readMirrorIdSync } from "./lib/syncRole.js";
+import { WORKSPACE_ROOT } from "../panel.config.js";
 import { importLegacyColors } from "./lib/import-legacy-colors.js";
 import {
   authMiddleware,
@@ -50,7 +52,8 @@ import { createPageCacheRouter } from "./routes/pageCache.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
-import { machineHostname } from "./lib/hostname.js";
+import { machineId } from "./lib/hostname.js";
+import { autoSyncSettings } from "./lib/autoSyncConfig.js";
 import { startScheduler } from "./lib/autoSyncScheduler.js";
 import { isEnabled } from "./lib/autoSyncState.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
@@ -120,7 +123,13 @@ export async function startPanel(
   // later read is synchronous, and `GET /api/preferences.js` — which the page
   // blocks on — never touches the disk. Deliberately before `listen()`, so no
   // request can observe an unloaded document.
-  loadPreferences(getConfig().preferencesPath);
+  // A first boot (no own file yet) seeds it from the mirror machine's file, or
+  // from the legacy shared one — see loadPreferences. A `preferencesPath`
+  // override in local config is still the own path the seed is written to.
+  loadPreferences(
+    getConfig().preferencesPath,
+    preferenceSeedsFor(WORKSPACE_ROOT, machineId(), readMirrorIdSync(WORKSPACE_ROOT)),
+  );
   // One-way fill of project colours from the old `.panel/project-colors.json`.
   try {
     importLegacyColors();
@@ -258,7 +267,7 @@ export async function startPanel(
   // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
   app.use("/api/speech/page-cache", createPageCacheRouter());
   app.use("/api", scriptsRouter);
-  mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineHostname() });
+  mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineId() });
 
   await mountFrontend(app);
 
@@ -309,15 +318,15 @@ export async function startPanel(
   setInterval(pruneDeadAgents, 30_000);
 
   if (isEnabled()) {
-    const c = getConfig();
-    const autoSync = c.autoSync ?? { intervalMinutes: 15, dataPaths: ["projects/"], generatedPaths: [] };
+    const s = autoSyncSettings();
     startScheduler({
-      repo: resolve(c.projectsDir, ".."),
-      hostname: machineHostname(),
-      dataPaths: autoSync.dataPaths,
-      generatedPaths: autoSync.generatedPaths,
-      intervalMinutes: autoSync.intervalMinutes,
-      notifyCmd: autoSync.notifyCmd,
+      repo: s.repo,
+      hostname: s.hostname,
+      dataPaths: s.dataPaths,
+      generatedPaths: s.generatedPaths,
+      machinePaths: s.machinePaths,
+      intervalMinutes: s.intervalMinutes,
+      notifyCmd: s.notifyCmd,
     });
   }
 }

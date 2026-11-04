@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
@@ -27,6 +27,15 @@ const UPDATE_SH = resolve(__dirname, "../../../scripts/update.sh");
 const PM_SH = resolve(__dirname, "../../../scripts/pm");
 // …and scripts/remotes, which is how it recognises a pavilio clone.
 const REMOTES_SH = resolve(__dirname, "../../../scripts/remotes");
+// …and scripts/sync-role + scripts/machine-id, for the mirror guard. Those two
+// run the panel's TypeScript through panel/node_modules, which a sandbox
+// workspace does not have, so the sandbox gets stand-ins that exec the real
+// scripts: the role is still resolved by the real code, on the sandbox repo.
+const SYNC_ROLE_SH = resolve(__dirname, "../../../scripts/sync-role");
+const MACHINE_ID_SH = resolve(__dirname, "../../../scripts/machine-id");
+/** Contract text, printed verbatim at the end of a sync and with a refusal. */
+const REMINDER =
+  "With several instances, run `pnpm sync` only on the mirror machine; every other machine runs `pnpm pull`.";
 /** The canonical pavilio URL, exactly as scripts/remotes defines it. */
 const CANONICAL_UPSTREAM_URL = "https://github.com/gmotyl/pavilio.git";
 
@@ -36,6 +45,10 @@ let dest: string;
 let home: string;
 let origin: string;
 let stubBin: string;
+/** The bare repo standing in for the WORKSPACE's own origin (not pavilio's). */
+let wsOrigin: string;
+/** This machine's id, exactly as scripts/machine-id prints it. */
+let me: string;
 
 function git(cwd: string, ...args: string[]): string {
   const res = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: gitEnv() });
@@ -67,8 +80,13 @@ function currentBranch(): string {
 function runUpdate(
   extraEnv: Record<string, string> = {},
   upstreamArg: string | null = upstream,
+  flags: string[] = [],
 ) {
-  const argv = [join(dest, "scripts", "update.sh"), ...(upstreamArg === null ? [] : [upstreamArg])];
+  const argv = [
+    join(dest, "scripts", "update.sh"),
+    ...flags,
+    ...(upstreamArg === null ? [] : [upstreamArg]),
+  ];
   const res = spawnSync("bash", argv, {
     encoding: "utf8",
     env: { ...gitEnv(), PATH: `${stubBin}:${process.env.PATH ?? ""}`, ...extraEnv },
@@ -148,12 +166,78 @@ function copyScriptsInto(repo: string) {
   copyFileSync(UPDATE_SH, join(repo, "scripts", "update.sh"));
   copyFileSync(PM_SH, join(repo, "scripts", "pm"));
   copyFileSync(REMOTES_SH, join(repo, "scripts", "remotes"));
+  for (const [name, real] of [
+    ["sync-role", SYNC_ROLE_SH],
+    ["machine-id", MACHINE_ID_SH],
+  ]) {
+    writeFileSync(join(repo, "scripts", name), `#!/bin/bash\nexec bash "${real}" "$@"\n`, {
+      mode: 0o755,
+    });
+  }
   if (existsSync(join(repo, ".git", "info"))) {
     writeFileSync(
       join(repo, ".git", "info", "exclude"),
-      "scripts/update.sh\nscripts/pm\nscripts/remotes\n",
+      "scripts/update.sh\nscripts/pm\nscripts/remotes\nscripts/sync-role\nscripts/machine-id\n",
     );
   }
+}
+
+/**
+ * Give the workspace repo an `origin` — the remote every machine of a shared
+ * workspace pushes to — and publish its main there. Without one there is no
+ * shared history and so no other machine to guard against.
+ */
+function addWorkspaceOrigin() {
+  wsOrigin = join(sandbox, "workspace-origin.git");
+  mkdirSync(wsOrigin, { recursive: true });
+  git(wsOrigin, "init", "--bare", "--quiet");
+  git(wsOrigin, "symbolic-ref", "HEAD", "refs/heads/main");
+  git(dest, "remote", "add", "origin", wsOrigin);
+  git(dest, "push", "-q", "origin", "HEAD:main");
+}
+
+/**
+ * Another machine's clone of the workspace commits `files` with `subject` and
+ * pushes it to the workspace origin — the destination has NOT pulled it.
+ */
+function pushFromAnotherMachine(subject: string, files: Record<string, string>) {
+  const other = join(sandbox, `other-${Math.random().toString(36).slice(2)}`);
+  git(sandbox, "clone", "--quiet", wsOrigin, other);
+  for (const [path, body] of Object.entries(files)) {
+    mkdirSync(join(other, path, ".."), { recursive: true });
+    writeFileSync(join(other, path), body);
+  }
+  git(other, "add", "-A");
+  git(other, "commit", "-q", "--allow-empty", "-m", subject);
+  git(other, "push", "-q", "origin", "HEAD:main");
+}
+
+const mirrorFile = (id: string) => ({
+  ".pavilio/sync-mirror.json": `${JSON.stringify({ mirror: id })}\n`,
+});
+
+/** The mirror file on the workspace origin's main, or null when there is none. */
+function remoteMirrorFile(): string | null {
+  const res = spawnSync("git", ["-C", wsOrigin, "show", "main:.pavilio/sync-mirror.json"], {
+    encoding: "utf8",
+    env: gitEnv(),
+  });
+  return res.status === 0 ? res.stdout : null;
+}
+
+/** A pre-receive hook on the workspace origin that rejects the first `times` pushes. */
+function rejectPushes(times: number) {
+  const counter = join(sandbox, "rejected-pushes");
+  writeFileSync(
+    join(wsOrigin, "hooks", "pre-receive"),
+    [
+      "#!/bin/bash",
+      `n=$(cat "${counter}" 2>/dev/null || echo 0)`,
+      `if [ "$n" -lt ${times} ]; then echo $((n + 1)) >"${counter}"; echo "rejected by test hook" >&2; exit 1; fi`,
+      "exit 0",
+    ].join("\n") + "\n",
+    { mode: 0o755 },
+  );
 }
 
 // A build that fails on purpose. The sandbox has no node_modules, so the real
@@ -183,6 +267,12 @@ function commitUpstream(message: string) {
   git(upstream, "commit", "-q", "-m", message);
   git(upstream, "push", "-q", "origin", "HEAD:main");
 }
+
+beforeAll(() => {
+  const res = spawnSync("bash", [MACHINE_ID_SH], { encoding: "utf8" });
+  if (res.status !== 0) throw new Error(`scripts/machine-id failed: ${res.stderr}`);
+  me = res.stdout.trim();
+});
 
 beforeEach(() => {
   sandbox = mkdtempSync(join(tmpdir(), "update-sh-"));
@@ -810,5 +900,281 @@ describe("scripts/update.sh clone mode", () => {
     // The recording stub above is the real assertion: scripts/panel — the only
     // thing that can stop or start the panel — was never invoked at all.
     expect(existsSync(panelInvoked)).toBe(false);
+  });
+});
+
+describe("scripts/update.sh mirror guard", () => {
+  it("sync refuses when fetch fails", () => {
+    initDestRepo();
+    git(dest, "remote", "add", "origin", join(sandbox, "no-such-origin.git"));
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/cannot confirm this machine is the mirror/);
+    expect(output).not.toMatch(/Syncing panel/);
+    expect(invocations(rsyncCalled)).toBe("");
+  });
+
+  it("sync refuses on a consumer before touching the tree", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    git(dest, "pull", "-q", "--no-rebase", "origin", "main");
+    const head = git(dest, "rev-parse", "HEAD");
+    const rsyncCalled = stubCommand("rsync");
+    git(upstream, "checkout", "-q", "-b", "feature/wip");
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toContain(REMINDER);
+    expect(output).toContain("pnpm sync --promote");
+    expect(output).not.toMatch(/Syncing panel/);
+    expect(invocations(rsyncCalled)).toBe("");
+    // Neither side was touched: the upstream clone stays on its branch, the
+    // workspace keeps its HEAD and a clean tree.
+    expect(currentBranch()).toBe("feature/wip");
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
+    expect(destStatus()).toBe("");
+  });
+
+  it("sync refuses when the role is unassigned", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("auto-sync other-box 2026-11-03T13:38:28.980Z", {
+      "projects/p/time/other-box.jsonl": "{}\n",
+    });
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toContain("pnpm sync --promote");
+    expect(invocations(rsyncCalled)).toBe("");
+  });
+
+  it("sync runs on the mirror and prints the reminder", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine(`chore(sync): promote ${me} to mirror`, mirrorFile(me));
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/Syncing panel/);
+    expect(git(dest, "log", "-1", "--pretty=%s")).toMatch(/^chore\(sync\): pavilio upstream @ /);
+    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+  });
+
+  it("sync runs on a single machine with an origin", () => {
+    // An origin, but no mirror file and no other machine in its history.
+    initDestRepo();
+    addWorkspaceOrigin();
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/sync role: single/);
+    expect(output).toMatch(/Syncing panel/);
+    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+  });
+
+  it("sync runs on a single machine whose only history is its own auto-sync", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine(`auto-sync ${me} 2026-11-03T13:38:28.980Z`, {
+      [`projects/p/time/${me}.jsonl`]: "{}\n",
+    });
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/sync role: single/);
+    expect(output).toMatch(/Syncing panel/);
+  });
+
+  it("sync reads the role from origin, not the working tree", () => {
+    // This clone still says it is the mirror — committed and pushed — but
+    // another machine has since pushed a promotion this clone has not pulled.
+    initDestRepo();
+    addWorkspaceOrigin();
+    for (const [path, body] of Object.entries(mirrorFile(me))) {
+      mkdirSync(join(dest, ".pavilio"), { recursive: true });
+      writeFileSync(join(dest, path), body);
+    }
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", `chore(sync): promote ${me} to mirror`);
+    git(dest, "push", "-q", "origin", "HEAD:main");
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toContain(REMINDER);
+    expect(invocations(rsyncCalled)).toBe("");
+  });
+
+  it("sync refreshes origin/main even when the remote has no default fetch refspec", () => {
+    // origin/main exists but is stale, and `git fetch origin main` alone would
+    // only fill FETCH_HEAD: the role must still come from origin's current main.
+    initDestRepo();
+    addWorkspaceOrigin();
+    git(dest, "fetch", "-q", "origin");
+    git(dest, "config", "--unset-all", "remote.origin.fetch");
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate();
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/another machine is the mirror/);
+    expect(invocations(rsyncCalled)).toBe("");
+  });
+
+  it("promote writes, commits and pushes the mirror file", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status, output).toBe(0);
+    expect(JSON.parse(remoteMirrorFile() ?? "null")).toEqual({ mirror: me });
+    expect(git(wsOrigin, "log", "-1", "--pretty=%s", "main")).toBe(`chore(sync): promote ${me} to mirror`);
+    // …then the sync itself runs, now as the mirror.
+    expect(output).toMatch(/Syncing panel/);
+    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+  });
+
+  it("promote commits and pushes the mirror file even when the workspace gitignores it", () => {
+    // A Quick Start clone carries pavilio's own .gitignore, which ignores the
+    // mirror file; the first promotion still has to record it.
+    initDestRepo();
+    writeFileSync(join(dest, ".gitignore"), "node_modules/\ndist/\n.pavilio/sync-mirror.json\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "ignore the mirror file");
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("auto-sync other-box 2026-11-03T13:38:28.980Z", {
+      "projects/p/time/other-box.jsonl": "{}\n",
+    });
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status, output).toBe(0);
+    expect(JSON.parse(remoteMirrorFile() ?? "null")).toEqual({ mirror: me });
+    expect(git(wsOrigin, "log", "-1", "--pretty=%s", "main")).toBe(`chore(sync): promote ${me} to mirror`);
+  });
+
+  it("promote pulls, re-checks and retries after one rejected push", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("notes from another machine", { "projects/p/note.md": "n\n" });
+    rejectPushes(1);
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status, output).toBe(0);
+    expect(output).toMatch(/Push rejected/);
+    expect(JSON.parse(remoteMirrorFile() ?? "null")).toEqual({ mirror: me });
+    // The other machine's commit was merged, not rebased away.
+    expect(existsSync(join(dest, "projects", "p", "note.md"))).toBe(true);
+    expect(output).toMatch(/Syncing panel/);
+  });
+
+  it("promote gives up after a second rejected push", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    const before = remoteMirrorFile();
+    rejectPushes(2);
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/not promoted/i);
+    expect(remoteMirrorFile()).toBe(before);
+    expect(invocations(rsyncCalled)).toBe("");
+    // The unpushed promotion is withdrawn locally too, so a later push (auto-sync)
+    // cannot land it behind the user's back.
+    expect(git(dest, "show", "HEAD:.pavilio/sync-mirror.json")).toBe(before?.trim());
+  });
+
+  it("promote names the failed pull, not the push, when origin/main cannot be merged", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    // The same file changed on both sides: the pull inside --promote conflicts.
+    mkdirSync(join(dest, "projects", "p"), { recursive: true });
+    writeFileSync(join(dest, "projects", "p", "note.md"), "mine\n");
+    git(dest, "add", "-A");
+    git(dest, "commit", "-q", "-m", "local note");
+    pushFromAnotherMachine("their note", { "projects/p/note.md": "theirs\n" });
+    const head = git(dest, "rev-parse", "HEAD");
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/could not pull origin\/main/);
+    expect(output).not.toMatch(/Check that origin accepts pushes/);
+    expect(output).toMatch(/not promoted/i);
+    expect(remoteMirrorFile()).toBeNull();
+    expect(invocations(rsyncCalled)).toBe("");
+    // The aborted merge leaves the workspace as it was.
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
+    expect(destStatus()).toBe("");
+  });
+
+  it("promote withdraws its commit when the role check fails on the retry", () => {
+    initDestRepo();
+    addWorkspaceOrigin();
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    const before = remoteMirrorFile();
+    rejectPushes(1);
+    // The role check passes on the first attempt and fails on the second.
+    const calls = join(sandbox, "sync-role-calls");
+    writeFileSync(
+      join(dest, "scripts", "sync-role"),
+      [
+        "#!/bin/bash",
+        `n=$(($(cat "${calls}" 2>/dev/null || echo 0) + 1)); echo "$n" >"${calls}"`,
+        `if [ "$n" -ge 2 ]; then echo "sync-role: broken by test" >&2; exit 1; fi`,
+        `exec bash "${SYNC_ROLE_SH}" "$@"`,
+      ].join("\n") + "\n",
+      { mode: 0o755 },
+    );
+    const rsyncCalled = stubCommand("rsync");
+
+    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+
+    expect(status).not.toBe(0);
+    expect(output).toMatch(/sync role check failed/);
+    expect(output).toMatch(/not promoted/i);
+    expect(remoteMirrorFile()).toBe(before);
+    expect(invocations(rsyncCalled)).toBe("");
+    expect(git(dest, "show", "HEAD:.pavilio/sync-mirror.json")).toBe(before?.trim());
+  });
+
+  it("clone mode refuses on a consumer before rebasing", () => {
+    initCloneRepo();
+    wsOrigin = join(sandbox, "workspace-origin.git");
+    mkdirSync(wsOrigin, { recursive: true });
+    git(wsOrigin, "init", "--bare", "--quiet");
+    git(wsOrigin, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(dest, "remote", "add", "origin", wsOrigin);
+    git(dest, "push", "-q", "origin", "HEAD:main");
+    pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
+    writeFileSync(join(upstream, "panel", "src", "app.ts"), "export const app = 3;\n");
+    commitUpstream("upstream moves on");
+    const head = git(dest, "rev-parse", "HEAD");
+
+    const { status, output } = runUpdate({}, null);
+
+    expect(status).not.toBe(0);
+    expect(output).toContain(REMINDER);
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
   });
 });

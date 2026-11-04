@@ -4,11 +4,13 @@ import request from "supertest";
 import { spawn } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -20,6 +22,18 @@ import { makeApp } from "../../test-kit";
 // The route's only side effect beyond the store is the WS fan-out.
 const { broadcast } = vi.hoisted(() => ({ broadcast: vi.fn() }));
 vi.mock("../../watcher", () => ({ broadcast }));
+
+// The machine list reads which per-machine files git tracks; the real `git
+// ls-files` is exercised in lib/__tests__/trackedFiles.test.ts (node-slow).
+// `undefined` = "not a git repository", the on-disk fallback.
+const machines = vi.hoisted(() => ({ self: "spock", tracked: undefined as string[] | undefined }));
+vi.mock("../../lib/hostname.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/hostname.js")>()),
+  machineId: () => machines.self,
+}));
+vi.mock("../../lib/trackedFiles.js", () => ({
+  trackedFileNames: vi.fn(async () => machines.tracked),
+}));
 
 import preferencesRouter from "../preferences.js";
 import {
@@ -44,6 +58,8 @@ const target = () => join(dir, "preferences.json");
 
 beforeEach(() => {
   broadcast.mockClear();
+  machines.self = "spock";
+  machines.tracked = undefined;
   dir = mkdtempSync(join(tmpdir(), "pavilio-prefs-route-"));
   loadPreferences(target());
 });
@@ -315,6 +331,143 @@ describe("PATCH /api/preferences", () => {
     const without = await runShutdownChild({ install: false });
     expect(without.code, without.stderr).not.toBe(9);
     expect(existsSync(without.file)).toBe(false);
+  });
+});
+
+describe("copy preferences from another machine", () => {
+  /** A workspace whose `.pavilio/preferences/` holds `files`; this machine's own file is loaded. */
+  function workspace(files: Record<string, string>): { prefsDir: string; own: string } {
+    const prefsDir = join(dir, ".pavilio", "preferences");
+    mkdirSync(prefsDir, { recursive: true });
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(prefsDir, name), text, "utf8");
+    const own = join(prefsDir, `${machines.self}.json`);
+    loadPreferences(own);
+    return { prefsDir, own };
+  }
+
+  it("machines lists committed preferences files except this machine", async () => {
+    workspace({
+      "spock.json": '{"version":1}',
+      "mac.json": '{"version":1}',
+      "zx-81.json": '{"version":1}',
+      // On disk but never committed: not offered.
+      "laptop.json": '{"version":1}',
+      // Not a preferences file at all.
+      "notes.txt": "x",
+    });
+    // Tracked but deleted from the working tree: nothing to copy from.
+    machines.tracked = ["mac.json", "spock.json", "zx-81.json", "gone.json", "notes.txt"];
+    const app = makeApp(preferencesRouter);
+
+    const res = await request(app).get("/api/preferences/machines");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ self: "spock", machines: ["mac", "zx-81"] });
+
+    // None committed besides this machine: an empty list, not an error.
+    machines.tracked = ["spock.json"];
+    const none = await request(app).get("/api/preferences/machines");
+    expect(none.body).toEqual({ self: "spock", machines: [] });
+
+    // Not a git repository: whatever per-machine files are on disk.
+    machines.tracked = undefined;
+    const onDisk = await request(app).get("/api/preferences/machines");
+    expect(onDisk.body).toEqual({ self: "spock", machines: ["laptop", "mac", "zx-81"] });
+  });
+
+  it("copy-from replaces the doc and the own file", async () => {
+    const macText = '{"version":1,"theme":"dark","panes.left":"300"}';
+    const { prefsDir, own } = workspace({
+      "spock.json": '{"version":1,"theme":"light","onlyHere":true}',
+      "mac.json": macText,
+    });
+    machines.tracked = ["mac.json", "spock.json"];
+
+    const res = await request(makeApp(preferencesRouter))
+      .post("/api/preferences/copy-from")
+      .send({ machine: "mac" });
+
+    expect(res.status).toBe(204);
+    const copied = { version: 1, theme: "dark", "panes.left": "300" };
+    // Whole document, not a merge: a key only this machine had is gone.
+    expect(getPreferences()).toEqual(copied);
+    // On disk by the time the request answered — the page reloads right after.
+    expect(JSON.parse(readFileSync(own, "utf8"))).toEqual(copied);
+    // The source is only read.
+    expect(readFileSync(join(prefsDir, "mac.json"), "utf8")).toBe(macText);
+  });
+
+  it("copy-from rejects an unknown or own machine id", async () => {
+    const ownText = '{"version":1,"theme":"light"}';
+    const { own } = workspace({
+      "spock.json": ownText,
+      "mac.json": '{"version":1,"theme":"dark"}',
+      "laptop.json": '{"version":1,"theme":"blue"}',
+    });
+    // A file just outside the preferences directory, for the traversal probes.
+    writeFileSync(join(dir, ".pavilio", "x.json"), '{"version":1,"theme":"evil"}', "utf8");
+    machines.tracked = ["mac.json", "spock.json"];
+    const before = { ...getPreferences() };
+    const app = makeApp(preferencesRouter);
+
+    const bodies: unknown[] = [
+      { machine: "nope" },
+      { machine: "spock" },
+      { machine: "laptop" }, // on disk, not committed
+      { machine: "../x" },
+      { machine: "../preferences/mac" },
+      { machine: "MAC" },
+      { machine: "mac.json" },
+      { machine: "" },
+      { machine: 42 },
+      {},
+    ];
+    for (const body of bodies) {
+      const res = await request(app).post("/api/preferences/copy-from").send(body as object);
+      expect(res.status, JSON.stringify(body)).toBe(404);
+    }
+
+    expect(getPreferences()).toEqual(before);
+    await flushPreferences();
+    expect(readFileSync(own, "utf8")).toBe(ownText);
+  });
+
+  it("a symlinked or non-file machine entry is neither listed nor copied", async () => {
+    const ownText = '{"version":1,"theme":"light"}';
+    const { prefsDir, own } = workspace({ "spock.json": ownText, "mac.json": '{"version":1,"theme":"dark"}' });
+    const outside = join(dir, "secret.json");
+    writeFileSync(outside, '{"version":1,"theme":"evil"}', "utf8");
+    symlinkSync(outside, join(prefsDir, "link.json"));
+    mkdirSync(join(prefsDir, "dir.json"));
+    machines.tracked = ["dir.json", "link.json", "mac.json", "spock.json"];
+    const app = makeApp(preferencesRouter);
+
+    const list = await request(app).get("/api/preferences/machines");
+    expect(list.body).toEqual({ self: "spock", machines: ["mac"] });
+
+    for (const machine of ["link", "dir"]) {
+      const res = await request(app).post("/api/preferences/copy-from").send({ machine });
+      expect(res.status, machine).toBe(404);
+    }
+    expect(getPreferences()).toEqual({ version: 1, theme: "light" });
+    await flushPreferences();
+    expect(readFileSync(own, "utf8")).toBe(ownText);
+  });
+
+  it("copy-from refuses a committed file that is not a preferences document", async () => {
+    const ownText = '{"version":1,"theme":"light"}';
+    const { own } = workspace({ "spock.json": ownText, "mac.json": "[1,2]", "zx.json": "{broken" });
+    machines.tracked = ["mac.json", "spock.json", "zx.json"];
+    const before = { ...getPreferences() };
+    const app = makeApp(preferencesRouter);
+
+    for (const machine of ["mac", "zx"]) {
+      const res = await request(app).post("/api/preferences/copy-from").send({ machine });
+      expect(res.status, machine).toBe(422);
+    }
+
+    expect(getPreferences()).toEqual(before);
+    await flushPreferences();
+    expect(readFileSync(own, "utf8")).toBe(ownText);
   });
 });
 

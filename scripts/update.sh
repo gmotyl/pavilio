@@ -25,6 +25,23 @@ flush_to_disk() {
 }
 trap 'sync' EXIT
 
+# Options come before or after the positional upstream directory; only
+# --promote exists. An unknown option is refused rather than taken for a path.
+PROMOTE=0
+POSITIONAL=()
+for ARG in "$@"; do
+  case "$ARG" in
+    --promote) PROMOTE=1 ;;
+    --*)
+      echo "Error: unknown option $ARG"
+      echo "Usage: $0 [--promote] [/path/to/pavilio]"
+      exit 2
+      ;;
+    *) POSITIONAL+=("$ARG") ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
 # Resolve upstream local clone directory
 # Default: sibling directory named pavilio
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -100,6 +117,164 @@ if [ "$CLONE_MODE" = 0 ] && [ ! -d "$UPSTREAM_DIR/.git" ]; then
   exit 1
 fi
 
+# Printed verbatim at the end of every update and with every refusal below.
+SYNC_REMINDER='With several instances, run `pnpm sync` only on the mirror machine; every other machine runs `pnpm pull`.'
+SYNC_MIRROR_FILE=".pavilio/sync-mirror.json"
+# Spelled out rather than `origin main`: a bare branch name refreshes
+# origin/main only through the remote's configured fetch refspec, and a remote
+# without the default one would leave the role check reading a stale origin/main.
+ORIGIN_MAIN_REFSPEC="+refs/heads/main:refs/remotes/origin/main"
+
+# The role of this machine, read from the workspace's origin/main by
+# scripts/sync-role (mirror, consumer, single or unassigned). Exits on failure:
+# a check that cannot run is a refusal, never a pass.
+read_sync_role() {
+  if ! try_read_sync_role; then
+    exit 1
+  fi
+}
+
+# The same check, returning 1 instead of exiting — for a caller that has to clean
+# up first (promote_to_mirror withdraws an unpushed promotion).
+try_read_sync_role() {
+  if ! SYNC_ROLE="$(bash "$SCRIPT_DIR/sync-role" --repo "$REPO_ROOT" --ref origin/main)"; then
+    echo "Error: the sync role check failed (scripts/sync-role, see above) — nothing was synced."
+    return 1
+  fi
+}
+
+# --promote: record this machine as the mirror on origin/main. The promotion
+# counts only once the push lands. Each attempt first pulls origin/main (merge,
+# never rebase), so the promotion commit sits on top of whatever is there —
+# including another machine's mirror file, which it then simply replaces — and
+# re-checks the role; a rejected push gets one more attempt. Giving up — on a
+# failed pull, a failed role check or a second rejected push — withdraws the
+# local commit, so a later push (auto-sync's) cannot land a promotion the user
+# saw fail.
+promote_to_mirror() {
+  local me branch attempt promoted_sha="" failure="push"
+  if ! me="$(bash "$SCRIPT_DIR/machine-id")"; then
+    echo "Error: could not read this machine's id (scripts/machine-id, see above) — not promoted."
+    exit 1
+  fi
+  branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
+  if [ "$branch" != "main" ]; then
+    echo "Error: the workspace is on '$branch', not main — not promoted. Switch to main and re-run."
+    exit 1
+  fi
+  echo "Promoting $me to mirror..."
+  for attempt in 1 2; do
+    [ "$attempt" = 2 ] && echo "  Push rejected — pulling origin/main, then retrying once..."
+    if ! git -C "$REPO_ROOT" pull --quiet --no-rebase --no-edit origin "$ORIGIN_MAIN_REFSPEC"; then
+      git -C "$REPO_ROOT" merge --abort >/dev/null 2>&1 || true
+      echo "Error: could not pull origin/main into the workspace (see above) — a conflict or local changes in the way."
+      failure="pull"
+      break
+    fi
+    if ! try_read_sync_role; then
+      failure="role"
+      break
+    fi
+    if [ "$SYNC_ROLE" = "mirror" ]; then
+      echo "  ✓ $me is the mirror on origin/main"
+      return 0
+    fi
+    mkdir -p "$REPO_ROOT/.pavilio"
+    printf '{ "mirror": "%s" }\n' "$me" >"$REPO_ROOT/$SYNC_MIRROR_FILE"
+    # Forced, and only for this one path: a Quick Start clone carries pavilio's
+    # own .gitignore, which ignores the mirror file, so the first promotion
+    # would otherwise be refused before it could commit anything.
+    git -C "$REPO_ROOT" add -f -- "$SYNC_MIRROR_FILE"
+    # Pathspec commit: only the mirror file, whatever else the user has staged.
+    if ! git -C "$REPO_ROOT" diff --cached --quiet -- "$SYNC_MIRROR_FILE"; then
+      git -C "$REPO_ROOT" commit --quiet -m "chore(sync): promote $me to mirror" -- "$SYNC_MIRROR_FILE"
+      promoted_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+    fi
+    if git -C "$REPO_ROOT" push --quiet origin HEAD:main; then
+      echo "  ✓ promoted $me to mirror (pushed to origin/main)"
+      return 0
+    fi
+  done
+  # Withdraw the unpushed promotion: put the mirror file back to what origin/main
+  # holds and commit that, scoped to the one path, so nothing else is disturbed.
+  if [ -n "$promoted_sha" ]; then
+    if git -C "$REPO_ROOT" cat-file -e "origin/main:$SYNC_MIRROR_FILE" 2>/dev/null; then
+      git -C "$REPO_ROOT" show "origin/main:$SYNC_MIRROR_FILE" >"$REPO_ROOT/$SYNC_MIRROR_FILE"
+    else
+      rm -f "$REPO_ROOT/$SYNC_MIRROR_FILE"
+    fi
+    git -C "$REPO_ROOT" add -A -- "$SYNC_MIRROR_FILE"
+    if ! git -C "$REPO_ROOT" diff --cached --quiet -- "$SYNC_MIRROR_FILE"; then
+      git -C "$REPO_ROOT" commit --quiet -m "chore(sync): withdraw unpushed promotion of $me" -- "$SYNC_MIRROR_FILE"
+    fi
+  fi
+  case "$failure" in
+    pull)
+      echo "$me is not promoted, and the mirror on origin/main is unchanged. Nothing was synced."
+      echo "Resolve it with: git pull --no-rebase origin main — then re-run: pnpm sync --promote"
+      ;;
+    role)
+      echo "$me is not promoted, and the mirror on origin/main is unchanged."
+      echo "Re-run once scripts/sync-role works: pnpm sync --promote"
+      ;;
+    *)
+      echo "Error: the promotion could not be pushed — $me is not promoted, and the mirror on origin/main is unchanged."
+      echo "Nothing was synced. Check that origin accepts pushes, then re-run: pnpm sync --promote"
+      ;;
+  esac
+  exit 1
+}
+
+# Only the mirror machine syncs from upstream (it is the one that commits the
+# result); every other machine pulls. Decided BEFORE anything is touched — the
+# upstream clone, an rsync, a rebase — and read from origin/main, never from the
+# working tree, so a promotion pushed from another machine counts the moment it
+# exists, whether or not this clone has pulled it.
+#
+# A workspace that is not a git repo, or has no origin, shares no history with
+# any other machine: there is nothing to guard, and the check is skipped.
+guard_sync_role() {
+  if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 ||
+    ! git -C "$REPO_ROOT" remote get-url origin >/dev/null 2>&1; then
+    if [ "$PROMOTE" = 1 ]; then
+      echo "Error: --promote needs a workspace git repo with an origin remote to record the mirror on."
+      exit 1
+    fi
+    return 0
+  fi
+  echo "Checking this machine's sync role on origin/main..."
+  if ! git -C "$REPO_ROOT" fetch --quiet origin "$ORIGIN_MAIN_REFSPEC"; then
+    echo "Error: could not fetch origin — cannot confirm this machine is the mirror, so nothing was synced."
+    echo "Re-run once origin is reachable."
+    exit 1
+  fi
+  if [ "$PROMOTE" = 1 ]; then
+    promote_to_mirror
+  fi
+  read_sync_role
+  case "$SYNC_ROLE" in
+    mirror | single)
+      echo "  ✓ sync role: $SYNC_ROLE"
+      ;;
+    consumer)
+      echo "Error: another machine is the mirror on origin/main — this one does not sync from upstream."
+      echo "$SYNC_REMINDER"
+      echo "To make this machine the mirror instead: pnpm sync --promote"
+      exit 1
+      ;;
+    unassigned)
+      echo "Error: several machines use this workspace and none is recorded as the mirror yet."
+      echo "On the machine that should sync from upstream, run: pnpm sync --promote"
+      echo "$SYNC_REMINDER"
+      exit 1
+      ;;
+    *)
+      echo "Error: unexpected sync role '$SYNC_ROLE' from scripts/sync-role — nothing was synced."
+      exit 1
+      ;;
+  esac
+}
+
 # Re-run command setup for whichever agents are already configured, so new/renamed
 # skills become slash-commands without a manual step. Guarded (never abort the
 # update) and fed </dev/null so a setup script's prompt can't hang an unattended
@@ -160,6 +335,9 @@ if [ "$CLONE_MODE" = 1 ]; then
   fi
 
   echo ""
+  guard_sync_role
+
+  echo ""
   echo "Pulling upstream/main..."
   # --rebase: the user's notes commits are replayed on top of upstream rather than
   # merged, so the clone keeps a linear history it can still push somewhere else.
@@ -212,8 +390,13 @@ if [ "$CLONE_MODE" = 1 ]; then
   # The panel process is never touched from here: it may be serving the very
   # terminal this update was started from, and stopping it would kill the run.
   echo "The running panel still serves the old bundle — run: $PM_CMD reboot"
+  echo ""
+  echo "$SYNC_REMINDER"
   exit 0
 fi
+
+guard_sync_role
+echo ""
 
 echo "Pulling latest from upstream at $UPSTREAM_DIR..."
 # rsync copies the upstream working tree, so main must be the checked-out branch.
@@ -483,3 +666,5 @@ echo "The panel bundle is built and ready to start: $PM_CMD start"
 echo ""
 echo "Note: AGENTS.md and CLAUDE.md are manually maintained."
 echo "Check https://github.com/gmotyl/pavilio for changes and cherry-pick as needed."
+echo ""
+echo "$SYNC_REMINDER"

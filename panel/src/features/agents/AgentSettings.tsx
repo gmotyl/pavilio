@@ -11,6 +11,7 @@ import { NotificationsToggle } from "../notifications/NotificationsToggle";
 import { LauncherSettings } from "./LauncherSettings";
 import { DefaultObjectiveSettings } from "./DefaultObjectiveSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
+import { CopyPreferencesSection } from "../settings/CopyPreferencesSection";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 
@@ -659,6 +660,12 @@ export default function AgentSettings() {
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Research</h2>
         <ResearchSettings />
+      </section>
+
+      {/* Preferences — this machine's own file, or a copy of another machine's */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Preferences</h2>
+        <CopyPreferencesSection />
       </section>
 
       {/* Workspace actions — whatever this workspace's package.json defines */}

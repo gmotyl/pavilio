@@ -154,7 +154,7 @@ describe("README Quick Start", () => {
     //
     // `update` has two documented aliases, `up` and `upgrade`, and all three run
     // pnpm's dependency updater. That is why the workspace's update command is
-    // `pnpm pull` (and its second spelling `pnpm sync`) and never `pnpm upgrade`.
+    // `pnpm pull` (or the mirror machine's `pnpm sync`) and never `pnpm upgrade`.
     // Verified against pnpm 10.18.1.
     //
     // `start` and `test` are absent from this list on purpose: pnpm claims those
@@ -180,9 +180,12 @@ describe("README Quick Start", () => {
     expect(rootScripts.sync, "scripts.sync must run scripts/update.sh").toContain(
       "scripts/update.sh",
     );
-    // `pull` predates `sync` and people's fingers know it — both names point at
-    // the one script, deliberately.
-    expect(rootScripts.pull, "scripts.pull must run scripts/update.sh").toContain(
+    // `pull` is the consumer's update — `git pull` plus a build — and runs
+    // scripts/pull; only the mirror machine runs the full `sync` (update.sh).
+    expect(rootScripts.pull, "scripts.pull must run scripts/pull").toMatch(
+      /scripts\/pull(\s|$)/,
+    );
+    expect(rootScripts.pull, "scripts.pull must not run scripts/update.sh").not.toContain(
       "scripts/update.sh",
     );
   });

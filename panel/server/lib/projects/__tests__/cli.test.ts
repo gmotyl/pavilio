@@ -3,6 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { join } from "path";
 
+import { loadConfig } from "../../../config";
+import { machineId } from "../../hostname";
+import { preferencesPathFor } from "../../preferencesPath";
 import { main, type CliDeps } from "../cli";
 
 let root = "";
@@ -102,8 +105,9 @@ describe("scripts/project", () => {
     mkdirSync(home);
     mkdirSync(join(root, "projects/lab"));
     writeFileSync(join(root, "projects/lab/PROJECT.md"), "---\nkind: research\n---\n# Lab\n");
-    mkdirSync(join(root, ".pavilio"));
-    writeFileSync(join(root, ".pavilio/preferences.json"), JSON.stringify({ "research.spikesRoot": "~/code/spikes" }));
+    await loadConfig();
+    mkdirSync(join(root, ".pavilio/preferences"), { recursive: true });
+    writeFileSync(preferencesPathFor(root, machineId()), JSON.stringify({ "research.spikesRoot": "~/code/spikes" }));
 
     const first = await cli(["spike-repo", "lab"], { home });
     expect(first.code).toBe(0);

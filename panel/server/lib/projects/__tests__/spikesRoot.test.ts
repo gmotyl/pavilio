@@ -3,6 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
+import { loadConfig } from "../../../config";
+import { machineId } from "../../hostname";
+import { preferencesPathFor } from "../../preferencesPath";
 import { loadSpikesRoot, readSpikesRoot, SPIKES_ROOT_DEFAULT } from "../spikesRoot";
 
 let dir = "";
@@ -48,10 +51,11 @@ describe("readSpikesRoot", () => {
     expect(readSpikesRoot(prefsPath)).toBe("~/code/spikes");
   });
 
-  it("loadSpikesRoot reads a foreign workspace's .pavilio/preferences.json", async () => {
-    mkdirSync(join(dir, ".pavilio"));
+  it("loadSpikesRoot reads a foreign workspace's per-machine preferences file", async () => {
+    await loadConfig();
+    mkdirSync(join(dir, ".pavilio", "preferences"), { recursive: true });
     writeFileSync(
-      join(dir, ".pavilio", "preferences.json"),
+      preferencesPathFor(dir, machineId()),
       JSON.stringify({ version: 1, "research.spikesRoot": "/srv/spikes" }),
     );
     expect(await loadSpikesRoot(dir)).toBe("/srv/spikes");

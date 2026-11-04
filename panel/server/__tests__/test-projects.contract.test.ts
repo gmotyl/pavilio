@@ -17,8 +17,8 @@ import config from "../../vitest.config";
 const PANEL = resolve(__dirname, "../..");
 
 const SLOW_INCLUDE = [
-  "server/__tests__/{setup-sh,update-sh,pm,panel-ctl,launcher-toolchain,setup-codex,setup-shortcut}.test.ts",
-  "server/lib/__tests__/syncRepo.test.ts",
+  "server/__tests__/{setup-sh,update-sh,pull-sh,machine-id-sh,consumer-push-guard,pm,panel-ctl,launcher-toolchain,setup-codex,setup-shortcut}.test.ts",
+  "server/lib/__tests__/{syncRepo,syncRole,trackedFiles}.test.ts",
   "scripts/__tests__/install-speech-hook.test.ts",
   "hooks/__tests__/*.test.ts",
 ];
@@ -68,7 +68,7 @@ describe("test projects", () => {
     expect(slow.testTimeout).toBe(120_000);
     // default pool (forks): these suites chdir, mutate env and spawn children
     expect(slow.pool).toBeUndefined();
-    expect(slowFiles()).toHaveLength(13);
+    expect(slowFiles()).toHaveLength(18);
   });
 
   it("the node project excludes every node-slow suite", () => {
@@ -113,7 +113,7 @@ describe("test projects", () => {
     const missed = slowFiles().filter((f) => !slow.test(`panel/${f}`));
     expect(missed).toEqual([]);
     // and the root launchers those suites execute, extensionless ones included
-    for (const subject of ["scripts/update.sh", "scripts/pm", "scripts/panel", "scripts/setup:codex", "scripts/setup:shortcut"]) {
+    for (const subject of ["scripts/update.sh", "scripts/pull", "scripts/pm", "scripts/panel", "scripts/setup:codex", "scripts/setup:shortcut", "scripts/machine-id", "panel/server/lib/hostname.ts", "scripts/sync-role", "scripts/git-hooks/pre-push", "panel/server/lib/syncRole.ts", "panel/server/lib/sync-role-cli.ts", "panel/server/lib/trackedFiles.ts"]) {
       expect(slow.test(subject), subject).toBe(true);
     }
   });

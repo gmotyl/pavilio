@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Prints this machine's sync role — mirror, consumer, single or unassigned — and
+# one trailing newline. Same value as resolveSyncRole() in
+# panel/server/lib/syncRole.ts, for this machine's id (scripts/machine-id), read
+# from the committed .pavilio/sync-mirror.json on the ref, never the working tree.
+#
+#   scripts/sync-role [--ref <ref>] [--repo <dir>]
+#
+#   --ref   ref to read the role from (default origin/main; fetch first)
+#   --repo  workspace repository (default the current directory)
+#
+# Works from any cwd: the panel is found relative to this file, and node is found
+# the same way every other entry point finds it (scripts/pm).
+# Exit 0 with the role on stdout; 1 when it cannot be resolved (e.g. unknown ref),
+# 2 on bad arguments — the reason on stderr.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+sync_role_fail() {
+  echo "sync-role: $1" >&2
+  exit 1
+}
+
+# scripts/pm reports on stderr only, so stdout stays the role alone.
+# shellcheck source=scripts/pm
+. "$SCRIPT_DIR/pm" >&2 || sync_role_fail "cannot load scripts/pm"
+pm_resolve >&2 || sync_role_fail "node not found (see above)"
+
+TSX="$REPO_ROOT/panel/node_modules/.bin/tsx"
+[ -x "$TSX" ] || sync_role_fail "panel dependencies missing: run pnpm install in $REPO_ROOT/panel"
+
+exec "$TSX" --tsconfig "$REPO_ROOT/panel/tsconfig.json" "$REPO_ROOT/panel/server/lib/sync-role-cli.ts" "$@"

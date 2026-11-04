@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Prints this machine's id — the name its per-host files and sync role use — and
+# one trailing newline. Same value as machineId() in panel/server/lib/hostname.ts:
+# `machineId` from panel/panel.config.local.ts (sanitized) when set, else the
+# sanitized hostname.
+#
+#   scripts/machine-id
+#
+# Works from any cwd: the panel is found relative to this file (scripts/ and
+# panel/ are siblings in both a source clone and a synced workspace), and node is
+# found the same way every other entry point finds it (scripts/pm).
+# Exit 0 with the id on stdout; exit 1 with the reason on stderr.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+machine_id_fail() {
+  echo "machine-id: $1" >&2
+  exit 1
+}
+
+# scripts/pm reports on stderr only, so stdout stays the id alone.
+# shellcheck source=scripts/pm
+. "$SCRIPT_DIR/pm" >&2 || machine_id_fail "cannot load scripts/pm"
+pm_resolve >&2 || machine_id_fail "node not found (see above)"
+
+TSX="$REPO_ROOT/panel/node_modules/.bin/tsx"
+[ -x "$TSX" ] || machine_id_fail "panel dependencies missing: run pnpm install in $REPO_ROOT/panel"
+
+exec "$TSX" --tsconfig "$REPO_ROOT/panel/tsconfig.json" "$REPO_ROOT/panel/server/lib/machine-id-cli.ts"

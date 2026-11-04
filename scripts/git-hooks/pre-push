@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Consumer pre-push guard (design D9 of per-machine-preferences).
+#
+# A sync-mode workspace gets panel/, scripts/, skills/ and commands/ from
+# upstream pavilio through `pnpm sync`, run on exactly one machine — the mirror.
+# Every other machine (a consumer) receives that copy through `git pull` only.
+# A consumer that pushes its own change to those paths forks the mirror's copy:
+# the next `pnpm sync` overwrites it, or merges against it. So on a consumer the
+# push is refused while `git diff @{u} HEAD` touches those paths. A merge that
+# takes the remote side leaves them equal to @{u} and passes.
+#
+# Installed as core.hooksPath=scripts/git-hooks by scripts/install-git-hooks in
+# a sync-mode workspace, and run first by panel/.husky/pre-push in a pavilio
+# clone (where @{u} carries no mirror file, so it does nothing).
+#
+#   pre-push <remote-name> <remote-url>   (refs on stdin — not read)
+#
+# Does nothing when: the branch has no upstream; @{u} has no
+# .pavilio/sync-mirror.json; the guarded paths equal @{u}; the role is not
+# `consumer`. The cheap git checks run first, so most pushes never start node.
+#
+# Fails OPEN: when the role cannot be resolved (node or the panel's dependencies
+# missing, a broken scripts/sync-role), the push proceeds with a warning. The
+# guard protects against a mistake, not an adversary — `--no-verify` bypasses it
+# anyway — and a missing toolchain must never wedge auto-sync's pushes.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPTS="$(cd "$SCRIPT_DIR/.." && pwd)"
+GUARDED=(panel/ scripts/ skills/ commands/)
+MIRROR_FILE=".pavilio/sync-mirror.json"
+
+# Git runs the hook from the work tree root, with GIT_DIR pointing at this
+# repository — exactly what the git calls below should talk to.
+upstream="$(git rev-parse --verify --quiet '@{u}^{commit}' 2>/dev/null)" || exit 0
+[ -n "$upstream" ] || exit 0
+git cat-file -e "$upstream:$MIRROR_FILE" 2>/dev/null || exit 0
+git diff --quiet "$upstream" HEAD -- "${GUARDED[@]}" && exit 0
+
+# scripts/sync-role spawns its own git with GIT_DIR stripped, so it needs the
+# work tree spelled out.
+repo="$(git rev-parse --show-toplevel 2>/dev/null)" || repo="$PWD"
+errlog="$(mktemp 2>/dev/null || echo "/tmp/pre-push-guard.$$")"
+trap 'rm -f "$errlog"' EXIT
+if ! role="$(bash "$SCRIPTS/sync-role" --ref "$upstream" --repo "$repo" 2>"$errlog")"; then
+  {
+    echo "pre-push guard skipped: could not resolve this machine's sync role (scripts/sync-role):"
+    sed 's/^/  /' "$errlog"
+  } >&2
+  exit 0
+fi
+
+[ "$role" = "consumer" ] || exit 0
+
+{
+  echo "Push refused: this machine is a sync consumer, and the push changes upstream tooling"
+  echo "that only the mirror machine's \`pnpm sync\` may change (compared with @{u}):"
+  git diff --name-only "$upstream" HEAD -- "${GUARDED[@]}" | sed 's/^/  /'
+  echo ""
+  echo "Route: hotfix via a PR to gmotyl/pavilio, then run \`pnpm sync\` on the mirror machine"
+  echo "and \`pnpm pull\` here. To drop the local change, merge or reset to the remote side."
+  echo "Deliberate escape: git push --no-verify"
+} >&2
+exit 1

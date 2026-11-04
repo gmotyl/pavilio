@@ -10,6 +10,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, readFile: vi.fn(actual.readFile), rename: vi.fn(actual.rename) };
 });
 
+// The real lib/hostname resolves machineId() from this config.
+vi.mock("../../../config", () => ({ getConfig: () => ({ machineId: "Override Box" }) }));
+
 import { readFile, rename } from "node:fs/promises";
 import { createUsageStore, USAGE_MONTHS_KEPT } from "../usage-store";
 
@@ -32,6 +35,12 @@ const readHost = (host = "spock") => JSON.parse(readFileSync(hostFile(host), "ut
 const at = (year: number, month1: number, day = 15) => new Date(year, month1 - 1, day, 12);
 
 describe("usage store", () => {
+  it("names the host file after the machine id override", async () => {
+    const store = createUsageStore({ dir });
+    await store.record("azure", 5, at(2026, 10));
+    expect(readdirSync(dir)).toEqual(["override-box.json"]);
+  });
+
   it("record creates the host file with the local month key", async () => {
     const store = createUsageStore({ dir, host: "spock" });
     // Last minute of the local month: in UTC− zones that instant is already the next UTC

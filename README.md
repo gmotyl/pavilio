@@ -41,7 +41,8 @@ The panel is then on <http://localhost:3010>.
 > and `pnpm up` — rewrites your lockfile; `pnpm restart` is a built-in
 > lifecycle command that runs `stop`, `restart` *and* `start` in turn. None of them ever reads
 > `package.json` the way you meant. So setup is `pnpm bootstrap`, the update is
-> `pnpm pull`, and the restart is `pnpm reboot`.
+> `pnpm sync` (`pnpm pull` on a second machine — see **Two machines** below), and
+> the restart is `pnpm reboot`.
 
 `pnpm bootstrap` is idempotent — re-run it whenever you like. It never overwrites
 a file you own and never adds a remote twice. In one pass it:
@@ -121,17 +122,21 @@ setup wires up two:
   so a stray `git push upstream` fails immediately instead of asking for
   credentials to a repository you cannot write to.
 
-`pnpm pull` then updates the workspace by **rebasing your commits onto
-`upstream/main`** (`git pull --rebase --autostash`). Your notes are replayed on
-top of the new version rather than merged into it, so the history stays linear
-and still pushes cleanly to your own `origin`. After the rebase it reinstalls the
+`pnpm sync` then updates the workspace by **rebasing your commits onto
+`upstream/main`** (`git pull --rebase --autostash upstream main`). Your notes
+are replayed on top of the new version rather than merged into it, so the
+history stays linear and still pushes cleanly to your own `origin`. After the rebase it reinstalls the
 panel's dependencies, regenerates the agent slash-commands and rebuilds the
 bundle — but it never restarts the running panel, which may be serving the very
 terminal you started the update from. It ends by reminding you to restart it
 yourself.
 
-One exception worth remembering: `pnpm pull` refreshes the Claude Code and
-opencode slash-commands, but **not** Codex. Run `pnpm setup:codex` by hand after
+A second machine on the same workspace does not do that: there `pnpm pull` is the
+update — it merges what the first machine pushed to `origin` and never touches
+`upstream`. See **Two machines** below.
+
+One exception worth remembering: `pnpm sync` and `pnpm pull` refresh the Claude
+Code and opencode slash-commands, but **not** Codex. Run `pnpm setup:codex` by hand after
 `skills/` changes.
 
 ## Everyday commands
@@ -142,8 +147,9 @@ opencode slash-commands, but **not** Codex. Run `pnpm setup:codex` by hand after
 | `pnpm stop` | Stop whatever is holding the panel port. |
 | `pnpm reboot` | Stop, then start. Every browser terminal session lives inside the panel process, so this closes all of them — it says how many before doing it. |
 | `pnpm status` | One line: running (with pid) or stopped. Exits 0 when running, 3 when not. |
-| `pnpm pull` | Update from upstream, then reinstall, regenerate commands and rebuild the bundle. |
-| `pnpm sync` | The same script under a second name. `pull` came first and stayed; `sync` reads better next to the team workflow below. |
+| `pnpm sync` | Update from upstream pavilio, then reinstall, regenerate commands and rebuild the bundle. With several machines, only the mirror machine runs it. |
+| `pnpm sync --promote` | Record this machine as the mirror machine, push that, then sync. |
+| `pnpm pull` | Update this machine from the workspace's `origin` (`git pull --no-rebase`), then reinstall, regenerate commands and rebuild. Never touches upstream, never commits. |
 | `pnpm build` | Rebuild the served bundle by hand. |
 | `pnpm test` | The panel test suite. |
 | `pnpm bootstrap` | Re-run setup. Safe at any time, and the way to re-pin node. |
@@ -270,7 +276,7 @@ So `[vite] (client) hmr update …` in the console means the wrong entry is live
 ps aux | grep 'tsx server'      # want server/index.ts, not server/dev.ts
 ```
 
-The usual cause is the **workspace's own root `package.json`**: `pnpm pull` syncs `panel/`, `skills/`, `commands/` and `scripts/`, but never the root `package.json`, so a workspace set up before the entry-point split can still carry a `start` script that changes into `panel/` and launches its `dev` script in the background. Point it at the serving entry:
+The usual cause is the **workspace's own root `package.json`**: `pnpm sync` syncs `panel/`, `skills/`, `commands/` and `scripts/`, but never the root `package.json`, so a workspace set up before the entry-point split can still carry a `start` script that changes into `panel/` and launches its `dev` script in the background. Point it at the serving entry:
 
 ```json
 "build": "pnpm -C panel build",
@@ -278,7 +284,7 @@ The usual cause is the **workspace's own root `package.json`**: `pnpm pull` sync
 "start": "./scripts/panel start"
 ```
 
-A missing `panel/dist` is never a silent fallback to Vite: `./scripts/panel start` (what `pnpm start` calls) builds the bundle first, and the serving entry started any other way fails loudly instead. `pnpm pull` builds the bundle as part of its run, so it normally stays fresh — the exception is the first pull after upgrading to a build-aware `update.sh`, where the copy of the script already running is still the old one. Run `pnpm build` once by hand, or `pnpm pull` twice.
+A missing `panel/dist` is never a silent fallback to Vite: `./scripts/panel start` (what `pnpm start` calls) builds the bundle first, and the serving entry started any other way fails loudly instead. `pnpm sync` and `pnpm pull` build the bundle as part of their run, so it normally stays fresh — the exception is the first sync after upgrading to a build-aware `update.sh`, where the copy of the script already running is still the old one. Run `pnpm build` once by hand, or `pnpm sync` twice.
 
 ### LAN access from phone or other devices
 
@@ -342,9 +348,13 @@ export default {
 
 ### Workspace preferences
 
-`.pavilio/preferences.json` — one level above `panel/`, at your workspace root — is where the panel remembers the choices that are worth carrying between machines: sidebar and pane state, sort orders, favorites, the speech voice, per-project and per-repo toggles. It belongs to the workspace, not to the browser, so it travels with your private repo and a second machine opens the panel the way you left it. Anything that names a live session — a focused terminal, a grid layout — stays in browser storage instead and never lands here.
+`.pavilio/preferences/<machineId>.json` — one level above `panel/`, at your workspace root — is where the panel remembers the choices that are worth keeping: sidebar and pane state, sort orders, favorites, the speech voice, per-project and per-repo toggles. It belongs to the workspace, not to the browser, so it travels with your private repo. Anything that names a live session — a focused terminal, a grid layout — stays in browser storage instead and never lands here.
 
-The file is gitignored in this repository (it would carry your project names and absolute repo paths); `.pavilio/preferences.example.json` is shipped in its place, so you can see the format. The panel reads it **once at boot** — after pulling a change to it, restart the panel.
+There is **one file per machine**, written only by that machine's panel; nothing is merged between machines behind your back. A machine with no file of its own is seeded at boot from the mirror machine's file (see **Two machines** below). Any machine that has neither its own file nor a mirror's file to copy — the mirror itself on its first boot after the upgrade, or a consumer whose pull has not brought the mirror's file yet — seeds once from the old single shared `.pavilio/preferences.json`, if the workspace still has one; the legacy file is never written again. To take another machine's choices later, use **Copy preferences from another machine** in Settings: it replaces this machine's file with that machine's committed one and reloads the page.
+
+The files are gitignored in this repository (they would carry your project names and absolute repo paths); `.pavilio/preferences.example.json` is shipped in their place, so you can see the format. The panel reads its file **once at boot** — after pulling a change to it, restart the panel.
+
+In a Quick Start clone (clone mode) that ignore stays in force: the workspace *is* a pavilio clone, so `.pavilio/preferences/` is never committed there, per-machine files do not travel between machines, and seeding from the mirror or **Copy preferences from another machine** has nothing to offer. The multi-machine setup is a sync-mode workspace (see **Teams: a private workspace tracking upstream**).
 
 ## Agent Tracking
 
@@ -408,8 +418,8 @@ Note that `Ctrl+Shift+C` is **not** copy here, which is where it differs from mo
 
 The Quick Start clone is already a workspace that tracks upstream: `pnpm
 bootstrap` renames the pavilio remote to `upstream`, leaves `origin` free for
-your own private repository, and `pnpm pull` rebases your notes onto whatever
-upstream has grown since. For one person, that is the whole story.
+your own private repository, and `pnpm sync` rebases your notes onto whatever
+upstream has grown since. For one person on one machine, that is the whole story.
 
 Teams usually want the other shape — **one private workspace repository, with a
 pavilio clone beside it** to sync from. New panel features, skills and scripts
@@ -445,12 +455,14 @@ workspace that has been bootstrapped stops being mirrored and starts being
 To take a new upstream version, from the workspace:
 
 ```bash
-pnpm pull ../pavilio                      # or: bash scripts/update.sh /path/to/pavilio
+pnpm sync ../pavilio                      # or: bash scripts/update.sh /path/to/pavilio
 ```
 
 Always name the pavilio clone. An explicit path means sync mode unconditionally,
-whatever the workspace's own remotes have grown since — bare `pnpm pull` is the
-Quick Start's spelling, and here it is a bet on a remote you did not check.
+whatever the workspace's own remotes have grown since — bare `pnpm sync` is the
+Quick Start's spelling, and here it is a bet on a remote you did not check. The
+team's other machines do not sync at all: they run `pnpm pull` (see **Two
+machines** below).
 
 `scripts/update.sh` has two modes and chooses between them itself, by asking
 whether the workspace it is running in is a pavilio clone — read from its
@@ -489,8 +501,99 @@ panel — do that yourself with `pnpm reboot`.
   push changes from your private workspace back here.
 - `AGENTS.md` and `CLAUDE.md` are manually maintained on both sides — cherry-pick
   upstream improvements as needed.
-- `pnpm pull` regenerates the Claude Code and opencode slash-commands, but not
-  the Codex ones: run `pnpm setup:codex` yourself after `skills/` changes.
+- `pnpm sync` and `pnpm pull` regenerate the Claude Code and opencode
+  slash-commands, but not the Codex ones: run `pnpm setup:codex` yourself after
+  `skills/` changes.
+
+## Two machines: one mirror, the rest consumers
+
+One workspace can serve several machines — a desktop and a laptop, say — all
+pushing to the same `origin`. Upstream pavilio must then enter the workspace
+through exactly one of them; two machines each copying (or rebasing onto) their
+own upstream version fight over the result.
+
+- The **mirror machine** runs `pnpm sync`: it takes upstream and commits the
+  result. `pnpm sync` does not push that commit — the next auto-sync tick does,
+  or `git push` it yourself (always, when auto-sync is off) before the other
+  machines pull.
+- Every other machine is a **consumer machine**: it gets that result with
+  `pnpm pull` — `git pull --no-rebase` from `origin`, then install, command
+  refresh and build. `pnpm pull` never rsyncs, never rebases and never commits
+  anything but git's own merge commit.
+
+Every machine has a **machine id**: its sanitized hostname, unless its own
+`panel/panel.config.local.ts` sets one (`machineId: "desk"`). The mirror is
+recorded by id in the committed `.pavilio/sync-mirror.json`
+(`{ "mirror": "desk" }`), and a machine's **sync role** is read from that file
+on `origin/main` — never from the working tree — so a promotion pushed from
+another machine counts as soon as it is fetched.
+
+`pnpm sync` checks the role before it touches anything, and refuses when:
+
+- `origin` cannot be fetched — offline, it cannot prove it is still the mirror;
+- this machine is a consumer — another machine is the mirror;
+- the role is unassigned — there is no mirror file yet, but the last 30 days of
+  history show another machine (its `auto-sync <id>` commits or
+  `time/<id>.jsonl` files). A workspace only one machine has used needs no
+  mirror file and syncs as before.
+
+Each refusal, and every `pnpm pull`, ends with the same reminder:
+
+> With several instances, run `pnpm sync` only on the mirror machine; every
+> other machine runs `pnpm pull`.
+
+**Promotion.** `pnpm sync --promote` records this machine as the mirror,
+commits it, pushes it to `origin/main` and then syncs. It counts only once the
+push lands: a rejected push pulls, re-checks and retries once, and a promotion
+that cannot be pushed is withdrawn.
+
+A few edges worth knowing:
+
+- A workspace without an `origin` remote shares no history with another machine,
+  so the role check is skipped.
+- The role is resolved by the panel's own code (`scripts/sync-role`), so it
+  needs node and the panel's dependencies installed — `pnpm sync` refuses
+  without them.
+- In a Quick Start clone, `pnpm sync` still rebases onto `upstream/main` (clone
+  mode); the role only decides which machine may run it.
+
+**Consumer pre-push guard.** `scripts/install-git-hooks` (run on every panel
+install) installs a pre-push hook. On a consumer it refuses a push that changes
+`panel/`, `scripts/`, `skills/` or `commands/` against the branch's upstream:
+those are the mirror's copy of pavilio, and the next `pnpm sync` would overwrite
+or conflict with the edit. Fix it upstream with a PR to pavilio, `pnpm sync` on
+the mirror, then `pnpm pull` here. `git push --no-verify` is the deliberate
+escape; when the role cannot be resolved at all, the hook lets the push through
+with a warning.
+
+**Preferences** are one file per machine — see **Workspace preferences** above.
+A new machine starts from the mirror's file, and Settings can copy any other
+machine's file over its own.
+
+> **Rolling out per-machine preferences.** After `pnpm pull` on a consumer,
+> check that `.pavilio/preferences/<mirror>.json` exists before restarting the
+> panel. If it does not (the mirror has not booted or auto-synced since the
+> upgrade), the consumer seeds its own file from its local legacy
+> `.pavilio/preferences.json` instead. To fix that, delete this machine's own
+> `.pavilio/preferences/<machineId>.json` and restart once the mirror's file is
+> there, or use Settings → **Copy preferences from <mirror>**.
+
+**Changing a machine id later.** Setting `machineId` in
+`panel/panel.config.local.ts` on a machine that already has history starts new
+per-machine files under the new id: preferences, `time/<id>.jsonl` and the TTS
+usage file (`.panel/tts-usage/<id>.json`). Totals still sum the old files, but manual time entries recorded under
+the old id can no longer be edited from that machine.
+
+**Auto-sync merges.** Each tick commits the data paths (`projects/` by default),
+this machine's own preferences file and `.pavilio/voices/` — never another
+machine's preferences — then runs `git pull --no-rebase` and pushes. There is no
+autostash: when an uncommitted file outside those paths would be overwritten by
+incoming changes, git refuses and auto-sync shows **blocked**, naming the files
+to commit or discard. A conflicting merge is aborted and reported, and a repo
+already mid-merge or mid-rebase is reported, never touched. The default interval
+is 60 minutes (`autoSync.intervalMinutes` in `panel.config.local.ts` overrides
+it). The same install step turns on `rerere.enabled`, so a conflict you resolve
+once is resolved the same way the next time.
 
 ## Creating a New Project
 

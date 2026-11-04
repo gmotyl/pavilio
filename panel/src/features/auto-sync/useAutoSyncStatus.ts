@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { alerts } from "../alerts/store";
-import { observeTransition } from "./attention";
+import { attentionMessage, observeTransition } from "./attention";
 
 export interface AutoSyncStatus {
   enabled: boolean;
-  state: "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy";
+  state: "idle" | "syncing" | "synced" | "offline" | "conflict" | "push-failed" | "busy" | "blocked";
   stale?: boolean;
   lastSync: string | null;
   detail: string;
@@ -12,13 +12,9 @@ export interface AutoSyncStatus {
   intervalMinutes: number;
   conflictFiles: string[];
   conflictPrompt: string;
+  /** Uncommitted non-data files blocking the merge. Empty unless state is "blocked". */
+  blockedFiles: string[];
 }
-
-const ATTENTION_TEXT: Record<string, string> = {
-  conflict: "Auto-sync: rebase conflict — repo needs manual attention",
-  "push-failed": "Auto-sync: push failed — repo needs manual attention",
-  stale: "Auto-sync: no successful sync for a long time — check the panel",
-};
 
 export function useAutoSyncStatus(pollMs = 15000) {
   const [status, setStatus] = useState<AutoSyncStatus | null>(null);
@@ -30,7 +26,7 @@ export function useAutoSyncStatus(pollMs = 15000) {
       const next = (await res.json()) as AutoSyncStatus;
       const entered = observeTransition(next);
       if (entered) {
-        const message = `${ATTENTION_TEXT[entered]}${next.detail ? ` (${next.detail})` : ""}`;
+        const message = attentionMessage(entered, next.detail);
         if (entered === "stale") alerts.info(message);
         else alerts.error(message);
       }

@@ -1,13 +1,9 @@
-import os from "node:os";
+import { getConfig } from "../config.js";
+import { machineIdFrom } from "./machineName.js";
 
-export function sanitizeHostname(raw: string): string {
-  const cleaned = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return cleaned || "unknown";
-}
+export { machineHostname, sanitizeHostname } from "./machineName.js";
 
-export function machineHostname(): string {
-  return sanitizeHostname(os.hostname());
+/** Panel config `machineId` (sanitized) when set, else machineHostname(). */
+export function machineId(): string {
+  return machineIdFrom(getConfig().machineId);
 }

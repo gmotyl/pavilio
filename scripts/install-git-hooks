@@ -14,8 +14,15 @@
 #
 # So the hooks go in only where the repository tracks pavilio itself (the same
 # remote-based answer scripts/update.sh uses for clone mode). Anywhere else this
-# is a no-op, except that it takes back a core.hooksPath an earlier install left
-# pointing at panel/.husky/_ — a hooksPath the user set themselves is left alone.
+# installs only the workspace's own hooks: core.hooksPath=scripts/git-hooks, whose
+# pre-push is the consumer guard (refuses a sync consumer's push that changes the
+# upstream tooling the mirror machine syncs). It takes back a core.hooksPath an
+# earlier install left pointing at panel/.husky/_, and one (any scope) whose
+# directory does not exist; an existing hooks directory the user set is left
+# alone, with a warning that the guard is not installed.
+#
+# Every repository, clone or workspace, gets rerere.enabled=true: auto-sync merges
+# (no rebase), and a conflict resolved once is then replayed instead of re-asked.
 
 set -eu
 
@@ -30,6 +37,8 @@ cd "$REPO_ROOT"
 # Not a git checkout (a tarball, a CI cache): nothing to install into.
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
+git config --local rerere.enabled true
+
 if repo_is_pavilio_clone "$REPO_ROOT"; then
   exec husky panel/.husky
 fi
@@ -37,4 +46,32 @@ fi
 if [ "$(git config --local --get core.hooksPath 2>/dev/null || true)" = "panel/.husky/_" ]; then
   git config --local --unset core.hooksPath
   echo "install-git-hooks: not a pavilio clone — removed core.hooksPath=panel/.husky/_ left by an earlier install"
+fi
+
+# An older checkout without scripts/git-hooks: pointing hooksPath at a missing
+# directory would only switch off .git/hooks.
+[ -d scripts/git-hooks ] || exit 0
+
+# Where git looks for a core.hooksPath value: ~/ expanded, a relative path taken
+# from the top of the working tree (where this script runs).
+hooks_dir_of() {
+  case "$1" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${1#"~/"}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Any scope: a global hooksPath the user set would be overridden by a local one.
+current="$(git config --get core.hooksPath 2>/dev/null || true)"
+if [ -z "$current" ]; then
+  git config --local core.hooksPath scripts/git-hooks
+elif [ "$current" != "scripts/git-hooks" ] && [ ! -d "$(hooks_dir_of "$current")" ]; then
+  # A hooksPath whose directory is gone runs no hooks at all — a leftover, not a
+  # choice. Replace it locally; a global value is left as it is and overridden.
+  git config --local core.hooksPath scripts/git-hooks
+  echo "install-git-hooks: replaced core.hooksPath=$current (no such directory) with scripts/git-hooks"
+elif [ "$current" != "scripts/git-hooks" ]; then
+  echo "install-git-hooks: warning: core.hooksPath=$current is set, so the consumer pre-push guard is not installed." >&2
+  echo "  To keep it, call scripts/git-hooks/pre-push \"\$@\" from your own pre-push hook." >&2
 fi

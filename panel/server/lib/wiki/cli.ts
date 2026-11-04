@@ -5,7 +5,8 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { parseAtlassianUrl } from "./atlassian-url";
 import { pageBacklog } from "./backlog";
 import { cloneRepo } from "./clone-repo";
-import { loadWikiConfig, readWikiConfig, type WikiConfig } from "./config";
+import { readWikiConfig, type WikiConfig } from "./config";
+import { preferencesFileFor } from "../../config";
 import { fetchArticle } from "./fetch-article";
 import { fetchYoutube, UvMissingError, type Runner } from "./fetch-youtube";
 import { addBacklink, clearCandidates, harvestStatus, listCandidates } from "./harvest";
@@ -196,11 +197,8 @@ type Outcome = { code: 0 | 1 | 2; body: Record<string, unknown> };
 const ok = (body: Record<string, unknown>): Outcome => ({ code: 0, body });
 
 async function readConfig(workspaceRoot: string): Promise<WikiConfig> {
-  // A workspace other than the one this panel lives in has its own preferences document.
-  if (resolve(workspaceRoot) !== DEFAULT_WORKSPACE_ROOT) {
-    return readWikiConfig(join(workspaceRoot, ".pavilio", "preferences.json"));
-  }
-  return loadWikiConfig();
+  // This machine's per-machine document; this panel's own workspace honours a local override.
+  return readWikiConfig(await preferencesFileFor(workspaceRoot));
 }
 
 async function dispatch(command: string, args: string[], deps: CliDeps, workspaceRoot: string): Promise<Outcome> {

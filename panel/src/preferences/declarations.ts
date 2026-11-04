@@ -322,8 +322,8 @@ export const ANSWER_PANE_FULL_HEIGHT = 4000;
  *
  *  A session id, a session ORDER, a tiling keyed by session, an armed speech
  *  cell, a bookmark into a live pane: each names something that exists on
- *  THIS machine, in THIS browser, right now. `.pavilio/preferences.json` is
- *  committed to a notes repo and carried to another machine, where every one
+ *  THIS machine, in THIS browser, right now. `.pavilio/preferences/<machineId>.json`
+ *  is committed to a notes repo and copied to another machine, where every one
  *  of them is a dangling reference.
  *
  *  `SESSION_NAMING` is a hand list and nothing forces it to grow with this
@@ -614,8 +614,8 @@ export const preferences = {
    * next. `git.history.paneWidth` is retired with no migration, per the
    * registry's standing policy — a dragged handle simply opens at 280 once.
    * Its orphan is not the usual quiet one, though: the key was `portable`, so
-   * it sits as a line in the workspace's `.pavilio/preferences.json` rather
-   * than only in a browser, and hand-seeding this key means deleting that
+   * it sits as a line in the workspace's `.pavilio/preferences/<machineId>.json`
+   * rather than only in a browser, and hand-seeding this key means deleting that
    * line.
    *
    * Global, not `repo`, even though a tree only ever appears beside a repo's
@@ -1042,7 +1042,7 @@ export const preferences = {
   // ── Wiki ─────────────────────────────────────────────────────────────────
   // Read by the server, not the panel UI: `server/lib/wiki/config.ts` takes
   // both defaults from here and `scripts/wiki config` prints them. Portable,
-  // because that reader only ever sees `.pavilio/preferences.json`.
+  // because that reader only ever sees the machine's `.pavilio/preferences/<machineId>.json`.
   /**
    * Whether session start catches the wiki up on records written since the
    * last ingest. `false` leaves ingest to note, session end and explicit runs
@@ -1066,7 +1066,7 @@ export const preferences = {
   /**
    * The directory under which `scripts/project spike-repo` creates each project's
    * spikes repo (research or ordinary). Kept as written (`~` unexpanded); a
-   * blank value reads as the default. Portable: the CLI reads it off `.pavilio/preferences.json`.
+   * blank value reads as the default. Portable: the CLI reads it off `.pavilio/preferences/<machineId>.json`.
    */
   researchSpikesRoot: definePreference({
     key: "research.spikesRoot", // was: nothing — new with spikes repos

@@ -1,18 +1,29 @@
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { machineHostname } from "./server/lib/machineName.js";
+import { preferencesPathFor } from "./server/lib/preferencesPath.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/** One level above panel/ — the repo root in a source clone, the workspace
+ *  root in the rsync mirror where panel/ is itself a synced copy. */
+export const WORKSPACE_ROOT = resolve(__dirname, "..");
 
 export interface PanelConfig {
   /** Absolute path to the projects directory (contains project subfolders with PROJECT.md) */
   projectsDir: string;
   /** Port for the dev server */
   port: number;
+  /** This machine's id in per-host files and the sync role (sanitized like a hostname).
+   *  Set only in the machine's own panel.config.local.ts; defaults to the hostname. */
+  machineId?: string;
   /** Path to agent registry file */
   agentRegistryPath: string;
-  /** Path to the workspace preferences document (read once at boot) */
+  /** Path to this machine's workspace preferences document (read once at boot).
+   *  Defaults to `.pavilio/preferences/<machineId>.json` under WORKSPACE_ROOT,
+   *  recomputed by loadConfig() once a local `machineId` override is known. */
   preferencesPath: string;
   /** File watching debounce in ms */
   watchDebounceMs: number;
@@ -27,16 +38,17 @@ export interface PanelConfig {
   tlsKey?: string;
   /** Auto-sync settings for the data repo. Enabled flag lives in .autosync-state.json (default on). */
   autoSync?: {
-    /** Minutes between automatic syncs */
-    intervalMinutes: number;
+    /** Minutes between automatic syncs. Default 60 (DEFAULT_AUTO_SYNC_INTERVAL_MINUTES). */
+    intervalMinutes?: number;
     /** Paths (relative to repo root) auto-committed each tick */
     dataPaths: string[];
     /** Paths (relative to repo root) rsynced in by scripts/update.sh. Never committed by
      *  auto-sync — used only to classify conflicts in the resolution prompt. */
     generatedPaths?: string[];
-    /** Optional shell command fired when sync needs attention (conflict/push-failed/stale).
-     *  Gets SYNC_STATE + SYNC_DETAIL env vars. Example (macOS):
-     *  `osascript -e "display notification \"$SYNC_DETAIL\" with title \"Pavilio sync: $SYNC_STATE\""` */
+    /** Optional shell command fired when sync needs attention (conflict/push-failed/blocked/stale).
+     *  Gets SYNC_STATE + SYNC_DETAIL env vars. Pass them as argv, never splice them into a
+     *  script string — the detail can name files containing quotes. Example (macOS):
+     *  `osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title ("Pavilio sync: " & item 1 of argv)' -e 'end run' "$SYNC_STATE" "$SYNC_DETAIL"` */
     notifyCmd?: string;
   };
 }
@@ -75,9 +87,8 @@ const defaults: PanelConfig = {
   projectsDir: resolve(__dirname, "../projects"),
   port: 3010,
   agentRegistryPath: resolve(process.env.HOME || "~", ".agent-registry.json"),
-  // One level above panel/ — the repo root in a source clone, the workspace
-  // root in the rsync mirror where panel/ is itself a synced copy.
-  preferencesPath: resolve(__dirname, "../.pavilio/preferences.json"),
+  // The hostname stands in for machineId until panel.config.local.ts is merged.
+  preferencesPath: preferencesPathFor(WORKSPACE_ROOT, machineHostname()),
   watchDebounceMs: 300,
   answerWaveDebounceMs: answerWaveDebounceMsFromEnv(),
   ignorePatterns: [
@@ -87,7 +98,7 @@ const defaults: PanelConfig = {
     "**/log/*.txt",
   ],
   autoSync: {
-    intervalMinutes: 15,
+    intervalMinutes: 60,
     dataPaths: ["projects/"],
     generatedPaths: [
       "panel/",

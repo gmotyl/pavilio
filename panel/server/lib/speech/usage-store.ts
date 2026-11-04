@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getConfig } from "../../config.js";
-import { machineHostname } from "../hostname.js";
+import { machineId } from "../hostname.js";
 
 /**
  * Speech usage: characters sent to speech engines, kept per month × engine in one JSON file per
@@ -66,7 +66,7 @@ function newestMonths(months: Iterable<string>): string[] {
 
 export function createUsageStore(opts: { dir?: string; host?: string } = {}): UsageStore {
   const dir = opts.dir ?? join(getConfig().projectsDir, ".panel", "tts-usage");
-  const host = opts.host ?? machineHostname();
+  const host = opts.host ?? machineId();
   const file = join(dir, `${host}.json`);
 
   // Every record is a read-modify-write of the host file; chaining them keeps

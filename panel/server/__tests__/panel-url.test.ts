@@ -71,7 +71,7 @@ vi.mock("../routes/archive.js", () => ({ default: passRouter() }));
 vi.mock("../routes/time.js", () => ({ mountTimeRoutes: vi.fn() }));
 
 vi.mock("../lib/file-index.js", () => ({ rebuildIndex: vi.fn() }));
-vi.mock("../lib/hostname.js", () => ({ machineHostname: vi.fn(() => "test-host") }));
+vi.mock("../lib/hostname.js", () => ({ machineHostname: vi.fn(() => "test-host"), machineId: vi.fn(() => "test-host") }));
 vi.mock("../lib/autoSyncScheduler.js", () => ({ startScheduler: vi.fn() }));
 vi.mock("../lib/autoSyncState.js", () => ({ isEnabled: vi.fn(() => false) }));
 vi.mock("../watcher.js", () => ({

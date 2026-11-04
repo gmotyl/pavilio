@@ -62,9 +62,10 @@ vi.mock("../routes/archive.js", () => ({ default: passRouter() }));
 vi.mock("../routes/time.js", () => ({ mountTimeRoutes: vi.fn() }));
 
 vi.mock("../lib/file-index.js", () => ({ rebuildIndex: vi.fn() }));
-vi.mock("../lib/hostname.js", () => ({ machineHostname: vi.fn(() => "test-host") }));
 vi.mock("../lib/autoSyncScheduler.js", () => ({ startScheduler: vi.fn() }));
 vi.mock("../lib/autoSyncState.js", () => ({ isEnabled: vi.fn(() => false) }));
+// The real lib/hostname.js runs against the mocked config above, so a test can
+// set `machineId` there and see which name startPanel() hands to its writers.
 vi.mock("../watcher.js", () => ({
   setupWebSocket: vi.fn(),
   setupFileWatcher: vi.fn(),
@@ -73,6 +74,16 @@ vi.mock("../watcher.js", () => ({
 vi.mock("../lib/agent-registry.js", () => ({ pruneDeadAgents: vi.fn() }));
 vi.mock("../lib/panel-listener.js", () => ({ registerPanelServer: vi.fn() }));
 vi.mock("../lib/os-users.js", () => ({ listOsUsers: vi.fn(() => []) }));
+
+// Boot must not read or seed the real workspace's preferences: capture the call.
+vi.mock("../lib/preferences-store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/preferences-store.js")>()),
+  loadPreferences: vi.fn(() => ({ version: 1 })),
+}));
+vi.mock("../lib/syncRole.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/syncRole.js")>()),
+  readMirrorIdSync: vi.fn(() => undefined),
+}));
 
 vi.mock("../lib/terminal-identity.js", () => ({ sweepNames: vi.fn() }));
 vi.mock("../lib/terminal-manager.js", () => ({ listSessions: vi.fn(() => []) }));
@@ -97,8 +108,17 @@ vi.mock("https", async (importOriginal) => ({
 }));
 
 import { startPanel } from "../panel-server.js";
+import { getConfig } from "../config.js";
+import { mountTimeRoutes } from "../routes/time.js";
+import { startScheduler } from "../lib/autoSyncScheduler.js";
+import { isEnabled } from "../lib/autoSyncState.js";
 import { sweepNames } from "../lib/terminal-identity.js";
 import { listSessions } from "../lib/terminal-manager.js";
+import { loadPreferences } from "../lib/preferences-store.js";
+import { readMirrorIdSync } from "../lib/syncRole.js";
+import { LEGACY_PREFERENCES, preferencesPathFor } from "../lib/preferencesPath.js";
+import { WORKSPACE_ROOT } from "../../panel.config.js";
+import { join } from "node:path";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -139,5 +159,70 @@ describe("startPanel terminal identity sweep", () => {
     expect(listSessions).toHaveBeenCalled();
     expect(sweepNames).toHaveBeenCalledWith([]);
     expect(mountOrder).toEqual(["mount", "sweep"]);
+  });
+});
+
+describe("startPanel machine identity", () => {
+  it("keys time files and auto-sync commits by the configured machine id", async () => {
+    // A machineId override differs from the OS hostname; every per-machine writer
+    // must use the override, or the sync role reads this machine's own history
+    // as another machine's.
+    vi.mocked(getConfig).mockReturnValue({
+      port: 0,
+      projectsDir: "/tmp/pavilio-startup-sweep-projects",
+      machineId: "Override Box",
+      preferencesPath: "/tmp/.pavilio/preferences/override-box.json",
+    } as unknown as ReturnType<typeof getConfig>);
+    vi.mocked(isEnabled).mockReturnValue(true);
+
+    await startPanel(() => {});
+
+    expect(mountTimeRoutes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ hostname: "override-box" }),
+    );
+    expect(startScheduler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostname: "override-box",
+        // no autoSync in the config: the defaults apply (design D11)
+        intervalMinutes: 60,
+        machinePaths: [".pavilio/preferences/override-box.json", ".pavilio/voices/"],
+      }),
+    );
+  });
+});
+
+describe("startPanel preferences seeding", () => {
+  const withOwnPath = (preferencesPath: string) =>
+    vi.mocked(getConfig).mockReturnValue({
+      port: 0,
+      projectsDir: "/tmp/pavilio-startup-sweep-projects",
+      machineId: "Override Box",
+      preferencesPath,
+    } as unknown as ReturnType<typeof getConfig>);
+
+  it("seeds the own path from the mirror's file, then the legacy one", async () => {
+    // A local preferencesPath override is still the own path the seed lands in.
+    withOwnPath("/custom/prefs.json");
+    vi.mocked(readMirrorIdSync).mockReturnValue("spock");
+
+    await startPanel(() => {});
+
+    expect(readMirrorIdSync).toHaveBeenCalledWith(WORKSPACE_ROOT);
+    expect(loadPreferences).toHaveBeenCalledWith("/custom/prefs.json", {
+      mirrorPath: preferencesPathFor(WORKSPACE_ROOT, "spock"),
+      legacyPath: join(WORKSPACE_ROOT, LEGACY_PREFERENCES),
+    });
+  });
+
+  it("the mirror machine seeds only from the legacy file", async () => {
+    withOwnPath("/tmp/.pavilio/preferences/override-box.json");
+    vi.mocked(readMirrorIdSync).mockReturnValue("override-box");
+
+    await startPanel(() => {});
+
+    expect(loadPreferences).toHaveBeenCalledWith("/tmp/.pavilio/preferences/override-box.json", {
+      legacyPath: join(WORKSPACE_ROOT, LEGACY_PREFERENCES),
+    });
   });
 });

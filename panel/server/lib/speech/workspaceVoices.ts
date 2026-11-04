@@ -4,7 +4,7 @@ import { join } from "node:path";
 /**
  * The workspace voice copy: every custom OmniVoice voice added from Settings is also kept as
  * `<workspaceRoot>/.pavilio/voices/<name>/sample.wav` (the server's converted wav) plus
- * `voice.json` (the voice record, `ref_text` included), next to `.pavilio/preferences.json`.
+ * `voice.json` (the voice record, `ref_text` included), next to `.pavilio/preferences/`.
  * It travels with the workspace, so `install:speech` can clone the voice onto a fresh server.
  */
 

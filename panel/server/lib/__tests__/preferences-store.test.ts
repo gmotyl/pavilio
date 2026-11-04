@@ -19,6 +19,7 @@ import {
   patchPreferences,
   flushPreferences,
   isReadOnly,
+  replacePreferences,
   _resetPreferencesForTests,
 } from "../preferences-store.js";
 
@@ -483,6 +484,25 @@ describe("a failed write", () => {
   });
 });
 
+describe("replacePreferences", () => {
+  it("a patch flushed during a slow replace write is not overtaken by it", async () => {
+    freshDir();
+    loadPreferences(file());
+
+    // A large copied document makes the replace write slow; the patch then drops
+    // that key again, so the flush has a small, fast document to write.
+    const replacing = replacePreferences({ version: 1, big: "x".repeat(16 * 1024 * 1024) });
+    patchPreferences({ big: null, theme: "dark" });
+    await flushPreferences();
+    await replacing;
+
+    expect(getPreferences()).toStrictEqual({ version: 1, theme: "dark" });
+    // The file on disk ends at the in-memory state, not the replace's stale copy.
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toStrictEqual({ version: 1, theme: "dark" });
+    expect(filesUnder(dir)).toEqual(["preferences.json"]);
+  });
+});
+
 describe("document version", () => {
   it("a v1 file loads and is rewritten as v1", async () => {
     freshDir();
@@ -616,5 +636,88 @@ describe("document version", () => {
     expect(isReadOnly()).toBe(true);
     // A predicate, not a gate: asking does not spend canWrite's one-time warning.
     expect(warnings).not.toHaveBeenCalled();
+  });
+});
+
+describe("seeding", () => {
+  // A workspace with the three candidate sources laid out as on disk.
+  const own = () => join(dir, ".pavilio", "preferences", "self.json");
+  const mirror = () => join(dir, ".pavilio", "preferences", "mirror.json");
+  const legacy = () => join(dir, ".pavilio", "preferences.json");
+  const put = (path: string, text: string) => {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, text, "utf8");
+  };
+  const seeds = () => ({ mirrorPath: mirror(), legacyPath: legacy() });
+
+  it("own file wins over every seed", () => {
+    freshDir();
+    put(own(), JSON.stringify({ version: 1, theme: "own" }));
+    put(mirror(), JSON.stringify({ version: 1, theme: "mirror" }));
+    put(legacy(), JSON.stringify({ theme: "legacy" }));
+    const before = readFileSync(own(), "utf8");
+
+    expect(loadPreferences(own(), seeds())).toStrictEqual({ version: 1, theme: "own" });
+    // Nothing was copied over it.
+    expect(readFileSync(own(), "utf8")).toBe(before);
+  });
+
+  it("a missing own file seeds from the mirror", () => {
+    freshDir();
+    put(mirror(), JSON.stringify({ version: 1, theme: "mirror", "wiki.writerModel": "sonnet" }));
+    put(legacy(), JSON.stringify({ theme: "legacy" }));
+
+    const loaded = loadPreferences(own(), seeds());
+    expect(loaded).toStrictEqual({ version: 1, theme: "mirror", "wiki.writerModel": "sonnet" });
+    // Written to the own path at boot, so it is this machine's file from now on.
+    expect(JSON.parse(readFileSync(own(), "utf8"))).toStrictEqual(loaded);
+  });
+
+  it("migration seeds from the legacy file and never writes it again", async () => {
+    freshDir();
+    const legacyText = JSON.stringify({ theme: "legacy", fontSize: 14 });
+    put(legacy(), legacyText);
+
+    expect(loadPreferences(own(), seeds())).toStrictEqual({
+      version: 1,
+      theme: "legacy",
+      fontSize: 14,
+    });
+    expect(JSON.parse(readFileSync(own(), "utf8"))).toStrictEqual({
+      version: 1,
+      theme: "legacy",
+      fontSize: 14,
+    });
+
+    // Later changes land in the own file only.
+    patchPreferences({ theme: "dark" });
+    await flushPreferences();
+    expect(JSON.parse(readFileSync(own(), "utf8")).theme).toBe("dark");
+    expect(readFileSync(legacy(), "utf8")).toBe(legacyText);
+  });
+
+  it("no source loads the defaults", async () => {
+    freshDir();
+    expect(loadPreferences(own(), seeds())).toStrictEqual({ version: 1 });
+    // Nothing to copy, so nothing is written at boot …
+    expect(existsSync(own())).toBe(false);
+    // … but the store can still write.
+    patchPreferences({ theme: "dark" });
+    await flushPreferences();
+    expect(JSON.parse(readFileSync(own(), "utf8"))).toStrictEqual({ version: 1, theme: "dark" });
+    expect(existsSync(legacy())).toBe(false);
+  });
+
+  it("a malformed seed falls through to the next source", () => {
+    freshDir();
+    put(mirror(), "{ not json");
+    put(legacy(), JSON.stringify({ theme: "legacy" }));
+    expect(loadPreferences(own(), seeds())).toStrictEqual({ version: 1, theme: "legacy" });
+
+    _resetPreferencesForTests();
+    rmSync(own());
+    put(legacy(), "[1,2,3]");
+    expect(loadPreferences(own(), seeds())).toStrictEqual({ version: 1 });
+    expect(existsSync(own())).toBe(false);
   });
 });

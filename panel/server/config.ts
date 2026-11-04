@@ -1,5 +1,7 @@
-import defaults, { type PanelConfig } from "../panel.config.js";
-import { existsSync } from "fs";
+import defaults, { WORKSPACE_ROOT, type PanelConfig } from "../panel.config.js";
+import { machineIdFrom } from "./lib/machineName.js";
+import { preferencesPathFor } from "./lib/preferencesPath.js";
+import { existsSync, realpathSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -39,11 +41,45 @@ function portFromEnv(): number | undefined {
   return parsed;
 }
 
+/**
+ * Defaults with `local` (panel.config.local.ts's default export) merged over them.
+ * `preferencesPath` follows the merged `machineId` — the per-machine file under this
+ * panel's workspace — unless `local` names a `preferencesPath` itself, which wins.
+ */
+export function mergeLocalConfig(local: Partial<PanelConfig> | undefined): PanelConfig {
+  const merged: PanelConfig = { ...defaults, ...local };
+  if (local?.preferencesPath === undefined) {
+    merged.preferencesPath = preferencesPathFor(WORKSPACE_ROOT, machineIdFrom(merged.machineId));
+  }
+  return merged;
+}
+
+/** `path` with symlinks resolved, so `/root/git/x` and `/srv/git/x` compare equal; plain resolve() when it does not exist. */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/**
+ * The preferences file for `workspaceRoot`: this panel's own workspace uses
+ * `preferencesPath` from the loaded config (so a local override wins) — compared by
+ * real path, so a symlinked spelling of the same workspace counts as its own; any other
+ * workspace uses this machine's per-machine file inside it.
+ */
+export async function preferencesFileFor(workspaceRoot: string): Promise<string> {
+  await loadConfig();
+  if (canonicalPath(workspaceRoot) === canonicalPath(WORKSPACE_ROOT)) return config.preferencesPath;
+  return preferencesPathFor(workspaceRoot, machineIdFrom(config.machineId));
+}
+
 export async function loadConfig(): Promise<PanelConfig> {
   if (existsSync(localPath)) {
     try {
       const local = await import(localPath);
-      config = { ...defaults, ...local.default };
+      config = mergeLocalConfig(local.default);
     } catch (e) {
       console.warn("Failed to load panel.config.local.ts, using defaults:", e);
     }

@@ -43,7 +43,7 @@ export interface SpeechVoicesOptions {
   catalog: Pick<OpenaiCatalog, "current" | "unreachable" | "refresh">;
   /** The server address, or undefined when none (or no usable one) is set. */
   baseUrl: () => string | undefined;
-  /** Default: the workspace above `projects/`, where `.pavilio/preferences.json` lives. */
+  /** Default: the workspace above `projects/`, where `.pavilio/preferences/` lives. */
   workspaceRoot?: string;
   /** Default: the global `fetch`. */
   fetch?: typeof fetch;

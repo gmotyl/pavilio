@@ -6,6 +6,9 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { promisify } from "util";
 
+import { loadConfig } from "../../../config";
+import { machineId } from "../../hostname";
+import { preferencesPathFor } from "../../preferencesPath";
 import { main, readProcessStdin, type CliDeps } from "../cli";
 import { hashRecord } from "../ledger";
 import type { FetchLike } from "../project";
@@ -126,8 +129,9 @@ describe("wiki cli", () => {
     expect(lint.code).toBe(0);
     expect(Object.keys(lint.json).sort()).toEqual(["broken", "codeIdentifiers", "diagrams", "malformed", "missingUrl", "orphans", "stale", "untyped"]);
 
-    mkdirSync(join(root, ".pavilio"), { recursive: true });
-    writeFileSync(join(root, ".pavilio", "preferences.json"), JSON.stringify({ "wiki.writerModel": "sonnet", "wiki.sessionStartIngest": false }));
+    await loadConfig();
+    mkdirSync(join(root, ".pavilio", "preferences"), { recursive: true });
+    writeFileSync(preferencesPathFor(root, machineId()), JSON.stringify({ "wiki.writerModel": "sonnet", "wiki.sessionStartIngest": false }));
     const config = await cli(["config"]);
     expect(config.code).toBe(0);
     // A foreign workspace root reads its own preferences document.

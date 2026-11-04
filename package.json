@@ -24,7 +24,7 @@
     "install-skills": "./skills/install-skills.sh",
     "install:speech": "./scripts/install:speech",
     "sync": "bash scripts/update.sh",
-    "pull": "bash scripts/update.sh",
+    "pull": "bash scripts/pull",
     "test": "pnpm -C panel test",
     "test:slow": "pnpm -C panel test:slow",
     "test:all": "pnpm -C panel test:all",
