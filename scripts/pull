@@ -1,0 +1,115 @@
+#!/bin/bash
+# pnpm pull — update THIS machine from the shared workspace remote.
+#
+# A plain `git pull --no-rebase --no-edit` of the workspace, then the panel's
+# dependencies and bundle. Unlike `pnpm sync` (scripts/update.sh) it never
+# mirrors an upstream pavilio clone and never commits: the mirror machine is the
+# one that syncs upstream and commits the result, every other machine just pulls
+# it. The only commit this can leave behind is git's own merge commit.
+set -e
+
+# Git exports these to every hook it runs, and they beat -C and the cwd. A pull
+# started from inside a hook would otherwise act on the hook's repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
+
+# A pull writes node_modules/, dist/ and git objects, and on WSL2 a Windows
+# restart drops whatever the page cache has not flushed yet (zero-byte files).
+# Flush before the final message so it means "safe to restart"; the trap covers
+# every failure exit.
+flush_to_disk() {
+  echo ""
+  echo "Flushing to disk..."
+  sync
+}
+trap 'sync' EXIT
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Shared toolchain resolution: $PM_CMD, pm_in, pm_install.
+# shellcheck source=scripts/pm
+. "$SCRIPT_DIR/pm" || exit 1
+pm_resolve || exit 1
+
+PANEL_INSTALL_CMD="$PM_CMD -C \"$REPO_ROOT/panel\" install"
+PANEL_BUILD_CMD="$PM_CMD -C \"$REPO_ROOT/panel\" build"
+
+# Same text scripts/update.sh prints — keep the two in step.
+SYNC_REMINDER='With several instances, run `pnpm sync` only on the mirror machine; every other machine runs `pnpm pull`.'
+
+if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "Error: $REPO_ROOT is not a git repository — there is nothing to pull."
+  exit 1
+fi
+
+echo "Pulling the workspace..."
+# --no-rebase: merge, the same way auto-sync does, so no history is rewritten.
+# No --autostash: an uncommitted file the pull would overwrite stops the run and
+# git names it, rather than being stashed and possibly conflicting on the way back.
+# --no-edit: git's own merge commit, with its default message, no editor.
+if ! git -C "$REPO_ROOT" pull --no-rebase --no-edit; then
+  echo ""
+  echo "Error: the pull stopped (see git's message above) — nothing was installed or built."
+  UNMERGED="$(git -C "$REPO_ROOT" diff --name-only --diff-filter=U)"
+  if [ -n "$UNMERGED" ]; then
+    echo "Conflicting paths:"
+    printf '%s\n' "$UNMERGED" | sed 's/^/  /'
+    echo "Resolve them and commit, or abort with: git -C \"$REPO_ROOT\" merge --abort"
+  else
+    echo "Commit or move the files git named above, then re-run: $PM_CMD pull"
+  fi
+  exit 1
+fi
+
+echo ""
+echo "Installing panel dependencies..."
+if ! pm_install "$REPO_ROOT/panel"; then
+  echo ""
+  echo "Error: installing the panel dependencies failed — the workspace is pulled, but node_modules/ is stale and the bundle was not rebuilt."
+  echo "Fix the install, then finish by hand:"
+  echo "  $PANEL_INSTALL_CMD"
+  echo "  $PANEL_BUILD_CMD"
+  exit 1
+fi
+
+# Refresh the slash commands generated from skills/ for the agents configured
+# here (the pull may have brought new or renamed skills). Never fatal, and fed
+# </dev/null so a setup prompt cannot hang the run. Same steps as update.sh.
+echo ""
+echo "Regenerating agent commands from skills/ ..."
+if [ -d "$REPO_ROOT/.claude" ]; then
+  if bash "$REPO_ROOT/scripts/setup:claude-code" </dev/null >/dev/null 2>&1; then
+    echo "  ✓ Claude Code commands refreshed (.claude/commands/)"
+  else
+    echo "  ⚠️  Claude Code refresh failed — run: bash scripts/setup:claude-code"
+  fi
+fi
+if [ -d "$REPO_ROOT/.opencode" ] || [ -d "$HOME/.config/opencode" ]; then
+  if bash "$REPO_ROOT/scripts/setup:opencode" </dev/null >/dev/null 2>&1; then
+    echo "  ✓ OpenCode commands refreshed (opencode.json + .opencode/commands/)"
+  else
+    echo "  ⚠️  OpenCode refresh failed — run: bash scripts/setup:opencode"
+  fi
+fi
+
+echo ""
+echo "Building the panel bundle..."
+if ! pm_in "$REPO_ROOT/panel" build; then
+  echo ""
+  echo "Error: the panel build failed — the workspace is pulled but the served bundle is stale."
+  echo "Fix the build, then re-run it on its own:"
+  echo "  $PANEL_BUILD_CMD"
+  exit 1
+fi
+echo "  ✓ panel bundle built"
+
+UPDATED_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+UPDATED_SUBJECT="$(git -C "$REPO_ROOT" log -1 --pretty=%s)"
+flush_to_disk
+echo ""
+echo "Updated to $UPDATED_SHA $UPDATED_SUBJECT."
+# Never touch the running panel: it may host the terminal this pull runs in.
+echo "The running panel still serves the old bundle — run: $PM_CMD reboot"
+echo ""
+echo "$SYNC_REMINDER"

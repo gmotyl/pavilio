@@ -26,7 +26,7 @@ import react from "@vitejs/plugin-react";
 // here on purpose. Keep it in step with the `SLOW` subject pattern in
 // .husky/pre-push (server/__tests__/test-projects.contract.test.ts checks both).
 const SLOW_SUITES = [
-  "server/__tests__/{setup-sh,update-sh,machine-id-sh,pm,panel-ctl,launcher-toolchain,setup-codex,setup-shortcut}.test.ts",
+  "server/__tests__/{setup-sh,update-sh,pull-sh,machine-id-sh,pm,panel-ctl,launcher-toolchain,setup-codex,setup-shortcut}.test.ts",
   "server/lib/__tests__/{syncRepo,syncRole}.test.ts",
   "scripts/__tests__/install-speech-hook.test.ts",
   "hooks/__tests__/*.test.ts",
