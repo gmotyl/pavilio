@@ -173,6 +173,49 @@ describe("GET /api/projects/:name/context — OpenSpec living specs", () => {
     expect(res.status).toBe(403);
   });
 
+  it.each([
+    ["specs", []],
+    ["openspec", ["specs"]],
+  ])("rejects an OpenSpec %s dir symlinked out of the repo", async (linkedDir, under) => {
+    seedFile("projects/alokai/PROJECT.md");
+    const repoPath = join(projects.root(), "repos", "pavilio");
+    const outside = join(projects.root(), "outside");
+    mkdirSync(join(outside, ...under, "checkout"), { recursive: true });
+    writeFileSync(join(outside, ...under, "checkout", "spec.md"), "# leak");
+    const linkAt = linkedDir === "specs" ? join(repoPath, "openspec", "specs") : join(repoPath, "openspec");
+    mkdirSync(join(linkAt, ".."), { recursive: true });
+    symlinkSync(outside, linkAt, "dir");
+    writeFileSync(
+      join(projects.dir(), "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
+    );
+    const linked = join(repoPath, "openspec", "specs", "checkout", "spec.md");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
+      `/api/projects/alokai/context/read?path=${encodeURIComponent(linked)}`,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.content).toBeUndefined();
+  });
+
+  it("reads an OpenSpec spec when the repo's parent dir is a symlink", async () => {
+    seedFile("projects/alokai/PROJECT.md");
+    const realParent = join(projects.root(), "real-repos");
+    mkdirSync(join(realParent, "pavilio", "openspec", "specs", "checkout"), { recursive: true });
+    writeFileSync(join(realParent, "pavilio", "openspec", "specs", "checkout", "spec.md"), "# checkout spec");
+    symlinkSync(realParent, join(projects.root(), "repos"), "dir");
+    const repoPath = join(projects.root(), "repos", "pavilio");
+    writeFileSync(
+      join(projects.dir(), "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
+    );
+    const spec = join(repoPath, "openspec", "specs", "checkout", "spec.md");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
+      `/api/projects/alokai/context/read?path=${encodeURIComponent(spec)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.content).toBe("# checkout spec");
+  });
+
   it("rejects OpenSpec living specs from an unconfigured repo", async () => {
     seedFile("projects/alokai/PROJECT.md");
     const repoPath = join(projects.root(), "repos", "pavilio");
