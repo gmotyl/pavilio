@@ -12,7 +12,7 @@ import { listEngines, listVoices } from "anytts";
 
 import AgentSettings from "../../agents/AgentSettings";
 import { EngineSettings } from "../EngineSettings";
-import { getCascadeOrder, getStoredVoices, setCascadeOrder } from "../voices";
+import { catalogDefaultVoice, getCascadeOrder, getStoredVoices, setCascadeOrder } from "../voices";
 import { groupVoices } from "../voiceGroups";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
@@ -126,9 +126,9 @@ describe("EngineSettings", () => {
     const select = within(section).getByRole("combobox", { name: "Default engine" }) as HTMLSelectElement;
     const values = Array.from(select.options).map((option) => option.value);
     expect(values).toEqual(
-      expect.arrayContaining(["cascade", "openai", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
+      expect.arrayContaining(["cascade", "openai", "kokoro", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
     );
-    expect(values).toHaveLength(7);
+    expect(values).toHaveLength(8);
     expect(Array.from(select.options).find((o) => o.value === "cascade")!.textContent).toBe(
       LABELS.get("cascade"),
     );
@@ -615,6 +615,20 @@ describe("EngineSettings", () => {
 
     const voice = within(row("openai")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
     expect(Array.from(voice.options).map((option) => option.value)).toEqual([]);
+  });
+
+  it("kokoro default voice is af_heart", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET]);
+
+    const voice = within(row("kokoro")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
+    expect(selectGroups(voice)).toEqual(
+      groupVoices(listVoices("kokoro"), "pl-PL").map((group) => ({ label: group.label, ids: group.voices.map((v) => v.id) })),
+    );
+    expect(voice.options).toHaveLength(54);
+    expect(getStoredVoices().kokoro).toBeUndefined();
+    expect(catalogDefaultVoice("kokoro")).toBe("af_heart");
+    expect(voice).toHaveValue("af_heart");
   });
 
   it("edge voice selects are unchanged", async () => {

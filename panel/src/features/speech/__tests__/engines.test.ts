@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   openaiEngineConfig,
+  SPEECH_ENGINES,
   SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS,
   SPEECH_FIRST_BYTE_TIMEOUT_MS,
 } from "../engines";
+import { KOKORO_FIRST_BYTE_TIMEOUT_MS } from "../kokoro";
 import { OPENAI_FIRST_BYTE_TIMEOUT_MS } from "../openaiVoices";
 
 describe("cascade relay timeout", () => {
@@ -17,5 +19,15 @@ describe("openai relay timeout", () => {
     const { firstByteMs } = openaiEngineConfig([]) as { firstByteMs?: number };
     expect(OPENAI_FIRST_BYTE_TIMEOUT_MS).toBeGreaterThan(SPEECH_FIRST_BYTE_TIMEOUT_MS);
     expect(firstByteMs).toBeGreaterThan(OPENAI_FIRST_BYTE_TIMEOUT_MS);
+  });
+});
+
+describe("kokoro relay client", () => {
+  it("kokoro is a relay client that outlasts the server wait", () => {
+    expect(SPEECH_ENGINES.kokoro).toMatchObject({
+      relayUrl: "/api/tts",
+      firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS + 15000,
+    });
+    expect(SPEECH_ENGINES.kokoro?.firstByteMs).toBe(45000);
   });
 });

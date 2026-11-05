@@ -18,6 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
+import { KOKORO_FIRST_BYTE_TIMEOUT_MS } from "./kokoro";
 import { OPENAI_FIRST_BYTE_TIMEOUT_MS, OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
@@ -112,6 +113,9 @@ export const SPEECH_ENGINES: TtsConfig["engines"] = {
   // server has the address, and the server drops `openai` when it has not.
   // `synth.ts` swaps in the live list (`openaiEngineConfig`) once it is loaded.
   openai: openaiEngineConfig([]),
+  // A local Kokoro-FastAPI server, same relay. Its catalog ships with anytts, so no live list.
+  // Outlasts the panel server's wait on Kokoro (a cold model load), so the server's verdict lands.
+  kokoro: { ...KEYED_RELAY, firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS + 15000 },
 };
 
 /** The configured engine ids. */

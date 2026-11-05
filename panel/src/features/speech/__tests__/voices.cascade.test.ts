@@ -209,8 +209,15 @@ describe("per-engine voices and cascade preferences", () => {
     const voices = cascadeVoicesOf(voiceForProject("p"));
     expect(voices).toMatchObject({ elevenlabs: SARAH, edge: ANDREW });
     // No openai entry: the browser lists no openai voices until it reads the OmniVoice server's
-    // catalog, so the server picks that member's voice.
-    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "speechify"]);
+    // catalog, so the server picks that member's voice. Kokoro's catalog is static, so it has one.
+    expect(Object.keys(voices ?? {}).sort()).toEqual([
+      "azure",
+      "cartesia",
+      "edge",
+      "elevenlabs",
+      "kokoro",
+      "speechify",
+    ]);
     expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });
     expect(voiceForDocKey("doc:p/notes.md")).toBe(voiceForProject("p"));
   });

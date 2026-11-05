@@ -24,6 +24,16 @@ describe("voicesOf", () => {
     expect(voicesOf("openai")).toEqual(LIVE_VOICES);
   });
 
+  it("voicesOf(kokoro) lists the static presets", async () => {
+    // Server down: no live list, and nothing fetched for kokoro.
+    const fetchMock = stubFetch({});
+    expect(voicesOf("kokoro")).toHaveLength(54);
+    expect(voicesOf("kokoro")).toEqual(listVoices("kokoro"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Server up: the openai live list does not leak into kokoro's.
+    expect(voicesOf("kokoro", LIVE_VOICES)).toEqual(listVoices("kokoro"));
+  });
+
   it("the OpenAI voice map defaults every language to my-voice", () => {
     expect(OPENAI_VOICE_MAP).toEqual({ pl: "my-voice", en: "my-voice", default: "my-voice" });
   });

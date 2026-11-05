@@ -99,6 +99,7 @@ describe("cascade requests through the speech seam", () => {
       speechify: voices.catalogDefaultVoice("speechify"),
       azure: voices.catalogDefaultVoice("azure"),
       edge: ANDREW,
+      kokoro: voices.catalogDefaultVoice("kokoro"),
     };
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
@@ -137,6 +138,23 @@ describe("cascade requests through the speech seam", () => {
         },
       },
     ]);
+  });
+
+  it("a kokoro project voice reads Polish answers", async () => {
+    const { synth, voices } = await load();
+    voices.setStoredEngine("kokoro");
+    voices.setProjectEngineVoice("p", "kokoro", "bm_george");
+
+    // No language gate: the picked voice reads Polish too.
+    await synth.synthesizeSpeech("Zrobiłem deploy.", { voice: voices.voiceForProject("p"), lang: "pl" });
+
+    expect(lastRequest()).toMatchObject({ engine: "kokoro", voice: "bm_george", lang: "pl" });
+    expect(relayed.at(-1)).toMatchObject({ url: "/api/tts", body: { engine: "kokoro", voice: "bm_george" } });
+
+    // Under the cascade the project's kokoro voice rides in `voices`.
+    voices.setStoredEngine("cascade");
+    await synth.synthesizeSpeech("Zrobiłem deploy.", { voice: voices.voiceForProject("p"), lang: "pl" });
+    expect(lastRequest().voices?.kokoro).toBe("bm_george");
   });
 
   it("in cascade off is left out of order", async () => {
