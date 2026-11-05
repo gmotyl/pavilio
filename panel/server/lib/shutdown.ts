@@ -48,7 +48,10 @@ export function installPreferenceFlush(): void {
   installed = true;
 
   for (const [signal, number] of Object.entries(SIGNALS)) {
-    process.once(signal as NodeJS.Signals, () => {
+    // `on`, not `once`: tsx (which runs the panel) adds a hidden signal handler
+    // that exits immediately when no other listener remains — a `once` listener
+    // is already removed by then, so the async flush below would be cut off.
+    process.on(signal as NodeJS.Signals, () => {
       void (async () => {
         // Never rejects — a failed write is logged by the store, and a full
         // disk must not be the reason a shutdown hangs.
