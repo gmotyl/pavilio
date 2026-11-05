@@ -39,7 +39,7 @@ export const CASCADE_ORDER = ["openai", "kokoro", "elevenlabs", "cartesia", "spe
 /** The Azure engine's own region check: with a key, anything else makes `createTts` throw. */
 const AZURE_REGION = /^[a-z0-9]+$/;
 
-/** The `openai` engine's own address check: anything but an http(s) URL makes `createTts` throw. */
+/** The local engines' (`openai`, `kokoro`) address check: anything but an http(s) URL makes `createTts` throw. */
 export function isHttpUrl(value: string): boolean {
   try {
     const { protocol } = new URL(value);
@@ -111,6 +111,7 @@ function configFrom(
   const kokoroUrl = key("KOKORO_TTS_BASE_URL");
   const kokoroUrlOk = !!kokoroUrl && isHttpUrl(kokoroUrl);
   if (kokoroUrl && !kokoroUrlOk) {
+    // Names the variable only: the value is not logged.
     console.warn(
       `[speech] KOKORO_TTS_BASE_URL is set but is not an http(s) URL ` +
         `(e.g. "http://127.0.0.1:8880"): the kokoro engine stays off until it is fixed.`,

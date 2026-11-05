@@ -9,8 +9,14 @@ import { KOKORO_FIRST_BYTE_TIMEOUT_MS } from "../kokoro";
 import { OPENAI_FIRST_BYTE_TIMEOUT_MS } from "../openaiVoices";
 
 describe("cascade relay timeout", () => {
-  it("leaves the fallback members a full minute after openai, which leads the cascade, gives up", () => {
-    expect(SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS).toBe(OPENAI_FIRST_BYTE_TIMEOUT_MS + 60000);
+  it("leaves the fallback members a full minute after openai and kokoro, which lead the cascade, give up", () => {
+    expect(SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS).toBe(
+      OPENAI_FIRST_BYTE_TIMEOUT_MS + KOKORO_FIRST_BYTE_TIMEOUT_MS + 60000,
+    );
+    // Both local servers hanging, then four keyed members timing out at the server's 8 s each.
+    expect(SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS).toBeGreaterThan(
+      OPENAI_FIRST_BYTE_TIMEOUT_MS + KOKORO_FIRST_BYTE_TIMEOUT_MS + 4 * 8000,
+    );
   });
 });
 
