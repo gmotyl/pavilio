@@ -40,6 +40,15 @@ const OPENAI_UNSET: EngineInfo = {
   status: { state: "no-key" },
 };
 
+/** The `kokoro` row as the server lists it while no address is saved. */
+const KOKORO_UNSET: EngineInfo = {
+  id: "kokoro",
+  label: "Kokoro",
+  keyed: true,
+  keySource: "none",
+  status: { state: "no-key" },
+};
+
 /** A voice select's groups and options, in DOM order. */
 function selectGroups(select: HTMLSelectElement): { label: string; ids: string[] }[] {
   return Array.from(select.querySelectorAll("optgroup")).map((group) => ({
@@ -585,6 +594,91 @@ describe("EngineSettings", () => {
     expect(scope.getByText("http://10.0.0.5:8890")).toBeInTheDocument();
     expect(scope.getByText("OPENAI_TTS_BASE_URL")).toBeInTheDocument();
     expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
+  });
+
+  it("kokoro row shows the address field and install hint when unset", async () => {
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET, KOKORO_UNSET]);
+
+    const scope = within(row("kokoro"));
+    const input = scope.getByLabelText("Server address") as HTMLInputElement;
+    expect(input.type).toBe("text");
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "http://127.0.0.1:8880");
+    expect(scope.queryByLabelText("API key")).toBeNull();
+    expect(scope.getByTestId("engine-status")).toHaveTextContent("no address · skipped");
+    expect(scope.getByTestId("engine-install-hint")).toHaveTextContent("pnpm install:kokoro");
+    // The OmniVoice control script is not Kokoro's.
+    expect(scope.queryByTestId("engine-server-hint")).toBeNull();
+    expect(scope.queryByTestId("engine-overage-hint")).toBeNull();
+  });
+
+  it("saving the kokoro address puts baseUrl", async () => {
+    const user = userEvent.setup();
+    let saved = false;
+    const fetchMock = stubFetch(
+      {
+        "/api/speech/keys/kokoro": () => {
+          saved = true;
+          return new Response(null, { status: 204 });
+        },
+        "/api/speech/engines": () =>
+          jsonResponse([
+            ...mockupEngines(),
+            OPENAI_UNSET,
+            saved
+              ? { ...KOKORO_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8880", status: { state: "ready" } }
+              : KOKORO_UNSET,
+          ]),
+      },
+      null,
+    );
+    render(<EngineSettings />);
+    await waitFor(() => expect(within(row("kokoro")).getByTestId("engine-status")).toHaveTextContent("no address"));
+
+    await user.type(within(row("kokoro")).getByLabelText("Server address"), "http://127.0.0.1:8880");
+    await user.click(within(row("kokoro")).getByRole("button", { name: `Save ${LABELS.get("kokoro")} address` }));
+
+    const puts = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/speech/keys/kokoro"));
+    expect(puts).toHaveLength(1);
+    expect(puts[0]![1]!.method).toBe("PUT");
+    expect(JSON.parse(String(puts[0]![1]!.body))).toEqual({ baseUrl: "http://127.0.0.1:8880" });
+    await waitFor(() => expect(within(row("kokoro")).getByText("http://127.0.0.1:8880")).toBeInTheDocument());
+    expect(within(row("kokoro")).queryByLabelText("Server address")).toBeNull();
+    expect(within(row("kokoro")).queryByTestId("engine-install-hint")).toBeNull();
+  });
+
+  it("kokoro address from environment is read-only", async () => {
+    await renderLoaded([
+      ...mockupEngines(),
+      OPENAI_UNSET,
+      { ...KOKORO_UNSET, keySource: "env", baseUrl: "http://10.0.0.5:8880", status: { state: "ready" } },
+    ]);
+
+    const scope = within(row("kokoro"));
+    expect(scope.getByText("http://10.0.0.5:8880")).toBeInTheDocument();
+    expect(scope.getByText("KOKORO_TTS_BASE_URL")).toBeInTheDocument();
+    expect(scope.getByTestId("engine-key")).toHaveTextContent(/is set on the\s+server/);
+    expect(scope.queryByLabelText("Server address")).toBeNull();
+    expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
+  });
+
+  it("kokoro has no voice management", async () => {
+    await renderLoaded(
+      [
+        ...mockupEngines(),
+        { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } },
+        { ...KOKORO_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8880", status: { state: "ready" } },
+      ],
+      { [OPENAI_VOICES_URL]: voicesBody() },
+    );
+
+    const kokoro = within(row("kokoro"));
+    expect(kokoro.queryByTestId("voices-section")).toBeNull();
+    expect(kokoro.queryByTestId("voices-add")).toBeNull();
+    expect(kokoro.queryByRole("button", { name: /delete/i })).toBeNull();
+    // OmniVoice keeps its Voices section.
+    expect(within(row("openai")).getByTestId("voices-section")).toBeInTheDocument();
+    expect(within(row("openai")).getByTestId("voices-add")).toBeInTheDocument();
   });
 
   it("openai voice selects list the live catalog", async () => {
