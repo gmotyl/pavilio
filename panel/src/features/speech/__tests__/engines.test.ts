@@ -13,7 +13,9 @@ describe("cascade relay timeout", () => {
     expect(SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS).toBe(
       OPENAI_FIRST_BYTE_TIMEOUT_MS + KOKORO_FIRST_BYTE_TIMEOUT_MS + 60000,
     );
-    // Both local servers hanging, then four keyed members timing out at the server's 8 s each.
+    // Both local servers hanging, then four keyed members timing out once at the server's 8 s.
+    // With anytts' default retry each would cost 16 s (64 s > the 60 s margin): accepted, since
+    // four keyed engines all hanging on both attempts is rare and the relay just fails over.
     expect(SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS).toBeGreaterThan(
       OPENAI_FIRST_BYTE_TIMEOUT_MS + KOKORO_FIRST_BYTE_TIMEOUT_MS + 4 * 8000,
     );

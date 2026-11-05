@@ -231,7 +231,7 @@ describe("server Tts holder", () => {
     });
 
     expect(KOKORO_FIRST_BYTE_TIMEOUT_MS).toBe(30000);
-    expect(configs[0]!.engines.kokoro).toEqual({ baseUrl: "http://127.0.0.1:8880", firstByteMs: 30000 });
+    expect(configs[0]!.engines.kokoro).toEqual({ baseUrl: "http://127.0.0.1:8880", firstByteMs: 30000, retries: 0 });
     expect(configs[0]!.engines.cascade).toEqual({
       order: ["kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
     });
@@ -297,7 +297,7 @@ describe("server Tts holder", () => {
     });
 
     expect(configs[0]!.engines.openai).toMatchObject({ baseUrl: "http://127.0.0.1:8890" });
-    expect(configs[0]!.engines.kokoro).toEqual({ baseUrl: "http://127.0.0.1:8880", firstByteMs: 30000 });
+    expect(configs[0]!.engines.kokoro).toEqual({ baseUrl: "http://127.0.0.1:8880", firstByteMs: 30000, retries: 0 });
     expect(configs[0]!.engines.cascade).toEqual({
       order: ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
     });

@@ -142,7 +142,12 @@ function configFrom(
   }
 
   if (kokoroUrl && kokoroUrlOk) {
-    members.kokoro = { baseUrl: kokoroUrl, firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS };
+    members.kokoro = {
+      baseUrl: kokoroUrl,
+      firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS,
+      // A retry re-spends the whole wait and outlasts the browser's own wait on this relay.
+      retries: 0,
+    };
   }
 
   return {

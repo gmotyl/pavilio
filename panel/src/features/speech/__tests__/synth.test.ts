@@ -122,7 +122,7 @@ describe("the anytts seam", () => {
           catalog: [{ id: "my-voice", label: "my-voice", locale: "und", gender: "male", multilingual: true }],
           voices: OPENAI_VOICE_MAP,
         },
-        // Outlasts the server's 30 s wait on a cold Kokoro model load.
+        // Outlasts the server's KOKORO_FIRST_BYTE_TIMEOUT_MS wait on a cold model load.
         kokoro: { ...keyed, firstByteMs: 45_000 },
       },
       defaultEngine: "edge",

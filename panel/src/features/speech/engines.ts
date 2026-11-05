@@ -42,10 +42,9 @@ export const SPEECH_FIRST_BYTE_TIMEOUT_MS = 25000;
 /**
  * Max wait for a cascade relay call's first byte. One call walks the members
  * on the server until one speaks, so it covers several members' first-byte
- * waits (a member that times out costs the server's 8s) before the one that
- * answers synthesizes its whole clip. `openai` and `kokoro` lead the cascade
- * and may each hold it for their whole wait, so the minute the other members
- * need comes on top of both.
+ * waits before the one that answers synthesizes its whole clip. `openai` and
+ * `kokoro` lead the cascade and, with no retry, may each hold it for one whole
+ * wait, so the minute the other members need comes on top of both.
  */
 export const SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS =
   OPENAI_FIRST_BYTE_TIMEOUT_MS + KOKORO_FIRST_BYTE_TIMEOUT_MS + 60000;
