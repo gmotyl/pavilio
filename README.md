@@ -358,7 +358,7 @@ In a Quick Start clone (clone mode) that ignore stays in force: the workspace *i
 
 ## Agent Tracking
 
-The `scripts/cc` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.
+The `scripts/ccl` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.
 
 How it works:
 
