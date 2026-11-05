@@ -362,7 +362,7 @@ The `scripts/ccl` and `scripts/oc` wrapper scripts launch Claude Code and OpenCo
 
 How it works:
 
-1. Run `cc` instead of `claude` — the wrapper captures the PID and writes an entry to `~/.agent-registry.json`
+1. Run `ccl` instead of `claude` — the wrapper captures the PID and writes an entry to `~/.agent-registry.json`
 2. On exit, the wrapper removes the entry automatically
 3. The panel sidebar polls the registry and shows live agent status
 
