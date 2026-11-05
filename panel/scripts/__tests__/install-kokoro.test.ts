@@ -151,6 +151,18 @@ describe("install:kokoro", () => {
     expect(calls.ctl).toEqual(["status", "start", "stop"]);
   });
 
+  it("resolves a relative PANEL_AUTH_STATE_DIR against the panel dir, like the server", async () => {
+    const panelDir = join(root, "panel");
+    const { deps } = fakes({ panelDir });
+    deps.env.PANEL_AUTH_STATE_DIR = "rel-state";
+
+    expect(await main([], deps)).toBe(0);
+
+    const secrets = readFileSync(join(panelDir, "rel-state", "secrets.env"), "utf8");
+    expect(secrets).toContain(`KOKORO_TTS_BASE_URL=${ADDRESS}\n`);
+    expect(existsSync(join(process.cwd(), "rel-state"))).toBe(false);
+  });
+
   it("missing prerequisite prints the install command and writes nothing", async () => {
     for (const [platform, hint] of [
       ["darwin", "brew install uv"],

@@ -32,7 +32,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KOKORO_FASTAPI_REF = "v0.9.2";
@@ -296,6 +296,8 @@ async function probe({ fetch, now, sleep }) {
   }
 }
 
+const PANEL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 /**
  * Returns the exit code instead of exiting, so a test can drive it with fakes.
  */
@@ -312,6 +314,7 @@ export async function main(
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
     log = console.log,
     error = console.error,
+    panelDir = PANEL_DIR,
   } = {},
 ) {
   const home = env.HOME || homedir();
@@ -319,7 +322,8 @@ export async function main(
   const cloneDir = join(installDir, CLONE_NAME);
   const ctlPath = join(installDir, "kokoroctl");
   const logPath = join(installDir, "kokoro.log");
-  const secretsFile = join(env.PANEL_AUTH_STATE_DIR || join(home, ".panel"), "secrets.env");
+  // The server runs with cwd panel/ and uses the value as-is, so a relative one is panel-relative.
+  const secretsFile = join(resolve(panelDir, env.PANEL_AUTH_STATE_DIR || join(home, ".panel")), "secrets.env");
 
   if (argv.includes("--uninstall")) {
     if (existsSync(ctlPath)) ctl(ctlPath, "stop");
