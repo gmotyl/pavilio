@@ -21,14 +21,14 @@ export interface EngineInfo {
   keyLast4?: string;
   /** Azure only; the region is not a secret. */
   region?: string;
-  /** `openai` only: the server address, shown in full (it is not a secret). */
+  /** Address engines only (`openai`, `kokoro`): the server address, shown in full (it is not a secret). */
   baseUrl?: string;
   status: { state: EngineState; until?: string };
 }
 
 /**
  * Keyed engine id → the server variable that, when set, wins over a saved key.
- * For `openai` the "key" is the server address (see {@link isAddressEngine}).
+ * For `openai` and `kokoro` the "key" is the server address (see {@link isAddressEngine}).
  */
 export const ENGINE_KEY_VARS: Readonly<Record<string, string>> = {
   elevenlabs: "ELEVENLABS_API_KEY",
@@ -36,6 +36,7 @@ export const ENGINE_KEY_VARS: Readonly<Record<string, string>> = {
   speechify: "SPEECHIFY_API_KEY",
   azure: "AZURE_SPEECH_KEY",
   openai: "OPENAI_TTS_BASE_URL",
+  kokoro: "KOKORO_TTS_BASE_URL",
 };
 
 /** Whether `id` is an engine that needs a key or an address to run (every member but Edge). */
@@ -45,11 +46,11 @@ export function isKeyedEngine(id: string): boolean {
 
 /**
  * Whether `id`'s "key" is a server address rather than a secret: the
- * OpenAI-compatible engine, turned on by `OPENAI_TTS_BASE_URL`. Its value is
- * shown in full and edited in a plain URL field.
+ * OpenAI-compatible engine (`OPENAI_TTS_BASE_URL`) and Kokoro
+ * (`KOKORO_TTS_BASE_URL`). Its value is shown in full and edited in a plain URL field.
  */
 export function isAddressEngine(id: string): boolean {
-  return id === "openai";
+  return id === "openai" || id === "kokoro";
 }
 
 /**

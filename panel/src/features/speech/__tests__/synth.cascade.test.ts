@@ -99,14 +99,15 @@ describe("cascade requests through the speech seam", () => {
       speechify: voices.catalogDefaultVoice("speechify"),
       azure: voices.catalogDefaultVoice("azure"),
       edge: ANDREW,
+      kokoro: voices.catalogDefaultVoice("kokoro"),
     };
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
     expect(Object.values(expectedVoices).every(Boolean)).toBe(true);
     // No openai voice: the browser lists none until it reads the OmniVoice server's catalog,
     // so the server speaks with its own default.
-    // `openai` leads the default order; the server drops it when it has no address.
-    const order = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    // `openai` and `kokoro` lead the default order; the server drops each when it has no address.
+    const order = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
     expect(request).toEqual({
@@ -139,6 +140,23 @@ describe("cascade requests through the speech seam", () => {
     ]);
   });
 
+  it("a kokoro project voice reads Polish answers", async () => {
+    const { synth, voices } = await load();
+    voices.setStoredEngine("kokoro");
+    voices.setProjectEngineVoice("p", "kokoro", "bm_george");
+
+    // No language gate: the picked voice reads Polish too.
+    await synth.synthesizeSpeech("Zrobiłem deploy.", { voice: voices.voiceForProject("p"), lang: "pl" });
+
+    expect(lastRequest()).toMatchObject({ engine: "kokoro", voice: "bm_george", lang: "pl" });
+    expect(relayed.at(-1)).toMatchObject({ url: "/api/tts", body: { engine: "kokoro", voice: "bm_george" } });
+
+    // Under the cascade the project's kokoro voice rides in `voices`.
+    voices.setStoredEngine("cascade");
+    await synth.synthesizeSpeech("Zrobiłem deploy.", { voice: voices.voiceForProject("p"), lang: "pl" });
+    expect(lastRequest().voices?.kokoro).toBe("bm_george");
+  });
+
   it("in cascade off is left out of order", async () => {
     const { synth, voices } = await load();
     voices.setStoredEngine("cascade");
@@ -149,6 +167,7 @@ describe("cascade requests through the speech seam", () => {
       { id: "cartesia", on: true },
       { id: "azure", on: false },
       { id: "openai", on: false },
+      { id: "kokoro", on: false },
     ]);
 
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });

@@ -91,7 +91,9 @@ function runUpdate(
     encoding: "utf8",
     env: { ...gitEnv(), PATH: `${stubBin}:${process.env.PATH ?? ""}`, ...extraEnv },
   });
-  return { status: res.status, output: `${res.stdout}${res.stderr}` };
+  // stdout kept apart: "printed last" claims are about stdout, and stderr may
+  // carry interpreter noise (e.g. Node deprecation warnings) after it.
+  return { status: res.status, stdout: res.stdout, output: `${res.stdout}${res.stderr}` };
 }
 
 /**
@@ -960,12 +962,12 @@ describe("scripts/update.sh mirror guard", () => {
     addWorkspaceOrigin();
     pushFromAnotherMachine(`chore(sync): promote ${me} to mirror`, mirrorFile(me));
 
-    const { status, output } = runUpdate();
+    const { status, stdout, output } = runUpdate();
 
     expect(status, output).toBe(0);
     expect(output).toMatch(/Syncing panel/);
     expect(git(dest, "log", "-1", "--pretty=%s")).toMatch(/^chore\(sync\): pavilio upstream @ /);
-    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+    expect(stdout.trimEnd().endsWith(REMINDER)).toBe(true);
   });
 
   it("sync runs on a single machine with an origin", () => {
@@ -973,12 +975,12 @@ describe("scripts/update.sh mirror guard", () => {
     initDestRepo();
     addWorkspaceOrigin();
 
-    const { status, output } = runUpdate();
+    const { status, stdout, output } = runUpdate();
 
     expect(status, output).toBe(0);
     expect(output).toMatch(/sync role: single/);
     expect(output).toMatch(/Syncing panel/);
-    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+    expect(stdout.trimEnd().endsWith(REMINDER)).toBe(true);
   });
 
   it("sync runs on a single machine whose only history is its own auto-sync", () => {
@@ -1039,14 +1041,14 @@ describe("scripts/update.sh mirror guard", () => {
     addWorkspaceOrigin();
     pushFromAnotherMachine("chore(sync): promote other-box to mirror", mirrorFile("other-box"));
 
-    const { status, output } = runUpdate({}, upstream, ["--promote"]);
+    const { status, stdout, output } = runUpdate({}, upstream, ["--promote"]);
 
     expect(status, output).toBe(0);
     expect(JSON.parse(remoteMirrorFile() ?? "null")).toEqual({ mirror: me });
     expect(git(wsOrigin, "log", "-1", "--pretty=%s", "main")).toBe(`chore(sync): promote ${me} to mirror`);
     // …then the sync itself runs, now as the mirror.
     expect(output).toMatch(/Syncing panel/);
-    expect(output.trimEnd().endsWith(REMINDER)).toBe(true);
+    expect(stdout.trimEnd().endsWith(REMINDER)).toBe(true);
   });
 
   it("promote commits and pushes the mirror file even when the workspace gitignores it", () => {

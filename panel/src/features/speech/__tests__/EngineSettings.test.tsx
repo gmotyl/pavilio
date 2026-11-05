@@ -12,7 +12,7 @@ import { listEngines, listVoices } from "anytts";
 
 import AgentSettings from "../../agents/AgentSettings";
 import { EngineSettings } from "../EngineSettings";
-import { getCascadeOrder, getStoredVoices, setCascadeOrder } from "../voices";
+import { catalogDefaultVoice, getCascadeOrder, getStoredVoices, setCascadeOrder } from "../voices";
 import { groupVoices } from "../voiceGroups";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
@@ -35,6 +35,15 @@ type EngineInfo = {
 const OPENAI_UNSET: EngineInfo = {
   id: "openai",
   label: "OpenAI-compatible (custom server)",
+  keyed: true,
+  keySource: "none",
+  status: { state: "no-key" },
+};
+
+/** The `kokoro` row as the server lists it while no address is saved. */
+const KOKORO_UNSET: EngineInfo = {
+  id: "kokoro",
+  label: "Kokoro",
   keyed: true,
   keySource: "none",
   status: { state: "no-key" },
@@ -126,9 +135,9 @@ describe("EngineSettings", () => {
     const select = within(section).getByRole("combobox", { name: "Default engine" }) as HTMLSelectElement;
     const values = Array.from(select.options).map((option) => option.value);
     expect(values).toEqual(
-      expect.arrayContaining(["cascade", "openai", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
+      expect.arrayContaining(["cascade", "openai", "kokoro", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
     );
-    expect(values).toHaveLength(7);
+    expect(values).toHaveLength(8);
     expect(Array.from(select.options).find((o) => o.value === "cascade")!.textContent).toBe(
       LABELS.get("cascade"),
     );
@@ -136,8 +145,8 @@ describe("EngineSettings", () => {
     // engine: the old single "Default voice" select is gone.
     expect(within(section).getByRole("heading", { name: "Engines and cascade order" })).toBeInTheDocument();
     expect(within(section).queryByRole("combobox", { name: "Default voice" })).toBeNull();
-    // One row per cascade member, `openai` included.
-    expect(within(section).getAllByRole("combobox", { name: "Voice" })).toHaveLength(6);
+    // One row per cascade member, `openai` and `kokoro` included.
+    expect(within(section).getAllByRole("combobox", { name: "Voice" })).toHaveLength(7);
   });
 
   it("rows follow cascade order with move buttons", async () => {
@@ -145,13 +154,14 @@ describe("EngineSettings", () => {
       { id: "edge", on: true },
       { id: "azure", on: true },
       { id: "openai", on: true },
+      { id: "kokoro", on: true },
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "speechify", on: true },
     ]);
     await renderLoaded();
 
-    expect(rowIds()).toEqual(["edge", "azure", "openai", "elevenlabs", "cartesia", "speechify"]);
+    expect(rowIds()).toEqual(["edge", "azure", "openai", "kokoro", "elevenlabs", "cartesia", "speechify"]);
     rowIds().forEach((id, index) => {
       expect(within(row(id)).getByTestId("engine-position")).toHaveTextContent(String(index + 1));
     });
@@ -159,7 +169,7 @@ describe("EngineSettings", () => {
     expect(within(row("edge")).getByRole("button", { name: `Move ${LABELS.get("edge")} down` })).toBeInTheDocument();
     expect(within(row("speechify")).getByRole("button", { name: `Move ${LABELS.get("speechify")} up` })).toBeInTheDocument();
     expect(within(row("speechify")).queryByRole("button", { name: `Move ${LABELS.get("speechify")} down` })).toBeNull();
-    for (const id of ["azure", "openai", "elevenlabs", "cartesia"]) {
+    for (const id of ["azure", "openai", "kokoro", "elevenlabs", "cartesia"]) {
       expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} up` })).toBeInTheDocument();
       expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} down` })).toBeInTheDocument();
     }
@@ -175,13 +185,14 @@ describe("EngineSettings", () => {
       { id: "azure", on: true },
       { id: "edge", on: true },
       { id: "openai", on: true },
+      { id: "kokoro", on: true },
     ]);
     await renderLoaded();
-    expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge", "openai"]);
+    expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge", "openai", "kokoro"]);
 
     await user.click(within(row("elevenlabs")).getByRole("button", { name: `Move ${LABELS.get("elevenlabs")} down` }));
 
-    expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge", "openai"]);
+    expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge", "openai", "kokoro"]);
     expect(readPreference(preferences.speechCascadeOrder).map((entry) => entry.id)).toEqual([
       "cartesia",
       "elevenlabs",
@@ -189,6 +200,7 @@ describe("EngineSettings", () => {
       "azure",
       "edge",
       "openai",
+      "kokoro",
     ]);
     // The first row now has no ↑, and the moved one does.
     expect(within(row("cartesia")).queryByRole("button", { name: `Move ${LABELS.get("cartesia")} up` })).toBeNull();
@@ -208,6 +220,7 @@ describe("EngineSettings", () => {
       ...mockupEngines().slice(0, 4),
       { ...mockupEngines()[4]!, status: { state: "ready" } },
       { id: "openai", label: "OpenAI-compatible", keyed: false, keySource: "none", status: { state: "ready" } },
+      { id: "kokoro", label: "Kokoro", keyed: false, keySource: "none", status: { state: "ready" } },
     ]);
 
     const chips = Object.fromEntries(
@@ -220,13 +233,14 @@ describe("EngineSettings", () => {
       azure: "bad key",
       edge: "ready",
       openai: "ready",
+      kokoro: "ready",
     });
 
     for (const id of rowIds()) {
       const scope = within(row(id));
       expect(scope.getByText(LABELS.get(id)!)).toBeInTheDocument();
-      // A self-hosted server has no plan limit to note.
-      if (id !== "openai") expect(scope.getByTestId("engine-limit").textContent).not.toBe("");
+      // A self-hosted server (openai, kokoro) has no plan limit to note.
+      if (id !== "openai" && id !== "kokoro") expect(scope.getByTestId("engine-limit").textContent).not.toBe("");
       expect(scope.getByRole("combobox", { name: "Voice" })).toBeInTheDocument();
       expect(scope.getByRole("checkbox", { name: "Pronunciation map" })).toBeInTheDocument();
       expect(scope.getByRole("checkbox", { name: "In cascade" })).toBeChecked();
@@ -258,6 +272,7 @@ describe("EngineSettings", () => {
       { id: "azure", on: false },
       { id: "edge", on: true },
       { id: "openai", on: false },
+      { id: "kokoro", on: false },
     ]);
     await renderLoaded();
 
@@ -581,6 +596,94 @@ describe("EngineSettings", () => {
     expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
   });
 
+  it("kokoro row shows the address field and install hint when unset", async () => {
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET, KOKORO_UNSET]);
+
+    const scope = within(row("kokoro"));
+    const input = scope.getByLabelText("Server address") as HTMLInputElement;
+    expect(input.type).toBe("text");
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "http://127.0.0.1:8880");
+    expect(scope.queryByLabelText("API key")).toBeNull();
+    expect(scope.getByTestId("engine-status")).toHaveTextContent("no address · skipped");
+    const hint = scope.getByTestId("engine-install-hint");
+    expect(hint).toHaveTextContent("pnpm install:kokoro");
+    // A synced workspace has the mirrored wrapper but not the root package.json script.
+    expect(hint).toHaveTextContent("bash scripts/install:kokoro");
+    // The OmniVoice control script is not Kokoro's.
+    expect(scope.queryByTestId("engine-server-hint")).toBeNull();
+    expect(scope.queryByTestId("engine-overage-hint")).toBeNull();
+  });
+
+  it("saving the kokoro address puts baseUrl", async () => {
+    const user = userEvent.setup();
+    let saved = false;
+    const fetchMock = stubFetch(
+      {
+        "/api/speech/keys/kokoro": () => {
+          saved = true;
+          return new Response(null, { status: 204 });
+        },
+        "/api/speech/engines": () =>
+          jsonResponse([
+            ...mockupEngines(),
+            OPENAI_UNSET,
+            saved
+              ? { ...KOKORO_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8880", status: { state: "ready" } }
+              : KOKORO_UNSET,
+          ]),
+      },
+      null,
+    );
+    render(<EngineSettings />);
+    await waitFor(() => expect(within(row("kokoro")).getByTestId("engine-status")).toHaveTextContent("no address"));
+
+    await user.type(within(row("kokoro")).getByLabelText("Server address"), "http://127.0.0.1:8880");
+    await user.click(within(row("kokoro")).getByRole("button", { name: `Save ${LABELS.get("kokoro")} address` }));
+
+    const puts = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/speech/keys/kokoro"));
+    expect(puts).toHaveLength(1);
+    expect(puts[0]![1]!.method).toBe("PUT");
+    expect(JSON.parse(String(puts[0]![1]!.body))).toEqual({ baseUrl: "http://127.0.0.1:8880" });
+    await waitFor(() => expect(within(row("kokoro")).getByText("http://127.0.0.1:8880")).toBeInTheDocument());
+    expect(within(row("kokoro")).queryByLabelText("Server address")).toBeNull();
+    expect(within(row("kokoro")).queryByTestId("engine-install-hint")).toBeNull();
+  });
+
+  it("kokoro address from environment is read-only", async () => {
+    await renderLoaded([
+      ...mockupEngines(),
+      OPENAI_UNSET,
+      { ...KOKORO_UNSET, keySource: "env", baseUrl: "http://10.0.0.5:8880", status: { state: "ready" } },
+    ]);
+
+    const scope = within(row("kokoro"));
+    expect(scope.getByText("http://10.0.0.5:8880")).toBeInTheDocument();
+    expect(scope.getByText("KOKORO_TTS_BASE_URL")).toBeInTheDocument();
+    expect(scope.getByTestId("engine-key")).toHaveTextContent(/is set on the\s+server/);
+    expect(scope.queryByLabelText("Server address")).toBeNull();
+    expect(scope.queryByRole("button", { name: /^(Save|Change|Remove) / })).toBeNull();
+  });
+
+  it("kokoro has no voice management", async () => {
+    await renderLoaded(
+      [
+        ...mockupEngines(),
+        { ...OPENAI_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8890", status: { state: "ready" } },
+        { ...KOKORO_UNSET, keySource: "file", baseUrl: "http://127.0.0.1:8880", status: { state: "ready" } },
+      ],
+      { [OPENAI_VOICES_URL]: voicesBody() },
+    );
+
+    const kokoro = within(row("kokoro"));
+    expect(kokoro.queryByTestId("voices-section")).toBeNull();
+    expect(kokoro.queryByTestId("voices-add")).toBeNull();
+    expect(kokoro.queryByRole("button", { name: /delete/i })).toBeNull();
+    // OmniVoice keeps its Voices section.
+    expect(within(row("openai")).getByTestId("voices-section")).toBeInTheDocument();
+    expect(within(row("openai")).getByTestId("voices-add")).toBeInTheDocument();
+  });
+
   it("openai voice selects list the live catalog", async () => {
     const user = userEvent.setup();
     vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
@@ -609,6 +712,20 @@ describe("EngineSettings", () => {
 
     const voice = within(row("openai")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
     expect(Array.from(voice.options).map((option) => option.value)).toEqual([]);
+  });
+
+  it("kokoro default voice is af_heart", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("pl-PL");
+    await renderLoaded([...mockupEngines(), OPENAI_UNSET]);
+
+    const voice = within(row("kokoro")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
+    expect(selectGroups(voice)).toEqual(
+      groupVoices(listVoices("kokoro"), "pl-PL").map((group) => ({ label: group.label, ids: group.voices.map((v) => v.id) })),
+    );
+    expect(voice.options).toHaveLength(54);
+    expect(getStoredVoices().kokoro).toBeUndefined();
+    expect(catalogDefaultVoice("kokoro")).toBe("af_heart");
+    expect(voice).toHaveValue("af_heart");
   });
 
   it("edge voice selects are unchanged", async () => {

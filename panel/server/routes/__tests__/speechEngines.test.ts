@@ -32,6 +32,7 @@ const KEY_VARS = [
   "AZURE_SPEECH_KEY",
   "AZURE_SPEECH_REGION",
   "OPENAI_TTS_BASE_URL",
+  "KOKORO_TTS_BASE_URL",
 ] as const;
 
 const COOKIE = `panel_token=${TOKEN}`;
@@ -70,7 +71,7 @@ function fakeTts(config: TtsConfig, windows: Record<string, EngineStatus>): Tts 
       const engine = engines[id];
       if (!engine) throw new RangeError(`unknown engine ${id}`);
       if (id === "edge" || id === "cascade") return { state: "ready" };
-      if (id === "openai") return windows[id] ?? { state: engine.baseUrl ? "ready" : "no-key" };
+      if (id === "openai" || id === "kokoro") return windows[id] ?? { state: engine.baseUrl ? "ready" : "no-key" };
       if (!engine.apiKey) return { state: "no-key" };
       return windows[id] ?? { state: "ready" };
     },
@@ -154,7 +155,7 @@ describe("/api/speech engines and keys", () => {
     expect(configs[1]!.engines.elevenlabs).toEqual({ apiKey: KEY });
 
     const list = await engines(app);
-    expect(list.map((e) => e.id)).toEqual(["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"]);
+    expect(list.map((e) => e.id)).toEqual(["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"]);
     expect(engine(list, "elevenlabs")).toEqual({
       id: "elevenlabs",
       label: "ElevenLabs",
@@ -495,5 +496,132 @@ describe("/api/speech openai address", () => {
     const row = engine(await engines(app), "openai");
     expect(row).toMatchObject({ keySource: "none", status: { state: "no-key" } });
     expect(row.baseUrl).toBeUndefined();
+  });
+});
+
+describe("/api/speech kokoro address", () => {
+  const ADDRESS = "http://127.0.0.1:8880";
+  const put = (app: Express, body: object) =>
+    request(app).put("/api/speech/keys/kokoro").set("Cookie", COOKIE).send(body);
+
+  it("PUT keys/kokoro writes the address and rebuilds", async () => {
+    const { app, configs, refresh } = loadApp();
+    expect(configs[0]!.engines.kokoro).toBeUndefined();
+    const res = await put(app, { baseUrl: `  ${ADDRESS}  ` });
+    expect(res.status).toBe(204);
+    expect(secrets()).toBe(`KOKORO_TTS_BASE_URL=${ADDRESS}\n`);
+    expect(configs).toHaveLength(2);
+    expect(configs[1]!.engines.kokoro).toMatchObject({ baseUrl: ADDRESS });
+    // Its catalog ships with anytts: nothing to fetch.
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("PUT keys/kokoro rejects a non-URL with 400", async () => {
+    const { app, configs } = loadApp();
+    for (const body of [{ baseUrl: "localhost8880" }, { baseUrl: "http://h/\nX=y" }, {}]) {
+      const res = await put(app, body);
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: expect.stringMatching(/^baseUrl must be an http\(s\) URL/) });
+      expect(res.text).not.toContain("localhost8880");
+    }
+    expect(secrets()).toBe("");
+    expect(configs).toHaveLength(1);
+  });
+
+  it("rejects an address carrying credentials without echoing it", async () => {
+    for (const id of ["openai", "kokoro"]) {
+      const { app, configs } = loadApp();
+      for (const baseUrl of ["http://user:hunter2@127.0.0.1:8880", "http://hunter2@127.0.0.1:8880", "http://:hunter2@127.0.0.1:8880"]) {
+        const res = await request(app).put(`/api/speech/keys/${id}`).set("Cookie", COOKIE).send({ baseUrl });
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: expect.stringMatching(/^baseUrl must be an http\(s\) URL/) });
+        expect(res.text).not.toContain("hunter2");
+      }
+      expect(secrets()).toBe("");
+      expect(configs).toHaveLength(1);
+    }
+  });
+
+  it("engines masks credentials in a hand-edited address", async () => {
+    vi.stubEnv("KOKORO_TTS_BASE_URL", "http://user:hunter2@127.0.0.1:8880");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { app } = loadApp();
+      const res = await request(app).get("/api/speech/engines").set("Cookie", COOKIE);
+      expect(res.text).not.toContain("hunter2");
+      expect(engine(res.body, "kokoro")).toMatchObject({
+        keySource: "env",
+        baseUrl: "http://***@127.0.0.1:8880",
+        status: { state: "no-key" },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("engines masks credentials the URL parser accepts but the mask pattern misses", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const value of [
+        "  http://user:hunter2@127.0.0.1:8880",
+        "\thttp://user:hunter2@127.0.0.1:8880",
+        "http:/user:hunter2@127.0.0.1:8880",
+        "http:\t//user:hunter2@127.0.0.1:8880",
+        "  http://user:hunter2@bad host",
+      ]) {
+        vi.stubEnv("KOKORO_TTS_BASE_URL", value);
+        const { app } = loadApp();
+        const res = await request(app).get("/api/speech/engines").set("Cookie", COOKIE);
+        expect(res.status).toBe(200);
+        expect(res.text).not.toContain("hunter2");
+        expect(engine(res.body, "kokoro")).toHaveProperty("baseUrl");
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("PUT keys/kokoro answers 409 when set in the environment", async () => {
+    vi.stubEnv("KOKORO_TTS_BASE_URL", "http://10.0.0.5:8880");
+    const { app, configs } = loadApp();
+    expect((await put(app, { baseUrl: ADDRESS })).status).toBe(409);
+    expect(secrets()).toBe("");
+    expect(configs).toHaveLength(1);
+  });
+
+  it("DELETE keys/kokoro removes the address", async () => {
+    const { app, configs } = loadApp();
+    await request(app).put("/api/speech/keys/elevenlabs").set("Cookie", COOKIE).send({ apiKey: KEY });
+    expect((await put(app, { baseUrl: ADDRESS })).status).toBe(204);
+    expect(configs[2]!.engines.kokoro).toMatchObject({ baseUrl: ADDRESS });
+
+    const res = await request(app).delete("/api/speech/keys/kokoro").set("Cookie", COOKIE);
+    expect(res.status).toBe(204);
+    expect(secrets()).toBe(`ELEVENLABS_API_KEY=${KEY}\n`);
+    expect(configs).toHaveLength(4);
+    expect(configs[3]!.engines.kokoro).toBeUndefined();
+  });
+
+  it("engines lists kokoro with its address or no-key", async () => {
+    const { app } = loadApp();
+    expect(engine(await engines(app), "kokoro")).toEqual({
+      id: "kokoro",
+      label: expect.any(String),
+      keyed: true,
+      keySource: "none",
+      status: { state: "no-key" },
+    });
+
+    expect((await put(app, { baseUrl: ADDRESS })).status).toBe(204);
+    const row = engine(await engines(app), "kokoro");
+    expect(row).toEqual({
+      id: "kokoro",
+      label: expect.any(String),
+      keyed: true,
+      keySource: "file",
+      baseUrl: ADDRESS,
+      status: { state: "ready" },
+    });
+    expect(row.keyLast4).toBeUndefined();
   });
 });

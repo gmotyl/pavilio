@@ -1,0 +1,17 @@
+#!/bin/bash
+#
+# Install (or remove, with --uninstall) a local Kokoro-FastAPI TTS server and
+# point the panel at it.
+#
+# A wrapper for the same reason as scripts/install:speech: `update.sh` mirrors
+# scripts/ and panel/ but never a downstream root package.json, so a root-level
+# script entry alone would not reach downstream workspaces.
+#
+# Run as `bash scripts/install:kokoro` (or `pnpm install:kokoro` in this repo).
+
+set -e
+
+# Resolve the repo root from this script's own location, so it works from any cwd.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+exec node "$REPO_ROOT/panel/scripts/install-kokoro.mjs" "$@"

@@ -219,6 +219,11 @@ interface OpenSpecSourceDesc {
   mode: "native" | "store";
   openspecDir: string;
   /**
+   * The configured repository the tree belongs to (the linked repo for native mode, the
+   * project for a store); a symlink below it must not lead out of it.
+   */
+  boundary: string;
+  /**
    * True when the source comes from an explicit `openspec` entry in repos.json.
    * The project-local store is implicit, so its absence is normal — a configured
    * root that does not exist is a typo worth surfacing.
@@ -276,6 +281,7 @@ function openSpecSources(
       label: `${basename(projectDir)} (OpenSpec)`,
       mode: "store",
       openspecDir: join(projectDir, "plans", "openspec"),
+      boundary: projectDir,
       configured: false,
     },
   ];
@@ -321,6 +327,7 @@ function openSpecSources(
       label: `${r.name} (OpenSpec)`,
       mode,
       openspecDir,
+      boundary: mode === "native" ? repoPath : projectDir,
       configured: true,
     });
     if (worktrees && mode === "native") {
@@ -362,6 +369,7 @@ function worktreeSources(
       label: `${name} @ ${wt.branch ?? wt.head.slice(0, 7)} (OpenSpec)`,
       mode: "native",
       openspecDir,
+      boundary: wt.path,
       configured: true,
       worktree: { path: wt.path, branch: wt.branch, changeIds },
     });
@@ -573,21 +581,24 @@ export function buildContextAllowlist(projectDir: string): string[] {
 export function isContextPathAllowed(
   absolutePath: string,
   allowlist: string[],
-  openspecDirs: string[] = [],
+  openspecRoots: { openspecDir: string; boundary: string }[] = [],
 ): boolean {
   if (absolutePath.includes("\0")) return false;
   // OpenSpec living spec: <openspecDir>/specs/<capability>/spec.md (exact depth).
   if (basename(absolutePath) === "spec.md") {
-    for (const openspecDir of openspecDirs) {
+    for (const { openspecDir, boundary } of openspecRoots) {
       const specsRoot = join(openspecDir, "specs");
       if (isPathUnder(absolutePath, specsRoot) && dirname(dirname(absolutePath)) === specsRoot) {
         // The depth/prefix check above is pure string math — a symlinked
-        // capability dir or spec.md file would otherwise sail through it and
-        // resolve outside specsRoot on read. Reject when the path exists and
-        // its realpath differs (i.e. a symlink is in the chain).
+        // openspec/specs/capability dir or spec.md would otherwise sail through
+        // it and resolve outside the repo on read. Reject when the path exists
+        // and a symlink sits below the configured repo root. Symlinks above it
+        // (macOS /var -> /private/var, a symlinked home or repos dir) are
+        // resolved on both sides.
         if (existsSync(absolutePath)) {
           try {
-            if (realpathSync(absolutePath) !== absolutePath) continue;
+            const expected = join(realpathSync(boundary), relative(boundary, absolutePath));
+            if (realpathSync(absolutePath) !== expected) continue;
           } catch {
             continue;
           }
@@ -695,8 +706,8 @@ router.get("/:name/context/read", (req, res) => {
   const absPath = resolve(pathParam);
   const allowlist = buildContextAllowlist(projectDir);
   // Main checkouts only, mirroring the /context listing: worktree living specs stay unreadable.
-  const openspecDirs = openSpecSources(projectDir, { worktrees: false }).sources.map((s) => s.openspecDir);
-  if (!isContextPathAllowed(absPath, allowlist, openspecDirs)) {
+  const openspecRoots = openSpecSources(projectDir, { worktrees: false }).sources;
+  if (!isContextPathAllowed(absPath, allowlist, openspecRoots)) {
     return res.status(403).json({ error: "Path not in this project's context allowlist" });
   }
   if (!existsSync(absPath) || !statSync(absPath).isFile()) {

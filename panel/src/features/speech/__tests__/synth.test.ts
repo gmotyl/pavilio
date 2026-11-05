@@ -108,7 +108,7 @@ describe("the anytts seam", () => {
           mode: "auto",
         },
         // The keyed engines and the cascade are relay clients, on every route.
-        cascade: { relayUrl: "/api/tts", firstByteMs: 120_000, stallMs: 15_000 },
+        cascade: { relayUrl: "/api/tts", firstByteMs: 150_000, stallMs: 15_000 },
         elevenlabs: keyed,
         cartesia: keyed,
         speechify: keyed,
@@ -122,6 +122,8 @@ describe("the anytts seam", () => {
           catalog: [{ id: "my-voice", label: "my-voice", locale: "und", gender: "male", multilingual: true }],
           voices: OPENAI_VOICE_MAP,
         },
+        // Outlasts the server's KOKORO_FIRST_BYTE_TIMEOUT_MS wait on a cold model load.
+        kokoro: { ...keyed, firstByteMs: 45_000 },
       },
       defaultEngine: "edge",
       scheduler: {

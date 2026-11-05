@@ -18,6 +18,7 @@ import {
   type CascadeEntry,
 } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
+import { KOKORO_FIRST_BYTE_TIMEOUT_MS } from "./kokoro";
 import { OPENAI_FIRST_BYTE_TIMEOUT_MS, OPENAI_VOICE_MAP, resolveVoiceMap } from "./openaiVoices";
 
 /** The engine id that walks the others: it has no voices of its own. */
@@ -41,11 +42,12 @@ export const SPEECH_FIRST_BYTE_TIMEOUT_MS = 25000;
 /**
  * Max wait for a cascade relay call's first byte. One call walks the members
  * on the server until one speaks, so it covers several members' first-byte
- * waits (a member that times out costs the server's 8s) before the one that
- * answers synthesizes its whole clip. `openai` leads the cascade and may hold
- * it for its whole wait, so the minute the other members need comes on top.
+ * waits before the one that answers synthesizes its whole clip. `openai` and
+ * `kokoro` lead the cascade and, with no retry, may each hold it for one whole
+ * wait, so the minute the other members need comes on top of both.
  */
-export const SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS = OPENAI_FIRST_BYTE_TIMEOUT_MS + 60000;
+export const SPEECH_CASCADE_FIRST_BYTE_TIMEOUT_MS =
+  OPENAI_FIRST_BYTE_TIMEOUT_MS + KOKORO_FIRST_BYTE_TIMEOUT_MS + 60000;
 
 /**
  * A keyed engine in the browser: a relay client of the panel server, which
@@ -112,6 +114,9 @@ export const SPEECH_ENGINES: TtsConfig["engines"] = {
   // server has the address, and the server drops `openai` when it has not.
   // `synth.ts` swaps in the live list (`openaiEngineConfig`) once it is loaded.
   openai: openaiEngineConfig([]),
+  // A local Kokoro-FastAPI server, same relay. Its catalog ships with anytts, so no live list.
+  // Outlasts the panel server's wait on Kokoro (a cold model load), so the server's verdict lands.
+  kokoro: { ...KEYED_RELAY, firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS + 15000 },
 };
 
 /** The configured engine ids. */

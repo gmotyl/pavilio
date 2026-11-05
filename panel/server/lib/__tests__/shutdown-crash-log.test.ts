@@ -67,3 +67,49 @@ describe("installCrashLog", () => {
     expect(exit).toHaveBeenCalledWith(1);
   });
 });
+
+describe("installPreferenceFlush", () => {
+  let handlers: Map<string, Handler>;
+  let exit: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    flushPreferences.mockReset();
+    flushPreferences.mockImplementation(() => new Promise(() => {}));
+    handlers = new Map();
+    vi.spyOn(process, "on").mockImplementation(((event: string, fn: Handler) => {
+      handlers.set(event, fn);
+      return process;
+    }) as typeof process.on);
+    exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const { installPreferenceFlush } = await import("../shutdown");
+    installPreferenceFlush();
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    flushPreferences.mockReset();
+    flushPreferences.mockImplementation(() => Promise.resolve());
+  });
+
+  it("a second signal during a hung flush exits immediately", async () => {
+    handlers.get("SIGINT")!(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(exit).not.toHaveBeenCalled();
+
+    handlers.get("SIGINT")!(undefined);
+    expect(exit).toHaveBeenCalledWith(130);
+    expect(flushPreferences).toHaveBeenCalledTimes(1);
+  });
+
+  it("exits after the timeout when the flush hangs", async () => {
+    handlers.get("SIGTERM")!(undefined);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exit).toHaveBeenCalledWith(143);
+  });
+});

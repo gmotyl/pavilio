@@ -36,6 +36,12 @@ const LIMIT_NOTES: Readonly<Record<string, string>> = {
   edge: "no key needed",
 };
 
+/** Each address engine's local default, as the empty field's placeholder. */
+const ADDRESS_PLACEHOLDERS: Readonly<Record<string, string>> = {
+  openai: "http://127.0.0.1:8890",
+  kokoro: "http://127.0.0.1:8880",
+};
+
 const CHIP_COLORS: Readonly<Record<ChipTone, string>> = {
   ok: "var(--green)",
   warn: "var(--yellow)",
@@ -65,7 +71,7 @@ const GHOST_STYLE: CSSProperties = {
 const CELL_LABEL_CLASS = "block text-xs mb-1";
 const MUTED: CSSProperties = { color: "var(--text-muted)" };
 
-/** What a row's key cell holds: an API key, or for `openai` the server address. */
+/** What a row's key cell holds: an API key, or for an address engine the server address. */
 function keyNoun(id: string): "key" | "address" {
   return isAddressEngine(id) ? "address" : "key";
 }
@@ -351,7 +357,15 @@ function EngineRow(props: EngineRowProps) {
           In cascade
         </label>
       </div>
-      {address && (
+      {id === "kokoro" && info?.keySource === "none" && (
+        <p data-testid="engine-install-hint" className="text-xs mt-2" style={MUTED}>
+          No Kokoro server yet: run{" "}
+          <code style={{ color: "var(--text-primary)" }}>pnpm install:kokoro</code> (or{" "}
+          <code style={{ color: "var(--text-primary)" }}>bash scripts/install:kokoro</code> in a synced
+          workspace), then save its address here.
+        </p>
+      )}
+      {id === "openai" && (
         <p data-testid="engine-server-hint" className="text-xs mt-2" style={MUTED}>
           Local server, started and stopped with the panel when{" "}
           <code style={{ color: "var(--text-primary)" }}>PANEL_TTS_SERVER_CTL</code> is set; by hand:{" "}
@@ -360,8 +374,8 @@ function EngineRow(props: EngineRowProps) {
           path — <code>~</code> is not expanded in <code>secrets.env</code>.
         </p>
       )}
-      {/* The OmniVoice server's voices, once there is a server to ask. */}
-      {address && info !== undefined && info.keySource !== "none" && <VoicesSection address={info.baseUrl ?? ""} />}
+      {/* The OmniVoice server's voices, once there is a server to ask; Kokoro's are a fixed catalog. */}
+      {id === "openai" && info !== undefined && info.keySource !== "none" && <VoicesSection address={info.baseUrl ?? ""} />}
       {keyed && !address && (
         <p data-testid="engine-overage-hint" className="text-xs mt-2" style={MUTED}>
           Turn off overage billing at {label} (or set a hard spend limit), so a used-up free tier is
@@ -382,8 +396,8 @@ interface KeyCellProps {
 
 /**
  * The API key: "set •••• 3f9a" with Change and Remove; a password input with
- * Save; or "from environment" naming the variable that wins. For the address
- * engine (`openai`) the same cell holds the server address instead: a plain
+ * Save; or "from environment" naming the variable that wins. For an address
+ * engine (`openai`, `kokoro`) the same cell holds the server address instead: a plain
  * URL field, and the saved value shown in full — it is not a secret. Azure adds its
  * Region, sent with the key. When the engines list could not be loaded the
  * key's source is unknown, so the cell offers the input: the server refuses
@@ -487,7 +501,7 @@ function KeyCell({ id, label, info, unavailable, onKeyChanged }: KeyCellProps) {
             <input
               id={keyInputId}
               {...(address
-                ? { type: "text", inputMode: "url" as const, autoComplete: "off", spellCheck: false, placeholder: "http://127.0.0.1:8890" }
+                ? { type: "text", inputMode: "url" as const, autoComplete: "off", spellCheck: false, placeholder: ADDRESS_PLACEHOLDERS[id] }
                 : { type: "password", autoComplete: "new-password", placeholder: `Paste ${label} API key` })}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}

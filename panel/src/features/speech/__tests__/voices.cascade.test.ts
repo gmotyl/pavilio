@@ -111,6 +111,7 @@ describe("per-engine voices and cascade preferences", () => {
   it("cascade order defaults to all engines on", () => {
     expect(getCascadeOrder()).toEqual([
       { id: "openai", on: true },
+      { id: "kokoro", on: true },
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "speechify", on: true },
@@ -142,7 +143,7 @@ describe("per-engine voices and cascade preferences", () => {
   });
 
   it("openai leads the default cascade order", () => {
-    const expected = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    const expected = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     expect(DEFAULT_CASCADE_ORDER).toEqual(expected);
     // The drift guard: the server's copy is the same list.
     const server = /CASCADE_ORDER\s*=\s*(\[[^\]]*\])/.exec(ttsHolderSource);
@@ -167,6 +168,28 @@ describe("per-engine voices and cascade preferences", () => {
       { id: "speechify", on: true },
       { id: "azure", on: false },
       { id: "openai", on: true },
+      { id: "kokoro", on: true },
+    ]);
+  });
+
+  it("a stored order without kokoro gets it appended", () => {
+    // A workspace stored its order with openai but before kokoro existed.
+    setCascadeOrder([
+      { id: "openai", on: false },
+      { id: "edge", on: true },
+      { id: "elevenlabs", on: true },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: true },
+    ]);
+    expect(getCascadeOrder()).toEqual([
+      { id: "openai", on: false },
+      { id: "edge", on: true },
+      { id: "elevenlabs", on: true },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: true },
+      { id: "kokoro", on: true },
     ]);
   });
 
@@ -186,8 +209,15 @@ describe("per-engine voices and cascade preferences", () => {
     const voices = cascadeVoicesOf(voiceForProject("p"));
     expect(voices).toMatchObject({ elevenlabs: SARAH, edge: ANDREW });
     // No openai entry: the browser lists no openai voices until it reads the OmniVoice server's
-    // catalog, so the server picks that member's voice.
-    expect(Object.keys(voices ?? {}).sort()).toEqual(["azure", "cartesia", "edge", "elevenlabs", "speechify"]);
+    // catalog, so the server picks that member's voice. Kokoro's catalog is static, so it has one.
+    expect(Object.keys(voices ?? {}).sort()).toEqual([
+      "azure",
+      "cartesia",
+      "edge",
+      "elevenlabs",
+      "kokoro",
+      "speechify",
+    ]);
     expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });
     expect(voiceForDocKey("doc:p/notes.md")).toBe(voiceForProject("p"));
   });

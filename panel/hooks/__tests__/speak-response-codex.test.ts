@@ -537,16 +537,20 @@ describe("speak-response-codex", () => {
     expect(result.stderr).not.toContain(TEST_TOKEN);
   });
   /**
-   * Is `--no-experimental-fetch` still a real switch on the Node running this
-   * suite? The flag has been around since fetch was introduced, but it guards
-   * an experiment, and an experiment that graduates can lose its off-switch.
-   * Probed rather than assumed, because a flag that is silently ignored turns
-   * the guard below into a test that passes no matter what the hook does.
+   * Removes the global `fetch` before the hook loads. A preload rather than
+   * `--no-experimental-fetch`: Node 26 dropped that flag (fetch graduated).
+   */
+  const NO_FETCH = ["--import", "data:text/javascript,delete globalThis.fetch"];
+
+  /**
+   * Does NO_FETCH still leave this Node without `fetch`? Probed rather than
+   * assumed, because a removal that silently fails turns the guard below into
+   * a test that passes no matter what the hook does.
    */
   async function fetchCanBeDisabled(): Promise<boolean> {
     const probe = spawnSync(
       process.execPath,
-      ["--no-experimental-fetch", "-e", "process.exit(typeof fetch === 'undefined' ? 0 : 3)"],
+      [...NO_FETCH, "-e", "process.exit(typeof fetch === 'undefined' ? 0 : 3)"],
       { stdio: "ignore" },
     );
     return probe.status === 0;
@@ -559,13 +563,13 @@ describe("speak-response-codex", () => {
     // logged. Any future reach for `fetch` reproduces it here instead of in
     // the user's terminal.
     //
-    // Asserted, not skipped: if a future Node stops honouring the flag this
+    // Asserted, not skipped: if a future Node stops honouring NO_FETCH this
     // test fails loudly and a human moves the guard to the old-interpreter
     // test below, rather than the guard quietly becoming a no-op.
     expect(await fetchCanBeDisabled()).toBe(true);
     await listenAsPanel();
 
-    const result = await run(stopPayload(FIXTURE), {}, { execArgv: ["--no-experimental-fetch"] });
+    const result = await run(stopPayload(FIXTURE), {}, { execArgv: NO_FETCH });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("");

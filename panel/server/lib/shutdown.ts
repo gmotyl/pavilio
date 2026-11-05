@@ -14,8 +14,8 @@ const SIGNALS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
 let installed = false;
 let crashLogInstalled = false;
 
-/** How long a crashing panel waits for the preference flush before exiting anyway. */
-const CRASH_FLUSH_TIMEOUT_MS = 1000;
+/** How long a dying panel waits for the preference flush before exiting anyway. */
+const FLUSH_TIMEOUT_MS = 1000;
 
 /**
  * Log an uncaught exception or unhandled rejection with a timestamp, flush
@@ -32,7 +32,7 @@ export function installCrashLog(): void {
   const die = (kind: string, err: unknown) => {
     console.error(`[panel] ${new Date().toISOString()} ${kind} — panel exiting:`, err);
     // A flush that hangs must not keep a broken process alive.
-    setTimeout(() => process.exit(1), CRASH_FLUSH_TIMEOUT_MS).unref();
+    setTimeout(() => process.exit(1), FLUSH_TIMEOUT_MS).unref();
     void flushPreferences().then(() => process.exit(1));
   };
   process.on("uncaughtException", (err) => die("uncaught exception", err));
@@ -47,8 +47,19 @@ export function installPreferenceFlush(): void {
   if (installed) return;
   installed = true;
 
+  let flushing = false;
   for (const [signal, number] of Object.entries(SIGNALS)) {
-    process.once(signal as NodeJS.Signals, () => {
+    // `on`, not `once`: tsx (which runs the panel) adds a hidden signal handler
+    // that exits immediately when no other listener remains — a `once` listener
+    // is already removed by then, so the async flush below would be cut off.
+    process.on(signal as NodeJS.Signals, () => {
+      // Staying registered swallows a repeat Ctrl-C, so it must force the exit.
+      if (flushing) {
+        process.exit(128 + number);
+        return;
+      }
+      flushing = true;
+      setTimeout(() => process.exit(128 + number), FLUSH_TIMEOUT_MS).unref();
       void (async () => {
         // Never rejects — a failed write is logged by the store, and a full
         // disk must not be the reason a shutdown hangs.

@@ -34,6 +34,11 @@ const PANEL_CTL = resolve(__dirname, "../../../scripts/panel");
 const PM_SCRIPT = resolve(__dirname, "../../../scripts/pm");
 const ROOT_PACKAGE_JSON = resolve(__dirname, "../../../package.json");
 
+/** Host tools scripts/panel uses when present and works around when absent (stock macOS). */
+const hasTool = (name: string) => spawnSync("bash", ["-c", `command -v ${name}`]).status === 0;
+const HAS_SETSID = hasTool("setsid");
+const HAS_TIMEOUT = hasTool("timeout");
+
 let sandbox: string;
 let repo: string;
 let stubBin: string;
@@ -131,12 +136,13 @@ const BUILD_FAILS = ['echo "stub pnpm build: TS2345 the bundle is broken" >&2', 
   "\n    ",
 );
 
-function runPanel(command: string, extraEnv: Record<string, string> = {}) {
+function runPanel(command: string, extraEnv: Record<string, string> = {}, cwd?: string) {
   // The developer's own PANEL_TTS_SERVER_CTL, and the one in their real
   // ~/.panel/secrets.env, must never reach the sandbox: either would start or
   // stop the real local TTS server. The state dir is the sandbox's own.
   const { PANEL_TTS_SERVER_CTL: _ignored, ...inherited } = process.env;
   const res = spawnSync("bash", [join(repo, "scripts", "panel"), command], {
+    cwd,
     encoding: "utf8",
     env: {
       ...inherited,
@@ -239,10 +245,13 @@ describe("scripts/panel process control", () => {
     // it — so a server still alive here outlived its parent.
     expect(alive(pid)).toBe(true);
     // And it is in a session of its own: closing the terminal, or the script
-    // that launched it finishing, cannot take the panel down with it.
-    const childSid = sessionId(pid);
-    expect(childSid).not.toBe("");
-    expect(childSid).not.toBe(sessionId(process.pid));
+    // that launched it finishing, cannot take the panel down with it. Only
+    // where setsid exists — without it the script falls back to nohup alone.
+    if (HAS_SETSID) {
+      const childSid = sessionId(pid);
+      expect(childSid).not.toBe("");
+      expect(childSid).not.toBe(sessionId(process.pid));
+    }
 
     expect(await waitUntil(() => panelLog().includes("stub panel listening"))).toBe(true);
     expect(panelLog()).toContain("stub pnpm start in panel");
@@ -510,6 +519,21 @@ describe("scripts/panel local TTS server control", () => {
     expect(existsSync(sourcedMarker)).toBe(false);
   });
 
+  it("resolves a relative PANEL_AUTH_STATE_DIR against panel/, as the server does", async () => {
+    writeCtl(ctl);
+    const relState = join(repo, "panel", "rel-state");
+    mkdirSync(relState, { recursive: true });
+    writeFileSync(join(relState, "secrets.env"), `PANEL_TTS_SERVER_CTL=${ctl}\n`);
+    // Run from elsewhere: `pnpm start` runs the script from the repo root, not panel/.
+    const env = { PANEL_AUTH_STATE_DIR: "rel-state" };
+
+    expect(runPanel("start", env, sandbox).status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(runPanel("stop", env, sandbox).status).toBe(0);
+
+    expect(ctlCalls()).toEqual(["start panel=down", "stop panel=down"]);
+  });
+
   it("a failing TTS control script does not fail the panel", async () => {
     writeCtl(ctl, 1);
 
@@ -593,11 +617,11 @@ describe("scripts/panel local TTS server control", () => {
     expect(await waitUntil(() => !alive(ctlPid), 5000)).toBe(true);
   });
 
-  it("the coreutils timeout path honours PANEL_TTS_SERVER_CTL_TIMEOUT", async () => {
+  // Only meaningful where coreutils `timeout` exists; the no-timeout fallback
+  // is covered by "a hanging TTS control script is cut off without timeout".
+  it.skipIf(!HAS_TIMEOUT)("the coreutils timeout path honours PANEL_TTS_SERVER_CTL_TIMEOUT", async () => {
     const pidFile = join(sandbox, "ctl.pid");
     writeHangingCtl(pidFile);
-    // Only meaningful where coreutils `timeout` exists; this suite runs on Linux.
-    expect(spawnSync("bash", ["-c", "command -v timeout"]).status).toBe(0);
 
     const t0 = Date.now();
     const started = runPanel("start", {

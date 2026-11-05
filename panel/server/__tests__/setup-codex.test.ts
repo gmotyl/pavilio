@@ -39,11 +39,19 @@ const SETUP_CODEX = resolve(__dirname, "../../../scripts/setup:codex");
 const BASH =
   spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "/bin/bash";
 
-// Where ln/rm/mkdir/readlink live on this host — the only directory on the PATH
-// the script is given.
-const COREUTILS_DIR = dirname(
-  spawnSync("sh", ["-c", "command -v ln"], { encoding: "utf8" }).stdout.trim() || "/bin/ln",
-);
+// Where ln/rm/mkdir/readlink live on this host — the only directories on the
+// PATH the script is given. Resolved per tool: macOS splits them across /bin
+// and /usr/bin.
+const COREUTILS_DIR = [
+  ...new Set(
+    ["ln", "rm", "mkdir", "readlink"].map((tool) =>
+      dirname(
+        spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim() ||
+          `/bin/${tool}`,
+      ),
+    ),
+  ),
+].join(":");
 
 let sandbox: string;
 let repo: string;

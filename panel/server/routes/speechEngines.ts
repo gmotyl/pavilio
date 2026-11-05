@@ -10,6 +10,7 @@ import type { OpenaiCatalog } from "../lib/speech/openaiCatalog.js";
  *   GET    /api/speech/engines      every cascade member: label, key source, status
  *   PUT    /api/speech/keys/:engine { apiKey, region? } → 204 | 400 | 409 | 500
  *   PUT    /api/speech/keys/openai  { baseUrl }         → 204 | 400 | 409 | 500
+ *   PUT    /api/speech/keys/kokoro  { baseUrl }         → 204 | 400 | 409 | 500
  *   DELETE /api/speech/keys/:engine → 204 | 400 | 500
  *
  * A saved key goes to the secrets store and the server's Tts is rebuilt from
@@ -24,6 +25,9 @@ import type { OpenaiCatalog } from "../lib/speech/openaiCatalog.js";
  * it (no address, one that is not an http(s) URL, or no voices fetched from the
  * server yet) its status is `no-key`. A saved address refreshes the live voice
  * catalog before answering, so the next GET sees the server's voices.
+ *
+ * `kokoro` (a Kokoro-FastAPI server) is handled the same way through
+ * `KOKORO_TTS_BASE_URL`, except its catalog ships with anytts: nothing is fetched.
  */
 
 export interface SpeechEngineInfo {
@@ -34,7 +38,7 @@ export interface SpeechEngineInfo {
   keyLast4?: string;
   /** Azure only; the region is not a secret. */
   region?: string;
-  /** `openai` only: the server address, in full (not a secret). */
+  /** `openai` and `kokoro` only: the server address, in full (not a secret). */
   baseUrl?: string;
   status: EngineStatus;
 }
@@ -52,8 +56,14 @@ const AZURE_REGION = /^[a-z0-9]+$/;
 
 const isKeyed = (id: string): id is KeyedEngineId => Object.hasOwn(KEYED_ENGINES, id);
 
-/** The member whose "key" is a server address rather than an API key. */
-const OPENAI = "openai";
+/** The members whose "key" is a server address rather than an API key. */
+const ADDRESS_ENGINES = {
+  openai: "OPENAI_TTS_BASE_URL",
+  kokoro: "KOKORO_TTS_BASE_URL",
+} as const satisfies Record<string, KeyVar>;
+type AddressEngineId = keyof typeof ADDRESS_ENGINES;
+
+const isAddressed = (id: string): id is AddressEngineId => Object.hasOwn(ADDRESS_ENGINES, id);
 
 /** The variables an engine's key occupies: Azure's region travels with its key. */
 function varsOf(id: KeyedEngineId): KeyVar[] {
@@ -63,6 +73,19 @@ function varsOf(id: KeyedEngineId): KeyVar[] {
 /** Last four characters, only when they leave most of the key unsaid. */
 function last4(value: string | undefined): string | undefined {
   return value && value.length > 8 ? value.slice(-4) : undefined;
+}
+
+/** A hand-edited address may carry `user:pass@`; the row shows it masked, never verbatim. */
+function maskCredentials(address: string): string {
+  const masked = address.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)?[^/?#]*@/i, "$1***@");
+  // The URL parser forgives what the pattern does not (leading whitespace, `http:/`, tabs),
+  // so anything it still reads as credentials, or any stray `@` it cannot parse, is redacted whole.
+  try {
+    const { username, password } = new URL(masked);
+    return (username && username !== "***") || password ? "***" : masked;
+  } catch {
+    return masked.replace("***@", "").includes("@") ? "***" : masked;
+  }
 }
 
 export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router {
@@ -82,23 +105,23 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
 
   router.get("/engines", (_req, res) => {
     // The cascade members only: `cascade` itself has no key and its status is its members'.
-    // `openai` is listed even while the holder leaves it out, so its address can be set;
-    // any other member the holder does not configure is skipped.
+    // The address engines are listed even while the holder leaves them out, so their address
+    // can be set; any other member the holder does not configure is skipped.
     const list = CASCADE_ORDER.flatMap((id): SpeechEngineInfo[] => {
-      const status = statusOf(id) ?? (id === OPENAI ? { state: "no-key" as const } : undefined);
+      const status = statusOf(id) ?? (isAddressed(id) ? { state: "no-key" as const } : undefined);
       if (!status) return [];
       const info: SpeechEngineInfo = {
         id,
         label: labels.get(id) ?? id,
-        keyed: isKeyed(id) || id === OPENAI,
+        keyed: isKeyed(id) || isAddressed(id),
         keySource: "none",
         status,
       };
-      if (id === OPENAI) {
+      if (isAddressed(id)) {
         // Shown even when it is not a URL (a hand-edited file), so it can be fixed.
-        const address = resolveKey("OPENAI_TTS_BASE_URL");
+        const address = resolveKey(ADDRESS_ENGINES[id]);
         info.keySource = address.source;
-        if (address.value) info.baseUrl = address.value;
+        if (address.value) info.baseUrl = maskCredentials(address.value);
       }
       if (isKeyed(id)) {
         const key = resolveKey(KEYED_ENGINES[id]);
@@ -132,27 +155,31 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
     }
   }
 
-  router.put("/keys/openai", async (req, res) => {
-    const body = (req.body ?? {}) as { baseUrl?: unknown };
-    const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
-    if (!baseUrl || /[\r\n]/.test(baseUrl) || !isHttpUrl(baseUrl)) {
-      res.status(400).json({ error: "baseUrl must be an http(s) URL, e.g. http://127.0.0.1:8890" });
-      return;
-    }
-    if (resolveKey("OPENAI_TTS_BASE_URL").source === "env") {
-      res.status(409).json({ error: "the address is set in the server environment" });
-      return;
-    }
-    if (!(await save({ OPENAI_TTS_BASE_URL: baseUrl }, res))) return;
-    // The new address may be a different server: fetch its voices. A changed list rebuilds the
-    // holder through the catalog's onChange; refresh never rejects (3 s timeout at worst).
-    await catalog?.refresh();
-    res.status(204).end();
-  });
+  for (const id of Object.keys(ADDRESS_ENGINES) as AddressEngineId[]) {
+    const name = ADDRESS_ENGINES[id];
+    router.put(`/keys/${id}`, async (req, res) => {
+      const body = (req.body ?? {}) as { baseUrl?: unknown };
+      const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+      if (!baseUrl || /[\r\n]/.test(baseUrl) || !isHttpUrl(baseUrl)) {
+        const example = id === "kokoro" ? "http://127.0.0.1:8880" : "http://127.0.0.1:8890";
+        res.status(400).json({ error: `baseUrl must be an http(s) URL without credentials, e.g. ${example}` });
+        return;
+      }
+      if (resolveKey(name).source === "env") {
+        res.status(409).json({ error: "the address is set in the server environment" });
+        return;
+      }
+      if (!(await save({ [name]: baseUrl }, res))) return;
+      // The new address may be a different server: fetch its voices. A changed list rebuilds the
+      // holder through the catalog's onChange; refresh never rejects (3 s timeout at worst).
+      if (id === "openai") await catalog?.refresh();
+      res.status(204).end();
+    });
 
-  router.delete("/keys/openai", async (_req, res) => {
-    if (await save({ OPENAI_TTS_BASE_URL: null }, res)) res.status(204).end();
-  });
+    router.delete(`/keys/${id}`, async (_req, res) => {
+      if (await save({ [name]: null }, res)) res.status(204).end();
+    });
+  }
 
   router.put("/keys/:engine", async (req, res) => {
     const id = req.params.engine;
