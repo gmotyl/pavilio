@@ -105,8 +105,8 @@ describe("cascade requests through the speech seam", () => {
     expect(Object.values(expectedVoices).every(Boolean)).toBe(true);
     // No openai voice: the browser lists none until it reads the OmniVoice server's catalog,
     // so the server speaks with its own default.
-    // `openai` leads the default order; the server drops it when it has no address.
-    const order = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    // `openai` and `kokoro` lead the default order; the server drops each when it has no address.
+    const order = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
     expect(request).toEqual({
@@ -149,6 +149,7 @@ describe("cascade requests through the speech seam", () => {
       { id: "cartesia", on: true },
       { id: "azure", on: false },
       { id: "openai", on: false },
+      { id: "kokoro", on: false },
     ]);
 
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });

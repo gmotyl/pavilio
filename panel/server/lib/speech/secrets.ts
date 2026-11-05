@@ -18,7 +18,9 @@ export type KeyVar =
   | "AZURE_SPEECH_KEY"
   | "AZURE_SPEECH_REGION"
   // Not a secret: the address of an OpenAI-compatible TTS server (e.g. a local OmniVoice).
-  | "OPENAI_TTS_BASE_URL";
+  | "OPENAI_TTS_BASE_URL"
+  // Not a secret either: the address of a Kokoro-FastAPI server.
+  | "KOKORO_TTS_BASE_URL";
 
 export type KeySource = "env" | "file" | "none";
 
@@ -29,6 +31,7 @@ const KEY_VARS: ReadonlySet<string> = new Set<KeyVar>([
   "AZURE_SPEECH_KEY",
   "AZURE_SPEECH_REGION",
   "OPENAI_TTS_BASE_URL",
+  "KOKORO_TTS_BASE_URL",
 ]);
 
 function stateDir(): string {

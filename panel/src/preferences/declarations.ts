@@ -257,6 +257,7 @@ export interface CascadeEntry {
  */
 export const DEFAULT_CASCADE_ORDER: readonly string[] = [
   "openai",
+  "kokoro",
   "elevenlabs",
   "cartesia",
   "speechify",

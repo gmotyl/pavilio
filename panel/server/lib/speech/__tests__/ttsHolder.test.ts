@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createTts } from "anytts/server";
 import { resolveVoice, type TtsConfig } from "anytts";
-import { createTtsHolder } from "../ttsHolder";
+import { createTtsHolder, KOKORO_FIRST_BYTE_TIMEOUT_MS } from "../ttsHolder";
 import type { KeyVar, KeySource } from "../secrets";
 import {
   OPENAI_FIRST_BYTE_TIMEOUT_MS,
@@ -219,5 +219,87 @@ describe("server Tts holder", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+  it("configures kokoro when KOKORO_TTS_BASE_URL is set", () => {
+    const configs: TtsConfig[] = [];
+    const holder = createTtsHolder({
+      createTts: (config) => {
+        configs.push(config);
+        return createTts(config);
+      },
+      resolveKey: keys({ KOKORO_TTS_BASE_URL: "http://127.0.0.1:8880" }),
+    });
+
+    expect(KOKORO_FIRST_BYTE_TIMEOUT_MS).toBe(30000);
+    expect(configs[0]!.engines.kokoro).toEqual({ baseUrl: "http://127.0.0.1:8880", firstByteMs: 30000 });
+    expect(configs[0]!.engines.cascade).toEqual({
+      order: ["kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
+    });
+    expect(holder.engineStatus("kokoro")).toEqual({ state: "ready" });
+  });
+
+  it("leaves kokoro out when the address is unset", () => {
+    const configs: TtsConfig[] = [];
+    const holder = createTtsHolder({
+      createTts: (config) => {
+        configs.push(config);
+        return createTts(config);
+      },
+      resolveKey: keys({}),
+    });
+
+    expect(Object.hasOwn(configs[0]!.engines, "kokoro")).toBe(false);
+    expect(configs[0]!.engines.cascade).toEqual({
+      order: ["elevenlabs", "cartesia", "speechify", "azure", "edge"],
+    });
+    expect(() => holder.engineStatus("kokoro")).toThrow(RangeError);
+  });
+
+  it("warns without the value and stays off on an invalid kokoro address", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const value of ["not a url", "ftp://127.0.0.1:8880"]) {
+        warn.mockClear();
+        const configs: TtsConfig[] = [];
+        createTtsHolder({
+          createTts: (config) => {
+            configs.push(config);
+            return createTts(config);
+          },
+          resolveKey: keys({ KOKORO_TTS_BASE_URL: value }),
+        });
+        expect(warn).toHaveBeenCalledTimes(1);
+        const message = String(warn.mock.calls[0]![0]);
+        expect(message).toContain("KOKORO_TTS_BASE_URL");
+        expect(message).not.toContain(value);
+        expect(Object.hasOwn(configs[0]!.engines, "kokoro")).toBe(false);
+        expect(configs[0]!.engines.cascade).toEqual({
+          order: ["elevenlabs", "cartesia", "speechify", "azure", "edge"],
+        });
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("orders openai before kokoro when both are set", () => {
+    const configs: TtsConfig[] = [];
+    createTtsHolder({
+      createTts: (config) => {
+        configs.push(config);
+        return createTts(config);
+      },
+      resolveKey: keys({
+        OPENAI_TTS_BASE_URL: "http://127.0.0.1:8890",
+        KOKORO_TTS_BASE_URL: "http://127.0.0.1:8880",
+      }),
+      catalog: liveCatalog([EN_MALE, PL_FEMALE]),
+    });
+
+    expect(configs[0]!.engines.openai).toMatchObject({ baseUrl: "http://127.0.0.1:8890" });
+    expect(configs[0]!.engines.kokoro).toEqual({ baseUrl: "http://127.0.0.1:8880", firstByteMs: 30000 });
+    expect(configs[0]!.engines.cascade).toEqual({
+      order: ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
+    });
   });
 });

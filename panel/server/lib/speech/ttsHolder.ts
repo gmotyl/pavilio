@@ -4,6 +4,7 @@ import {
   OPENAI_FIRST_BYTE_TIMEOUT_MS,
   OPENAI_VOICE_MAP,
 } from "../../../src/features/speech/openaiVoices";
+import { KOKORO_FIRST_BYTE_TIMEOUT_MS } from "../../../src/features/speech/kokoro";
 import { resolveVoiceMap } from "./openaiCatalog.js";
 import { resolveKey as resolveSecret, type KeyVar } from "./secrets.js";
 
@@ -23,14 +24,17 @@ export const KEYED_ENGINES = {
   azure: "AZURE_SPEECH_KEY",
 } as const satisfies Record<string, KeyVar>;
 
+export { KOKORO_FIRST_BYTE_TIMEOUT_MS };
+
 export type KeyedEngineId = keyof typeof KEYED_ENGINES;
 
 /**
  * The cascade's default member order; the browser sends its own order per request anyway.
- * `openai` leads but is configured only when `OPENAI_TTS_BASE_URL` is set, so the order handed
- * to `createTts` is narrowed to the engines actually configured.
+ * The local engines lead: `openai` and `kokoro` are configured only when their address
+ * (`OPENAI_TTS_BASE_URL`, `KOKORO_TTS_BASE_URL`) is set, so the order handed to `createTts` is
+ * narrowed to the engines actually configured.
  */
-export const CASCADE_ORDER = ["openai", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+export const CASCADE_ORDER = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
 
 /** The Azure engine's own region check: with a key, anything else makes `createTts` throw. */
 const AZURE_REGION = /^[a-z0-9]+$/;
@@ -103,6 +107,15 @@ function configFrom(
         `(e.g. "http://127.0.0.1:8890"): the openai engine stays off until it is fixed.`,
     );
   }
+  // `kokoro` likewise has no keyless form; its catalog ships with anytts, so no fetch gates it.
+  const kokoroUrl = key("KOKORO_TTS_BASE_URL");
+  const kokoroUrlOk = !!kokoroUrl && isHttpUrl(kokoroUrl);
+  if (kokoroUrl && !kokoroUrlOk) {
+    console.warn(
+      `[speech] KOKORO_TTS_BASE_URL is set but is not an http(s) URL ` +
+        `(e.g. "http://127.0.0.1:8880"): the kokoro engine stays off until it is fixed.`,
+    );
+  }
   const members: TtsConfig["engines"] = {
     elevenlabs: keyed(KEYED_ENGINES.elevenlabs),
     cartesia: keyed(KEYED_ENGINES.cartesia),
@@ -125,6 +138,10 @@ function configFrom(
       // A retry re-spends the whole wait on a server that synthesizes one clip at a time.
       retries: 0,
     };
+  }
+
+  if (kokoroUrl && kokoroUrlOk) {
+    members.kokoro = { baseUrl: kokoroUrl, firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS };
   }
 
   return {
