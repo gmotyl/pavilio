@@ -77,7 +77,15 @@ function last4(value: string | undefined): string | undefined {
 
 /** A hand-edited address may carry `user:pass@`; the row shows it masked, never verbatim. */
 function maskCredentials(address: string): string {
-  return address.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)?[^/?#]*@/i, "$1***@");
+  const masked = address.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)?[^/?#]*@/i, "$1***@");
+  // The URL parser forgives what the pattern does not (leading whitespace, `http:/`, tabs),
+  // so anything it still reads as credentials, or any stray `@` it cannot parse, is redacted whole.
+  try {
+    const { username, password } = new URL(masked);
+    return (username && username !== "***") || password ? "***" : masked;
+  } catch {
+    return masked.replace("***@", "").includes("@") ? "***" : masked;
+  }
 }
 
 export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router {

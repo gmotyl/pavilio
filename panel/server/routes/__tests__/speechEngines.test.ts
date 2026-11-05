@@ -559,6 +559,28 @@ describe("/api/speech kokoro address", () => {
     }
   });
 
+  it("engines masks credentials the URL parser accepts but the mask pattern misses", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const value of [
+        "  http://user:hunter2@127.0.0.1:8880",
+        "\thttp://user:hunter2@127.0.0.1:8880",
+        "http:/user:hunter2@127.0.0.1:8880",
+        "http:\t//user:hunter2@127.0.0.1:8880",
+        "  http://user:hunter2@bad host",
+      ]) {
+        vi.stubEnv("KOKORO_TTS_BASE_URL", value);
+        const { app } = loadApp();
+        const res = await request(app).get("/api/speech/engines").set("Cookie", COOKIE);
+        expect(res.status).toBe(200);
+        expect(res.text).not.toContain("hunter2");
+        expect(engine(res.body, "kokoro")).toHaveProperty("baseUrl");
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("PUT keys/kokoro answers 409 when set in the environment", async () => {
     vi.stubEnv("KOKORO_TTS_BASE_URL", "http://10.0.0.5:8880");
     const { app, configs } = loadApp();
