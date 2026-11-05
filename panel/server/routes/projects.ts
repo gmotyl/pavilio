@@ -583,11 +583,14 @@ export function isContextPathAllowed(
       if (isPathUnder(absolutePath, specsRoot) && dirname(dirname(absolutePath)) === specsRoot) {
         // The depth/prefix check above is pure string math — a symlinked
         // capability dir or spec.md file would otherwise sail through it and
-        // resolve outside specsRoot on read. Reject when the path exists and
-        // its realpath differs (i.e. a symlink is in the chain).
+        // resolve outside specsRoot on read. Reject when the path exists and a
+        // symlink sits below specsRoot. Symlinks above it (macOS /var ->
+        // /private/var, a symlinked home or repo dir) belong to the configured
+        // root and are resolved on both sides.
         if (existsSync(absolutePath)) {
           try {
-            if (realpathSync(absolutePath) !== absolutePath) continue;
+            const expected = join(realpathSync(specsRoot), relative(specsRoot, absolutePath));
+            if (realpathSync(absolutePath) !== expected) continue;
           } catch {
             continue;
           }

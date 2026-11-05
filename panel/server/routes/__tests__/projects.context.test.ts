@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
@@ -152,6 +152,25 @@ describe("GET /api/projects/:name/context — OpenSpec living specs", () => {
     );
     expect(ok.status).toBe(200);
     expect(ok.body.content).toBe("# checkout spec");
+  });
+
+  it("rejects an OpenSpec capability dir symlinked out of specs/", async () => {
+    seedFile("projects/alokai/PROJECT.md");
+    const repoPath = join(projects.root(), "repos", "pavilio");
+    const outside = join(projects.root(), "outside");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "spec.md"), "# leak");
+    mkdirSync(join(repoPath, "openspec", "specs"), { recursive: true });
+    symlinkSync(outside, join(repoPath, "openspec", "specs", "checkout"), "dir");
+    writeFileSync(
+      join(projects.dir(), "alokai", "repos.json"),
+      JSON.stringify([{ name: "pavilio", path: repoPath, openspec: { mode: "native" } }]),
+    );
+    const linked = join(repoPath, "openspec", "specs", "checkout", "spec.md");
+    const res = await request(makeApp(projectsRouter, "/api/projects")).get(
+      `/api/projects/alokai/context/read?path=${encodeURIComponent(linked)}`,
+    );
+    expect(res.status).toBe(403);
   });
 
   it("rejects OpenSpec living specs from an unconfigured repo", async () => {
