@@ -34,6 +34,11 @@ const PANEL_CTL = resolve(__dirname, "../../../scripts/panel");
 const PM_SCRIPT = resolve(__dirname, "../../../scripts/pm");
 const ROOT_PACKAGE_JSON = resolve(__dirname, "../../../package.json");
 
+/** Host tools scripts/panel uses when present and works around when absent (stock macOS). */
+const hasTool = (name: string) => spawnSync("bash", ["-c", `command -v ${name}`]).status === 0;
+const HAS_SETSID = hasTool("setsid");
+const HAS_TIMEOUT = hasTool("timeout");
+
 let sandbox: string;
 let repo: string;
 let stubBin: string;
@@ -240,10 +245,13 @@ describe("scripts/panel process control", () => {
     // it — so a server still alive here outlived its parent.
     expect(alive(pid)).toBe(true);
     // And it is in a session of its own: closing the terminal, or the script
-    // that launched it finishing, cannot take the panel down with it.
-    const childSid = sessionId(pid);
-    expect(childSid).not.toBe("");
-    expect(childSid).not.toBe(sessionId(process.pid));
+    // that launched it finishing, cannot take the panel down with it. Only
+    // where setsid exists — without it the script falls back to nohup alone.
+    if (HAS_SETSID) {
+      const childSid = sessionId(pid);
+      expect(childSid).not.toBe("");
+      expect(childSid).not.toBe(sessionId(process.pid));
+    }
 
     expect(await waitUntil(() => panelLog().includes("stub panel listening"))).toBe(true);
     expect(panelLog()).toContain("stub pnpm start in panel");
@@ -609,11 +617,11 @@ describe("scripts/panel local TTS server control", () => {
     expect(await waitUntil(() => !alive(ctlPid), 5000)).toBe(true);
   });
 
-  it("the coreutils timeout path honours PANEL_TTS_SERVER_CTL_TIMEOUT", async () => {
+  // Only meaningful where coreutils `timeout` exists; the no-timeout fallback
+  // is covered by "a hanging TTS control script is cut off without timeout".
+  it.skipIf(!HAS_TIMEOUT)("the coreutils timeout path honours PANEL_TTS_SERVER_CTL_TIMEOUT", async () => {
     const pidFile = join(sandbox, "ctl.pid");
     writeHangingCtl(pidFile);
-    // Only meaningful where coreutils `timeout` exists; this suite runs on Linux.
-    expect(spawnSync("bash", ["-c", "command -v timeout"]).status).toBe(0);
 
     const t0 = Date.now();
     const started = runPanel("start", {
