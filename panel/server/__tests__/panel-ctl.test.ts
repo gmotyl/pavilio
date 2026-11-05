@@ -131,12 +131,13 @@ const BUILD_FAILS = ['echo "stub pnpm build: TS2345 the bundle is broken" >&2', 
   "\n    ",
 );
 
-function runPanel(command: string, extraEnv: Record<string, string> = {}) {
+function runPanel(command: string, extraEnv: Record<string, string> = {}, cwd?: string) {
   // The developer's own PANEL_TTS_SERVER_CTL, and the one in their real
   // ~/.panel/secrets.env, must never reach the sandbox: either would start or
   // stop the real local TTS server. The state dir is the sandbox's own.
   const { PANEL_TTS_SERVER_CTL: _ignored, ...inherited } = process.env;
   const res = spawnSync("bash", [join(repo, "scripts", "panel"), command], {
+    cwd,
     encoding: "utf8",
     env: {
       ...inherited,
@@ -508,6 +509,21 @@ describe("scripts/panel local TTS server control", () => {
     expect(ctlCalls()).toEqual(["start panel=down", "stop panel=down"]);
     expect(started.output).not.toMatch(/warning/i);
     expect(existsSync(sourcedMarker)).toBe(false);
+  });
+
+  it("resolves a relative PANEL_AUTH_STATE_DIR against panel/, as the server does", async () => {
+    writeCtl(ctl);
+    const relState = join(repo, "panel", "rel-state");
+    mkdirSync(relState, { recursive: true });
+    writeFileSync(join(relState, "secrets.env"), `PANEL_TTS_SERVER_CTL=${ctl}\n`);
+    // Run from elsewhere: `pnpm start` runs the script from the repo root, not panel/.
+    const env = { PANEL_AUTH_STATE_DIR: "rel-state" };
+
+    expect(runPanel("start", env, sandbox).status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(runPanel("stop", env, sandbox).status).toBe(0);
+
+    expect(ctlCalls()).toEqual(["start panel=down", "stop panel=down"]);
   });
 
   it("a failing TTS control script does not fail the panel", async () => {

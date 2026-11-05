@@ -144,7 +144,13 @@ tts_server_ctl_path() {
     printf '%s' "$PANEL_TTS_SERVER_CTL"
     return 0
   fi
-  local file="${PANEL_AUTH_STATE_DIR:-$HOME/.panel}/secrets.env" value
+  local dir="${PANEL_AUTH_STATE_DIR:-$HOME/.panel}" file value
+  # The server runs with cwd panel/, so a relative state dir is panel-relative.
+  case "$dir" in
+    /*) ;;
+    *) dir="$REPO_ROOT/panel/$dir" ;;
+  esac
+  file="$dir/secrets.env"
   [ -f "$file" ] || return 0
   value="$(grep -E '^PANEL_TTS_SERVER_CTL=' "$file" 2>/dev/null | tail -n 1)"
   value="${value#PANEL_TTS_SERVER_CTL=}"
