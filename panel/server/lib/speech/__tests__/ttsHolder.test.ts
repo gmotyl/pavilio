@@ -258,7 +258,7 @@ describe("server Tts holder", () => {
   it("warns without the value and stays off on an invalid kokoro address", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      for (const value of ["not a url", "ftp://127.0.0.1:8880"]) {
+      for (const value of ["not a url", "ftp://127.0.0.1:8880", "http://user:hunter2@127.0.0.1:8880"]) {
         warn.mockClear();
         const configs: TtsConfig[] = [];
         createTtsHolder({

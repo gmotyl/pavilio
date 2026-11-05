@@ -528,6 +528,37 @@ describe("/api/speech kokoro address", () => {
     expect(configs).toHaveLength(1);
   });
 
+  it("rejects an address carrying credentials without echoing it", async () => {
+    for (const id of ["openai", "kokoro"]) {
+      const { app, configs } = loadApp();
+      for (const baseUrl of ["http://user:hunter2@127.0.0.1:8880", "http://hunter2@127.0.0.1:8880", "http://:hunter2@127.0.0.1:8880"]) {
+        const res = await request(app).put(`/api/speech/keys/${id}`).set("Cookie", COOKIE).send({ baseUrl });
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: expect.stringMatching(/^baseUrl must be an http\(s\) URL/) });
+        expect(res.text).not.toContain("hunter2");
+      }
+      expect(secrets()).toBe("");
+      expect(configs).toHaveLength(1);
+    }
+  });
+
+  it("engines masks credentials in a hand-edited address", async () => {
+    vi.stubEnv("KOKORO_TTS_BASE_URL", "http://user:hunter2@127.0.0.1:8880");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { app } = loadApp();
+      const res = await request(app).get("/api/speech/engines").set("Cookie", COOKIE);
+      expect(res.text).not.toContain("hunter2");
+      expect(engine(res.body, "kokoro")).toMatchObject({
+        keySource: "env",
+        baseUrl: "http://***@127.0.0.1:8880",
+        status: { state: "no-key" },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("PUT keys/kokoro answers 409 when set in the environment", async () => {
     vi.stubEnv("KOKORO_TTS_BASE_URL", "http://10.0.0.5:8880");
     const { app, configs } = loadApp();

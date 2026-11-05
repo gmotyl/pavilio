@@ -75,6 +75,11 @@ function last4(value: string | undefined): string | undefined {
   return value && value.length > 8 ? value.slice(-4) : undefined;
 }
 
+/** A hand-edited address may carry `user:pass@`; the row shows it masked, never verbatim. */
+function maskCredentials(address: string): string {
+  return address.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)?[^/?#]*@/i, "$1***@");
+}
+
 export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router {
   const { holder, writeKeys = writeSecrets, catalog } = options;
   const labels = new Map(listEngines().map((e) => [e.id, e.label]));
@@ -108,7 +113,7 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
         // Shown even when it is not a URL (a hand-edited file), so it can be fixed.
         const address = resolveKey(ADDRESS_ENGINES[id]);
         info.keySource = address.source;
-        if (address.value) info.baseUrl = address.value;
+        if (address.value) info.baseUrl = maskCredentials(address.value);
       }
       if (isKeyed(id)) {
         const key = resolveKey(KEYED_ENGINES[id]);
@@ -149,7 +154,7 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
       const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
       if (!baseUrl || /[\r\n]/.test(baseUrl) || !isHttpUrl(baseUrl)) {
         const example = id === "kokoro" ? "http://127.0.0.1:8880" : "http://127.0.0.1:8890";
-        res.status(400).json({ error: `baseUrl must be an http(s) URL, e.g. ${example}` });
+        res.status(400).json({ error: `baseUrl must be an http(s) URL without credentials, e.g. ${example}` });
         return;
       }
       if (resolveKey(name).source === "env") {

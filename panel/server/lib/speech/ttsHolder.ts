@@ -42,7 +42,9 @@ const AZURE_REGION = /^[a-z0-9]+$/;
 /** The local engines' (`openai`, `kokoro`) address check: anything but an http(s) URL makes `createTts` throw. */
 export function isHttpUrl(value: string): boolean {
   try {
-    const { protocol } = new URL(value);
+    const { protocol, username, password } = new URL(value);
+    // Credentials would be stored in the clear and shown back in Settings.
+    if (username || password) return false;
     return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
@@ -103,7 +105,7 @@ function configFrom(
   if (baseUrl && !baseUrlOk) {
     // Names the variable only, like the Azure warning: the value is not logged.
     console.warn(
-      `[speech] OPENAI_TTS_BASE_URL is set but is not an http(s) URL ` +
+      `[speech] OPENAI_TTS_BASE_URL is set but is not an http(s) URL without credentials ` +
         `(e.g. "http://127.0.0.1:8890"): the openai engine stays off until it is fixed.`,
     );
   }
@@ -113,7 +115,7 @@ function configFrom(
   if (kokoroUrl && !kokoroUrlOk) {
     // Names the variable only: the value is not logged.
     console.warn(
-      `[speech] KOKORO_TTS_BASE_URL is set but is not an http(s) URL ` +
+      `[speech] KOKORO_TTS_BASE_URL is set but is not an http(s) URL without credentials ` +
         `(e.g. "http://127.0.0.1:8880"): the kokoro engine stays off until it is fixed.`,
     );
   }
