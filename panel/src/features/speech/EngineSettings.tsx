@@ -360,8 +360,9 @@ function EngineRow(props: EngineRowProps) {
       {id === "kokoro" && info?.keySource === "none" && (
         <p data-testid="engine-install-hint" className="text-xs mt-2" style={MUTED}>
           No Kokoro server yet: run{" "}
-          <code style={{ color: "var(--text-primary)" }}>pnpm install:kokoro</code>, then save its
-          address here.
+          <code style={{ color: "var(--text-primary)" }}>pnpm install:kokoro</code> (or{" "}
+          <code style={{ color: "var(--text-primary)" }}>bash scripts/install:kokoro</code> in a synced
+          workspace), then save its address here.
         </p>
       )}
       {id === "openai" && (

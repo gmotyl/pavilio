@@ -367,14 +367,14 @@ Set the address in **Settings → Speech** (the engine's address field) or as a 
 
 `PANEL_TTS_SERVER_CTL` names the server's control script (anything that takes `start|stop`). `pnpm start` runs `<ctl> start` and `pnpm stop` runs `<ctl> stop`; a missing script, a failure or a hang past `PANEL_TTS_SERVER_CTL_TIMEOUT` (default 60 s) costs one warning line, never the panel. It holds one script, so **one machine runs one local server** — pick one per machine.
 
-**Kokoro.** `pnpm install:kokoro` sets it up:
+**Kokoro.** `pnpm install:kokoro` sets it up (in a synced workspace, which has no root `package.json` script for it, run `bash scripts/install:kokoro`):
 
 - needs `git`, `uv` and `espeak-ng`, and prints the install command for any that are missing;
 - clones Kokoro-FastAPI at a pinned tag into `~/.local/share/pavilio/kokoro-fastapi` (or `$PAVILIO_KOKORO_DIR`) and writes `kokoroctl` (`start|stop|restart|status|log`) beside it; the server listens on `http://127.0.0.1:8880`, on the GPU (MPS) on macOS and on the CPU on Linux/WSL;
 - writes `KOKORO_TTS_BASE_URL` and `PANEL_TTS_SERVER_CTL` to the secrets file, but refuses to replace a `PANEL_TTS_SERVER_CTL` that names another server's script;
 - starts the server once to check it answers — the first start downloads the model, so this can take up to 300 s.
 
-Then restart the panel (`pnpm stop && pnpm start`); it starts and stops Kokoro itself from then on. Re-running the installer changes nothing that is already in place; `pnpm install:kokoro --uninstall` stops the server and removes its files and its secrets lines.
+Then restart the panel (`pnpm stop && pnpm start`); it starts and stops Kokoro itself from then on. Re-running the installer changes nothing that is already in place; `pnpm install:kokoro --uninstall` (or `bash scripts/install:kokoro --uninstall`) stops the server and removes its files and its secrets lines.
 
 Kokoro has a fixed catalog of 54 preset voices (default `af_heart`) and uses one voice for every language; there is no voice cloning — that stays with OmniVoice. It also has **no Polish phonemizer**: Polish text goes through its fallback and may sound off. To keep it away from Polish on a machine, switch `kokoro` off in that machine's cascade.
 

@@ -606,7 +606,10 @@ describe("EngineSettings", () => {
     expect(input).toHaveAttribute("placeholder", "http://127.0.0.1:8880");
     expect(scope.queryByLabelText("API key")).toBeNull();
     expect(scope.getByTestId("engine-status")).toHaveTextContent("no address · skipped");
-    expect(scope.getByTestId("engine-install-hint")).toHaveTextContent("pnpm install:kokoro");
+    const hint = scope.getByTestId("engine-install-hint");
+    expect(hint).toHaveTextContent("pnpm install:kokoro");
+    // A synced workspace has the mirrored wrapper but not the root package.json script.
+    expect(hint).toHaveTextContent("bash scripts/install:kokoro");
     // The OmniVoice control script is not Kokoro's.
     expect(scope.queryByTestId("engine-server-hint")).toBeNull();
     expect(scope.queryByTestId("engine-overage-hint")).toBeNull();
