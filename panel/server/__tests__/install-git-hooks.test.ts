@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -49,7 +49,8 @@ function runPrepare() {
 }
 
 beforeEach(() => {
-  sandbox = mkdtempSync(join(tmpdir(), "install-git-hooks-"));
+  // realpath: macOS tmpdir is a /var -> /private/var symlink and the stub logs the resolved $PWD.
+  sandbox = realpathSync(mkdtempSync(join(tmpdir(), "install-git-hooks-")));
   repo = join(sandbox, "repo");
   stubBin = join(sandbox, "bin");
   huskyLog = join(sandbox, "husky.log");
