@@ -6,11 +6,12 @@
  * `PAVILIO_KOKORO_DIR ?? ~/.local/share/pavilio/kokoro-fastapi`, writes a
  * `kokoroctl` (start|stop|restart|status|log) beside the clone, points the panel
  * secrets file at both (KOKORO_TTS_BASE_URL, PANEL_TTS_SERVER_CTL), then starts the
- * server once to prove it answers and stops it again. `scripts/panel` drives
+ * server once to prove it answers and stops it again (a server already running is
+ * only probed, or restarted onto a new ref, never stopped). `scripts/panel` drives
  * kokoroctl start/stop from then on.
  *
  * Re-running converges: same ref, same kokoroctl and same lines change nothing.
- * `--uninstall` stops the server, removes the dir, and removes each secrets line
+ * `--uninstall` stops the server, removes its own files (and the dir once empty), and removes each secrets line
  * only when it still names this install.
  *
  * Every side effect outside its own files (git, kokoroctl, fetch, clock) is
@@ -26,6 +27,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -47,6 +49,8 @@ const URL_VAR = "KOKORO_TTS_BASE_URL";
 const CTL_VAR = "PANEL_TTS_SERVER_CTL";
 const PREREQUISITES = ["git", "uv", "espeak-ng"];
 const CLONE_NAME = "Kokoro-FastAPI";
+// Everything the installer or kokoroctl puts in the install dir; uninstall removes only these.
+const OWN_ENTRIES = [CLONE_NAME, "kokoroctl", "kokoro.pid", "kokoro.log"];
 const LINE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
 
 /** The upstream start script for this platform; both honour HOST/PORT. */
@@ -72,13 +76,31 @@ export PORT=${KOKORO_PORT}
 # The panel may launch this with a minimal PATH; uv's installer and brew live here.
 export PATH="$PATH:$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin"
 
+# Whitespace squeezed: ps pads lstart, and read would trim it back off.
+started_at() {
+  ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'
+}
+
+# The pidfile holds the pid and its start time. A pid alone can be reused by an
+# unrelated process, which stop would then kill; so it must still lead its own
+# group and have started when recorded, else the pidfile is stale and goes.
 running() {
-  [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+  [ -f "$PIDFILE" ] || return 1
+  local pid recorded
+  { read -r pid; read -r recorded; } <"$PIDFILE"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && [ -n "$recorded" ] && kill -0 "$pid" 2>/dev/null \\
+    && [ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" = "$pid" ] \\
+    && [ "$(started_at "$pid")" = "$recorded" ]; then
+    PID="$pid"
+    return 0
+  fi
+  rm -f "$PIDFILE"
+  return 1
 }
 
 start() {
   if running; then
-    echo "kokoro: already running (pid $(cat "$PIDFILE"))"
+    echo "kokoro: already running (pid $PID)"
     return 0
   fi
   cd "$REPO" || { echo "kokoro: $REPO is missing" >&2; return 1; }
@@ -89,9 +111,10 @@ start() {
   # Own process group, so stop can take down the whole uv -> uvicorn tree.
   set -m
   nohup bash "./$START_SCRIPT" >>"$LOG" 2>&1 </dev/null &
-  echo $! >"$PIDFILE"
+  local pid=$!
   set +m
-  echo "kokoro: started (pid $(cat "$PIDFILE"), http://$HOST:$PORT, log $LOG)"
+  printf '%s\\n%s\\n' "$pid" "$(started_at "$pid")" >"$PIDFILE"
+  echo "kokoro: started (pid $pid, http://$HOST:$PORT, log $LOG)"
 }
 
 stop() {
@@ -100,8 +123,7 @@ stop() {
     echo "kokoro: not running"
     return 0
   fi
-  local pid i=0
-  pid="$(cat "$PIDFILE")"
+  local pid="$PID" i=0
   kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
   while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 40 ]; do
     sleep 0.25
@@ -118,7 +140,7 @@ case "\${1:-}" in
   restart) stop && start ;;
   status)
     if running; then
-      echo "kokoro: running (pid $(cat "$PIDFILE"), http://$HOST:$PORT)"
+      echo "kokoro: running (pid $PID, http://$HOST:$PORT)"
     else
       echo "kokoro: stopped"
       exit 3
@@ -231,23 +253,24 @@ function withValues(lines, entries) {
 
 /* ──────────────────────────────── the steps ──────────────────────────────── */
 
+/** `updated` is true when the checkout changed, so a running server needs a restart. */
 function cloneOrUpdate(git, installDir, cloneDir, log) {
   if (!existsSync(cloneDir)) {
     mkdirSync(installDir, { recursive: true });
     log(`kokoro: cloning ${KOKORO_FASTAPI_REPO} at ${KOKORO_FASTAPI_REF}`);
     const res = git(["clone", "-q", "--depth", "1", "--branch", KOKORO_FASTAPI_REF, KOKORO_FASTAPI_REPO, cloneDir]);
-    return res.status === 0 ? null : `git clone failed (exit ${res.status})`;
+    return res.status === 0 ? { updated: true } : { error: `git clone failed (exit ${res.status})` };
   }
   const current = git(["-C", cloneDir, "describe", "--tags", "--exact-match", "HEAD"]);
   if (current.status === 0 && current.stdout.trim() === KOKORO_FASTAPI_REF) {
     log(`kokoro: ${cloneDir} already at ${KOKORO_FASTAPI_REF}`);
-    return null;
+    return { updated: false };
   }
   log(`kokoro: updating ${cloneDir} to ${KOKORO_FASTAPI_REF}`);
   const fetched = git(["-C", cloneDir, "fetch", "-q", "--depth", "1", "origin", "tag", KOKORO_FASTAPI_REF]);
-  if (fetched.status !== 0) return `git fetch failed (exit ${fetched.status})`;
+  if (fetched.status !== 0) return { error: `git fetch failed (exit ${fetched.status})` };
   const checkedOut = git(["-C", cloneDir, "checkout", "-q", KOKORO_FASTAPI_REF]);
-  return checkedOut.status === 0 ? null : `git checkout failed (exit ${checkedOut.status})`;
+  return checkedOut.status === 0 ? { updated: true } : { error: `git checkout failed (exit ${checkedOut.status})` };
 }
 
 function writeKokoroctl(ctlPath, platform) {
@@ -300,7 +323,14 @@ export async function main(
 
   if (argv.includes("--uninstall")) {
     if (existsSync(ctlPath)) ctl(ctlPath, "stop");
-    rmSync(installDir, { recursive: true, force: true });
+    // Only what the installer and kokoroctl create; the dir may hold other files.
+    for (const name of OWN_ENTRIES) rmSync(join(installDir, name), { recursive: true, force: true });
+    try {
+      rmdirSync(installDir);
+    } catch (e) {
+      if (e.code === "ENOTEMPTY" || e.code === "EEXIST") log(`kokoro: kept ${installDir}; it holds files this installer did not create`);
+      else if (e.code !== "ENOENT") throw e;
+    }
     const lines = readSecretLines(secretsFile);
     const kept = lines.filter((line) => {
       const match = LINE.exec(line);
@@ -332,9 +362,9 @@ export async function main(
     return 1;
   }
 
-  const gitError = cloneOrUpdate(git, installDir, cloneDir, log);
-  if (gitError) {
-    error(`kokoro: ${gitError}`);
+  const checkout = cloneOrUpdate(git, installDir, cloneDir, log);
+  if (checkout.error) {
+    error(`kokoro: ${checkout.error}`);
     return 1;
   }
   writeKokoroctl(ctlPath, platform);
@@ -349,15 +379,29 @@ export async function main(
     error(`kokoro: warning: ${URL_VAR}=${env[URL_VAR]} in the environment overrides the secrets file`);
   }
 
-  log(`kokoro: starting the server to check it answers (the first start downloads the model; up to ${PROBE_TIMEOUT_MS / 1000} s)`);
-  const started = ctl(ctlPath, "start");
-  const answered = started.status === 0 && (await probe({ fetch, now, sleep }));
-  ctl(ctlPath, "stop");
+  // A server already up (likely the panel's) stays up: restarted only onto a new
+  // checkout, never stopped. Otherwise start it just for the probe.
+  const wasRunning = ctl(ctlPath, "status").status === 0;
+  let launched;
+  if (wasRunning && checkout.updated) {
+    log(`kokoro: restarting the running server on ${KOKORO_FASTAPI_REF}`);
+    launched = ctl(ctlPath, "restart");
+  } else if (wasRunning) {
+    log("kokoro: server already running; checking it answers");
+    launched = { status: 0 };
+  } else {
+    log(`kokoro: starting the server to check it answers (the first start downloads the model; up to ${PROBE_TIMEOUT_MS / 1000} s)`);
+    launched = ctl(ctlPath, "start");
+  }
+  const answered = launched.status === 0 && (await probe({ fetch, now, sleep }));
+  if (!wasRunning) ctl(ctlPath, "stop");
   if (!answered) {
     error(`kokoro: the server did not answer at ${KOKORO_ADDRESS}; see ${logPath}`);
     return 1;
   }
-  log(`kokoro: installed; ${KOKORO_ADDRESS} answered, server stopped (\`pnpm start\` starts it with the panel)`);
+  log(`kokoro: installed; ${KOKORO_ADDRESS} answered${wasRunning ? "" : ", server stopped"}`);
+  // The panel caches secrets at boot, so it only sees the new lines after a restart.
+  log("kokoro: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Kokoro itself)");
   return 0;
 }
 

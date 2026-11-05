@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -69,6 +69,7 @@ function snapshot(dir = root): Record<string, string> {
  */
 function fakes(overrides: Record<string, unknown> = {}) {
   const calls = { git: [] as string[], ctl: [] as string[], fetch: [] as string[] };
+  const server = { running: false };
   const clock = { now: 0 };
   const output: string[] = [];
   const git = (args: string[]) => {
@@ -106,6 +107,8 @@ function fakes(overrides: Record<string, unknown> = {}) {
     ctl: (path: string, verb: string) => {
       expect(path).toBe(ctlPath);
       calls.ctl.push(verb);
+      // kokoroctl status exits 3 when stopped.
+      if (verb === "status") return { status: server.running ? 0 : 3 };
       return { status: 0 };
     },
     fetch: async (url: string) => {
@@ -120,7 +123,7 @@ function fakes(overrides: Record<string, unknown> = {}) {
     error: (line: string) => output.push(line),
     ...overrides,
   };
-  return { deps, calls, clock, output: () => output.join("\n") };
+  return { deps, calls, clock, server, output: () => output.join("\n") };
 }
 
 describe("install:kokoro", () => {
@@ -145,7 +148,7 @@ describe("install:kokoro", () => {
     expect(readFileSync(join(stateDir, backup), "utf8")).toBe("ELEVENLABS_API_KEY=abc\n");
 
     expect(calls.fetch).toContain(`${ADDRESS}/v1/audio/voices`);
-    expect(calls.ctl).toEqual(["start", "stop"]);
+    expect(calls.ctl).toEqual(["status", "start", "stop"]);
   });
 
   it("missing prerequisite prints the install command and writes nothing", async () => {
@@ -198,6 +201,35 @@ describe("install:kokoro", () => {
     expect(again.calls.git.filter((c) => /clone|fetch|checkout/.test(c))).toEqual([]);
   });
 
+  it("a server that is already running is probed, never stopped", async () => {
+    expect(await main([], fakes().deps)).toBe(0);
+
+    const again = fakes();
+    again.server.running = true;
+    expect(await main([], again.deps)).toBe(0);
+
+    expect(again.calls.ctl).toEqual(["status"]);
+    expect(again.calls.fetch).toContain(`${ADDRESS}/v1/audio/voices`);
+  });
+
+  it("a ref change restarts a running server instead of stopping it", async () => {
+    expect(await main([], fakes().deps)).toBe(0);
+    writeFileSync(join(installDir, "Kokoro-FastAPI", ".git", "FAKE_REF"), "v0.0.1");
+
+    const again = fakes();
+    again.server.running = true;
+    expect(await main([], again.deps)).toBe(0);
+
+    expect(again.calls.ctl).toEqual(["status", "restart"]);
+    expect(readFileSync(join(installDir, "Kokoro-FastAPI", ".git", "FAKE_REF"), "utf8")).toBe(KOKORO_FASTAPI_REF);
+  });
+
+  it("final message says to restart the panel", async () => {
+    const { deps, output } = fakes();
+    expect(await main([], deps)).toBe(0);
+    expect(output()).toContain("pnpm stop && pnpm start");
+  });
+
   it("probe timeout stops the server and keeps the install", async () => {
     const { deps, calls, clock, output } = fakes({
       fetch: async () => {
@@ -208,7 +240,7 @@ describe("install:kokoro", () => {
     expect(await main([], deps)).not.toBe(0);
 
     expect(clock.now).toBeGreaterThanOrEqual(300_000);
-    expect(calls.ctl).toEqual(["start", "stop"]);
+    expect(calls.ctl).toEqual(["status", "start", "stop"]);
     expect(output()).toContain(join(installDir, "kokoro.log"));
     expect(existsSync(ctlPath)).toBe(true);
     const secrets = readFileSync(secretsFile, "utf8");
@@ -233,45 +265,117 @@ describe("install:kokoro", () => {
     expect(readFileSync(secretsFile, "utf8")).toBe("KOKORO_TTS_BASE_URL=http://gpu-box:8880\nB=2\n");
   });
 
-  it("kokoroctl picks the platform start script", async () => {
+  it("uninstall leaves files it did not create", async () => {
+    expect(await main([], fakes().deps)).toBe(0);
+    writeFileSync(join(installDir, "kokoro.log"), "log\n");
+    writeFileSync(join(installDir, "kokoro.pid"), "1\n");
+    writeFileSync(join(installDir, "notes.txt"), "mine\n");
+
+    expect(await main(["--uninstall"], fakes().deps)).toBe(0);
+
+    expect(readdirSync(installDir)).toEqual(["notes.txt"]);
+  });
+
+  it("kokoroctl picks the platform start script and stops the whole tree", async () => {
     for (const [platform, script] of [
       ["darwin", "start-gpu_mac.sh"],
       ["linux", "start-cpu.sh"],
     ]) {
-      const dir = join(root, platform);
-      const repo = join(dir, "Kokoro-FastAPI");
-      const bin = join(dir, "bin");
-      const marker = join(dir, "started");
-      mkdirSync(repo, { recursive: true });
-      mkdirSync(bin);
-      for (const name of ["start-gpu_mac.sh", "start-cpu.sh"]) {
-        writeFileSync(
-          join(repo, name),
-          `#!/bin/bash\necho "${name} $(pwd -P) $HOST $PORT" > "${marker}"\nexec sleep 30\n`,
-        );
-      }
-      writeFileSync(join(bin, "uv"), `#!/bin/bash\n[ "$1" = venv ] && mkdir .venv\nexit 0\n`);
-      chmodSync(join(bin, "uv"), 0o755);
-      const ctl = join(dir, "kokoroctl");
-      writeFileSync(ctl, kokoroctlScript({ platform }));
-      chmodSync(ctl, 0o755);
-      const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
-      const run = (verb: string) => spawnSync(ctl, [verb], { env, encoding: "utf8", timeout: 20_000 });
+      const box = ctlSandbox(platform);
 
-      expect(run("start").status).toBe(0);
-      for (let i = 0; i < 100 && !existsSync(marker); i++) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      expect(box.run("start").status).toBe(0);
+      await until(() => existsSync(box.child));
       try {
-        expect(readFileSync(marker, "utf8").trim()).toBe(`${script} ${realpathSync(repo)} 127.0.0.1 8880`);
-        expect(existsSync(join(repo, ".venv"))).toBe(true);
-        expect(run("status").status).toBe(0);
+        expect(readFileSync(box.marker, "utf8").trim()).toBe(`${script} ${realpathSync(box.repo)} 127.0.0.1 8880`);
+        expect(existsSync(join(box.repo, ".venv"))).toBe(true);
+        expect(box.run("status").status).toBe(0);
       } finally {
-        const pid = Number(readFileSync(join(dir, "kokoro.pid"), "utf8"));
-        expect(run("stop").status).toBe(0);
-        expect(() => process.kill(pid, 0)).toThrow();
+        const pid = pidOf(box.pidfile);
+        const child = Number(readFileSync(box.child, "utf8"));
+        expect(box.run("stop").status).toBe(0);
+        expect(alive(pid)).toBe(false);
+        // A backgrounded child of the start script dies too: stop kills the group.
+        await until(() => !alive(child));
+        expect(alive(child)).toBe(false);
       }
-      expect(run("status").status).not.toBe(0);
+      expect(box.run("status").status).not.toBe(0);
+    }
+  });
+
+  it("kokoroctl treats a pidfile naming an unrelated process as stale", async () => {
+    const box = ctlSandbox("darwin");
+    // Own process group, like a real server, so only identity tells them apart.
+    const stranger = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    stranger.unref();
+    const strangerPid = stranger.pid as number;
+    // A reused pid: alive and leading its group, but not started when recorded.
+    const stale = `${strangerPid}\nThu Jan 1 00:00:00 1970\n`;
+    try {
+      writeFileSync(box.pidfile, stale);
+
+      expect(box.run("status").status).not.toBe(0);
+      writeFileSync(box.pidfile, stale);
+      expect(box.run("start").stdout).not.toContain("already running");
+      await until(() => existsSync(box.child));
+      expect(pidOf(box.pidfile)).not.toBe(strangerPid);
+
+      writeFileSync(box.pidfile, stale);
+      expect(box.run("stop").status).toBe(0);
+      expect(alive(strangerPid)).toBe(true);
+    } finally {
+      try {
+        process.kill(strangerPid, "SIGKILL");
+      } catch {}
+      // The real start launched above: take its group down by the child's pgid.
+      if (existsSync(box.child)) {
+        try {
+          process.kill(Number(readFileSync(box.child, "utf8")), "SIGKILL");
+        } catch {}
+      }
     }
   });
 });
+
+/** A kokoroctl beside a fake repo whose start script backgrounds a child and waits. */
+function ctlSandbox(platform: string) {
+  const dir = join(root, platform);
+  const repo = join(dir, "Kokoro-FastAPI");
+  const bin = join(dir, "bin");
+  const marker = join(dir, "started");
+  const child = join(dir, "child");
+  mkdirSync(repo, { recursive: true });
+  mkdirSync(bin);
+  for (const name of ["start-gpu_mac.sh", "start-cpu.sh"]) {
+    writeFileSync(
+      join(repo, name),
+      `#!/bin/bash\necho "${name} $(pwd -P) $HOST $PORT" > "${marker}"\nsleep 30 &\necho $! > "${child}.tmp"\nmv "${child}.tmp" "${child}"\nwait\n`,
+    );
+  }
+  writeFileSync(join(bin, "uv"), `#!/bin/bash\n[ "$1" = venv ] && mkdir .venv\nexit 0\n`);
+  chmodSync(join(bin, "uv"), 0o755);
+  const ctl = join(dir, "kokoroctl");
+  writeFileSync(ctl, kokoroctlScript({ platform }));
+  chmodSync(ctl, 0o755);
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const run = (verb: string) => spawnSync(ctl, [verb], { env, encoding: "utf8", timeout: 20_000 });
+  return { repo, marker, child, pidfile: join(dir, "kokoro.pid"), run };
+}
+
+function pidOf(pidfile: string): number {
+  return Number(readFileSync(pidfile, "utf8").split("\n")[0]);
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function until(done: () => boolean) {
+  for (let i = 0; i < 100 && !done(); i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
