@@ -356,6 +356,28 @@ The files are gitignored in this repository (they would carry your project names
 
 In a Quick Start clone (clone mode) that ignore stays in force: the workspace *is* a pavilio clone, so `.pavilio/preferences/` is never committed there, per-machine files do not travel between machines, and seeding from the mirror or **Copy preferences from another machine** has nothing to offer. The multi-machine setup is a sync-mode workspace (see **Teams: a private workspace tracking upstream**).
 
+### Local speech servers
+
+Two speech engines talk to a server on your own machine, and each is turned on by its address:
+
+- `openai` — any OpenAI-compatible speech server (OmniVoice, for one): `OPENAI_TTS_BASE_URL`.
+- `kokoro` — a local [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI): `KOKORO_TTS_BASE_URL`.
+
+Set the address in **Settings → Speech** (the engine's address field) or as a line in the panel secrets file, `~/.panel/secrets.env` (`$PANEL_AUTH_STATE_DIR/secrets.env` when that is set). A variable in the panel's environment wins over both, and the field then shows it read-only. The cascade tries `openai`, then `kokoro`, then the cloud engines, with `edge` last; an engine without an address is skipped.
+
+`PANEL_TTS_SERVER_CTL` names the server's control script (anything that takes `start|stop`). `pnpm start` runs `<ctl> start` and `pnpm stop` runs `<ctl> stop`; a missing script, a failure or a hang past `PANEL_TTS_SERVER_CTL_TIMEOUT` (default 60 s) costs one warning line, never the panel. It holds one script, so **one machine runs one local server** — pick one per machine.
+
+**Kokoro.** `pnpm install:kokoro` sets it up:
+
+- needs `git`, `uv` and `espeak-ng`, and prints the install command for any that are missing;
+- clones Kokoro-FastAPI at a pinned tag into `~/.local/share/pavilio/kokoro-fastapi` (or `$PAVILIO_KOKORO_DIR`) and writes `kokoroctl` (`start|stop|restart|status|log`) beside it; the server listens on `http://127.0.0.1:8880`, on the GPU (MPS) on macOS and on the CPU on Linux/WSL;
+- writes `KOKORO_TTS_BASE_URL` and `PANEL_TTS_SERVER_CTL` to the secrets file, but refuses to replace a `PANEL_TTS_SERVER_CTL` that names another server's script;
+- starts the server once to check it answers — the first start downloads the model, so this can take up to 300 s.
+
+Then restart the panel (`pnpm stop && pnpm start`); it starts and stops Kokoro itself from then on. Re-running the installer changes nothing that is already in place; `pnpm install:kokoro --uninstall` stops the server and removes its files and its secrets lines.
+
+Kokoro has a fixed catalog of 54 preset voices (default `af_heart`) and uses one voice for every language; there is no voice cloning — that stays with OmniVoice. It also has **no Polish phonemizer**: Polish text goes through its fallback and may sound off. To keep it away from Polish on a machine, switch `kokoro` off in that machine's cascade.
+
 ## Agent Tracking
 
 The `scripts/cc` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.
