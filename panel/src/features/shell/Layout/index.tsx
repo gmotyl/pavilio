@@ -1,10 +1,12 @@
-import { useContext, useRef, type ReactNode } from "react";
+import { useContext, useEffect, useRef, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { PanelRight } from "lucide-react";
 import { Breadcrumbs } from "../Breadcrumbs";
 import LeftSidebar from "../LeftSidebar";
 import SidebarHamburger from "../SidebarHamburger";
 import RightSidebar from "../RightSidebar";
 import { useSidebarState } from "../useSidebarState";
+import { useIsMobile } from "../useIsMobile";
 import { useEdgeSwipe } from "../useEdgeSwipe";
 import PaneResizer from "../PaneResizer";
 import useResizablePane, { type PaneBounds } from "../useResizablePane";
@@ -86,6 +88,28 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const left = useSidebarState("leftSidebar");
   const right = useSidebarState("rightSidebar");
+  const location = useLocation();
+  const isMobile = useIsMobile();
+
+  /**
+   * On a phone the left sidebar is a menu over the page: any navigation while
+   * it is open closes it. Keyed on `location.key`, not the pathname, because a
+   * tap on the project already shown pushes the same path under a new key — and
+   * that tap should close the menu too. Non-navigating controls (chevron, star,
+   * new terminal) never move the key, so they need no exemption list.
+   *
+   * The first run is the mount, not a navigation, and is skipped. Desktop is a
+   * stored preference rather than an overlay and is never touched here; the
+   * mobile fold `setExpanded(false)` writes is transient, so nothing is stored.
+   */
+  const lastLocationKey = useRef(location.key);
+  useEffect(() => {
+    if (lastLocationKey.current === location.key) return;
+    lastLocationKey.current = location.key;
+    if (isMobile && left.expanded) left.setExpanded(false);
+    // `isMobile` and `left` re-run the effect, but the key guard above makes
+    // those runs no-ops: only a navigation closes the sidebar.
+  }, [location.key, isMobile, left]);
   const leftPane = useResizablePane(preferences.leftSidebarWidth, LEFT_BOUNDS);
   const rightPane = useResizablePane(preferences.rightSidebarWidth, RIGHT_BOUNDS);
   const scrollRef = useRef<HTMLDivElement>(null);
