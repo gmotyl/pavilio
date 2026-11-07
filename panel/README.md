@@ -58,7 +58,7 @@ exactly why: a `VITE_*` variable would be baked in at build time and need one.
 
 ## Agent Tracking
 
-Use `scripts/cc` instead of `claude` and `scripts/oc` instead of `opencode`. The wrapper scripts register/deregister sessions in `~/.agent-registry.json`, which the panel sidebar reads to show live agent status.
+Use `scripts/ccl` instead of `claude` and `scripts/oc` instead of `opencode`. The wrapper scripts register/deregister sessions in `~/.agent-registry.json`, which the panel sidebar reads to show live agent status.
 
 ## LAN Access with Token Auth + HTTPS
 

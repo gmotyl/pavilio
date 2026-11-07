@@ -321,7 +321,7 @@ my-workspace/
 │       ├── progress/    # Session progress tracking
 │       └── plans/       # Design docs + implementation plans
 ├── commands/            # CLI command definitions
-├── scripts/             # Utility scripts (cc, oc, backup, etc.)
+├── scripts/             # Utility scripts (ccl, oc, backup, etc.)
 ├── AGENTS.md            # Agent instructions
 └── CLAUDE.md            # Claude Code configuration
 ```
@@ -380,11 +380,11 @@ Kokoro has a fixed catalog of 54 preset voices (default `af_heart`) and uses one
 
 ## Agent Tracking
 
-The `scripts/cc` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.
+The `scripts/ccl` and `scripts/oc` wrapper scripts launch Claude Code and OpenCode while registering the session in a shared registry file.
 
 How it works:
 
-1. Run `cc` instead of `claude` — the wrapper captures the PID and writes an entry to `~/.agent-registry.json`
+1. Run `ccl` (or `scripts/ccl` when `scripts/` is not on your `PATH`) instead of `claude` — the wrapper captures the PID and writes an entry to `~/.agent-registry.json`
 2. On exit, the wrapper removes the entry automatically
 3. The panel sidebar polls the registry and shows live agent status
 
