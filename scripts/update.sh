@@ -458,9 +458,14 @@ fi
 #                    masked by the destination's umask or default ACL;
 #   --executability  ...but the executable bit still follows upstream;
 #   --no-group       files keep the workspace group; new ones get the directory's
-#                    (setgid) or the caller's.
+#                    (setgid) or the caller's;
+#   --no-owner       never stamp the upstream clone's owner. -a implies -o, which
+#                    only bites a privileged pull: run as root it would hand every
+#                    synced file to that owner. A replaced file still becomes the
+#                    caller's (rsync writes a temp file and renames it), so the
+#                    kept group and mode are what keep it writable to the others.
 # On a single-user workspace this changes nothing anyone can see.
-SYNC_RSYNC=(rsync -a --no-perms --executability --no-group)
+SYNC_RSYNC=(rsync -a --no-perms --executability --no-group --no-owner)
 
 echo ""
 echo "Syncing panel/..."
