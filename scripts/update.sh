@@ -448,6 +448,25 @@ if ! git -C "$UPSTREAM_DIR" merge --ff-only FETCH_HEAD --quiet; then
   exit 1
 fi
 
+# Copy content, not ownership. Plain `rsync -a` also stamps the upstream clone's
+# owner, group and mode bits onto every synced file — unchanged ones included, on
+# every pull. A workspace shared between accounts through a group (setgid dirs,
+# default ACLs, g+w) is closed again each time: panel/, skills/, scripts/ and
+# commands/ come back as the clone's root:root 755 and the other accounts' agents
+# hit EACCES. So:
+#   --no-perms       existing files keep their mode; new ones get upstream's mode
+#                    masked by the destination's umask or default ACL;
+#   --executability  ...but the executable bit still follows upstream;
+#   --no-group       files keep the workspace group; new ones get the directory's
+#                    (setgid) or the caller's;
+#   --no-owner       never stamp the upstream clone's owner. -a implies -o, which
+#                    only bites a privileged pull: run as root it would hand every
+#                    synced file to that owner. A replaced file still becomes the
+#                    caller's (rsync writes a temp file and renames it), so the
+#                    kept group and mode are what keep it writable to the others.
+# On a single-user workspace this changes nothing anyone can see.
+SYNC_RSYNC=(rsync -a --no-perms --executability --no-group --no-owner)
+
 echo ""
 echo "Syncing panel/..."
 # --delete: panel/ is a pure mirror, so a file retired upstream must disappear
@@ -492,7 +511,7 @@ if [ "$(readlink -f "$UPSTREAM_DIR/panel")" = "$(readlink -f "$REPO_ROOT/panel")
   echo "Error: source and destination panel/ resolve to the same directory — refusing to sync."
   exit 1
 fi
-rsync -a --delete --max-delete=100 \
+"${SYNC_RSYNC[@]}" --delete --max-delete=100 \
   --exclude='node_modules/' \
   --exclude='dist/' \
   --exclude='.DS_Store' \
@@ -502,7 +521,7 @@ rsync -a --delete --max-delete=100 \
 
 echo "Syncing skills/..."
 mkdir -p "$REPO_ROOT/skills"
-rsync -a \
+"${SYNC_RSYNC[@]}" \
   --exclude='.DS_Store' \
   "$UPSTREAM_DIR/skills/" "$REPO_ROOT/skills/"
 # skills/ is synced without --delete (it holds private downstream skills), so a skill retired
@@ -525,13 +544,13 @@ fi
 
 if [ -d "$UPSTREAM_DIR/commands" ]; then
   echo "Syncing commands/..."
-  rsync -a \
+  "${SYNC_RSYNC[@]}" \
     --exclude='.DS_Store' \
     "$UPSTREAM_DIR/commands/" "$REPO_ROOT/commands/"
 fi
 
 echo "Syncing scripts/..."
-rsync -a \
+"${SYNC_RSYNC[@]}" \
   --exclude='.DS_Store' \
   "$UPSTREAM_DIR/scripts/" "$REPO_ROOT/scripts/"
 

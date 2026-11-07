@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
+  chownSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -679,6 +682,60 @@ describe("scripts/update.sh sync commit", () => {
     expect(status).toBe(0);
     expect(output).toMatch(/not a git repo/);
     expect(output).toMatch(/^Done\./m);
+  });
+});
+
+describe("scripts/update.sh file modes", () => {
+  const mode = (...p: string[]) => statSync(join(dest, ...p)).mode & 0o7777;
+
+  it("keeps the workspace's own modes on synced paths, but follows upstream's executable bit", () => {
+    initDestRepo();
+    // A workspace shared between accounts: setgid, group-writable dirs and files.
+    mkdirSync(join(dest, "skills"), { recursive: true });
+    mkdirSync(join(dest, "scripts"), { recursive: true });
+    writeFileSync(join(dest, "skills", "demo.md"), "# old\n");
+    writeFileSync(join(dest, "scripts", "noop.sh"), "#!/bin/bash\n");
+    chmodSync(join(dest, "skills"), 0o2775);
+    chmodSync(join(dest, "skills", "demo.md"), 0o664);
+    chmodSync(join(dest, "scripts", "noop.sh"), 0o664);
+    // Upstream: plain 755/644, and noop.sh turns executable.
+    chmodSync(join(upstream, "skills"), 0o755);
+    chmodSync(join(upstream, "skills", "demo.md"), 0o644);
+    chmodSync(join(upstream, "scripts", "noop.sh"), 0o755);
+    commitUpstream("noop.sh executable");
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(readFileSync(join(dest, "skills", "demo.md"), "utf8")).toBe("# demo\n");
+    expect(mode("skills").toString(8)).toBe("2775");
+    expect(mode("skills", "demo.md").toString(8)).toBe("664");
+    expect(mode("scripts", "noop.sh") & 0o111).not.toBe(0);
+    expect(mode("scripts", "noop.sh") & 0o020).not.toBe(0);
+  });
+
+  // Only root can hand a file to another uid, so only a privileged pull can
+  // stamp upstream's owner — which is exactly the case this guards. rsync
+  // replaces a changed file (temp + rename), so it ends up the caller's, not
+  // the old owner's; the group and mode are what keep it writable to the others.
+  it.skipIf(process.getuid?.() !== 0)("never stamps upstream's owner when the pull runs as root", () => {
+    initDestRepo();
+    mkdirSync(join(dest, "skills"), { recursive: true });
+    writeFileSync(join(dest, "skills", "demo.md"), "# old\n");
+    chownSync(join(dest, "skills"), 4343, 4343);
+    chmodSync(join(dest, "skills"), 0o2775);
+    chownSync(join(dest, "skills", "demo.md"), 4343, 4343);
+    chmodSync(join(dest, "skills", "demo.md"), 0o664);
+    chownSync(join(upstream, "skills", "demo.md"), 4242, 4242);
+
+    const { status, output } = runUpdate();
+
+    expect(status, output).toBe(0);
+    expect(readFileSync(join(dest, "skills", "demo.md"), "utf8")).toBe("# demo\n");
+    const st = statSync(join(dest, "skills", "demo.md"));
+    expect(st.uid).not.toBe(4242);
+    expect(st.gid).toBe(4343);
+    expect((st.mode & 0o7777).toString(8)).toBe("664");
   });
 });
 
