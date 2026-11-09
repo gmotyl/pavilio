@@ -24,25 +24,48 @@ Start work on a project by loading context, checking in-progress plans, and ente
 
 If the resolved folder is missing, say so and re-resolve via `.projects.local.md` — never guess a sibling path like `<root>/<name>/`.
 
-**Then follow the lazy start logic.** With no task known yet, read only the two files below and nothing else — no git history, no `CONTEXT.md`, no `adr/`, no wiki pages, no repo code, no `tasks.md`:
+**Then follow the lazy start logic.** With no task known yet, read only the two files below plus the frontmatter of each active change's `proposal.md`, and nothing else — no git history beyond change ages, no `CONTEXT.md`, no `adr/`, no wiki pages, no repo code, no `tasks.md`, specs or `design.md`:
 
 1. Load the most recent progress file from `<root>/projects/[project]/progress/`
 2. Read `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; capped at 60 lines for exactly this read). `STATUS.md` is **not** read at start; it holds meeting-driven state for [[pavilio-question]] / [[pavilio-manager]]. Read it only when the session turns out to be meeting prep or a status question.
-3. Derive **active work** by listing the **names** of the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). Do not open their files at this point. There is no active-plan pointer file to read.
+3. Derive **active work** by listing the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read. For each one, read **only the frontmatter** of its `proposal.md` — the Change summary (`title`, `summary`) — all of them in **one shell pass**, e.g.:
+
+   ```bash
+   for d in <changes-dir>/*/; do [ "$d" = "<changes-dir>/archive/" ] && continue
+     echo "== $d"; [ -f "$d/proposal.md" ] && awk 'NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} NR>1' "$d/proposal.md"
+   done
+   ```
+
+   Do not open `tasks.md`, specs or `design.md`, and nothing below the frontmatter — except in the one-time backfill (below) for a change that has no Change summary yet.
 4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Only the fast-entry variant skips this.
 5. **Branch on the active changes found:**
 
    **None** → After the summary, ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
 
-   **One active change** → After the summary, show:
+   **One active change** → After the summary, render the **change table** (below) with its one row, followed by:
    ```
-   In-progress change: <change-id>
-
    Continue this change, or do you have a different task?
    ```
    Wait for reply. If confirmed → the task is known: load its scope (below), read that change's `tasks.md` for the next unchecked task, and enter the workflow at **step 3: Execute**. If new task → treat as fast-entry with task description.
 
-   **Multiple active changes** → After the summary, show the change names as a numbered markdown list per [[pavilio-ask]] (blank line before it, one item per change), wait for selection.
+   **Multiple active changes** → After the summary, render the **change table** (below), one row per change, and wait for selection. The `#` column is the selection key — the user may reply `1` (numbered candidates, [[pavilio-ask]] §4). Once a change is picked, name it by its slug in the next line.
+
+   **Change table** — columns `#`, `Title`, `Description`, `Age`; rows sorted by age, **newest first**; no slug column. Put a blank line before it:
+
+   ```markdown
+   | # | Title | Description | Age |
+   |---|---|---|---|
+   | 1 | Per-machine preferences | Two panels on one workspace stop overwriting each other's preferences … | 6 days |
+   ```
+
+   - **Title** = frontmatter `title`; **Description** = frontmatter `summary`. A Title cell never holds a date prefix, a raw slug (when a Change summary exists) or a `Change:`/`Proposal:` prefix.
+   - **Age** source, in order: the dir's `YYYY-MM-DD-` prefix → else `git log --diff-filter=A --format=%as -- <dir> | tail -1` (the dir's first-add date) → else `—`. Buckets: under 1 day → `today`; under 14 days → `N days`; under 8 weeks → `N weeks`; under 24 months → `N months`; else `N years`.
+
+   **Backfill (once per change)** — before rendering, for every active change missing a Change summary (see [[pavilio-openspec-storage]] § Proposal frontmatter):
+   - `proposal.md` lacks `title` or `summary` → derive them from its H1 and the first `## Why` paragraph and write them into the frontmatter (add the block above the H1 if absent), **keeping any field that already exists**.
+   - No `proposal.md` but a `design.md` → derive them from `design.md`'s H1 and first paragraph and create a minimal `proposal.md`: the frontmatter, an H1 `# Change: <slug>`, and the line `Backfilled at session start — the design lives in [design.md](design.md).`
+   - Neither file → write nothing; the row shows a slug-derived title (date prefix dropped, dashes to spaces, sentence case) and `—` as Description.
+   - Any backfill written → commit all of them in **one** commit, `pavilio: backfill change summaries`, before rendering the table — workspace auto-sync sweeps dirty edits otherwise. Nothing backfilled → no commit, so a second start writes nothing.
 
 **Once the task is known** (reply to the question above, a selected change, or fast-entry), load context for that scope only, guided by `PROJECT.md`:
 - `CONTEXT.md` (if present) — the project glossary; with `wiki/`, walk on from it per `skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` (the reading ladder: wiki index → ≤2 section indexes → ≤3 pages, no logging) instead of sweeping notes; no `wiki/` → `CONTEXT.md` whole, as before
@@ -114,4 +137,5 @@ Rules for the rename:
 - Use the `context-mode` MCP (`ctx_search`, `ctx_execute`, `ctx_execute_file`) for codebase exploration and any operation that would otherwise dump a large output into context. Do **not** fall back to `ls`/`find`/glob browsing. If `context-mode` is not installed, prompt the user to install it from https://github.com/mksglu/context-mode and run `/context-mode:ctx-doctor` to verify.
 - Classify the intent before picking a workflow — **build work** begins with Design ([[pavilio-grill]]) and never jumps straight to code; **questions, meeting prep, note-digging, reviews, memos** skip grill entirely and are answered directly
 - Keep the in-session progress file focused on resume-context, not a transcript
+- Active changes are always shown as the change table (`#`, Title, Description, Age, newest first), read from `proposal.md` frontmatter only; a missing Change summary is backfilled once and committed as `pavilio: backfill change summaries`
 - A `-wip.md` progress file must be renamed to its real theme as soon as that theme exists — same session, without being asked
