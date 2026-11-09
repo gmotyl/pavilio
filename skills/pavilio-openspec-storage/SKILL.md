@@ -17,7 +17,7 @@ Pavilio follows OpenSpec's native layout in every backend. There is no second Pa
 openspec/
   changes/
     <change-id>/                 — one active (un-archived) change
-      proposal.md                — the why/what (from pavilio-grill)
+      proposal.md                — the why/what, opens with title/summary frontmatter (from pavilio-grill)
       design.md                  — technical design; KEEPS mermaid diagrams (from pavilio-grill)
       tasks.md                   — test-first implementation contract (from pavilio-writing-plans)
       specs/
@@ -29,6 +29,23 @@ openspec/
 ```
 
 **Active vs archived is directory location, not a pointer file.** A change directory under `openspec/changes/` that is **not** under `changes/archive/` is the active/current change. There is **no `CURRENT.md`** and no star pin — active work is *derived* from un-archived change dirs.
+
+### Proposal frontmatter
+
+Every `proposal.md` starts with a YAML frontmatter block above its H1 — the **Change summary**, used to list the change (e.g. by [[pavilio-session-start]]):
+
+```yaml
+---
+title: Composer draft lost when an answer arrives
+summary: Text typed in the composer while the agent streams can vanish when the answer lands. Find the race and keep the draft.
+---
+```
+
+- `title:` — plain language, sentence case, ≤ ~6 words; no date and no `Change:`/`Proposal:` prefix.
+- `summary:` — 1–2 sentences on what the change does and why, readable without context.
+- Nothing else in the proposal changes; the frontmatter only sits above the existing H1.
+
+A proposal that lacks the Change summary (or a change with only `design.md`) is backfilled once by [[pavilio-session-start]], which commits the result.
 
 ## Backends
 

@@ -98,7 +98,14 @@ Once you understand what's being built, present it in sections scaled to complex
 
 Backend already resolved in §0 (per [[pavilio-openspec-storage]]). Write into the resolved `openspec/changes/<change-id>/` tree and commit:
 
-- `proposal.md` — the why/what of the change.
+- `proposal.md` — the why/what of the change. It **starts with the Change summary frontmatter** above the H1 — non-empty `title` (plain language, ≤ ~6 words) and `summary` (1–2 sentences); see [[pavilio-openspec-storage]] for the rules:
+
+  ```yaml
+  ---
+  title: Composer draft lost when an answer arrives
+  summary: Text typed in the composer while the agent streams can vanish when the answer lands. Find the race and keep the draft.
+  ---
+  ```
 - `design.md` — the technical design, **with mermaid diagrams** where they clarify architecture, data flow, or state. When the change has mockups (§2 Mockup mode), `design.md` gets a `## Mockups` section in exactly this shape — one `###` per mockup, its heading the mockup's Copy-link link, and one `Visual verification` line for the whole change:
 
   ```markdown
@@ -154,7 +161,7 @@ Not a suggestion and not a handoff to the user — grill performs this step itse
 1. **Invoke [[pavilio-writing-plans]]** (`Skill` tool, `skill: pavilio-writing-plans`) with the approved change dir. Announce it: "Design approved — writing the implementation contract."
 2. Follow that skill to produce `openspec/changes/<change-id>/tasks.md` in the same resolved backend, and commit it alongside the other change artifacts.
 3. **Exit checklist — verify on disk before reporting done:**
-   - [ ] `openspec/changes/<change-id>/proposal.md`
+   - [ ] `openspec/changes/<change-id>/proposal.md` with `title`/`summary` frontmatter
    - [ ] `openspec/changes/<change-id>/design.md`
    - [ ] `openspec/changes/<change-id>/specs/<capability>/spec.md` (one per touched capability)
    - [ ] `openspec/changes/<change-id>/tasks.md`
