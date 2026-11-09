@@ -28,13 +28,19 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 
 1. Load the most recent progress file from `<root>/projects/[project]/progress/`
 2. Read `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; capped at 60 lines for exactly this read). `STATUS.md` is **not** read at start; it holds meeting-driven state for [[pavilio-question]] / [[pavilio-manager]]. Read it only when the session turns out to be meeting prep or a status question.
-3. Derive **active work** by listing the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read. For each one, read **only the frontmatter** of its `proposal.md` — the Change summary (`title`, `summary`) — all of them in **one shell pass**, e.g.:
+3. Derive **active work** by listing the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read. For each one, read **only the frontmatter** of its `proposal.md` — the Change summary (`title`, `summary`) — all of them in **one shell pass** (bash and zsh alike; CRLF-safe, at most 20 lines per file), e.g.:
 
    ```bash
-   for d in <changes-dir>/*/; do [ "$d" = "<changes-dir>/archive/" ] && continue
-     echo "== $d"; [ -f "$d/proposal.md" ] && awk 'NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} NR>1' "$d/proposal.md"
+   find <changes-dir> -mindepth 1 -maxdepth 1 -type d ! -name archive | sort | while IFS= read -r d; do
+     echo "== ${d##*/}"
+     if [ -f "$d/proposal.md" ]; then
+       awk '{sub(/\r$/,"")} NR==1{if($0!="---"){print "[no frontmatter]";f=1;exit};next} $0=="---"{f=1;printf "%s",b;exit} NR>20{exit} {b=b $0 "\n"} END{if(!f)print (NR?"[unclosed frontmatter]":"[no frontmatter]")}' "$d/proposal.md"
+     elif [ -f "$d/design.md" ]; then echo "[no proposal] [design.md]"
+     else echo "[no proposal]"; fi
    done
    ```
+
+   Each `== <slug>` block prints either the frontmatter fields or one marker, which picks the backfill branch below: fields without `title:`/`summary:`, `[no frontmatter]` or `[unclosed frontmatter]` → backfill the proposal; `[no proposal] [design.md]` → design-only backfill; `[no proposal]` → neither file.
 
    Do not open `tasks.md`, specs or `design.md`, and nothing below the frontmatter — except in the one-time backfill (below) for a change that has no Change summary yet.
 4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Only the fast-entry variant skips this.
@@ -42,15 +48,20 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 
    **None** → After the summary, ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
 
-   **One active change** → After the summary, render the **change table** (below) with its one row, followed by:
+   **One active change** → After the summary, render the **change table** (below) with its one row, followed by the change's slug and the question, as the turn's last lines:
    ```
+   Change `<slug>`.
    Continue this change, or do you have a different task?
    ```
    Wait for reply. If confirmed → the task is known: load its scope (below), read that change's `tasks.md` for the next unchecked task, and enter the workflow at **step 3: Execute**. If new task → treat as fast-entry with task description.
 
-   **Multiple active changes** → After the summary, render the **change table** (below), one row per change, and wait for selection. The `#` column is the selection key — the user may reply `1` (numbered candidates, [[pavilio-ask]] §4). Once a change is picked, name it by its slug in the next line.
+   **Multiple active changes** → After the summary, render the **change table** (below), one row per change, then end the turn with the question on its own line after the table:
+   ```
+   Which change — reply with its `#` — or a different task?
+   ```
+   Wait for selection. The `#` column is the selection key — the user replies `1`; the table stands in for [[pavilio-ask]] rule 3's lettered list (numbered like rule 4's candidates, but pick one), and the table plus question form the self-contained final message (rule 6). Once a change is picked, name it by its slug in the next line.
 
-   **Change table** — columns `#`, `Title`, `Description`, `Age`; rows sorted by age, **newest first**; no slug column. Put a blank line before it:
+   **Change table** — columns `#`, `Title`, `Description`, `Age`; rows sorted by age, **newest first**, rows with `—` age last; no slug column. Put a blank line before it:
 
    ```markdown
    | # | Title | Description | Age |
@@ -59,13 +70,13 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    ```
 
    - **Title** = frontmatter `title`; **Description** = frontmatter `summary`. A Title cell never holds a date prefix, a raw slug (when a Change summary exists) or a `Change:`/`Proposal:` prefix.
-   - **Age** source, in order: the dir's `YYYY-MM-DD-` prefix → else `git log --diff-filter=A --format=%as -- <dir> | tail -1` (the dir's first-add date) → else `—`. Buckets: under 1 day → `today`; under 14 days → `N days`; under 8 weeks → `N weeks`; under 24 months → `N months`; else `N years`.
+   - **Age** source, in order: the dir's `YYYY-MM-DD-` prefix → else `git log --diff-filter=A --format=%as -- <dir> | tail -1` (the dir's first-add date) → else `—`. Buckets (N floored; singular when N is 1 — `1 day`, `1 week`, `1 month`, `1 year`): under 1 day → `today`; under 14 days → `N days`; under 8 weeks → `N weeks`; under 24 months → `N months`; else `N years`.
 
    **Backfill (once per change)** — before rendering, for every active change missing a Change summary (see [[pavilio-openspec-storage]] § Proposal frontmatter):
-   - `proposal.md` lacks `title` or `summary` → derive them from its H1 and the first `## Why` paragraph and write them into the frontmatter (add the block above the H1 if absent), **keeping any field that already exists**.
-   - No `proposal.md` but a `design.md` → derive them from `design.md`'s H1 and first paragraph and create a minimal `proposal.md`: the frontmatter, an H1 `# Change: <slug>`, and the line `Backfilled at session start — the design lives in [design.md](design.md).`
+   - `proposal.md` lacks `title` or `summary` → derive them from its H1 and the first `## Why` paragraph (no `## Why` → the first prose paragraph after the H1) and write them into the frontmatter (add the block above the H1 if absent), **keeping any field that already exists**.
+   - No `proposal.md` but a `design.md` → derive them from `design.md`'s H1 and its first prose paragraph and create a minimal `proposal.md`: the frontmatter, an H1 `# Change: <slug>`, and the line `Backfilled at session start — the design lives in [design.md](design.md).`
    - Neither file → write nothing; the row shows a slug-derived title (date prefix dropped, dashes to spaces, sentence case) and `—` as Description.
-   - Any backfill written → commit all of them in **one** commit, `pavilio: backfill change summaries`, before rendering the table — workspace auto-sync sweeps dirty edits otherwise. Nothing backfilled → no commit, so a second start writes nothing.
+   - Any backfill written → commit before rendering the table — workspace auto-sync sweeps dirty edits otherwise — in the repo that holds the change dir: the workspace store → the workspace repo on `main`; a repo-native `<repo>/openspec/` → that repo, on its current branch. **One** commit per repo, message `<project>: backfill change summaries` (e.g. `pavilio: backfill change summaries`). Nothing backfilled → no commit, so a second start writes nothing.
 
 **Once the task is known** (reply to the question above, a selected change, or fast-entry), load context for that scope only, guided by `PROJECT.md`:
 - `CONTEXT.md` (if present) — the project glossary; with `wiki/`, walk on from it per `skills/pavilio-wiki/CONVENTIONS.md § Reading ladder` (the reading ladder: wiki index → ≤2 section indexes → ≤3 pages, no logging) instead of sweeping notes; no `wiki/` → `CONTEXT.md` whole, as before
@@ -134,8 +145,8 @@ Rules for the rename:
 ## Rules
 
 - Always remember the project for subsequent [[pavilio-session-end]] calls in this conversation
-- Use the `context-mode` MCP (`ctx_search`, `ctx_execute`, `ctx_execute_file`) for codebase exploration and any operation that would otherwise dump a large output into context. Do **not** fall back to `ls`/`find`/glob browsing. If `context-mode` is not installed, prompt the user to install it from https://github.com/mksglu/context-mode and run `/context-mode:ctx-doctor` to verify.
+- Use the `context-mode` MCP (`ctx_search`, `ctx_execute`, `ctx_execute_file`) for codebase exploration and any operation that would otherwise dump a large output into context. Do **not** fall back to `ls`/`find`/glob browsing — the one exception is the single change-listing pass in lazy-start step 3. If `context-mode` is not installed, prompt the user to install it from https://github.com/mksglu/context-mode and run `/context-mode:ctx-doctor` to verify.
 - Classify the intent before picking a workflow — **build work** begins with Design ([[pavilio-grill]]) and never jumps straight to code; **questions, meeting prep, note-digging, reviews, memos** skip grill entirely and are answered directly
 - Keep the in-session progress file focused on resume-context, not a transcript
-- Active changes are always shown as the change table (`#`, Title, Description, Age, newest first), read from `proposal.md` frontmatter only; a missing Change summary is backfilled once and committed as `pavilio: backfill change summaries`
+- Active changes are always shown as the change table (`#`, Title, Description, Age, newest first), read from `proposal.md` frontmatter only; a missing Change summary is backfilled once and committed as `<project>: backfill change summaries` in the repo holding the change dir
 - A `-wip.md` progress file must be renamed to its real theme as soon as that theme exists — same session, without being asked
