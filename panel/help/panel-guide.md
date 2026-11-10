@@ -22,8 +22,11 @@
 
 ## Features
 
+### Dashboard
+Lists all discovered projects. A project is discovered when its folder contains a `PROJECT.md` file. Each card shows the project name, badges for the sections it has (notes, progress, plans, index), and the date of its latest progress entry.
+
 ### Quick Finder (Cmd+P)
-Fuzzy file search across all projects. Type to filter, arrow keys to navigate, Enter to open. Files show project badge and last modified date.
+Fuzzy file search across all projects. Press `Cmd+P` anywhere in the panel, type to filter, arrow keys to navigate, Enter to open. It searches filenames; files show project badge and last modified date. For semantic search across note content, use the `?` prefix (below) or `qmd` from the terminal.
 
 ### Semantic Search
 In Quick Finder, type `?` followed by your query to search project knowledge using QMD. Returns ranked results with context snippets.
@@ -32,13 +35,16 @@ In Quick Finder, type `?` followed by your query to search project knowledge usi
 Click a project in the left sidebar to see its PROJECT.md, decisions, plans, and notes. Use the section tabs to navigate.
 
 ### Markdown Viewer
-All `.md` files render with GitHub-flavored markdown. Relative links resolve within the panel. Drag-and-drop images onto markdown files to optimize and embed them.
+All `.md` files render with GitHub-flavored markdown. Relative links resolve within the panel. The "Open in VS Code" button opens the file at the exact line in your editor. Drag-and-drop images onto markdown files to optimize and embed them.
 
 ### Git Panel
-View git status across all project repositories. Stage changes, view diffs, and commit from the panel.
+View git status across all project repositories. Stage changes, view diffs, write a commit message, commit and push — all from the browser.
+
+### File Tree
+The right sidebar shows the file tree for the active project. Click a file to open it. Drag a file onto a folder to move it — inside the project's notes only; files in linked code repositories never accept a drop, because a move there would break their git history.
 
 ### Agent Monitoring
-Active Claude Code and other AI agents appear in the left sidebar with their status, PID, and working project.
+Active Claude Code and other AI agents appear in the left sidebar with their status, PID, and working project. Agents started through the `ccl` (Claude Code) and `oc` (opencode) wrappers register themselves in `~/.agent-registry.json`, which the panel polls; see `docs/agents.md` in the workspace.
 
 ### Favorites
 Star projects in the left sidebar to pin them to the top of the list. Persisted in localStorage.
@@ -48,6 +54,18 @@ Right sidebar lists all skills under `skills/` with descriptions parsed from eac
 
 ### Image Optimization
 Drag and drop images onto the markdown viewer to optimize them with sharp and embed the reference.
+
+### Terminal
+Full terminal sessions in the browser, one per agent. Keyboard shortcuts differ from stock xterm.js so that copy and cancel never fire from the same chord on Windows:
+
+| Chord | Action |
+| --- | --- |
+| `Ctrl+C` | Copies the selection. With nothing selected, sends the interrupt (`^C`) instead. |
+| `Ctrl+Shift+C` | Always sends the interrupt, even with a selection — the unambiguous cancel chord. |
+| `Ctrl+V` | Pastes. |
+| `Shift+Enter` | Inserts a continuation (`\` + newline) rather than submitting. |
+
+Note that `Ctrl+Shift+C` is **not** copy here, which is where it differs from most terminals — `Ctrl+C` took over that job.
 
 ### Terminal Viewport Reader
 xterm renders to a canvas, so the browser's "Read Aloud" / screen-reader / find-in-page features can't see anything. Each terminal cell has an Eye icon in its header (between the title and the Maximize button) that opens a modal with a plain-DOM, fully styled snapshot of what's currently on screen.
