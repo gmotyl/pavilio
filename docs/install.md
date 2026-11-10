@@ -133,6 +133,6 @@ update — it merges what the first machine pushed to `origin` and never touches
 [Two machines](workspaces.md#two-machines-one-mirror-the-rest-consumers).
 
 One exception worth remembering: `pnpm sync` and `pnpm pull` refresh the Claude
-Code and opencode slash-commands, but **not** Codex — and only for an agent set
-up in this workspace ([details](agents.md#codex-is-not-refreshed-by-sync-or-pull)).
+Code and opencode slash-commands, but **not** Codex (the first two only when that
+agent is configured; [details](agents.md#codex-is-not-refreshed-by-sync-or-pull)).
 Run `pnpm setup:codex` by hand after `skills/` changes.
