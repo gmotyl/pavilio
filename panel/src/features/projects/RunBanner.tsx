@@ -74,14 +74,14 @@ export interface RunBannerProps {
   path: string | null;
   /**
    * Called with the chosen launcher — always one whose run loop resolves
-   * ready — and the objective to send. A returned promise disables Run until
-   * it settles, so one click cannot start two sessions.
+   * ready — and the objective to send. A returned promise disables Run and
+   * Archive until it settles, so one click cannot start two sessions.
    */
   onRun: (run: { launcher: TerminalLauncher; objective: string }) => void | Promise<unknown>;
   /**
    * Called with the chosen launcher — always a ready one — to archive the
-   * change. A returned promise disables Archive until it settles. Without it
-   * no Archive control is drawn (e.g. an already archived change).
+   * change. A returned promise disables Archive and Run until it settles.
+   * Without it no Archive control is drawn (e.g. an already archived change).
    */
   onArchive?: (run: { launcher: TerminalLauncher }) => void | Promise<unknown>;
 }
@@ -213,12 +213,33 @@ function CliSwitch({ options, pickedIndex, pick }: RunLauncher) {
 }
 
 /**
+ * One launch at a time from a banner: Run and Archive share this gate, so
+ * while either one's returned promise is pending both are disabled — a Run
+ * cannot start a second session on a change that is being archived, nor the
+ * other way round. `start` calls the launch and closes the gate until a
+ * returned promise settles; a plain return leaves it open.
+ */
+function useLaunchGate() {
+  const [busy, setBusy] = useState(false);
+  const start = (launch: () => void | Promise<unknown>) => {
+    const result = launch();
+    if (result && typeof (result as Promise<unknown>).finally === "function") {
+      setBusy(true);
+      void (result as Promise<unknown>).catch(() => undefined).finally(() => setBusy(false));
+    }
+  };
+  return { busy, start };
+}
+
+type LaunchGate = ReturnType<typeof useLaunchGate>;
+
+/**
  * The red Archive control. With nothing unchecked one click archives; with
  * unchecked tasks the first click arms it — the label asks to confirm — and a
  * second within {@link ARCHIVE_CONFIRM_MS} archives. The arm lapses after that
  * window and when another file is opened (`path` changes), so a stale arm
  * never archives the wrong change. A blocked or missing launcher disables it,
- * with Run's reason.
+ * with Run's reason, and so does a launch still starting ({@link useLaunchGate}).
  */
 function ArchiveButton({
   launcher,
@@ -226,6 +247,7 @@ function ArchiveButton({
   blocked,
   unchecked,
   path,
+  gate,
   onArchive,
 }: {
   launcher: TerminalLauncher | undefined;
@@ -233,12 +255,12 @@ function ArchiveButton({
   blocked: boolean;
   unchecked: number;
   path: string | null;
+  gate: LaunchGate;
   onArchive: NonNullable<RunBannerProps["onArchive"]>;
 }) {
   // The arm remembers the file it was made on: opened elsewhere, it is void
   // on that very render, before the effect below drops it.
   const [armed, setArmed] = useState<{ until: number; path: string | null } | null>(null);
-  const [busy, setBusy] = useState(false);
   const isArmed = armed !== null && armed.path === path;
 
   useEffect(() => {
@@ -252,7 +274,7 @@ function ArchiveButton({
     setArmed(null);
   }, [path]);
 
-  const canArchive = ready && launcher !== undefined && !busy;
+  const canArchive = ready && launcher !== undefined && !gate.busy;
 
   const click = () => {
     if (!canArchive || !launcher) return;
@@ -261,11 +283,7 @@ function ArchiveButton({
       return;
     }
     setArmed(null);
-    const result = onArchive({ launcher });
-    if (result && typeof (result as Promise<unknown>).finally === "function") {
-      setBusy(true);
-      void (result as Promise<unknown>).catch(() => undefined).finally(() => setBusy(false));
-    }
+    gate.start(() => onArchive({ launcher }));
   };
 
   return (
@@ -292,6 +310,7 @@ function ArchiveButton({
  */
 function DoneBanner({ status, path, onArchive }: RunBannerProps) {
   const cli = useRunLauncher();
+  const gate = useLaunchGate();
   const total = status.total;
   return (
     <section className="run-banner" data-done="" role="status" aria-label="Change done">
@@ -315,6 +334,7 @@ function DoneBanner({ status, path, onArchive }: RunBannerProps) {
               blocked={cli.blocked}
               unchecked={0}
               path={path}
+              gate={gate}
               onArchive={onArchive}
             />
           </>
@@ -336,7 +356,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
   const cli = useRunLauncher();
   const { launcher, ready, blocked } = cli;
 
-  const [busy, setBusy] = useState(false);
+  const gate = useLaunchGate();
   const noPromptNote = useId();
   const blockedNote = useId();
   // A run loop with nowhere to put the objective sends it nowhere, so the
@@ -345,7 +365,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
   // A blank edit is not blank to send: saving it clears the override, and the
   // workspace default is what runs. So only the stored objective gates Run.
   const canRun =
-    Boolean(ready) && path !== null && (!usesObjective || resolved.trim() !== "") && !busy;
+    Boolean(ready) && path !== null && (!usesObjective || resolved.trim() !== "") && !gate.busy;
 
   const run = () => {
     if (!canRun || !launcher) return;
@@ -353,11 +373,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
     // render's `resolved`, which predates the save.
     const objective = field.current?.commit() ?? resolved;
     if (usesObjective && objective.trim() === "") return;
-    const result = onRun({ launcher, objective });
-    if (result && typeof (result as Promise<unknown>).finally === "function") {
-      setBusy(true);
-      void (result as Promise<unknown>).catch(() => undefined).finally(() => setBusy(false));
-    }
+    gate.start(() => onRun({ launcher, objective }));
   };
 
   const done = status.total - status.remaining;
@@ -400,6 +416,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
           blocked={blocked}
           unchecked={status.remaining}
           path={path}
+          gate={gate}
           onArchive={onArchive}
         />
       )}

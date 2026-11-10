@@ -683,4 +683,71 @@ describe("RunBanner, archive", () => {
     fireEvent.click(archive());
     expect(onArchive).not.toHaveBeenCalled();
   });
+
+  /** A launch that stays pending until the test settles it. */
+  function pending() {
+    let settle!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+
+  it("disables Run while an archive is starting", async () => {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    const launch = pending();
+    const onRun = vi.fn();
+    render(
+      <MemoryRouter>
+        <RunBanner
+          status={TWO_LEFT}
+          project="pavilio"
+          path={PATH}
+          onRun={onRun}
+          onArchive={() => launch.promise}
+        />
+      </MemoryRouter>,
+    );
+    const run = screen.getByTestId("run-banner-run");
+
+    fireEvent.click(archive());
+    fireEvent.click(archive());
+    expect(run).toBeDisabled();
+    expect(archive()).toBeDisabled();
+    fireEvent.click(run);
+    expect(onRun).not.toHaveBeenCalled();
+
+    await act(async () => launch.settle());
+    expect(run).toBeEnabled();
+    expect(archive()).toBeEnabled();
+  });
+
+  it("disables Archive while a run is starting", async () => {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    const launch = pending();
+    const onArchive = vi.fn();
+    render(
+      <MemoryRouter>
+        <RunBanner
+          status={TWO_LEFT}
+          project="pavilio"
+          path={PATH}
+          onRun={() => launch.promise}
+          onArchive={onArchive}
+        />
+      </MemoryRouter>,
+    );
+    const run = screen.getByTestId("run-banner-run");
+
+    fireEvent.click(run);
+    expect(run).toBeDisabled();
+    expect(archive()).toBeDisabled();
+    fireEvent.click(archive());
+    fireEvent.click(archive());
+    expect(onArchive).not.toHaveBeenCalled();
+
+    await act(async () => launch.settle());
+    expect(run).toBeEnabled();
+    expect(archive()).toBeEnabled();
+  });
 });
