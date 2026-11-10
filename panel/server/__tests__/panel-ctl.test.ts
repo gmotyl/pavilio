@@ -736,13 +736,19 @@ describe("scripts/panel local TTS server control", () => {
     expect(started.status).toBe(0);
     expect(await waitUntil(() => portOpen(port))).toBe(true);
     expect(started.output).toContain("panel started");
-    expect(started.output).toMatch(new RegExp(`warning.*${missing}.*does not exist`, "i"));
-    expect(started.output).toMatch(new RegExp(`warning.*${notExec}.*not executable`, "i"));
+    const missingStart = started.output.split("\n").filter((l) => l.includes(missing));
+    expect(missingStart).toHaveLength(1);
+    expect(missingStart[0]).toMatch(/warning.*does not exist/i);
+    const notExecStart = started.output.split("\n").filter((l) => l.includes(notExec));
+    expect(notExecStart).toHaveLength(1);
+    expect(notExecStart[0]).toMatch(/warning.*not executable/i);
     expect(ctlCalls()).toEqual(["ctl-a start", "ctl-b start"]);
 
     const stopped = runPanel("stop", env);
     expect(stopped.status).toBe(0);
-    expect(stopped.output).toMatch(new RegExp(`warning.*${missing}`, "i"));
+    const missingStop = stopped.output.split("\n").filter((l) => l.includes(missing));
+    expect(missingStop).toHaveLength(1);
+    expect(missingStop[0]).toMatch(/warning/i);
     expect(ctlCalls().slice(-2)).toEqual(["ctl-b stop", "ctl-a stop"]);
   });
 

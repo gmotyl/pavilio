@@ -163,9 +163,11 @@ tts_server_ctl_path() {
   printf '%s' "$value"
 }
 
-# The entries of tts_server_ctl_path, one per line, in list order. Empty entries
-# are dropped and a repeated path keeps its first position only, so no script is
-# started or stopped twice. Paths containing `:` cannot be expressed.
+# The entries of tts_server_ctl_path, one per line, in list order. Zero-length
+# entries (a leading or trailing `:`, or `::`) are dropped; entries are not
+# trimmed, so a whitespace-only one is kept and warns as missing. A repeated path
+# keeps its first position only, so no script is started or stopped twice. Paths
+# containing `:` cannot be expressed.
 tts_server_ctl_entries() {
   local raw entry seen=":" rest
   raw="$(tts_server_ctl_path)"
@@ -231,7 +233,11 @@ run_with_limit() {
 tts_server_ctl() {
   local verb="$1" entry i
   local entries=()
+  # The heredoc yields one empty line when nothing is configured; skip it so the
+  # array stays empty. The guard below then matters: expanding an empty array
+  # under `set -u` is an error in bash 3.2 (stock macOS).
   while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
     entries[${#entries[@]}]="$entry"
   done <<EOF
 $(tts_server_ctl_entries)
@@ -240,12 +246,12 @@ EOF
   if [ "$verb" = stop ]; then
     i=$((${#entries[@]} - 1))
     while [ "$i" -ge 0 ]; do
-      [ -n "${entries[$i]}" ] && tts_server_ctl_one "$verb" "${entries[$i]}"
+      tts_server_ctl_one "$verb" "${entries[$i]}"
       i=$((i - 1))
     done
   else
     for entry in "${entries[@]}"; do
-      [ -n "$entry" ] && tts_server_ctl_one "$verb" "$entry"
+      tts_server_ctl_one "$verb" "$entry"
     done
   fi
   return 0
