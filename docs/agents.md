@@ -17,14 +17,18 @@ not have, and reports that agent as skipped instead:
 | opencode | `~/.config/opencode`, or a local `.opencode/` | `pnpm setup:opencode` | one `.opencode/commands/<name>.md` wrapper per skill, registered in `opencode.json` and copied to `~/.config/opencode/commands/` when that exists |
 | Codex | `$CODEX_HOME`, default `~/.codex` | `pnpm setup:codex` | a link per skill in `$CODEX_HOME/skills/`; list them in a session with `/skills` |
 
-Each command is safe to re-run on its own, and removes what it generated for a
-skill that has since been retired (`skills/RETIRED`). `pnpm setup:codex` leaves
-links it did not plant alone; `pnpm setup:codex --force` replaces those too.
+Each command is safe to re-run on its own. `setup:claude-code` and
+`setup:opencode` remove what they generated for a skill listed in
+`skills/RETIRED`; `setup:codex` instead prunes its own links into `skills/` that
+no longer resolve. `pnpm setup:codex` leaves links it did not plant alone;
+`pnpm setup:codex --force` replaces those too.
 
 ### Codex is not refreshed by sync or pull
 
-`pnpm sync` and `pnpm pull` re-run `setup:claude-code` and `setup:opencode` after
-every update, so those two agents always see the current `skills/`. They do
+After every update `pnpm sync` and `pnpm pull` re-run `setup:claude-code` when
+the repo has a `.claude/` folder, and `setup:opencode` when the repo has a
+`.opencode/` folder or `~/.config/opencode` exists, so those agents see the
+current `skills/`. They do
 **not** re-run `setup:codex`: after `skills/` changes, run `pnpm setup:codex`
 yourself. See [Keep your notes safe](install.md#keep-your-notes-safe).
 

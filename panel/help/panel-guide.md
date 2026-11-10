@@ -35,13 +35,13 @@ In Quick Finder, type `?` followed by your query to search project knowledge usi
 Click a project in the left sidebar to see its PROJECT.md, decisions, plans, and notes. Use the section tabs to navigate.
 
 ### Markdown Viewer
-All `.md` files render with GitHub-flavored markdown. Relative links resolve within the panel. The "Open in VS Code" button opens the file at the exact line in your editor. Drag-and-drop images onto markdown files to optimize and embed them.
+All `.md` files render with GitHub-flavored markdown. Relative links resolve within the panel. The "Open in VS Code" button opens the file in VS Code. Drag-and-drop images onto markdown files to optimize and embed them.
 
 ### Git Panel
 View git status across all project repositories. Stage changes, view diffs, write a commit message, commit and push — all from the browser.
 
 ### File Tree
-The right sidebar shows the file tree for the active project. Click a file to open it. Drag a file onto a folder to move it — inside the project's notes only; files in linked code repositories never accept a drop, because a move there would break their git history.
+The right sidebar shows a file tree with every project, the active one expanded. Click a file to open it. Drag a file onto a folder to move it; moves are limited to notes under `projects/`.
 
 ### Agent Monitoring
 Active Claude Code and other AI agents appear in the left sidebar with their status, PID, and working project. Agents started through the `ccl` (Claude Code) and `oc` (opencode) wrappers register themselves in `~/.agent-registry.json`, which the panel polls; see `docs/agents.md` in the workspace.
@@ -56,7 +56,7 @@ Right sidebar lists all skills under `skills/` with descriptions parsed from eac
 Drag and drop images onto the markdown viewer to optimize them with sharp and embed the reference.
 
 ### Terminal
-Full terminal sessions in the browser, one per agent. Keyboard shortcuts differ from stock xterm.js so that copy and cancel never fire from the same chord on Windows:
+Full terminal sessions (general-purpose shells) in the browser. Keyboard shortcuts differ from stock xterm.js so that copy and cancel never fire from the same chord on Windows:
 
 | Chord | Action |
 | --- | --- |

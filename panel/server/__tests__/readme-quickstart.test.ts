@@ -160,7 +160,10 @@ describe("README Quick Start", () => {
     expect(notes).toMatch(/`pnpm pull`/);
     expect(notes).not.toMatch(/`pnpm (run )?(update|upgrade|up)`(?!\s*(is|runs|would|and))/);
     // The one agent sync/pull leaves stale: Codex has to be refreshed by hand.
-    expect(mentions(notes, /codex/i), "must say sync/pull do not refresh Codex").toBe(true);
+    expect(notes, "must say sync/pull do not refresh Codex").toMatch(
+      /`pnpm sync`[\s\S]{0,40}`pnpm pull`[\s\S]{0,40}refresh[\s\S]{0,80}\bnot\b\W*Codex/i,
+    );
+    expect(notes, "must say how to refresh Codex by hand").toMatch(/`pnpm setup:codex`/);
   });
 
   it("no package script is named after a command pnpm resolves itself", () => {

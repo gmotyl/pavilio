@@ -61,7 +61,7 @@ At the beginning of each session:
 ## Folder Structure
 
 ```
-notes/
+projects/
   [project]/
     /notes - session notes, decisions
     /progress - session tracking files
@@ -69,8 +69,6 @@ notes/
     PROJECT.md - stable resume card (overview, repos, working rules, gotchas; ≤ 60 lines)
     STATUS.md - volatile state (focus, open questions, recent decisions, active team) — rewritten by pavilio-note
     DECISIONS.md - append-only decision log
-.agent/
-  config.json - provider configuration
 ```
 
 ## How to Add New Projects

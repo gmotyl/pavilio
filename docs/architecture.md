@@ -76,7 +76,7 @@ my-workspace/
 └── CLAUDE.md            # Claude Code configuration
 ```
 
-A new project gets `PROJECT.md`, `STATUS.md`, `progress/` and an empty `wiki/`
+A new project gets `PROJECT.md`, `STATUS.md`, `progress/` and a `wiki/` skeleton
 from the New Project dialog or `scripts/project new <name>`; the other files and
 folders appear as the skills that write them are used.
 
