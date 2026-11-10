@@ -21,12 +21,12 @@ What it writes, as `Pavilio Panel` on your Windows desktop:
 | Field | Value |
 | --- | --- |
 | Target | `C:\Windows\System32\wsl.exe` |
-| Arguments | `~ -d "<your distro>" -- bash -lc "<workspace>/scripts/start-panel-windows.sh"` |
+| Arguments | `~ -d "<your distro>" -- bash -lc "'<workspace>/scripts/start-panel-windows.sh'"` |
 | Working directory | `C:\Windows\System32` |
 | Icon | `C:\Windows\System32\wsl.exe,0` |
 | Description | `Start the Pavilio panel` |
 
-Three details in those arguments are load-bearing, and worth knowing before you
+Four details in those arguments are load-bearing, and worth knowing before you
 edit them by hand:
 
 - **`-d "<your distro>"`** pins the distro to the one setup ran in. Without it
@@ -42,6 +42,11 @@ edit them by hand:
   usual home for fnm's `eval "$(fnm env)"` or nvm's `nvm.sh` — is therefore
   invisible to the shortcut, which is why the launcher resolves node itself
   instead of trusting PATH.
+- **`"'<workspace>/…'"`** — the launcher path is single-quoted *inside* the
+  double quotes. `bash -lc` re-parses its argument as a command string, so a
+  workspace path with a space (`/mnt/c/Users/Jane Doe/…`) has to arrive already
+  quoted; without the inner quotes the shortcut saves fine and then flashes
+  "No such file or directory" on every double-click.
 
 The shortcut runs `scripts/start-panel-windows.sh`, which resolves the toolchain,
 hands the panel over to `scripts/panel`, repairs the Windows portproxy when it

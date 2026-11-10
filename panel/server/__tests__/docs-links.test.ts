@@ -87,16 +87,12 @@ describe("docs shape contract", () => {
   it("README Docs index links every doc", () => {
     const index = readmeSection(readFileSync(README_PATH, "utf8"), "Docs");
     const linked = new Set(linkTargets(index).map((target) => target.split("#")[0].replace(/^\.\//, "")));
-    const expected = [
-      "docs/install.md",
-      "docs/windows-wsl.md",
-      "docs/workspaces.md",
-      "docs/configuration.md",
-      "docs/agents.md",
-      "docs/architecture.md",
-      "docs/mobile-access-tailscale.md",
-      "panel/help/panel-guide.md",
-    ];
+    // Derived from the docs set, not a fixed list, so a new doc cannot be forgotten here.
+    const expected = docsSet()
+      .filter((path) => path !== README_PATH)
+      .map((path) => relative(REPO_ROOT, path).split("\\").join("/"));
+    expect(expected).toContain("docs/install.md");
+    expect(expected).toContain("panel/help/panel-guide.md");
     const missing = expected.filter((doc) => !linked.has(doc));
     expect(missing, "docs not linked from the README Docs index").toEqual([]);
   });

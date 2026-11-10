@@ -51,7 +51,7 @@ Two speech engines talk to a server on your own machine, and each is turned on b
 
 Set the address in **Settings → Speech** (the engine's address field) or as a line in the panel secrets file, `~/.panel/secrets.env` (`$PANEL_AUTH_STATE_DIR/secrets.env` when that is set). A variable in the panel's environment wins over both, and the field then shows it read-only. The cascade tries `openai`, then `kokoro`, then the cloud engines, with `edge` last; an engine without an address is skipped.
 
-`PANEL_TTS_SERVER_CTL` names the server's control script (anything that takes `start|stop`). `pnpm start` runs `<ctl> start` and `pnpm stop` runs `<ctl> stop`; a missing script, a failure or a hang past `PANEL_TTS_SERVER_CTL_TIMEOUT` (default 60 s) costs one warning line, never the panel. It holds one script, so **one machine runs one local server** — pick one per machine.
+`PANEL_TTS_SERVER_CTL` names the server's control script (anything that takes `start|stop`). `pnpm start` runs `<ctl> start` and `pnpm stop` runs `<ctl> stop`; a missing script, a failure or a hang past `PANEL_TTS_SERVER_CTL_TIMEOUT` (default 60 s) costs one warning line, never the panel. It holds one script, so the panel starts and stops **one** local server per machine. Both engines can still sit in the cascade at once — set both addresses and run the second server yourself (e.g. its own `kokoroctl start`).
 
 **Kokoro.** `pnpm install:kokoro` sets it up (in a synced workspace, which has no root `package.json` script for it, run `bash scripts/install:kokoro`):
 

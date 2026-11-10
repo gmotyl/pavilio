@@ -72,7 +72,9 @@ and scripts).
 
 ### macOS
 
-Nothing extra to do. Install Node 22 or newer, run the three commands above, and
+Install Node 22 or newer and make `pnpm` available — `corepack enable` (Corepack
+ships with Node up to 24 and then provides the pnpm version pinned in
+`package.json`) or install pnpm itself. Then run the three commands above, and
 that is the whole install — the Windows shortcut step reports
 `skipped (not WSL)` and every other step applies unchanged.
 

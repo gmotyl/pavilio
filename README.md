@@ -31,7 +31,7 @@ pnpm start
 The panel is then on <http://localhost:3010>. What `pnpm bootstrap` does, and why it is not
 `pnpm setup`: [docs/install.md](./docs/install.md).
 
-- **macOS** — nothing extra: Node 22 or newer and the three commands above ([details](./docs/install.md#macos)).
+- **macOS** — Node 22 or newer, pnpm (`corepack enable`) and the three commands above ([details](./docs/install.md#macos)).
 - **WSL2** — run them inside WSL; setup also writes a Windows desktop shortcut ([details](./docs/install.md#wsl2)).
 - **Phone** — reach the panel over Tailscale: [docs/mobile-access-tailscale.md](./docs/mobile-access-tailscale.md).
 
@@ -125,6 +125,7 @@ The panel picks up any folder under `projects/` that has a `PROJECT.md` — no r
 - [docs/agents.md](./docs/agents.md) — supported agents and how skills reach each of them
 - [docs/architecture.md](./docs/architecture.md) — how the panel, skills, scripts and project data fit together
 - [docs/mobile-access-tailscale.md](./docs/mobile-access-tailscale.md) — phone access over Tailscale: setup, pairing, threat model
+- [docs/notebooklm-integration.md](./docs/notebooklm-integration.md) — exporting a project or codebase to Google NotebookLM
 - [panel/help/panel-guide.md](./panel/help/panel-guide.md) — panel features and keyboard shortcuts
 
 ## License

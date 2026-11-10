@@ -44,7 +44,7 @@ View git status across all project repositories. Stage changes, view diffs, writ
 The right sidebar shows a file tree with every project, the active one expanded. Click a file to open it. Drag a file onto a folder to move it; moves are limited to notes under `projects/`.
 
 ### Agent Monitoring
-Active Claude Code and other AI agents appear in the left sidebar with their status, PID, and working project. Agents started through the `ccl` (Claude Code) and `oc` (opencode) wrappers register themselves in `~/.agent-registry.json`, which the panel polls; see `docs/agents.md` in the workspace.
+Active Claude Code and other AI agents appear in the left sidebar with their status, PID, and working project. Agents started through the `ccl` (Claude Code) and `oc` (opencode) wrappers register themselves in `~/.agent-registry.json`, which the panel polls; see [docs/agents.md](https://github.com/gmotyl/pavilio/blob/main/docs/agents.md) in the pavilio repository (sync-mode workspaces do not receive `docs/`).
 
 ### Favorites
 Star projects in the left sidebar to pin them to the top of the list. Persisted in localStorage.

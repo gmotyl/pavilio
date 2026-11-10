@@ -13,12 +13,12 @@ At the beginning of each session:
    - Code style guidelines
 
 2. If the user says "resume [project]" or "resume":
-   - Look up the most recent progress file in `notes/[project]/progress/`
+   - Look up the most recent progress file in `projects/[project]/progress/`
    - Display the appropriate formatted response
    - Never skip this - it's how work continuity is maintained
 
 3. If the user says "session end" or "end session":
-   - Create/update `notes/[project]/progress/[date]-slug.md`
+   - Create/update `projects/[project]/progress/[date]-slug.md`
    - Commit and push to remote if configured
    - Start a new session automatically
 

@@ -77,8 +77,10 @@ my-workspace/
 ```
 
 A new project gets `PROJECT.md`, `STATUS.md`, `progress/` and a `wiki/` skeleton
-from the New Project dialog or `scripts/project new <name>`; the other files and
-folders appear as the skills that write them are used.
+from the New Project dialog or `scripts/project new <name>` (a `research` project
+also gets `wiki/raw/`; a `knowledge` project gets only `PROJECT.md` and the
+`wiki/` skeleton — no `STATUS.md`, no `progress/`); the other files and folders
+appear as the skills that write them are used.
 
 ## Tech Stack
 
