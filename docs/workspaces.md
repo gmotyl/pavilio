@@ -81,7 +81,7 @@ panel — do that yourself with `pnpm reboot`.
 | File | Purpose |
 |------|---------|
 | `.projects.local.md` | Your private project registry (gitignored) |
-| `panel/panel.config.local.ts` | Local panel path overrides (gitignored) — see [Configuration](configuration.md#panel-config) |
+| `panel/panel.config.local.ts` | Local panel path overrides (gitignored) — see [Panel config](configuration.md#panel-config) |
 | `scripts/start-panel-windows.local.env` | Per-host launcher settings and the node pin (gitignored) |
 
 ### Rules
