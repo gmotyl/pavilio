@@ -1,6 +1,6 @@
 # AGENTS.md - Projects Workspace
 
-This file defines your project registry and workflow for AI agents (Claude Code, Kilocode, Copilot, etc.).
+This file defines your project registry and workflow for AI agents (Claude Code, opencode, Codex).
 
 ## Communication rule - important!
 
@@ -40,7 +40,7 @@ The table above is an example. Replace it with your own projects in `.projects.l
 
 `<root>` is this workspace's repo root (`git rev-parse --show-toplevel`). Project folders always live in its `projects/` subdirectory, so a project's path is `<root>/projects/<name>/`. When the repo itself is named `projects`, that resolves to `.../projects/projects/<name>/` — keep both levels, never collapse to `<root>/<name>/`.
 
-## Provider Configuration
+## Supported Agents
 
 Supported agents (Claude Code, opencode, Codex), their config locations and setup commands are described in [`docs/agents.md`](docs/agents.md).
 

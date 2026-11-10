@@ -45,7 +45,6 @@ npm run export-project -- --project my-project
 The export includes:
 - `PROJECT.md` - Project overview
 - `DECISIONS.md` - Architectural decisions
-- `.agent/config.json` - Provider configuration
 - Recent `progress/` session notes
 
 Example export file:
