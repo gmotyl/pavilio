@@ -479,7 +479,13 @@ describe("RunBanner, done", () => {
     writePreference(preferences.terminalLaunchers, LAUNCHERS);
     render(
       <MemoryRouter>
-        <RunBanner status={DONE} project="pavilio" path={PATH} onRun={onRun} />
+        <RunBanner
+          status={DONE}
+          project="pavilio"
+          path={PATH}
+          onRun={onRun}
+          onArchive={vi.fn()}
+        />
       </MemoryRouter>,
     );
     return onRun;
@@ -500,21 +506,53 @@ describe("RunBanner, done", () => {
   });
 
   it("the done banner offers no run", () => {
-    // Collapsed or not, the done banner is the same: the preference is not read.
+    // Collapsed or not, the done banner is the same: the fold is not read.
     for (const expanded of [true, false]) {
       writePreference(preferences.plansBannerExpanded, expanded);
       const onRun = renderDone();
 
       expect(screen.getByText("All 6 tasks done")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
-      expect(screen.queryByRole("group", { name: "CLI" })).toBeNull();
       expect(screen.queryByRole("textbox", { name: "Objective" })).toBeNull();
       expect(screen.queryByTestId("run-banner-chevron")).toBeNull();
-      expect(screen.queryAllByRole("button")).toHaveLength(0);
+      // What it does offer: the CLI switch and Archive.
+      expect(cliOptions()).toEqual(["claude", "codex", "opencode"]);
+      expect(screen.getByTestId("run-banner-archive")).toHaveTextContent("Archive");
       expect(onRun).not.toHaveBeenCalled();
       cleanup();
     }
   });
+
+  it("done banner offers the CLI switch and Archive but no Run", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    render(
+      <MemoryRouter>
+        <RunBanner
+          status={DONE}
+          project="pavilio"
+          path={PATH}
+          onRun={vi.fn()}
+          onArchive={onArchive}
+        />
+      </MemoryRouter>,
+    );
+
+    const banner = screen.getByRole("status", { name: "Change done" });
+    expect(within(banner).getByRole("group", { name: "CLI" })).toBeInTheDocument();
+    expect(within(banner).getByTestId("run-banner-archive")).toBeEnabled();
+    expect(within(banner).queryByRole("button", { name: "Run" })).toBeNull();
+    expect(within(banner).queryByRole("textbox", { name: "Objective" })).toBeNull();
+    expect(within(banner).queryByTestId("run-banner-chevron")).toBeNull();
+
+    // The switch picks the launcher Archive starts.
+    await user.click(screen.getByRole("button", { name: "codex" }));
+    await user.click(screen.getByTestId("run-banner-archive"));
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0][0].launcher.name).toBe("codex");
+  });
+
   it("a one-task change reads in the singular", () => {
     writePreference(preferences.terminalLaunchers, LAUNCHERS);
     render(
@@ -530,5 +568,119 @@ describe("RunBanner, done", () => {
 
     const banner = screen.getByRole("status", { name: "Change done" });
     expect(within(banner).getByText("All 1 task done")).toBeInTheDocument();
+  });
+});
+
+describe("RunBanner, archive", () => {
+  const DONE: TaskListStatus = { changeId: STATUS.changeId, total: 6, remaining: 0 };
+  const TWO_LEFT: TaskListStatus = { changeId: STATUS.changeId, total: 6, remaining: 2 };
+  const OTHER = "projects/pavilio/plans/openspec/changes/2026-10-01-other/tasks.md";
+
+  function banner(status: TaskListStatus, path: string, onArchive: () => void) {
+    return (
+      <MemoryRouter>
+        <RunBanner
+          status={status}
+          project="pavilio"
+          path={path}
+          onRun={vi.fn()}
+          onArchive={onArchive}
+        />
+      </MemoryRouter>
+    );
+  }
+
+  function renderArchive(status: TaskListStatus, onArchive = vi.fn()) {
+    writePreference(preferences.terminalLaunchers, LAUNCHERS);
+    const view = render(banner(status, PATH, onArchive));
+    return { onArchive, rerender: (path: string) => view.rerender(banner(status, path, onArchive)) };
+  }
+
+  function archive(): HTMLElement {
+    return screen.getByTestId("run-banner-archive");
+  }
+
+  it("shows Archive next to Run when expanded", () => {
+    writePreference(preferences.plansBannerExpanded, true);
+    renderArchive(STATUS);
+
+    const run = screen.getByTestId("run-banner-run");
+    expect(archive()).toHaveTextContent("Archive");
+    expect(run.nextElementSibling).toBe(archive());
+  });
+
+  it("shows Archive next to Run when collapsed", () => {
+    writePreference(preferences.plansBannerExpanded, false);
+    renderArchive(STATUS);
+
+    expect(screen.getByRole("button", { name: "Expand run banner" })).toBeInTheDocument();
+    const run = screen.getByTestId("run-banner-run");
+    expect(run.nextElementSibling).toBe(archive());
+  });
+
+  it("archives on one click when every task is checked", () => {
+    const { onArchive } = renderArchive(DONE);
+
+    fireEvent.click(archive());
+
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive).toHaveBeenCalledWith({ launcher: LAUNCHERS[0] });
+  });
+
+  it("asks for a second click when tasks are unchecked", () => {
+    vi.useFakeTimers();
+    const { onArchive } = renderArchive(TWO_LEFT);
+
+    fireEvent.click(archive());
+    expect(archive()).toHaveTextContent("Archive with 2 unchecked? Confirm");
+    expect(onArchive).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(3_000));
+    fireEvent.click(archive());
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive).toHaveBeenCalledWith({ launcher: LAUNCHERS[0] });
+  });
+
+  it("disarms after 4 seconds", () => {
+    vi.useFakeTimers();
+    const { onArchive } = renderArchive(TWO_LEFT);
+
+    fireEvent.click(archive());
+    act(() => vi.advanceTimersByTime(4_000));
+    expect(archive().textContent).toBe("Archive");
+
+    // A later single click only arms again.
+    fireEvent.click(archive());
+    expect(archive()).toHaveTextContent("Archive with 2 unchecked? Confirm");
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it("disarms when another file is opened", () => {
+    vi.useFakeTimers();
+    const { onArchive, rerender } = renderArchive(TWO_LEFT);
+
+    fireEvent.click(archive());
+    rerender(OTHER);
+    expect(archive().textContent).toBe("Archive");
+
+    fireEvent.click(archive());
+    expect(archive()).toHaveTextContent("Archive with 2 unchecked? Confirm");
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it("disables Archive for a blocked launcher", () => {
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    writePreference(preferences.plansRunLauncher, "mine");
+    const onArchive = vi.fn();
+    render(banner(TWO_LEFT, PATH, onArchive));
+
+    expect(archive()).toBeDisabled();
+    expect(archive()).toHaveAttribute("title", screen.getByTestId("run-banner-run").title);
+    expect(archive().title).toMatch(/whole command line/);
+    fireEvent.click(archive());
+    expect(onArchive).not.toHaveBeenCalled();
   });
 });

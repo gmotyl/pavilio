@@ -2181,6 +2181,32 @@ input[type="checkbox"] {
   cursor: default;
 }
 
+/* Archive: Run's size, on the danger red — archiving retires the change. Armed
+   (asking to confirm), it stays red; only its label changes. */
+.run-banner-archive {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  background: var(--red);
+  color: var(--bg-base);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: filter var(--transition-fast);
+}
+
+.run-banner-archive:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.run-banner-archive:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* What the terminal will receive. The launcher's wrapper is dimmed and is
    plain text; only the objective between it is a field. */
 .run-banner-prompt {
