@@ -710,6 +710,48 @@ describe("RunBanner, archive", () => {
     expect(onArchive).not.toHaveBeenCalled();
   });
 
+  it("collapsed banner explains a blocked launcher", () => {
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    writePreference(preferences.plansRunLauncher, "mine");
+    writePreference(preferences.plansBannerExpanded, false);
+    render(banner(TWO_LEFT, PATH, vi.fn()));
+
+    expect(screen.getByRole("button", { name: "Expand run banner" })).toBeInTheDocument();
+    // Visible without expanding, and tied to both disabled buttons.
+    const note = screen.getByTestId("run-banner-blocked");
+    expect(note).toBeVisible();
+    expect(note).toHaveTextContent(/whole command line/);
+    expect(within(note).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    const run = screen.getByTestId("run-banner-run");
+    expect(run).toBeDisabled();
+    expect(archive()).toBeDisabled();
+    expect(run).toHaveAttribute("aria-describedby", note.id);
+    expect(archive()).toHaveAttribute("aria-describedby", note.id);
+    expect(run).toHaveAccessibleDescription(/whole command line/);
+    expect(archive()).toHaveAccessibleDescription(/whole command line/);
+  });
+
+  it("expanded banner draws a blocked launcher's note once", () => {
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    writePreference(preferences.plansRunLauncher, "mine");
+    writePreference(preferences.plansBannerExpanded, true);
+    render(banner(TWO_LEFT, PATH, vi.fn()));
+
+    const notes = screen.getAllByTestId("run-banner-blocked");
+    expect(notes).toHaveLength(1);
+    expect(archive()).toHaveAttribute("aria-describedby", notes[0].id);
+    expect(screen.getByTestId("run-banner-run")).toHaveAttribute("aria-describedby", notes[0].id);
+  });
+
   /** A launch that stays pending until the test settles it. */
   function pending() {
     let settle!: () => void;

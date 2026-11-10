@@ -429,7 +429,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
         data-testid="run-banner-run"
         disabled={!canRun}
         title={blocked ? BLOCKED_TEXT : undefined}
-        aria-describedby={blocked && expanded ? blockedNote : undefined}
+        aria-describedby={blocked ? blockedNote : undefined}
         onClick={run}
       >
         <Play size={11} aria-hidden="true" />
@@ -443,7 +443,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
           unchecked={status.remaining}
           path={path}
           gate={gate}
-          describedBy={blocked && expanded ? blockedNote : undefined}
+          describedBy={blocked ? blockedNote : undefined}
           onArchive={onArchive}
         />
       )}
@@ -457,6 +457,9 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
         <span className="run-banner-title">{title}</span>
         <span className="run-banner-grow" />
         {controls}
+        {/* No prompt row when collapsed, so a blocked launcher's reason wraps
+            onto a line of its own, still the target of Run and Archive. */}
+        {blocked && <BlockedNote id={blockedNote} />}
       </section>
     );
   }
