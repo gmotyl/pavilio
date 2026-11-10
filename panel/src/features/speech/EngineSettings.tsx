@@ -371,7 +371,8 @@ function EngineRow(props: EngineRowProps) {
           <code style={{ color: "var(--text-primary)" }}>PANEL_TTS_SERVER_CTL</code> is set; by hand:{" "}
           <code style={{ color: "var(--text-primary)" }}>omnivoicectl start</code>. Give{" "}
           <code style={{ color: "var(--text-primary)" }}>PANEL_TTS_SERVER_CTL</code> as an absolute
-          path — <code>~</code> is not expanded in <code>secrets.env</code>.
+          path — <code>~</code> is not expanded in <code>secrets.env</code>. List several servers' scripts as{" "}
+          <code style={{ color: "var(--text-primary)" }}>:</code>-separated paths.
         </p>
       )}
       {/* The OmniVoice server's voices, once there is a server to ask; Kokoro's are a fixed catalog. */}

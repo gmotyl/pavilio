@@ -526,6 +526,7 @@ describe("EngineSettings", () => {
     expect(help).toHaveTextContent("PANEL_TTS_SERVER_CTL");
     expect(help).toHaveTextContent("omnivoicectl start");
     expect(help).toHaveTextContent(/absolute path/i);
+    expect(help).toHaveTextContent(/:-separated paths/);
     // A local server bills nothing.
     expect(scope.queryByTestId("engine-overage-hint")).toBeNull();
   });
