@@ -31,7 +31,7 @@ pnpm start
 The panel is then on <http://localhost:3010>. What `pnpm bootstrap` does, and why it is not
 `pnpm setup`: [docs/install.md](./docs/install.md).
 
-- **macOS** — Node 22 or newer, pnpm (`corepack enable`) and the three commands above ([details](./docs/install.md#macos)).
+- **macOS** — Node 22 or newer, pnpm (`corepack enable` on Node 22–24, or install pnpm directly) and the three commands above ([details](./docs/install.md#macos)).
 - **WSL2** — run them inside WSL; setup also writes a Windows desktop shortcut ([details](./docs/install.md#wsl2)).
 - **Phone** — reach the panel over Tailscale: [docs/mobile-access-tailscale.md](./docs/mobile-access-tailscale.md).
 

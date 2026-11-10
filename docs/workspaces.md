@@ -70,8 +70,8 @@ remotes, not from what the directory is called, so the Quick Start's
   `--delete`, so modules retired upstream disappear here too; `skills/`,
   `scripts/` and `commands/` keep whatever you added downstream — with one
   exception: a skill folder whose name is listed in upstream's `skills/RETIRED`
-  (and no longer exists upstream) is removed, so do not give a private skill a
-  retired skill's name. Pass the clone's
+  (and no longer exists upstream) is removed (skipped when the workspace's `skills/` is a symlink), so do not give a
+  private skill a retired skill's name. Pass the clone's
   path as an argument when it is not the sibling directory named `pavilio` — an
   explicit path always means sync mode, whatever the workspace's own remotes say.
 
