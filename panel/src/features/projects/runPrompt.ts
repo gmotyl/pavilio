@@ -134,3 +134,25 @@ export function taskRunLine(launcher: TerminalLauncher, objective: string): stri
   if (state.kind !== "ready") return null;
   return composeRunLine(launcher.command, state.promptFlag, state.runLoop, objective);
 }
+
+/**
+ * The objective an Archive run types: the user has approved the manual checks
+ * still unchecked in `tasks.md`, so the session checks them off and archives.
+ * `{change}` is the change id.
+ */
+export const ARCHIVE_OBJECTIVE =
+  "pavilio-archive-plan {change} — the user approved the remaining unchecked tasks (manual checks); check them off in tasks.md, then archive.";
+
+/**
+ * The line an Archive run types for `launcher`: the archive objective as the
+ * start prompt on its own, NOT wrapped in the run loop — archiving is one
+ * interactive session, not a goal loop. Readiness still follows
+ * {@link taskRunLine}: null when the launcher's run loop is not ready, so the
+ * same launchers are offered for both.
+ */
+export function archiveRunLine(launcher: TerminalLauncher, change: string): string | null {
+  const state = resolveRunLoop(launcher);
+  if (state.kind !== "ready") return null;
+  const objective = ARCHIVE_OBJECTIVE.replace("{change}", () => change);
+  return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(objective)}'`;
+}
