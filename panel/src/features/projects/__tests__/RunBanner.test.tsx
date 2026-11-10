@@ -553,6 +553,32 @@ describe("RunBanner, done", () => {
     expect(onArchive.mock.calls[0][0].launcher.name).toBe("codex");
   });
 
+  it("done banner explains a blocked launcher", () => {
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+    ]);
+    writePreference(preferences.plansRunLauncher, "mine");
+    render(
+      <MemoryRouter>
+        <RunBanner status={DONE} project="pavilio" path={PATH} onRun={vi.fn()} onArchive={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    const archive = screen.getByTestId("run-banner-archive");
+    expect(archive).toBeDisabled();
+    // Visible, not only a hover title, and tied to the disabled button.
+    const note = screen.getByTestId("run-banner-blocked");
+    expect(note).toBeVisible();
+    expect(note).toHaveTextContent(/whole command line/);
+    expect(within(note).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(archive).toHaveAttribute("aria-describedby", note.id);
+    expect(archive).toHaveAccessibleDescription(/whole command line/);
+  });
+
   it("a one-task change reads in the singular", () => {
     writePreference(preferences.terminalLaunchers, LAUNCHERS);
     render(

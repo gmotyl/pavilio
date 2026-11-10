@@ -89,6 +89,22 @@ export interface RunBannerProps {
 /** Why a whole-line launcher cannot run, in the banner and on its disabled Run. */
 const BLOCKED_TEXT = "This launcher's run loop is a whole command line";
 
+/**
+ * {@link BLOCKED_TEXT} drawn where it is read, with where to fix it. The
+ * disabled Run and Archive point at it through `aria-describedby`, since a
+ * disabled button's `title` is neither hovered nor focused.
+ */
+function BlockedNote({ id }: { id: string }) {
+  return (
+    <div className="run-banner-blocked" data-testid="run-banner-blocked" id={id}>
+      {BLOCKED_TEXT} — fix it in{" "}
+      <Link to="/settings" className="run-banner-blocked-link">
+        Settings
+      </Link>
+    </div>
+  );
+}
+
 /** How long an armed Archive waits for its confirming second click. */
 const ARCHIVE_CONFIRM_MS = 4_000;
 
@@ -248,6 +264,7 @@ function ArchiveButton({
   unchecked,
   path,
   gate,
+  describedBy,
   onArchive,
 }: {
   launcher: TerminalLauncher | undefined;
@@ -256,6 +273,8 @@ function ArchiveButton({
   unchecked: number;
   path: string | null;
   gate: LaunchGate;
+  /** The id of the visible note saying why it is off, when one is drawn. */
+  describedBy?: string;
   onArchive: NonNullable<RunBannerProps["onArchive"]>;
 }) {
   // The arm remembers the file it was made on: opened elsewhere, it is void
@@ -294,6 +313,7 @@ function ArchiveButton({
       data-armed={isArmed || undefined}
       disabled={!canArchive}
       title={blocked ? BLOCKED_TEXT : undefined}
+      aria-describedby={describedBy}
       onClick={click}
     >
       <Archive size={11} aria-hidden="true" />
@@ -311,6 +331,10 @@ function ArchiveButton({
 function DoneBanner({ status, path, onArchive }: RunBannerProps) {
   const cli = useRunLauncher();
   const gate = useLaunchGate();
+  const blockedNote = useId();
+  // The done banner has no prompt row, so a blocked launcher's reason gets a
+  // row of its own under the switch rather than only Archive's title.
+  const showBlocked = Boolean(onArchive) && cli.blocked;
   const total = status.total;
   return (
     <section className="run-banner" data-done="" role="status" aria-label="Change done">
@@ -335,11 +359,13 @@ function DoneBanner({ status, path, onArchive }: RunBannerProps) {
               unchecked={0}
               path={path}
               gate={gate}
+              describedBy={showBlocked ? blockedNote : undefined}
               onArchive={onArchive}
             />
           </>
         )}
       </div>
+      {showBlocked && <BlockedNote id={blockedNote} />}
       <TaskProgress total={total} done={total} />
     </section>
   );
@@ -417,6 +443,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
           unchecked={status.remaining}
           path={path}
           gate={gate}
+          describedBy={blocked && expanded ? blockedNote : undefined}
           onArchive={onArchive}
         />
       )}
@@ -449,14 +476,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
       <div className="run-banner-prompt" data-testid="run-banner-prompt">
         {/* A whole-line run loop draws no line: it would not be the one sent,
             since none is. What is wrong, and where to fix it, stands instead. */}
-        {blocked && (
-          <div className="run-banner-blocked" data-testid="run-banner-blocked" id={blockedNote}>
-            {BLOCKED_TEXT} — fix it in{" "}
-            <Link to="/settings" className="run-banner-blocked-link">
-              Settings
-            </Link>
-          </div>
-        )}
+        {blocked && <BlockedNote id={blockedNote} />}
         {/* The launcher's, not the template's: drawn, never editable, and
             hidden from assistive tech, which reads the field by its name. */}
         {!blocked && (

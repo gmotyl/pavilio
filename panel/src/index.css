@@ -2232,6 +2232,12 @@ input[type="checkbox"] {
   margin-bottom: 4px;
 }
 
+/* The done banner has no prompt row: the note sits between the top row and
+   the bar. */
+.run-banner[data-done] > .run-banner-blocked {
+  margin-top: 6px;
+}
+
 .run-banner-blocked-link {
   color: inherit;
   text-decoration: underline;
