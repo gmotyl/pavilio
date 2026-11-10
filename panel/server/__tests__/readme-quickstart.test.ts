@@ -225,10 +225,11 @@ describe("README Quick Start", () => {
     }
     expect(broken, "README links a path that is not in the repo").toEqual([]);
 
-    // The two fork/upstream sections are one section now, and it still carries
-    // what made Option B worth reading: the side-by-side clone, and what
-    // scripts/update.sh does with them.
-    const teams = section("Teams");
+    // The two fork/upstream sections are one section now — moved to
+    // docs/workspaces.md — and it still carries what made Option B worth
+    // reading: the side-by-side clone, and what scripts/update.sh does with them.
+    const workspaces = readFileSync(join(REPO_ROOT, "docs/workspaces.md"), "utf8");
+    const teams = section("Teams", workspaces);
     expect(teams).toMatch(/git clone\b[\s\S]*pavilio\.git/);
     expect((teams.match(/git clone\b/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(mentions(teams, /same parent|side by side|side-by-side/i)).toBe(true);
@@ -236,7 +237,9 @@ describe("README Quick Start", () => {
     expect(mentions(teams, "pnpm pull")).toBe(true);
 
     // The old headings are gone, not duplicated alongside the new one.
-    expect(README).not.toMatch(/^##\s+Using as Your Upstream/m);
-    expect(README).not.toMatch(/^###\s+Option [AB]\b/m);
+    for (const doc of [README, workspaces]) {
+      expect(doc).not.toMatch(/^##\s+Using as Your Upstream/m);
+      expect(doc).not.toMatch(/^###\s+Option [AB]\b/m);
+    }
   });
 });
