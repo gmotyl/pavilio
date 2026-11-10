@@ -690,4 +690,130 @@ describe("scripts/panel local TTS server control", () => {
     const idle = runPanel("stop");
     expect(idle.output).toBe(`panel not running (nothing to stop on port ${port})\n`);
   });
+
+  /** A control script that logs `<name> <verb>` to the shared ctl log, so order across scripts shows. */
+  function writeNamedCtl(name: string, exitCode = 0): string {
+    const path = join(sandbox, name);
+    writeFileSync(
+      path,
+      ["#!/usr/bin/env bash", `echo "${name} $1" >> "${ctlLog}"`, `exit ${exitCode}`, ""].join(
+        "\n",
+      ),
+      { mode: 0o755 },
+    );
+    return path;
+  }
+
+  it("panel start runs every listed control script in order and stop runs them in reverse", async () => {
+    const a = writeNamedCtl("ctl-a");
+    const b = writeNamedCtl("ctl-b");
+    const env = { PANEL_TTS_SERVER_CTL: `${a}:${b}` };
+
+    const started = runPanel("start", env);
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).not.toMatch(/warning/i);
+    expect(ctlCalls()).toEqual(["ctl-a start", "ctl-b start"]);
+
+    const stopped = runPanel("stop", env);
+    expect(stopped.status).toBe(0);
+    expect(portOpen(port)).toBe(false);
+    expect(ctlCalls()).toEqual(["ctl-a start", "ctl-b start", "ctl-b stop", "ctl-a stop"]);
+    // Each script gets its own log marker.
+    expect(panelLog()).toContain(`tts server start ${a}`);
+    expect(panelLog()).toContain(`tts server stop ${b}`);
+  });
+
+  it("a missing entry warns and the other entries still run", async () => {
+    const a = writeNamedCtl("ctl-a");
+    const b = writeNamedCtl("ctl-b");
+    const missing = join(sandbox, "no-such-ctl");
+    const notExec = join(sandbox, "not-exec-ctl");
+    writeFileSync(notExec, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o644 });
+    const env = { PANEL_TTS_SERVER_CTL: `${a}:${missing}:${notExec}:${b}` };
+
+    const started = runPanel("start", env);
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toContain("panel started");
+    expect(started.output).toMatch(new RegExp(`warning.*${missing}.*does not exist`, "i"));
+    expect(started.output).toMatch(new RegExp(`warning.*${notExec}.*not executable`, "i"));
+    expect(ctlCalls()).toEqual(["ctl-a start", "ctl-b start"]);
+
+    const stopped = runPanel("stop", env);
+    expect(stopped.status).toBe(0);
+    expect(stopped.output).toMatch(new RegExp(`warning.*${missing}`, "i"));
+    expect(ctlCalls().slice(-2)).toEqual(["ctl-b stop", "ctl-a stop"]);
+  });
+
+  it("a failing entry warns and the next entry still starts", async () => {
+    const bad = writeNamedCtl("ctl-bad", 3);
+    const ok = writeNamedCtl("ctl-ok");
+    const hang1 = join(sandbox, "ctl-hang1");
+    const hang2 = join(sandbox, "ctl-hang2");
+    for (const h of [hang1, hang2]) {
+      writeFileSync(
+        h,
+        ["#!/usr/bin/env bash", `echo $$ > "${h}.pid"`, "while :; do sleep 1; done", ""].join("\n"),
+        { mode: 0o755 },
+      );
+    }
+
+    const t0 = Date.now();
+    const started = runPanel("start", {
+      PANEL_TTS_SERVER_CTL: `${bad}:${hang1}:${hang2}:${ok}`,
+      PANEL_TTS_SERVER_CTL_TIMEOUT: "1",
+    });
+    const elapsed = Date.now() - t0;
+
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).toContain("panel started");
+    const badWarn = started.output.split("\n").filter((l) => l.includes(bad));
+    expect(badWarn).toHaveLength(1);
+    expect(badWarn[0]).toMatch(/warning.*\bstart\b.*exited 3\b/i);
+    // Each hang is cut at the limit on its own: neither shares the other's budget.
+    for (const h of [hang1, hang2]) {
+      const w = started.output.split("\n").filter((l) => l.includes(h));
+      expect(w).toHaveLength(1);
+      expect(w[0]).toMatch(/timed out after 1s/);
+      const pid = Number(readFileSync(`${h}.pid`, "utf8").trim());
+      expect(await waitUntil(() => !alive(pid), 5000)).toBe(true);
+    }
+    expect(elapsed).toBeGreaterThanOrEqual(2000);
+    expect(ctlCalls()).toEqual(["ctl-bad start", "ctl-ok start"]);
+  });
+
+  it("empty and duplicate entries are ignored", async () => {
+    const a = writeNamedCtl("ctl-a");
+    const b = writeNamedCtl("ctl-b");
+    const env = { PANEL_TTS_SERVER_CTL: `:${a}::${b}:${a}:` };
+
+    const started = runPanel("start", env);
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).not.toMatch(/warning/i);
+    expect(runPanel("stop", env).status).toBe(0);
+
+    expect(ctlCalls()).toEqual(["ctl-a start", "ctl-b start", "ctl-b stop", "ctl-a stop"]);
+  });
+
+  it("reads a ':'-separated list from the secrets file", async () => {
+    const a = writeNamedCtl("ctl-a");
+    const b = writeNamedCtl("ctl-b");
+    const sourcedMarker = join(sandbox, "secrets-were-sourced");
+    writeFileSync(
+      join(stateDir, "secrets.env"),
+      [`touch "${sourcedMarker}"`, `PANEL_TTS_SERVER_CTL='${a}:${b}'\r`, ""].join("\n"),
+    );
+
+    const started = runPanel("start");
+    expect(started.status).toBe(0);
+    expect(await waitUntil(() => portOpen(port))).toBe(true);
+    expect(started.output).not.toMatch(/warning/i);
+    expect(runPanel("stop").status).toBe(0);
+
+    expect(ctlCalls()).toEqual(["ctl-a start", "ctl-b start", "ctl-b stop", "ctl-a stop"]);
+    expect(existsSync(sourcedMarker)).toBe(false);
+  });
 });
