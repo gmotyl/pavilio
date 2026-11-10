@@ -135,6 +135,9 @@ export function taskRunLine(launcher: TerminalLauncher, objective: string): stri
   return composeRunLine(launcher.command, state.promptFlag, state.runLoop, objective);
 }
 
+/** What a change id an Archive run accepts looks like: one slug, nothing else. */
+const CHANGE_ID = /^[A-Za-z0-9._-]+$/;
+
 /**
  * The objective an Archive run types: the user has approved the manual checks
  * still unchecked in `tasks.md`, so the session checks them off and archives.
@@ -149,8 +152,14 @@ export const ARCHIVE_OBJECTIVE =
  * interactive session, not a goal loop. Readiness still follows
  * {@link taskRunLine}: null when the launcher's run loop is not ready, so the
  * same launchers are offered for both.
+ *
+ * The change id is interpolated into a natural-language prompt, so it must be
+ * a slug ({@link CHANGE_ID}, e.g. `2026-11-09-run-banner-archive-button`):
+ * any other directory name could carry instructions to the agent, and yields
+ * null.
  */
 export function archiveRunLine(launcher: TerminalLauncher, change: string): string | null {
+  if (!CHANGE_ID.test(change)) return null;
   const state = resolveRunLoop(launcher);
   if (state.kind !== "ready") return null;
   const objective = ARCHIVE_OBJECTIVE.replace("{change}", () => change);
