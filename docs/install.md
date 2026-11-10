@@ -14,7 +14,7 @@ commands do, what to expect per platform, and how your notes stay safe.
 
 ## Command names
 
-> **`bootstrap`, not `setup`.** Every command in the README is named so that
+> **`bootstrap`, not `setup`.** Every workspace command is named so that
 > the bare `pnpm <name>` spelling reaches *this* workspace's script. That rules
 > out the names pnpm claims for itself: `pnpm setup` appends pnpm's `PNPM_HOME`
 > block to your shell profile; `pnpm update` — and its aliases `pnpm upgrade`
@@ -25,14 +25,14 @@ commands do, what to expect per platform, and how your notes stay safe.
 > [Two machines](workspaces.md#two-machines-one-mirror-the-rest-consumers)), and
 > the restart is `pnpm reboot`.
 
-None of these needs a `run` in front of it: `bootstrap`, `pull`, `sync` and
+None of the commands named above needs a `run` in front of it: `bootstrap`, `pull`, `sync` and
 `reboot` are named precisely so that they do not collide with `pnpm setup`,
 `pnpm update` and `pnpm restart`, which pnpm handles itself and would never pass
 on to `package.json`. `update` is the one with a reach beyond its own name: pnpm
 documents `pnpm up` and `pnpm upgrade` as aliases of it, so all three rewrite
 your lockfile and none of them can be the update command here.
 
-All of the panel commands are thin wrappers around
+The panel commands (`pnpm start|stop|reboot|status`) are thin wrappers around
 `./scripts/panel start|stop|restart|status`, which needs no package manager at
 all — that is what the Windows launcher calls.
 
