@@ -221,6 +221,21 @@ describe("install:kokoro", () => {
     expect(listed.output()).not.toMatch(/PANEL_TTS_SERVER_CTL=.* in the environment/);
   });
 
+  it("does not promise the panel drives Kokoro when the environment overrides the list", async () => {
+    const { deps, output } = fakes();
+    deps.env.PANEL_TTS_SERVER_CTL = FOREIGN_CTL;
+
+    expect(await main([], deps)).toBe(0);
+
+    expect(output()).toContain("pnpm stop && pnpm start");
+    expect(output()).not.toContain("starts and stops Kokoro itself");
+    expect(output()).toMatch(/PANEL_TTS_SERVER_CTL in the environment must list .*kokoroctl/);
+
+    const plain = fakes();
+    expect(await main([], plain.deps)).toBe(0);
+    expect(plain.output()).toContain("starts and stops Kokoro itself");
+  });
+
   it("re-run is a no-op", async () => {
     writeSecrets("ELEVENLABS_API_KEY=abc\n");
     expect(await main([], fakes().deps)).toBe(0);

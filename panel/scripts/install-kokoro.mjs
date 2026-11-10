@@ -366,8 +366,8 @@ export async function main(
     return 1;
   }
 
-  // kokoroctl joins the list; other servers' ctls stay, in their order. A line that
-  // already lists it is left byte-for-byte as it is.
+  // kokoroctl joins the list; other servers' ctls stay, in their order. When the
+  // effective (last) PANEL_TTS_SERVER_CTL line already lists it, the file is left byte-for-byte.
   const lines = readSecretLines(secretsFile);
   const fileCtls = ctlEntries(fileValue(lines, CTL_VAR));
   const ctlLine = fileCtls.includes(ctlPath) ? {} : { [CTL_VAR]: [...fileCtls, ctlPath].join(":") };
@@ -388,7 +388,8 @@ export async function main(
   if (env[URL_VAR] && env[URL_VAR] !== KOKORO_ADDRESS) {
     error(`kokoro: warning: ${URL_VAR}=${env[URL_VAR]} in the environment overrides the secrets file`);
   }
-  if (env[CTL_VAR] && !ctlEntries(env[CTL_VAR]).includes(ctlPath)) {
+  const envOverridesCtl = Boolean(env[CTL_VAR]) && !ctlEntries(env[CTL_VAR]).includes(ctlPath);
+  if (envOverridesCtl) {
     error(`kokoro: warning: ${CTL_VAR}=${env[CTL_VAR]} in the environment overrides the secrets file`);
   }
 
@@ -414,7 +415,11 @@ export async function main(
   }
   log(`kokoro: installed; ${KOKORO_ADDRESS} answered${wasRunning ? "" : ", server stopped"}`);
   // The panel caches secrets at boot, so it only sees the new lines after a restart.
-  log("kokoro: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Kokoro itself)");
+  log(
+    envOverridesCtl
+      ? `kokoro: restart the panel to use it: \`pnpm stop && pnpm start\` (${CTL_VAR} in the environment must list ${ctlPath} too, or the panel will not start and stop Kokoro)`
+      : "kokoro: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Kokoro itself)",
+  );
   return 0;
 }
 
