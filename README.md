@@ -374,7 +374,7 @@ Set the address in **Settings → Speech** (the engine's address field) or as a 
 - writes `KOKORO_TTS_BASE_URL` to the secrets file and appends `kokoroctl` to `PANEL_TTS_SERVER_CTL`, keeping any other server's script already listed there;
 - starts the server once to check it answers — the first start downloads the model, so this can take up to 300 s.
 
-Then restart the panel (`pnpm stop && pnpm start`); it starts and stops Kokoro itself from then on. Re-running the installer changes nothing that is already in place; `pnpm install:kokoro --uninstall` (or `bash scripts/install:kokoro --uninstall`) stops the server, removes its files and its `KOKORO_TTS_BASE_URL` line, and removes only its own entry from `PANEL_TTS_SERVER_CTL` — other servers' scripts stay.
+Then restart the panel (`pnpm stop && pnpm start`); it starts and stops Kokoro itself from then on — unless a `PANEL_TTS_SERVER_CTL` in the panel's environment wins and does not list `kokoroctl` (the installer warns then). Re-running the installer changes nothing that is already in place; `pnpm install:kokoro --uninstall` (or `bash scripts/install:kokoro --uninstall`) stops the server, removes its files and its `KOKORO_TTS_BASE_URL` line, and removes only its own entry from `PANEL_TTS_SERVER_CTL` — other servers' scripts stay.
 
 Kokoro has a fixed catalog of 54 preset voices (default `af_heart`) and uses one voice for every language; there is no voice cloning — that stays with OmniVoice. It also has **no Polish phonemizer**: Polish text goes through its fallback and may sound off. To keep it away from Polish on a machine, switch `kokoro` off in that machine's cascade.
 

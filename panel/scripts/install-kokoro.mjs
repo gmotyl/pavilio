@@ -365,6 +365,11 @@ export async function main(
     for (const hint of installHint(platform, missing)) error(`  ${hint}`);
     return 1;
   }
+  // The list is ':'-separated, so a ':' in the path would split into bogus entries.
+  if (ctlPath.includes(":")) {
+    error(`kokoro: ${ctlPath} contains ':'; ${CTL_VAR} cannot hold a path with ':' — set PAVILIO_KOKORO_DIR to a path without one`);
+    return 1;
+  }
 
   // kokoroctl joins the list; other servers' ctls stay, in their order. When the
   // effective (last) PANEL_TTS_SERVER_CTL line already lists it, the file is left byte-for-byte.

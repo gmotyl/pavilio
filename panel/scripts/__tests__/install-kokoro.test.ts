@@ -180,6 +180,21 @@ describe("install:kokoro", () => {
     }
   });
 
+  it("refuses an install dir whose path contains ':'", async () => {
+    const colonDir = join(root, "a:b", "kokoro-fastapi");
+    const { deps, calls, output } = fakes();
+    deps.env.PAVILIO_KOKORO_DIR = colonDir;
+
+    expect(await main([], deps)).not.toBe(0);
+
+    expect(output()).toContain(join(colonDir, "kokoroctl"));
+    expect(output()).toContain("PANEL_TTS_SERVER_CTL");
+    expect(existsSync(join(root, "a:b"))).toBe(false);
+    expect(existsSync(stateDir)).toBe(false);
+    expect(calls.git).toEqual([]);
+    expect(calls.ctl).toEqual([]);
+  });
+
   it("appends kokoroctl to a foreign PANEL_TTS_SERVER_CTL", async () => {
     writeSecrets(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
     const { deps, calls } = fakes();
