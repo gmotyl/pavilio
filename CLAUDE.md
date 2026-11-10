@@ -75,18 +75,15 @@ notes/
 
 ## How to Add New Projects
 
-Use the project creation script:
+Use the project CLI (or the panel's New Project dialog):
 
 ```bash
-./scripts/create-project.sh
+scripts/project new <name> [--kind project|research|knowledge]
 ```
 
-This will:
-1. Ask for project name, type, and provider
-2. Create directory structure
-3. Generate PROJECT.md and DECISIONS.md
-4. Update AGENTS.md registry (optional)
-5. Create CLAUDE.md configuration for the project
+This scaffolds `projects/<name>/` and prints the result as JSON. To build the
+project's resume card (PROJECT.md, STATUS.md, DECISIONS.md) from its notes, run
+`/pavilio-new-project <name>`.
 
 ---
 
