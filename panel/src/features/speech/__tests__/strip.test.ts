@@ -274,4 +274,34 @@ describe("stripToSpeakableText", () => {
   ])("inline code: %s", (_label, markdown, spoken) => {
     expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
+
+  // Wikilinks are spoken as their rendered label: the short label of the target,
+  // or the explicit `|label`. Spoken text then equals the rendered link text.
+  it("speaks an unlabelled wikilink as its short label", () => {
+    const spoken = stripToSpeakableText(
+      "Rate the typing ([[wiki/sources/context-snapshot-2026-10-21-speech]]; [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]).",
+    );
+    expect(spoken).toContain("typing (speech; repos resize answer pane)");
+    expect(spoken).not.toContain("wiki/sources");
+    // A concept page keeps its file name, which then goes on to the
+    // code-shaped-token handling like any other name in prose.
+    expect(stripToSpeakableText("See [[wiki/concepts/resizable-pane]] for the rule.")).toBe(
+      "See resizable-pane for the rule.",
+    );
+  });
+
+  it("speaks an explicit wikilink label", () => {
+    expect(stripToSpeakableText("Ask [[metro:wiki/entities/jane-doe|Jane]] first.")).toBe("Ask Jane first.");
+  });
+
+  it("leaves a wikilink inside code to code handling", () => {
+    expect(stripToSpeakableText("Write `[[wiki/x]]` to link.")).toBe("Write [[wiki/x]] to link.");
+    expect(stripToSpeakableText("Before.\n\n```\n[[wiki/concepts/resizable-pane]]\n```\n\nAfter.")).toBe(
+      "Before.\n\n⟦code⟧\n\nAfter.",
+    );
+  });
+
+  it("drops an unparsable wikilink", () => {
+    expect(stripToSpeakableText("Broken [[ ]] and [[../escape]] links.")).toBe("Broken and links.");
+  });
 });

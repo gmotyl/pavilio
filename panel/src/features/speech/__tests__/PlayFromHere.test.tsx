@@ -580,6 +580,32 @@ describe("PlayFromHere", () => {
     expect(screen.getAllByRole("button", { name: "Play from here" })).toHaveLength(2);
     expect(block(container, "Only paragraph")).toHaveAttribute("data-speak-unit", "1");
   });
+
+  it("play from here starts at a paragraph ending in wikilink citations", () => {
+    const text = [
+      "# Wikilink page",
+      "",
+      "An opening paragraph that comes before the cited one.",
+      "",
+      // Short prose, then citations: neither match window survives if speech
+      // reads the paths while the page renders the short labels.
+      "Typing lag ([[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]; [[wiki/sources/context-snapshot-2026-10-21-speech]])",
+      "",
+      "A closing paragraph after the cited one.",
+      "",
+    ].join("\n");
+    const units = prepare(pageSpeechText(text), { blockBounded: true }).units;
+    const cited = units.findIndex((u) => u.source.startsWith("Typing lag"));
+    expect(cited).toBeGreaterThan(0);
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });
+
+    const { container } = render(<Page text={text} />);
+    const para = block(container, "Typing lag");
+    expect(para).toHaveAttribute("data-speak-unit", String(cited));
+    fireEvent.mouseOver(para);
+    fireEvent.click(playOf(container, para)!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text, startUnit: cited });
+  });
 });
 
 describe("playButtonLeft", () => {
