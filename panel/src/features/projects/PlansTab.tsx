@@ -26,13 +26,14 @@ import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
 import { RunBanner } from "./RunBanner";
 import { startTaskRun } from "./startTaskRun";
-import { taskRunLine } from "./runPrompt";
+import { archiveRunLine, taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useDocSpeech, type DocSpeech } from "./docSpeech";
 import { PlayFromHere } from "../speech/PlayFromHere";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
+import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
 
 interface Props {
   projectName: string;
@@ -347,7 +348,13 @@ export default function PlansTab({ projectName, archived = false }: Props) {
   const runStatus =
     selectedPath && fileContent !== null ? taskListStatus(selectedPath, fileContent) : null;
   const navigate = useNavigate();
-  const [runError, setRunError] = useState<string | null>(null);
+  // `useTerminalDrawerVisible` rather than `useTerminalDrawer().visible`: the
+  // same flag, but false (not a throw) outside a drawer provider.
+  const drawerVisible = useTerminalDrawerVisible();
+  // The failed launch's verb and message: Run and Archive share one slot.
+  const [runError, setRunError] = useState<{ verb: "run" | "archive"; message: string } | null>(
+    null,
+  );
   useEffect(() => setRunError(null), [selectedPath]);
   // The selection at settle time: a run started from one tasks.md that fails
   // after the user opened another must not report its error under that one.
@@ -355,6 +362,27 @@ export default function PlansTab({ projectName, archived = false }: Props) {
   useEffect(() => {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
+  // Starts a session typing `line`, then lands where the terminal shows: the
+  // focus is already stored by the create and the broadcast tells a mounted
+  // Terminal view (the drawer included); only with the drawer not visible
+  // does the panel navigate to the Terminals page to show it.
+  const launch = useCallback(
+    (line: string, verb: "run" | "archive") => {
+      const startedFrom = selectedPathRef.current;
+      return startTaskRun({ project: projectName, runLine: line }).then(
+        (sessionId) => {
+          setRunError(null);
+          dispatchTerminalFocus(projectName, sessionId);
+          if (!drawerVisible) navigate(`/project/${encodeURIComponent(projectName)}/iterm`);
+        },
+        (err: unknown) => {
+          if (selectedPathRef.current !== startedFrom) return;
+          setRunError({ verb, message: err instanceof Error ? err.message : String(err) });
+        },
+      );
+    },
+    [projectName, navigate, drawerVisible],
+  );
   const onRun = useCallback(
     ({ launcher, objective }: { launcher: TerminalLauncher; objective: string }) => {
       // Composed here from the launcher's resolved run loop, and refused when
@@ -362,23 +390,21 @@ export default function PlansTab({ projectName, archived = false }: Props) {
       // launcher, and this keeps one from ever reaching a session regardless.
       const runLine = taskRunLine(launcher, objective);
       if (runLine === null) return;
-      const startedFrom = selectedPathRef.current;
-      return startTaskRun({ project: projectName, runLine }).then(
-        (sessionId) => {
-          setRunError(null);
-          // Same hand-off as the sidebar's new-terminal button: the focus is
-          // already stored by the create, the broadcast tells a mounted
-          // Terminal view, and the navigation shows the run.
-          dispatchTerminalFocus(projectName, sessionId);
-          navigate(`/project/${encodeURIComponent(projectName)}/iterm`);
-        },
-        (err: unknown) => {
-          if (selectedPathRef.current !== startedFrom) return;
-          setRunError(err instanceof Error ? err.message : String(err));
-        },
-      );
+      return launch(runLine, "run");
     },
-    [projectName, navigate],
+    [launch],
+  );
+  // The banner only exists for an un-archived change's tasks.md (taskListStatus
+  // is null under changes/archive/), so its change id is always archivable.
+  const changeId = runStatus?.changeId ?? null;
+  const onArchive = useCallback(
+    ({ launcher }: { launcher: TerminalLauncher }) => {
+      if (changeId === null) return;
+      const line = archiveRunLine(launcher, changeId);
+      if (line === null) return;
+      return launch(line, "archive");
+    },
+    [launch, changeId],
   );
 
   // Load plan content when selection changes
@@ -657,11 +683,12 @@ export default function PlansTab({ projectName, archived = false }: Props) {
               project={projectName}
               path={selectedRelative}
               onRun={onRun}
+              onArchive={onArchive}
             />
           )}
           {runStatus && !archived && runError && (
             <p role="alert" className="text-sm" style={{ color: "var(--red)" }}>
-              Could not start the run: {runError}
+              Could not start the {runError.verb}: {runError.message}
             </p>
           )}
           {fileContent !== null && (

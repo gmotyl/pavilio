@@ -14,8 +14,22 @@ vi.mock("../startTaskRun", () => ({
   startTaskRun: vi.fn(async () => "new-1"),
 }));
 
+// Whether the terminal drawer is showing; each test sets it.
+const drawer = vi.hoisted(() => ({ visible: false }));
+vi.mock("../../terminal/useTerminalDrawer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../terminal/useTerminalDrawer")>()),
+  useTerminalDrawerVisible: () => drawer.visible,
+}));
+
+vi.mock("../../terminal/useTerminalSessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../terminal/useTerminalSessions")>()),
+  dispatchTerminalFocus: vi.fn(),
+}));
+
 import PlansTab from "../PlansTab";
 import { startTaskRun } from "../startTaskRun";
+import { archiveRunLine } from "../runPrompt";
+import { dispatchTerminalFocus } from "../../terminal/useTerminalSessions";
 import { __resetWorkspaceRootForTests } from "../useWorkspaceRoot";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
@@ -95,6 +109,8 @@ beforeEach(() => {
   globals.__PAVILIO_PREFS__ = { version: 1 };
   writePreference(preferences.terminalLaunchers, LAUNCHERS);
   vi.mocked(startTaskRun).mockClear();
+  vi.mocked(dispatchTerminalFocus).mockClear();
+  drawer.visible = false;
   __resetWorkspaceRootForTests();
   systemPending = false;
   fetchMock = vi.fn(async (input: string) => {
@@ -240,7 +256,7 @@ describe("PlansTab run banner", () => {
     await screen.findByText("Step two pending");
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Could not create a terminal");
+    expect(alert.textContent).toBe("Could not start the run: Could not create a terminal");
     expect(screen.queryByText("terminal view")).toBeNull();
   });
 
@@ -269,6 +285,105 @@ describe("PlansTab run banner", () => {
 
     rejectRun(new Error("Could not create a terminal"));
     // Let the rejection land, then check nothing was reported under the new file.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  /** Clicks Archive; CONTENT has one unchecked box, so it arms first and the second click confirms. */
+  async function clickArchive() {
+    const archive = await screen.findByTestId("run-banner-archive");
+    await waitFor(() => expect(archive).not.toBeDisabled());
+    fireEvent.click(archive);
+    fireEvent.click(screen.getByRole("button", { name: /Archive with 1 unchecked\? Confirm/ }));
+  }
+
+  it("archive starts a session with the archive line for the selected change", async () => {
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    await clickArchive();
+    await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(startTaskRun).mock.calls[0][0]).toEqual({
+      project: "alokai",
+      runLine: archiveRunLine(LAUNCHERS[0], "live-change"),
+    });
+    await waitFor(() =>
+      expect(vi.mocked(dispatchTerminalFocus)).toHaveBeenCalledWith("alokai", "new-1"),
+    );
+  });
+
+  it("run stays on Plans when the drawer is visible", async () => {
+    drawer.visible = true;
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() =>
+      expect(vi.mocked(dispatchTerminalFocus)).toHaveBeenCalledWith("alokai", "new-1"),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText("terminal view")).toBeNull();
+    expect(screen.getByText("Step two pending")).toBeInTheDocument();
+  });
+
+  it("archive stays on Plans when the drawer is visible", async () => {
+    drawer.visible = true;
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    await clickArchive();
+    await waitFor(() =>
+      expect(vi.mocked(dispatchTerminalFocus)).toHaveBeenCalledWith("alokai", "new-1"),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText("terminal view")).toBeNull();
+    expect(screen.getByText("Step two pending")).toBeInTheDocument();
+  });
+
+  it("run navigates to the terminals page when the drawer is closed", async () => {
+    drawer.visible = false;
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByText("terminal view")).toBeTruthy();
+    expect(vi.mocked(dispatchTerminalFocus)).toHaveBeenCalledWith("alokai", "new-1");
+  });
+
+  it("archive navigates to the terminals page when the drawer is closed", async () => {
+    drawer.visible = false;
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    await clickArchive();
+    expect(await screen.findByText("terminal view")).toBeTruthy();
+  });
+
+  it("archive reports a failed start as an archive error", async () => {
+    vi.mocked(startTaskRun).mockRejectedValueOnce(new Error("Could not create a terminal"));
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    await clickArchive();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Could not start the archive: Could not create a terminal");
+    expect(screen.queryByText("terminal view")).toBeNull();
+  });
+
+  it("an archive that fails after switching to another tasks.md shows no error there", async () => {
+    let rejectRun: (err: Error) => void = () => {};
+    vi.mocked(startTaskRun).mockImplementationOnce(
+      () => new Promise<string>((_resolve, reject) => (rejectRun = reject)),
+    );
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+    await clickArchive();
+    await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      await screen.findByTestId("plans-tab-artifact-openspec:project-next-change-tasks"),
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([u]) => String(u).includes("plans/read") && String(u).includes("next-change"),
+        ),
+      ).toBe(true),
+    );
+    await screen.findByText("Step two pending");
+    rejectRun(new Error("Could not create a terminal"));
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByRole("alert")).toBeNull();
   });
