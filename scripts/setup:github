@@ -1,9 +1,0 @@
-#!/bin/bash
-echo "🔧 Setting up GitHub CLI..."
-echo ""
-if ! command -v gh &> /dev/null; then
-    echo "GitHub CLI not installed. Install from: https://cli.github.com"
-    exit 1
-fi
-gh auth login
-echo "✅ GitHub CLI setup complete"

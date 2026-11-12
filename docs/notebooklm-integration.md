@@ -45,7 +45,6 @@ npm run export-project -- --project my-project
 The export includes:
 - `PROJECT.md` - Project overview
 - `DECISIONS.md` - Architectural decisions
-- `.agent/config.json` - Provider configuration
 - Recent `progress/` session notes
 
 Example export file:
@@ -213,8 +212,8 @@ Start with database query caching - easier to implement"
 
 ## Pro Tips
 
-- Use with [provider-selection.md](./provider-selection.md) to choose agent
-- Combine with [workflow.md](./workflow.md) for full process
+- See [agents.md](./agents.md) for the supported agents
+- See [architecture.md](./architecture.md) for how projects, notes and progress fit together
 - Regular exports help catch gaps early
 - Share notebooks for team alignment
 - Keep notes well-structured for better analysis

@@ -1,9 +1,0 @@
-#!/bin/bash
-echo "🔧 Setting up Azure DevOps CLI..."
-echo ""
-if ! command -v az &> /dev/null; then
-    echo "Azure CLI not installed. Install from: https://docs.microsoft.com/cli/azure"
-    exit 1
-fi
-az devops configure --defaults organization=[URL] project=[PROJECT]
-echo "✅ Azure DevOps setup complete"

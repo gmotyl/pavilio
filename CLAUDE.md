@@ -13,12 +13,12 @@ At the beginning of each session:
    - Code style guidelines
 
 2. If the user says "resume [project]" or "resume":
-   - Look up the most recent progress file in `notes/[project]/progress/`
+   - Look up the most recent progress file in `projects/[project]/progress/`
    - Display the appropriate formatted response
    - Never skip this - it's how work continuity is maintained
 
 3. If the user says "session end" or "end session":
-   - Create/update `notes/[project]/progress/[date]-slug.md`
+   - Create/update `projects/[project]/progress/[date]-slug.md`
    - Commit and push to remote if configured
    - Start a new session automatically
 
@@ -61,7 +61,7 @@ At the beginning of each session:
 ## Folder Structure
 
 ```
-notes/
+projects/
   [project]/
     /notes - session notes, decisions
     /progress - session tracking files
@@ -69,24 +69,19 @@ notes/
     PROJECT.md - stable resume card (overview, repos, working rules, gotchas; ≤ 60 lines)
     STATUS.md - volatile state (focus, open questions, recent decisions, active team) — rewritten by pavilio-note
     DECISIONS.md - append-only decision log
-.agent/
-  config.json - provider configuration
 ```
 
 ## How to Add New Projects
 
-Use the project creation script:
+Use the project CLI (or the panel's New Project dialog):
 
 ```bash
-./scripts/create-project.sh
+scripts/project new <name> [--kind project|research|knowledge]
 ```
 
-This will:
-1. Ask for project name, type, and provider
-2. Create directory structure
-3. Generate PROJECT.md and DECISIONS.md
-4. Update AGENTS.md registry (optional)
-5. Create CLAUDE.md configuration for the project
+This scaffolds `projects/<name>/` and prints the result as JSON. To build the
+project's resume card (PROJECT.md, STATUS.md, DECISIONS.md) from its notes, run
+`/pavilio-new-project <name>`.
 
 ---
 
