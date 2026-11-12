@@ -224,7 +224,14 @@ function useMissingWikiLinks(targets: string): ReadonlySet<string> {
 
 export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
   const navigate = useNavigate();
-  const missingWikiLinks = useMissingWikiLinks(useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]));
+  const targets = useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]);
+  const missingWikiLinks = useMissingWikiLinks(targets);
+  // Only paths the remark plugin generated from `[[…]]` are wikilinks: raw HTML can carry an
+  // authored `data-wikilink`, which must not get a card (and a read of an arbitrary path).
+  // Read through a ref for the same reason as `contentRef` below.
+  const targetSet = useMemo(() => new Set(targets ? targets.split("\n") : []), [targets]);
+  const wikiLinkTargetsRef = useRef(targetSet);
+  wikiLinkTargetsRef.current = targetSet;
   // Read through a ref, not a memo dependency: new override functions are new
   // component types, so every keystroke in a live preview would remount the
   // whole tree (mermaid diagrams included) just to refresh the quote text.
@@ -359,7 +366,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
     const a: Components["a"] = ({ href, children, ...props }) => {
       if (!href) return <a {...props}>{children}</a>;
       const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
-      if (typeof wikiTarget === "string") {
+      if (typeof wikiTarget === "string" && wikiLinkTargetsRef.current.has(wikiTarget)) {
         if (missingWikiLinks.has(wikiTarget)) {
           return (
             <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>

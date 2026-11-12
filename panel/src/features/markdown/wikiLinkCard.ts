@@ -106,6 +106,12 @@ export function parseCardContent(markdown: string): WikiLinkCardContent {
   return content;
 }
 
+/**
+ * Largest page the card reads. The card needs only the head of a page, and the server reads
+ * files synchronously: a bigger target is answered `tooLarge` and its card shows no content.
+ */
+export const WIKILINK_CARD_MAX_BYTES = 256 * 1024;
+
 type CardState = { status: "idle" | "loading" | "ready" | "error"; content?: WikiLinkCardContent };
 
 // Per-tab cache: a page's card is read once. A failed read is dropped so a later hover retries.
@@ -115,12 +121,13 @@ const resolved = new Map<string, WikiLinkCardContent>();
 function loadCard(path: string): Promise<WikiLinkCardContent> {
   let pending = cache.get(path);
   if (!pending) {
-    pending = fetch(`/api/files/read/${encodePathSegments(path)}`)
+    pending = fetch(`/api/files/read/${encodePathSegments(path)}?maxBytes=${WIKILINK_CARD_MAX_BYTES}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`Not found (${res.status})`);
-        const data = (await res.json()) as { content?: unknown };
+        const data = (await res.json()) as { content?: unknown; tooLarge?: unknown };
         if (typeof data?.content !== "string") throw new Error("No content");
-        const content = parseCardContent(data.content);
+        // Too large to read: the page exists, so the card shows the link label and path only.
+        const content = data.tooLarge === true ? {} : parseCardContent(data.content);
         resolved.set(path, content);
         return content;
       })
@@ -133,7 +140,7 @@ function loadCard(path: string): Promise<WikiLinkCardContent> {
   return pending;
 }
 
-/** Fetches `/api/files/read/<path>` once per path per tab (module-level cache); idle until `enabled`. */
+/** Fetches `/api/files/read/<path>?maxBytes=…` once per path per tab (module-level cache); idle until `enabled`. */
 export function useWikiLinkCard(path: string, enabled: boolean): CardState {
   const [state, setState] = useState<CardState & { path?: string }>({ status: "idle" });
 

@@ -1,6 +1,11 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetWikiLinkCardCacheForTests, parseCardContent, useWikiLinkCard } from "../wikiLinkCard";
+import {
+  __resetWikiLinkCardCacheForTests,
+  parseCardContent,
+  useWikiLinkCard,
+  WIKILINK_CARD_MAX_BYTES,
+} from "../wikiLinkCard";
 
 describe("parseCardContent", () => {
   it("parseCardContent takes the H1 and the frontmatter description", () => {
@@ -96,7 +101,7 @@ describe("useWikiLinkCard", () => {
     rerender({ enabled: true });
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/files/read/p/wiki/a.md");
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/files/read/p/wiki/a.md?maxBytes=${WIKILINK_CARD_MAX_BYTES}`);
     expect(result.current.content).toEqual({ title: "Page" });
   });
 
@@ -110,7 +115,26 @@ describe("useWikiLinkCard", () => {
     await waitFor(() => expect(second.result.current.status).toBe("ready"));
     expect(second.result.current.content).toEqual({ title: "Once" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/files/read/p/wiki/b%20c.md");
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/files/read/p/wiki/b%20c.md?maxBytes=${WIKILINK_CARD_MAX_BYTES}`);
+  });
+
+  it("useWikiLinkCard caps the read at 256 KiB", () => {
+    expect(WIKILINK_CARD_MAX_BYTES).toBe(256 * 1024);
+  });
+
+  it("useWikiLinkCard reads nothing from a too-large page (link label + path only) and does not re-read it", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: "", tooLarge: true }), { status: 200 })),
+    );
+    const first = renderHook(() => useWikiLinkCard("p/wiki/huge#1.md", true));
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    expect(first.result.current.content).toEqual({});
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/files/read/p/wiki/huge%231.md?maxBytes=${WIKILINK_CARD_MAX_BYTES}`);
+    first.unmount();
+
+    const second = renderHook(() => useWikiLinkCard("p/wiki/huge#1.md", true));
+    await waitFor(() => expect(second.result.current.status).toBe("ready"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("useWikiLinkCard reports a failed read as error", async () => {

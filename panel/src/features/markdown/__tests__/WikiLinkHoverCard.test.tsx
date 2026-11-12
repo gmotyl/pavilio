@@ -32,7 +32,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const exists = Object.fromEntries(paths.map((p) => [p, existing.has(p)]));
     return new Response(JSON.stringify({ exists }), { status: 200 });
   }
-  const path = decodeURIComponent(url.replace(/^\/api\/files\/read\//, ""));
+  const path = decodeURIComponent(url.replace(/^\/api\/files\/read\//, "").replace(/\?.*$/, ""));
   const content = pages.get(path);
   if (content === undefined) return new Response("{}", { status: 404 });
   return new Response(JSON.stringify({ content }), { status: 200 });
@@ -111,6 +111,27 @@ describe("WikiLinkHoverCard", () => {
     // The anchor keeps its own attributes.
     expect(link().getAttribute("data-wikilink")).toBe(TARGET);
     expect(link().getAttribute("href")).toBe(href);
+  });
+
+  it("a hand-written anchor carrying data-wikilink gets no card and no read", async () => {
+    const SPOOF = "pavilio/wiki/secret.md";
+    pages.set(SPOOF, "# Secret\n\nShould never be read.");
+    renderMd(`${LINK_MD}\n\n<a href="/elsewhere" data-wikilink="${SPOOF}">spoof</a>`);
+    const spoof = screen.getByRole("link", { name: "spoof" });
+    hover(spoof);
+    act(() => spoof.focus());
+    await advance(1000);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(spoof.hasAttribute("aria-describedby")).toBe(false);
+    expect(readCalls()).toHaveLength(0);
+
+    // The real wikilink in the same document still gets its card.
+    act(() => spoof.blur());
+    hover(link());
+    await advance(400);
+    await advance(0);
+    expect(screen.getByRole("tooltip").textContent).toContain(TARGET);
   });
 
   it("does not open or fetch when the pointer leaves early", async () => {
@@ -323,6 +344,56 @@ describe("WikiLinkHoverCard", () => {
 
       const notPrevented = fireEvent.keyDown(editor, { key: "Escape" });
       expect(notPrevented).toBe(true);
+      expect(outer).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      window.removeEventListener("keydown", outer);
+    }
+  });
+
+  it.each(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"])(
+    "Escape on a focused %s input is the card's, not an editor's",
+    async (type) => {
+      const outer = vi.fn();
+      window.addEventListener("keydown", outer);
+      try {
+        render(
+          <MemoryRouter>
+            <MarkdownRenderer content={LINK_MD} basePath={BASE} />
+            <input type={type} data-testid="control" />
+          </MemoryRouter>,
+        );
+        const control = screen.getByTestId("control");
+        act(() => control.focus());
+        hover(link());
+        await advance(400);
+        expect(screen.getByRole("tooltip")).toBeTruthy();
+
+        const notPrevented = fireEvent.keyDown(control, { key: "Escape" });
+        expect(notPrevented).toBe(false);
+        expect(outer).not.toHaveBeenCalled();
+        expect(screen.queryByRole("tooltip")).toBeNull();
+      } finally {
+        window.removeEventListener("keydown", outer);
+      }
+    },
+  );
+
+  it("Escape in a text input is still not consumed by the card", async () => {
+    const outer = vi.fn();
+    window.addEventListener("keydown", outer);
+    try {
+      render(
+        <MemoryRouter>
+          <MarkdownRenderer content={LINK_MD} basePath={BASE} />
+          <input type="text" data-testid="editor" />
+        </MemoryRouter>,
+      );
+      const editor = screen.getByTestId("editor");
+      act(() => editor.focus());
+      hover(link());
+      await advance(400);
+      expect(fireEvent.keyDown(editor, { key: "Escape" })).toBe(true);
       expect(outer).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole("tooltip")).toBeNull();
     } finally {

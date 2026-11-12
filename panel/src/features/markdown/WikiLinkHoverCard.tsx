@@ -30,8 +30,17 @@ const EDGE_PX = 8;
  */
 export const WIKILINK_HOVER_CARD_SELECTOR = "[data-wikilink-hover-card]";
 
+/** Input types that are controls, not text fields: Escape on them is not typed into anything. */
+const NON_TEXT_INPUT_TYPES = ["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image", "hidden"];
+
 /** Text fields, contenteditable regions and xterm cells (xterm reads keys from a hidden textarea). */
-const EDITOR_SELECTOR = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .xterm';
+const EDITOR_SELECTOR = [
+  `input${NON_TEXT_INPUT_TYPES.map((t) => `:not([type="${t}" i])`).join("")}`,
+  "textarea",
+  "select",
+  '[contenteditable]:not([contenteditable="false"])',
+  ".xterm",
+].join(", ");
 
 /**
  * Whether an open hover card consumes this Escape. Not when it was typed into
