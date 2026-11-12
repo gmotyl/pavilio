@@ -155,6 +155,9 @@ describe("WikiLinkHoverCard", () => {
     expect(screen.getByRole("tooltip")).toBeTruthy();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("tooltip")).toBeNull();
+    // The pointer still rests on the link: no timer reopens the card.
+    await advance(1000);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("opens on keyboard focus", async () => {
@@ -174,14 +177,17 @@ describe("WikiLinkHoverCard", () => {
     renderMd(LINK_MD);
     const a = link();
     const href = a.getAttribute("href") ?? "";
+    // The real touch tap order: pointerup comes before the focus.
     hover(a, "touch");
     fireEvent.pointerDown(a, { pointerType: "touch" });
+    fireEvent.pointerUp(a, { pointerType: "touch" });
     act(() => a.focus());
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.click(a);
     await advance(1000);
     expect(screen.queryByRole("tooltip")).toBeNull();
     expect(readCalls()).toHaveLength(0);
 
-    fireEvent.click(a);
     // Navigates as before: the in-app route the anchor points at.
     expect(href).not.toBe("");
     expect(screen.getByTestId("location").textContent).toBe(href.split("?")[0]);
@@ -269,6 +275,58 @@ describe("WikiLinkHoverCard", () => {
     } finally {
       window.removeEventListener("keydown", outer.window);
       document.removeEventListener("keydown", outer.document);
+    }
+  });
+
+  it("opens on keyboard focus after a touch tap that did not focus the link", () => {
+    // iOS Safari does not focus links on tap; the click ends the press.
+    renderMd(LINK_MD);
+    fireEvent.pointerDown(link(), { pointerType: "touch" });
+    fireEvent.pointerUp(link(), { pointerType: "touch" });
+    fireEvent.click(link());
+    act(() => link().focus());
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+  });
+
+  it.each([
+    ["a textarea", "textarea"],
+    ["an input", "input"],
+    ["an xterm cell", "xterm"],
+    ["a contenteditable", "contenteditable"],
+  ])("Escape typed in %s closes the card without consuming the key", async (_, kind) => {
+    const outer = vi.fn();
+    window.addEventListener("keydown", outer);
+    try {
+      render(
+        <MemoryRouter>
+          <MarkdownRenderer content={LINK_MD} basePath={BASE} />
+          {kind === "textarea" && <textarea data-testid="editor" />}
+          {kind === "input" && <input data-testid="editor" />}
+          {kind === "xterm" && (
+            <div className="xterm">
+              <textarea data-testid="editor" />
+            </div>
+          )}
+          {kind === "contenteditable" && (
+            <div contentEditable suppressContentEditableWarning>
+              <span data-testid="editor">text</span>
+            </div>
+          )}
+        </MemoryRouter>,
+      );
+      const editor = screen.getByTestId("editor");
+      act(() => editor.focus());
+      // Opened by the mouse resting on the link while focus is in the editor.
+      hover(link());
+      await advance(400);
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+
+      const notPrevented = fireEvent.keyDown(editor, { key: "Escape" });
+      expect(notPrevented).toBe(true);
+      expect(outer).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      window.removeEventListener("keydown", outer);
     }
   });
 

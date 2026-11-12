@@ -8,6 +8,7 @@ import {
   useState,
   type CSSProperties,
   type FocusEvent,
+  type MouseEvent,
   type PointerEvent,
   type ReactElement,
 } from "react";
@@ -24,16 +25,33 @@ const GAP_PX = 4;
 const EDGE_PX = 8;
 
 /**
- * Matches an open hover card. While one is up, Escape is the card's: another
- * Escape owner listening earlier in the dispatch (the answer pane) steps aside.
+ * Matches an open hover card. While one is up, Escape is the card's unless it
+ * was typed into an editor (see `wikiLinkHoverCardTakesEscape`).
  */
 export const WIKILINK_HOVER_CARD_SELECTOR = "[data-wikilink-hover-card]";
+
+/** Text fields, contenteditable regions and xterm cells (xterm reads keys from a hidden textarea). */
+const EDITOR_SELECTOR = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .xterm';
+
+/**
+ * Whether an open hover card consumes this Escape. Not when it was typed into
+ * an editor: the card then closes without consuming it, and the editor's owner
+ * (a terminal, a form, the answer pane) still gets the key. Another Escape
+ * owner that listens earlier in the dispatch steps aside only when this is true.
+ */
+export function wikiLinkHoverCardTakesEscape(e: KeyboardEvent): boolean {
+  if (e.key !== "Escape") return false;
+  if (!document.querySelector(WIKILINK_HOVER_CARD_SELECTOR)) return false;
+  const target = e.target instanceof Element ? e.target : null;
+  return !target?.closest(EDITOR_SELECTOR);
+}
 
 type AnchorProps = {
   onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
   onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
   onPointerDown?: (e: PointerEvent<HTMLElement>) => void;
   onPointerUp?: (e: PointerEvent<HTMLElement>) => void;
+  onClick?: (e: MouseEvent<HTMLElement>) => void;
   onFocus?: (e: FocusEvent<HTMLElement>) => void;
   onBlur?: (e: FocusEvent<HTMLElement>) => void;
   "aria-describedby"?: string;
@@ -77,8 +95,11 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // A focus that follows a pointer press (a click or tap) is not keyboard focus.
-  // Cleared again on pointerup: browsers that do not focus a link on click
-  // (Safari, Firefox on macOS) would otherwise leave it set for the next Tab.
+  // Consumed by that focus; otherwise cleared once the press is over, so a
+  // browser that does not focus a link on click (Safari, Firefox on macOS)
+  // leaves nothing set for the next Tab. "Over" is pointerup for a mouse or
+  // pen (they focus on mousedown, before it) but click for touch: a tap fires
+  // pointerdown, pointerup, mousedown, focus, click — focus after pointerup.
   const pointerPressed = useRef(false);
   // Whether the pointer is over the link or the card; while it is, the pointer
   // timers own closing and a blur does not close.
@@ -118,13 +139,17 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
   // Escape closes the card wherever focus is: a hover-opened card never had focus.
   // Window capture phase, so the key is consumed before any outer Escape owner
   // sees it (the answer pane would close itself); the pane's own window capture
-  // listener is registered earlier and steps aside for WIKILINK_HOVER_CARD_SELECTOR.
+  // listener is registered earlier and steps aside via wikiLinkHoverCardTakesEscape.
+  // An Escape typed into an editor (an xterm cell, an input) is not consumed:
+  // the card just closes and the key goes on to its owner.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
+      if (wikiLinkHoverCardTakesEscape(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       close();
     };
     window.addEventListener("keydown", onKey, true);
@@ -178,7 +203,12 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
     },
     onPointerUp: (e: PointerEvent<HTMLElement>) => {
       own.onPointerUp?.(e);
-      // A click focuses on mousedown, before this; a press that did not focus is over.
+      // A mouse click focuses on mousedown, before this; a press that did not
+      // focus is over. A tap focuses after this, so touch waits for click.
+      if (e.pointerType !== "touch") pointerPressed.current = false;
+    },
+    onClick: (e: MouseEvent<HTMLElement>) => {
+      own.onClick?.(e);
       pointerPressed.current = false;
     },
     onFocus: (e: FocusEvent<HTMLElement>) => {
