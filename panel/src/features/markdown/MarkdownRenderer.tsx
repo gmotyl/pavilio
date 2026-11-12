@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
+import WikiLinkHoverCard from "./WikiLinkHoverCard";
 import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
 import remarkWikiLinks, {
   owningProject,
@@ -339,16 +340,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
 
     // App routes do not depend on where the file lives, so they work without a
     // basePath too (e.g. a design doc from an OpenSpec backend outside projectsDir).
-    const a: Components["a"] = ({ href, children, ...props }) => {
-      if (!href) return <a {...props}>{children}</a>;
-      const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
-      if (typeof wikiTarget === "string" && missingWikiLinks.has(wikiTarget)) {
-        return (
-          <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>
-            {children}
-          </span>
-        );
-      }
+    const linkElement = (href: string, children: ReactNode, props: Record<string, unknown>) => {
       if (isAppRoute(href)) return inAppLink(href, children, props);
       if (!basePath) return <a href={href} {...props}>{children}</a>;
 
@@ -362,6 +354,27 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       }
 
       return inAppLink(`/view/${resolved}`, children, props);
+    };
+
+    const a: Components["a"] = ({ href, children, ...props }) => {
+      if (!href) return <a {...props}>{children}</a>;
+      const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
+      if (typeof wikiTarget === "string") {
+        if (missingWikiLinks.has(wikiTarget)) {
+          return (
+            <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>
+              {children}
+            </span>
+          );
+        }
+        // A resolved wikilink gets the hover card around the anchor it would have rendered anyway.
+        return (
+          <WikiLinkHoverCard path={wikiTarget} label={extractText(children)}>
+            {linkElement(href, children, props)}
+          </WikiLinkHoverCard>
+        );
+      }
+      return linkElement(href, children, props);
     };
 
     // Relative links and images can only be resolved against a known base.
