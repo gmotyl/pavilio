@@ -43,14 +43,14 @@ describe("MarkdownRenderer wikilinks", () => {
     existing.add("pavilio/progress/2026-10-19-tts-relay-node20.md");
     renderMd("See [[progress/2026-10-19-tts-relay-node20]] for details.");
 
-    const link = screen.getByRole("link", { name: "progress/2026-10-19-tts-relay-node20" });
+    const link = screen.getByRole("link", { name: "tts relay node20" });
     expect(link.getAttribute("href")).toBe("/view/pavilio/progress/2026-10-19-tts-relay-node20.md");
 
     // The existence check ran for the owning project's path and kept the link.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(fetchMock.mock.calls[0][0]).toBe("/api/files/exists");
     await waitFor(() =>
-      expect(screen.getByRole("link", { name: "progress/2026-10-19-tts-relay-node20" })).toBeTruthy(),
+      expect(screen.getByRole("link", { name: "tts relay node20" })).toBeTruthy(),
     );
   });
 
@@ -171,6 +171,43 @@ describe("MarkdownRenderer wikilinks", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await screen.findByText("B", { selector: ".wikilink-missing" });
     expect(screen.getByText("Nope", { selector: ".wikilink-missing" })).toBeTruthy();
+  });
+
+  it("renders an unlabelled source citation as its short label", async () => {
+    existing.add("pavilio/wiki/sources/context-snapshot-2026-10-21-speech.md");
+    existing.add("pavilio/wiki/sources/progress-2026-09-23-repos-resize-answer-pane.md");
+    const { container } = renderMd(
+      "Cited ([[wiki/sources/context-snapshot-2026-10-21-speech]]; [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]).",
+    );
+
+    expect(container.textContent).toContain("(speech; repos resize answer pane)");
+    expect(screen.getByRole("link", { name: "speech" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "repos resize answer pane" })).toBeTruthy();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the href and data-wikilink of a shortened link", async () => {
+    existing.add("pavilio/wiki/sources/progress-2026-09-23-repos-resize-answer-pane.md");
+    renderMd("See [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]].");
+
+    const link = screen.getByRole("link", { name: "repos resize answer pane" });
+    expect(link.getAttribute("href")).toBe(
+      "/project/pavilio/wiki?file=pavilio%2Fwiki%2Fsources%2Fprogress-2026-09-23-repos-resize-answer-pane.md",
+    );
+    expect(link.getAttribute("data-wikilink")).toBe(
+      "pavilio/wiki/sources/progress-2026-09-23-repos-resize-answer-pane.md",
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the short label in a missing-link span", async () => {
+    renderMd("Broken: [[wiki/sources/context-snapshot-2026-10-21-speech]] here.");
+
+    const warning = await screen.findByText("speech", { selector: ".wikilink-missing" });
+    expect(warning.getAttribute("title")).toBe(
+      "Missing: pavilio/wiki/sources/context-snapshot-2026-10-21-speech.md",
+    );
+    expect(warning.closest("a")).toBeNull();
   });
 
   it("leaves wikilinks in code untouched", () => {
