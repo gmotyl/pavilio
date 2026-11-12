@@ -180,25 +180,75 @@ describe("install:kokoro", () => {
     }
   });
 
-  it("refuses to overwrite a foreign PANEL_TTS_SERVER_CTL", async () => {
-    // From the secrets file.
-    writeSecrets(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
-    const fromFile = fakes();
-    expect(await main([], fromFile.deps)).not.toBe(0);
-    expect(fromFile.output()).toContain(FOREIGN_CTL);
-    expect(fromFile.output()).toContain(`PANEL_TTS_SERVER_CTL=${ctlPath}`);
-    expect(readFileSync(secretsFile, "utf8")).toBe(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
-    expect(backups()).toEqual([]);
-    expect(fromFile.calls.ctl).toEqual([]);
+  it("refuses an install dir whose path contains ':'", async () => {
+    const colonDir = join(root, "a:b", "kokoro-fastapi");
+    const { deps, calls, output } = fakes();
+    deps.env.PAVILIO_KOKORO_DIR = colonDir;
 
-    // From the process environment, which wins over the file.
+    expect(await main([], deps)).not.toBe(0);
+
+    expect(output()).toContain(join(colonDir, "kokoroctl"));
+    expect(output()).toContain("PANEL_TTS_SERVER_CTL");
+    expect(existsSync(join(root, "a:b"))).toBe(false);
+    expect(existsSync(stateDir)).toBe(false);
+    expect(calls.git).toEqual([]);
+    expect(calls.ctl).toEqual([]);
+  });
+
+  it("appends kokoroctl to a foreign PANEL_TTS_SERVER_CTL", async () => {
+    writeSecrets(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
+    const { deps, calls } = fakes();
+
+    expect(await main([], deps)).toBe(0);
+
+    const secrets = readFileSync(secretsFile, "utf8");
+    expect(secrets).toContain(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}:${ctlPath}\n`);
+    expect(secrets.match(/PANEL_TTS_SERVER_CTL=/g)).toHaveLength(1);
+    expect(calls.ctl).toEqual(["status", "start", "stop"]);
+  });
+
+  it("leaves the list alone when kokoroctl is already in it", async () => {
+    expect(await main([], fakes().deps)).toBe(0);
+    writeSecrets(`KOKORO_TTS_BASE_URL=${ADDRESS}\nPANEL_TTS_SERVER_CTL=${ctlPath}:${FOREIGN_CTL}\n`);
+    const before = snapshot();
+
+    const again = fakes();
+    expect(await main([], again.deps)).toBe(0);
+
+    expect(snapshot()).toEqual(before);
+    expect(backups()).toEqual([]);
+  });
+
+  it("warns when the environment value without kokoroctl overrides the file", async () => {
     writeSecrets("");
-    const fromEnv = fakes();
-    fromEnv.deps.env.PANEL_TTS_SERVER_CTL = FOREIGN_CTL;
-    expect(await main([], fromEnv.deps)).not.toBe(0);
-    expect(fromEnv.output()).toContain(FOREIGN_CTL);
-    expect(fromEnv.output()).toContain(`PANEL_TTS_SERVER_CTL=${ctlPath}`);
-    expect(readFileSync(secretsFile, "utf8")).toBe("");
+    const { deps, output } = fakes();
+    deps.env.PANEL_TTS_SERVER_CTL = FOREIGN_CTL;
+
+    expect(await main([], deps)).toBe(0);
+
+    expect(readFileSync(secretsFile, "utf8")).toContain(`PANEL_TTS_SERVER_CTL=${ctlPath}\n`);
+    expect(output()).toMatch(/warning: PANEL_TTS_SERVER_CTL=.* in the environment overrides the secrets file/);
+
+    // With kokoroctl in the environment list there is nothing to warn about.
+    const listed = fakes();
+    listed.deps.env.PANEL_TTS_SERVER_CTL = `${FOREIGN_CTL}:${ctlPath}`;
+    expect(await main([], listed.deps)).toBe(0);
+    expect(listed.output()).not.toMatch(/PANEL_TTS_SERVER_CTL=.* in the environment/);
+  });
+
+  it("does not promise the panel drives Kokoro when the environment overrides the list", async () => {
+    const { deps, output } = fakes();
+    deps.env.PANEL_TTS_SERVER_CTL = FOREIGN_CTL;
+
+    expect(await main([], deps)).toBe(0);
+
+    expect(output()).toContain("pnpm stop && pnpm start");
+    expect(output()).not.toContain("starts and stops Kokoro itself");
+    expect(output()).toMatch(/PANEL_TTS_SERVER_CTL in the environment must list .*kokoroctl/);
+
+    const plain = fakes();
+    expect(await main([], plain.deps)).toBe(0);
+    expect(plain.output()).toContain("starts and stops Kokoro itself");
   });
 
   it("re-run is a no-op", async () => {
@@ -275,6 +325,24 @@ describe("install:kokoro", () => {
     writeSecrets(`KOKORO_TTS_BASE_URL=http://gpu-box:8880\nPANEL_TTS_SERVER_CTL=${ctlPath}\nB=2\n`);
     expect(await main(["--uninstall"], fakes().deps)).toBe(0);
     expect(readFileSync(secretsFile, "utf8")).toBe("KOKORO_TTS_BASE_URL=http://gpu-box:8880\nB=2\n");
+  });
+
+  it("uninstall removes only the kokoroctl entry from the list", async () => {
+    expect(await main([], fakes().deps)).toBe(0);
+    writeSecrets(`A=1\nPANEL_TTS_SERVER_CTL=${FOREIGN_CTL}:${ctlPath}\n`);
+
+    expect(await main(["--uninstall"], fakes().deps)).toBe(0);
+
+    expect(readFileSync(secretsFile, "utf8")).toBe(`A=1\nPANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
+  });
+
+  it("uninstall removes the line when kokoroctl was the only entry", async () => {
+    expect(await main([], fakes().deps)).toBe(0);
+    writeSecrets(`A=1\nPANEL_TTS_SERVER_CTL=${ctlPath}\n`);
+
+    expect(await main(["--uninstall"], fakes().deps)).toBe(0);
+
+    expect(readFileSync(secretsFile, "utf8")).toBe("A=1\n");
   });
 
   it("uninstall leaves files it did not create", async () => {

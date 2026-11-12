@@ -133,8 +133,9 @@ panel_build() {
   (cd "$REPO_ROOT" && pm_in panel build)
 }
 
-# The optional control script of a local TTS server (omnivoicectl, or anything
-# else with `start|stop`): $PANEL_TTS_SERVER_CTL, else the last
+# The optional control scripts of local TTS servers (omnivoicectl, kokoroctl, or
+# anything else with `start|stop`), as one `:`-separated value:
+# $PANEL_TTS_SERVER_CTL, else the last
 # `PANEL_TTS_SERVER_CTL=` line of the panel secrets file. That file is read with
 # grep and never sourced — it holds API keys written by the panel, and sourcing
 # it would run whatever else a line in it says. Optional single or double quotes
@@ -160,6 +161,29 @@ tts_server_ctl_path() {
     \'*\') value="${value#\'}"; value="${value%\'}" ;;
   esac
   printf '%s' "$value"
+}
+
+# The entries of tts_server_ctl_path, one per line, in list order. Zero-length
+# entries (a leading or trailing `:`, or `::`) are dropped; entries are not
+# trimmed, so a whitespace-only one is kept and warns as missing. A repeated path
+# keeps its first position only, so no script is started or stopped twice. Paths
+# containing `:` cannot be expressed.
+tts_server_ctl_entries() {
+  local raw entry seen=":" rest
+  raw="$(tts_server_ctl_path)"
+  rest="$raw"
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      *:*) entry="${rest%%:*}"; rest="${rest#*:}" ;;
+      *) entry="$rest"; rest="" ;;
+    esac
+    [ -n "$entry" ] || continue
+    case "$seen" in
+      *":$entry:"*) continue ;;
+    esac
+    seen="$seen$entry:"
+    printf '%s\n' "$entry"
+  done
 }
 
 # `timeout <secs> <cmd...>` for hosts without coreutils timeout, with its
@@ -198,18 +222,46 @@ run_with_limit() {
   wait "$pid"
 }
 
-# Run `<ctl> start|stop` when a control script is configured; a no-op, with no
-# output at all, when it is not. Never fails the panel verb: the panel works
-# without a local TTS server (the engine cascade moves on), so a missing script,
-# a non-zero exit or a hang past the limit costs one warning line and nothing
-# else. The limit is $PANEL_TTS_SERVER_CTL_TIMEOUT seconds (a positive integer;
-# anything else means the default, 60).
+# Run `<ctl> start|stop` for every configured control script — `start` in list
+# order, `stop` in reverse, so servers come down in the opposite order they came
+# up. A no-op, with no output at all, when none is configured. Never fails the
+# panel verb: the panel works without a local TTS server (the engine cascade
+# moves on), so a missing script, a non-zero exit or a hang past the limit costs
+# one warning line for that script, and the remaining scripts still run. The
+# limit is $PANEL_TTS_SERVER_CTL_TIMEOUT seconds per script, not shared (a
+# positive integer; anything else means the default, 60).
+tts_server_ctl() {
+  local verb="$1" entry i
+  local entries=()
+  # The heredoc yields one empty line when nothing is configured; skip it so the
+  # array stays empty. The guard below then matters: expanding an empty array
+  # under `set -u` is an error in bash 3.2 (stock macOS).
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    entries[${#entries[@]}]="$entry"
+  done <<EOF
+$(tts_server_ctl_entries)
+EOF
+  [ "${#entries[@]}" -gt 0 ] || return 0
+  if [ "$verb" = stop ]; then
+    i=$((${#entries[@]} - 1))
+    while [ "$i" -ge 0 ]; do
+      tts_server_ctl_one "$verb" "${entries[$i]}"
+      i=$((i - 1))
+    done
+  else
+    for entry in "${entries[@]}"; do
+      tts_server_ctl_one "$verb" "$entry"
+    done
+  fi
+  return 0
+}
+
+# One `<ctl> <verb>`, bounded and warned about as tts_server_ctl describes.
 # The script's own output goes to the panel log, not the terminal — and not to
 # a pipe a caller may be reading, which a daemon it spawns could hold open.
-tts_server_ctl() {
-  local verb="$1" ctl rc
-  ctl="$(tts_server_ctl_path)"
-  [ -n "$ctl" ] || return 0
+tts_server_ctl_one() {
+  local verb="$1" ctl="$2" rc
   if [ ! -e "$ctl" ]; then
     echo "warning: PANEL_TTS_SERVER_CTL $ctl does not exist — skipping TTS server $verb" >&2
     return 0
@@ -219,7 +271,7 @@ tts_server_ctl() {
     return 0
   fi
   mkdir -p "$(dirname "$LOG_FILE")"
-  echo "--- tts server $verb $(date -Is 2>/dev/null) ---" >>"$LOG_FILE"
+  echo "--- tts server $verb $ctl $(date -Is 2>/dev/null) ---" >>"$LOG_FILE"
   local limit="${PANEL_TTS_SERVER_CTL_TIMEOUT:-60}"
   case "$limit" in
     '' | *[!0-9]* | 0*) limit=60 ;;

@@ -5,14 +5,16 @@
  * Clones remsky/Kokoro-FastAPI at KOKORO_FASTAPI_REF into
  * `PAVILIO_KOKORO_DIR ?? ~/.local/share/pavilio/kokoro-fastapi`, writes a
  * `kokoroctl` (start|stop|restart|status|log) beside the clone, points the panel
- * secrets file at both (KOKORO_TTS_BASE_URL, PANEL_TTS_SERVER_CTL), then starts the
+ * secrets file at both (KOKORO_TTS_BASE_URL, and kokoroctl appended to the
+ * `:`-separated PANEL_TTS_SERVER_CTL list), then starts the
  * server once to prove it answers and stops it again (a server already running is
  * only probed, or restarted onto a new ref, never stopped). `scripts/panel` drives
  * kokoroctl start/stop from then on.
  *
  * Re-running converges: same ref, same kokoroctl and same lines change nothing.
- * `--uninstall` stops the server, removes its own files (and the dir once empty), and removes each secrets line
- * only when it still names this install.
+ * `--uninstall` stops the server, removes its own files (and the dir once empty), removes
+ * KOKORO_TTS_BASE_URL only when it still names this install, and drops only the kokoroctl
+ * entry from PANEL_TTS_SERVER_CTL (the line goes once nothing remains); foreign entries stay.
  *
  * Every side effect outside its own files (git, kokoroctl, fetch, clock) is
  * injected into `main`, so tests run without network or a real server.
@@ -251,6 +253,11 @@ function withValues(lines, entries) {
   return out;
 }
 
+/** A `:`-separated ctl list's entries, empty ones dropped, as scripts/panel reads it. */
+function ctlEntries(value) {
+  return (value ?? "").split(":").filter(Boolean);
+}
+
 /* ──────────────────────────────── the steps ──────────────────────────────── */
 
 /** `updated` is true when the checkout changed, so a running server needs a restart. */
@@ -336,13 +343,16 @@ export async function main(
       else if (e.code !== "ENOENT") throw e;
     }
     const lines = readSecretLines(secretsFile);
-    const kept = lines.filter((line) => {
+    const kept = lines.flatMap((line) => {
       const match = LINE.exec(line);
-      if (!match) return true;
+      if (!match) return [line];
       const value = unquote(match[2]);
-      if (match[1] === URL_VAR && value === KOKORO_ADDRESS) return false;
-      if (match[1] === CTL_VAR && value === ctlPath) return false;
-      return true;
+      if (match[1] === URL_VAR && value === KOKORO_ADDRESS) return [];
+      if (match[1] !== CTL_VAR) return [line];
+      const entries = ctlEntries(value);
+      if (!entries.includes(ctlPath)) return [line];
+      const rest = entries.filter((entry) => entry !== ctlPath);
+      return rest.length ? [`${CTL_VAR}=${rest.join(":")}`] : [];
     });
     if (existsSync(secretsFile)) writeSecretLines(secretsFile, kept, now);
     log(`kokoro: removed ${installDir}`);
@@ -355,16 +365,17 @@ export async function main(
     for (const hint of installHint(platform, missing)) error(`  ${hint}`);
     return 1;
   }
-
-  // Checked before anything is written: another TTS server's ctl must stay in charge.
-  const lines = readSecretLines(secretsFile);
-  const existingCtl = env[CTL_VAR] || fileValue(lines, CTL_VAR);
-  if (existingCtl && existingCtl !== ctlPath) {
-    error(`kokoro: ${CTL_VAR} is already set to ${existingCtl}`);
-    error(`kokoro: to hand control to Kokoro, set it in ${secretsFile} (and the environment, if set there):`);
-    error(`  ${CTL_VAR}=${ctlPath}`);
+  // The list is ':'-separated, so a ':' in the path would split into bogus entries.
+  if (ctlPath.includes(":")) {
+    error(`kokoro: ${ctlPath} contains ':'; ${CTL_VAR} cannot hold a path with ':' — set PAVILIO_KOKORO_DIR to a path without one`);
     return 1;
   }
+
+  // kokoroctl joins the list; other servers' ctls stay, in their order. When the
+  // effective (last) PANEL_TTS_SERVER_CTL line already lists it, the file is left byte-for-byte.
+  const lines = readSecretLines(secretsFile);
+  const fileCtls = ctlEntries(fileValue(lines, CTL_VAR));
+  const ctlLine = fileCtls.includes(ctlPath) ? {} : { [CTL_VAR]: [...fileCtls, ctlPath].join(":") };
 
   const checkout = cloneOrUpdate(git, installDir, cloneDir, log);
   if (checkout.error) {
@@ -375,12 +386,16 @@ export async function main(
 
   const changed = writeSecretLines(
     secretsFile,
-    withValues(lines, { [URL_VAR]: KOKORO_ADDRESS, [CTL_VAR]: ctlPath }),
+    withValues(lines, { [URL_VAR]: KOKORO_ADDRESS, ...ctlLine }),
     now,
   );
   log(`kokoro: ${secretsFile} ${changed ? "updated" : "already up to date"}`);
   if (env[URL_VAR] && env[URL_VAR] !== KOKORO_ADDRESS) {
     error(`kokoro: warning: ${URL_VAR}=${env[URL_VAR]} in the environment overrides the secrets file`);
+  }
+  const envOverridesCtl = Boolean(env[CTL_VAR]) && !ctlEntries(env[CTL_VAR]).includes(ctlPath);
+  if (envOverridesCtl) {
+    error(`kokoro: warning: ${CTL_VAR}=${env[CTL_VAR]} in the environment overrides the secrets file`);
   }
 
   // A server already up (likely the panel's) stays up: restarted only onto a new
@@ -405,7 +420,11 @@ export async function main(
   }
   log(`kokoro: installed; ${KOKORO_ADDRESS} answered${wasRunning ? "" : ", server stopped"}`);
   // The panel caches secrets at boot, so it only sees the new lines after a restart.
-  log("kokoro: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Kokoro itself)");
+  log(
+    envOverridesCtl
+      ? `kokoro: restart the panel to use it: \`pnpm stop && pnpm start\` (${CTL_VAR} in the environment must list ${ctlPath} too, or the panel will not start and stop Kokoro)`
+      : "kokoro: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Kokoro itself)",
+  );
   return 0;
 }
 
