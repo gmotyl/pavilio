@@ -71,7 +71,7 @@ Example: user provides `https://spartacus-dev.carolinaherrera.com/es/es/adding-p
 
 Create the run folder at:
 ```
-/Users/gmotyl/git/prv/projects/projects/ch/test-runs/<folderName>/
+/Users/gmotyl/git/prv/projects/projects/ch/qa/<folderName>/
 ```
 where `<folderName>` is derived per the **Run Folder Name** rules above.
 
