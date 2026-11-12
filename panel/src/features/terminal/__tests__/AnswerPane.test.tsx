@@ -788,6 +788,53 @@ describe("rendering", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    it("Escape with a wikilink hover card open is the card's, not the pane's", () => {
+      // The card closes itself on Escape from a window capture listener that is
+      // registered after the pane's, so the pane has to step aside while one is open.
+      const h = harness(MARKDOWN, null);
+      const onClose = vi.fn();
+      render(paneElement(speechOf(h), onClose));
+      (document.activeElement as HTMLElement | null)?.blur();
+      const card = document.createElement("div");
+      card.setAttribute("data-wikilink-hover-card", "");
+      document.body.appendChild(card);
+      try {
+        fireEvent.keyDown(document.body, { key: "Escape" });
+        expect(onClose).not.toHaveBeenCalled();
+      } finally {
+        card.remove();
+      }
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("Escape in the cell's terminal closes the pane even with a hover card open", () => {
+      // The card does not consume an Escape typed into an editor (it just
+      // closes), so the pane must not step aside for it either: the key would
+      // otherwise reach the shell with the pane still open.
+      const h = harness(MARKDOWN, null);
+      const onClose = vi.fn();
+      render(
+        <MemoryRouter>
+          <div className="relative">
+            <div className="xterm">
+              <textarea aria-label="terminal input" />
+            </div>
+            <AnswerPane sessionId="cell-a" speech={speechOf(h)} onClose={onClose} send={NO_SEND} />
+          </div>
+        </MemoryRouter>,
+      );
+      const card = document.createElement("div");
+      card.setAttribute("data-wikilink-hover-card", "");
+      document.body.appendChild(card);
+      try {
+        fireEvent.keyDown(screen.getByLabelText("terminal input"), { key: "Escape" });
+        expect(onClose).toHaveBeenCalledTimes(1);
+      } finally {
+        card.remove();
+      }
+    });
+
     it("Escape in the cell's terminal closes the pane", () => {
       // Greg's rule: if the terminal has focus and the pane is open, Escape
       // closes the pane. The pane is a sibling of the xterm container inside the

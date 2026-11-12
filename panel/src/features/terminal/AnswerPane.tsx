@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Pause, Play } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
+import { wikiLinkHoverCardTakesEscape } from "../markdown/WikiLinkHoverCard";
 import { CopyIconButton } from "../shell/CopyIconButton";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
@@ -509,9 +510,15 @@ export function AnswerPane({
   // the target is inside the root, so `onClose` runs once per keypress — from
   // the root's own `onKeyDown` below, whose `stopPropagation` is what keeps
   // the key from the cell, not what prevents a double close.
+  //
+  // An open wikilink hover card owns Escape: its own window capture listener,
+  // registered after this one, closes just the card and stops the key. Not an
+  // Escape typed into an editor (this cell's terminal included): the card
+  // closes without consuming it, so this listener handles it as usual.
   useEffect(() => {
     const onWindowKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
+      if (wikiLinkHoverCardTakesEscape(e)) return;
       const target = e.target instanceof Element ? e.target : null;
       const root = rootRef.current;
       if (root && target && root.contains(target)) return;

@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
+import WikiLinkHoverCard from "./WikiLinkHoverCard";
 import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
 import remarkWikiLinks, {
   owningProject,
@@ -223,7 +224,18 @@ function useMissingWikiLinks(targets: string): ReadonlySet<string> {
 
 export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
   const navigate = useNavigate();
-  const missingWikiLinks = useMissingWikiLinks(useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]));
+  const targets = useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]);
+  const missingWikiLinks = useMissingWikiLinks(targets);
+  // Only paths the remark plugin generated from `[[…]]` are wikilinks: raw HTML can carry an
+  // authored `data-wikilink`, which must not get a card (and a read of an arbitrary path).
+  // `targets` is no allowlist — it scans the raw source, comments and link text included — so
+  // the plugin fills this set itself while ReactMarkdown parses, before any anchor renders.
+  // A fresh set per document, so a path dropped from the source drops out of it too; refilling
+  // it on a re-render of the same document only re-adds the same paths. Read through a ref for
+  // the same reason as `contentRef` below.
+  const generatedWikiLinks = useMemo(() => new Set<string>(), [content, basePath]);
+  const wikiLinkTargetsRef = useRef(generatedWikiLinks);
+  wikiLinkTargetsRef.current = generatedWikiLinks;
   // Read through a ref, not a memo dependency: new override functions are new
   // component types, so every keystroke in a live preview would remount the
   // whole tree (mermaid diagrams included) just to refresh the quote text.
@@ -339,16 +351,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
 
     // App routes do not depend on where the file lives, so they work without a
     // basePath too (e.g. a design doc from an OpenSpec backend outside projectsDir).
-    const a: Components["a"] = ({ href, children, ...props }) => {
-      if (!href) return <a {...props}>{children}</a>;
-      const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
-      if (typeof wikiTarget === "string" && missingWikiLinks.has(wikiTarget)) {
-        return (
-          <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>
-            {children}
-          </span>
-        );
-      }
+    const linkElement = (href: string, children: ReactNode, props: Record<string, unknown>) => {
       if (isAppRoute(href)) return inAppLink(href, children, props);
       if (!basePath) return <a href={href} {...props}>{children}</a>;
 
@@ -362,6 +365,27 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
       }
 
       return inAppLink(`/view/${resolved}`, children, props);
+    };
+
+    const a: Components["a"] = ({ href, children, ...props }) => {
+      if (!href) return <a {...props}>{children}</a>;
+      const wikiTarget = (props as Record<string, unknown>)[WIKILINK_ATTR];
+      if (typeof wikiTarget === "string" && wikiLinkTargetsRef.current.has(wikiTarget)) {
+        if (missingWikiLinks.has(wikiTarget)) {
+          return (
+            <span className={WIKILINK_MISSING_CLASS} title={`Missing: ${wikiTarget}`}>
+              {children}
+            </span>
+          );
+        }
+        // A resolved wikilink gets the hover card around the anchor it would have rendered anyway.
+        return (
+          <WikiLinkHoverCard path={wikiTarget} label={extractText(children)}>
+            {linkElement(href, children, props)}
+          </WikiLinkHoverCard>
+        );
+      }
+      return linkElement(href, children, props);
     };
 
     // Relative links and images can only be resolved against a known base.
@@ -384,7 +408,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
   return (
     <div className="prose prose-invert prose-zinc max-w-none">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath }]]}
+        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath, generated: generatedWikiLinks }]]}
         rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw]}
         components={components}
       >

@@ -61,8 +61,8 @@ describe("resolveWikiLink", () => {
   it("keeps the label after a pipe", () => {
     expect(resolve("metro:wiki/entities/y|Y").label).toBe("Y");
     expect(resolve("wiki/concepts/x|The X concept").label).toBe("The X concept");
-    // Without a pipe the label is the link text as written.
-    expect(resolve("wiki/concepts/x").label).toBe("wiki/concepts/x");
+    // Without a pipe the label is the short label (the file name for an undated target).
+    expect(resolve("wiki/concepts/x").label).toBe("x");
   });
 
   it("marks missing targets as not existing", () => {

@@ -28,6 +28,8 @@
  * readable attached — a bare URL, an image — is worth interrupting for.
  */
 
+import { parseWikiLink } from "../../../server/lib/wiki/wikilinks";
+
 /**
  * Longest code-ish run kept verbatim in spoken text. It governs both inline
  * code spans and bare path tokens, because the question is the same for both:
@@ -116,6 +118,17 @@ const IMAGE_RE = new RegExp(String.raw`!\[${LINK_TEXT}\]${LINK_TAIL}`, "g");
 
 /** `[text](url)` and `[text][ref]` — capture group 1 is the spoken text. */
 const LINK_RE = new RegExp(String.raw`\[(${LINK_TEXT})\]${LINK_TAIL}`, "g");
+
+/**
+ * `[[target]]` / `[[target|label]]`, on one line. The inside may be empty (`*`,
+ * not `+`) so a bare `[[]]` is caught (and dropped) here rather than left to the
+ * link rule; a blank `[[ ]]` would match either way.
+ *
+ * Not when a `(` follows: `[[x]](url)` is a markdown link whose text is `[x]`,
+ * and the page renders it that way (the wikilink plugin skips link nodes), so
+ * it is left to the link rule, which keeps that text.
+ */
+const WIKILINK_RE = /\[\[([^\[\]\n]*)\]\](?!\()/g;
 
 /**
  * A reference definition's destination: angle-bracketed, or a run without
@@ -453,6 +466,20 @@ function reduceLinks(segment: string): string {
 }
 
 /**
+ * Replaces each wikilink with the label the page renders for it — the explicit
+ * `|label`, else the target's short label — so for a parsable wikilink the
+ * spoken text equals the link text, and play-from-here can match the rendered
+ * block to its unit. The label then goes through the rest of the pipeline like
+ * any prose (a concept page's `resizable-pane` is a name like any other). An
+ * unparsable `[[…]]` is the exception: the renderer leaves it as literal text,
+ * but speech drops it (per spec), since the raw brackets and path are nothing a
+ * listener could use.
+ */
+function reduceWikiLinks(segment: string): string {
+  return segment.replace(WIKILINK_RE, (_match, inner: string) => parseWikiLink(inner)?.label ?? "");
+}
+
+/**
  * Takes the addresses out of a line: images and bare URLs become sentinels,
  * links keep their text and lose their destination, and a reference definition
  * line disappears entirely.
@@ -489,7 +516,12 @@ function reduceAddresses(line: string): string {
 
   const withoutImages = line.replace(IMAGE_RE, SENTINEL.image);
 
-  return outsideCodeSpans(withoutImages, reduceLinks).replace(BARE_ADDRESS_RE, SENTINEL.link);
+  // Wikilinks first: `[[a]]` is not a markdown link, but the link rule must
+  // never see its brackets. Both skip code spans, where `[[…]]` is quoted code.
+  return outsideCodeSpans(withoutImages, (text) => reduceLinks(reduceWikiLinks(text))).replace(
+    BARE_ADDRESS_RE,
+    SENTINEL.link,
+  );
 }
 
 /**
