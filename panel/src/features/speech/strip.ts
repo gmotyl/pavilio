@@ -123,8 +123,12 @@ const LINK_RE = new RegExp(String.raw`\[(${LINK_TEXT})\]${LINK_TAIL}`, "g");
  * `[[target]]` / `[[target|label]]`, on one line. The inside may be empty (`*`,
  * not `+`) so a bare `[[]]` is caught (and dropped) here rather than left to the
  * link rule; a blank `[[ ]]` would match either way.
+ *
+ * Not when a `(` follows: `[[x]](url)` is a markdown link whose text is `[x]`,
+ * and the page renders it that way (the wikilink plugin skips link nodes), so
+ * it is left to the link rule, which keeps that text.
  */
-const WIKILINK_RE = /\[\[([^\[\]\n]*)\]\]/g;
+const WIKILINK_RE = /\[\[([^\[\]\n]*)\]\](?!\()/g;
 
 /**
  * A reference definition's destination: angle-bracketed, or a run without

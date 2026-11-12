@@ -306,14 +306,22 @@ describe("stripToSpeakableText", () => {
     expect(stripToSpeakableText("Broken [[ ]] and [[../escape]] links.")).toBe("Broken and links.");
   });
 
-  // A wikilink followed by a `[ref]` or `(url)` tail must be reduced before the
+  // A wikilink followed by a `[ref]` tail must be reduced before the
   // markdown-link rule runs: the other way round, the link rule takes the inner
   // `[wiki/…]` plus the tail as one link and leaves the outer brackets behind.
+  // A `(url)` tail is different: `[[x]](url)` is a markdown link whose text is
+  // `[x]` — the page renders it that way — so it is left to the link rule.
   it("wikilinks are reduced before markdown links", () => {
     expect(
       stripToSpeakableText(
         "see [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]][ref] and [[wiki/concepts/x]](https://example.com)",
       ),
-    ).toBe("see repos resize answer pane[ref] and x(⟦link⟧)");
+    ).toBe("see repos resize answer pane[ref] and [wiki/concepts/x]");
+  });
+
+  it("speaks a markdown link whose text is a wikilink as the page renders it", () => {
+    expect(stripToSpeakableText("Read [[progress-2026-09-23-repos-resize-answer-pane]](https://example.com)")).toBe(
+      "Read [progress-2026-09-23-repos-resize-answer-pane]",
+    );
   });
 });

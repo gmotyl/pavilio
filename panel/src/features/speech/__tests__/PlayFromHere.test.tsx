@@ -606,6 +606,31 @@ describe("PlayFromHere", () => {
     fireEvent.click(playOf(container, para)!);
     expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text, startUnit: cited });
   });
+
+  it("play from here starts at a paragraph ending in a markdown link whose text is a wikilink", () => {
+    // `[[x]](url)` is a markdown link with text `[x]`, not a wikilink: the page
+    // renders the bracketed name, so speech must read it too — not the short
+    // label "repos resize answer pane", which leaves no match window intact.
+    const text = [
+      "# Link page",
+      "",
+      "An opening paragraph that comes before the linked one.",
+      "",
+      "Read [[progress-2026-09-23-repos-resize-answer-pane]](https://example.com)",
+      "",
+      "A closing paragraph after the linked one.",
+      "",
+    ].join("\n");
+    const units = prepare(pageSpeechText(text), { blockBounded: true }).units;
+    const linked = units.findIndex((u) => u.source.startsWith("Read ["));
+    expect(linked).toBeGreaterThan(0);
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });
+
+    const { container } = render(<Page text={text} />);
+    const para = block(container, "Read [");
+    expect(para.textContent).toBe("Read [progress-2026-09-23-repos-resize-answer-pane]");
+    expect(para).toHaveAttribute("data-speak-unit", String(linked));
+  });
 });
 
 describe("playButtonLeft", () => {
