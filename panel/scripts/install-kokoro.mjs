@@ -15,6 +15,8 @@
  * `--uninstall` stops the server, removes its own files (and the dir once empty), removes
  * KOKORO_TTS_BASE_URL only when it still names this install, and drops only the kokoroctl
  * entry from PANEL_TTS_SERVER_CTL (the line goes once nothing remains); foreign entries stay.
+ * It edits only the secrets file: a PANEL_TTS_SERVER_CTL in the environment that still lists
+ * kokoroctl gets a warning, since the user has to update it separately.
  *
  * Every side effect outside its own files (git, kokoroctl, fetch, clock) is
  * injected into `main`, so tests run without network or a real server.
@@ -356,6 +358,10 @@ export async function main(
     });
     if (existsSync(secretsFile)) writeSecretLines(secretsFile, kept, now);
     log(`kokoro: removed ${installDir}`);
+    // scripts/panel prefers a non-empty environment value over the secrets file; that one is the user's to edit.
+    if (ctlEntries(env[CTL_VAR]).includes(ctlPath)) {
+      error(`kokoro: warning: ${CTL_VAR} in the environment still lists ${ctlPath}; update it separately`);
+    }
     return 0;
   }
 
