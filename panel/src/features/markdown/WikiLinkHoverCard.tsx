@@ -23,10 +23,17 @@ const WIKILINK_CARD_CLOSE_DELAY_MS = 150;
 const GAP_PX = 4;
 const EDGE_PX = 8;
 
+/**
+ * Matches an open hover card. While one is up, Escape is the card's: another
+ * Escape owner listening earlier in the dispatch (the answer pane) steps aside.
+ */
+export const WIKILINK_HOVER_CARD_SELECTOR = "[data-wikilink-hover-card]";
+
 type AnchorProps = {
   onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
   onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
   onPointerDown?: (e: PointerEvent<HTMLElement>) => void;
+  onPointerUp?: (e: PointerEvent<HTMLElement>) => void;
   onFocus?: (e: FocusEvent<HTMLElement>) => void;
   onBlur?: (e: FocusEvent<HTMLElement>) => void;
   "aria-describedby"?: string;
@@ -70,7 +77,13 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // A focus that follows a pointer press (a click or tap) is not keyboard focus.
+  // Cleared again on pointerup: browsers that do not focus a link on click
+  // (Safari, Firefox on macOS) would otherwise leave it set for the next Tab.
   const pointerPressed = useRef(false);
+  // Whether the pointer is over the link or the card; while it is, the pointer
+  // timers own closing and a blur does not close.
+  const overLink = useRef(false);
+  const overCard = useRef(false);
   const card = useWikiLinkCard(path, open);
 
   const clearTimers = useCallback(() => {
@@ -82,6 +95,8 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
 
   const close = useCallback(() => {
     clearTimers();
+    // The card unmounts without a pointerleave.
+    overCard.current = false;
     setOpen(false);
     setPos(null);
   }, [clearTimers]);
@@ -101,13 +116,19 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
   useEffect(() => clearTimers, [clearTimers]);
 
   // Escape closes the card wherever focus is: a hover-opened card never had focus.
+  // Window capture phase, so the key is consumed before any outer Escape owner
+  // sees it (the answer pane would close itself); the pane's own window capture
+  // listener is registered earlier and steps aside for WIKILINK_HOVER_CARD_SELECTOR.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      close();
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open, close]);
 
   // Measure after each render while open (content changes the card's size), and follow scroll.
@@ -137,6 +158,7 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
     onPointerEnter: (e: PointerEvent<HTMLElement>) => {
       own.onPointerEnter?.(e);
       if (e.pointerType === "touch") return;
+      overLink.current = true;
       cancelClose();
       if (open || openTimer.current) return;
       openTimer.current = setTimeout(() => {
@@ -147,11 +169,17 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
     onPointerLeave: (e: PointerEvent<HTMLElement>) => {
       own.onPointerLeave?.(e);
       if (e.pointerType === "touch") return;
+      overLink.current = false;
       scheduleClose();
     },
     onPointerDown: (e: PointerEvent<HTMLElement>) => {
       own.onPointerDown?.(e);
       pointerPressed.current = true;
+    },
+    onPointerUp: (e: PointerEvent<HTMLElement>) => {
+      own.onPointerUp?.(e);
+      // A click focuses on mousedown, before this; a press that did not focus is over.
+      pointerPressed.current = false;
     },
     onFocus: (e: FocusEvent<HTMLElement>) => {
       own.onFocus?.(e);
@@ -164,6 +192,11 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
     onBlur: (e: FocusEvent<HTMLElement>) => {
       own.onBlur?.(e);
       pointerPressed.current = false;
+      // A press inside the non-focusable card blurs the link; while the pointer
+      // is over the link or the card, leaving them closes it instead.
+      const into = e.relatedTarget;
+      if (overLink.current || overCard.current) return;
+      if (into instanceof Node && cardRef.current?.contains(into)) return;
       close();
     },
     "aria-describedby": open
@@ -193,14 +226,24 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
             id={cardId}
             role="tooltip"
             data-testid="wikilink-hover-card"
+            data-wikilink-hover-card=""
             className="fixed z-50 max-w-sm p-3 rounded-md text-sm shadow-lg"
             style={style}
             onPointerEnter={(e) => {
-              if (e.pointerType !== "touch") cancelClose();
+              if (e.pointerType === "touch") return;
+              overCard.current = true;
+              cancelClose();
             }}
             onPointerLeave={(e) => {
-              if (e.pointerType !== "touch") scheduleClose();
+              if (e.pointerType === "touch") return;
+              overCard.current = false;
+              scheduleClose();
             }}
+            // React events from a portal bubble through the React tree: keep
+            // hovering and clicking the card out of the ancestors (PlayFromHere).
+            onMouseOver={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
             {title && <div className="font-semibold">{title}</div>}
             <div className="font-mono text-xs break-all select-text" style={{ color: "var(--text-muted)" }}>

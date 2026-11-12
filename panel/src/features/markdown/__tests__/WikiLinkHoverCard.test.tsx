@@ -215,6 +215,130 @@ describe("WikiLinkHoverCard", () => {
     expect(card.textContent).toBe(TARGET);
   });
 
+  it("stays open on blur while the pointer is over the card", async () => {
+    // A mousedown inside the (non-focusable) card blurs the focused link; the
+    // pointer timers own closing then, so the path can still be selected.
+    renderMd(LINK_MD);
+    act(() => link().focus());
+    const card = screen.getByRole("tooltip");
+    hover(card);
+    act(() => link().blur());
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+
+    fireEvent.pointerLeave(card, { pointerType: "mouse" });
+    await advance(149);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    await advance(1);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("Escape closes only the card, never an outer Escape owner", async () => {
+    const outer = { window: vi.fn(), document: vi.fn(), react: vi.fn() };
+    window.addEventListener("keydown", outer.window);
+    document.addEventListener("keydown", outer.document);
+    try {
+      render(
+        <MemoryRouter>
+          <div onKeyDown={outer.react}>
+            <MarkdownRenderer content={LINK_MD} basePath={BASE} />
+          </div>
+        </MemoryRouter>,
+      );
+      // Hover-opened: focus is elsewhere.
+      hover(link());
+      await advance(400);
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      const onBody = fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(onBody).toBe(false); // default prevented
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      // Keyboard-opened: the key starts on the focused link.
+      act(() => link().focus());
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      fireEvent.keyDown(link(), { key: "Escape" });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      expect(outer.window).not.toHaveBeenCalled();
+      expect(outer.document).not.toHaveBeenCalled();
+      expect(outer.react).not.toHaveBeenCalled();
+
+      // With no card open, Escape is the outer owners' again.
+      fireEvent.keyDown(link(), { key: "Escape" });
+      expect(outer.react).toHaveBeenCalledTimes(1);
+      expect(outer.window).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", outer.window);
+      document.removeEventListener("keydown", outer.document);
+    }
+  });
+
+  it("pointer events on the card do not bubble to React ancestors", async () => {
+    const outer = { mouseOver: vi.fn(), click: vi.fn(), pointerDown: vi.fn() };
+    render(
+      <MemoryRouter>
+        <div onMouseOver={outer.mouseOver} onClick={outer.click} onPointerDown={outer.pointerDown}>
+          <MarkdownRenderer content={LINK_MD} basePath={BASE} />
+        </div>
+      </MemoryRouter>,
+    );
+    hover(link());
+    await advance(400);
+    const card = screen.getByRole("tooltip");
+    fireEvent.mouseOver(card);
+    fireEvent.pointerDown(card, { pointerType: "mouse" });
+    fireEvent.click(card);
+    expect(outer.mouseOver).not.toHaveBeenCalled();
+    expect(outer.pointerDown).not.toHaveBeenCalled();
+    expect(outer.click).not.toHaveBeenCalled();
+  });
+
+  it("opens on a later keyboard focus after a pointer-caused focus and blur", () => {
+    renderMd(LINK_MD);
+    fireEvent.pointerDown(link(), { pointerType: "mouse" });
+    act(() => link().focus());
+    fireEvent.pointerUp(link(), { pointerType: "mouse" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    act(() => link().blur());
+
+    act(() => link().focus());
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+  });
+
+  it("opens on keyboard focus after a click that did not focus the link", () => {
+    // Safari and Firefox on macOS do not focus links on click.
+    renderMd(LINK_MD);
+    fireEvent.pointerDown(link(), { pointerType: "mouse" });
+    fireEvent.pointerUp(link(), { pointerType: "mouse" });
+    act(() => link().focus());
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+  });
+
+  it("a leave cancels the pending open", async () => {
+    renderMd(LINK_MD);
+    hover(link());
+    await advance(300);
+    fireEvent.pointerLeave(link(), { pointerType: "mouse" });
+    // Past the open delay, still inside the close delay: only a cleared open
+    // timer keeps the card shut here.
+    await advance(120);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    await advance(1000);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(readCalls()).toHaveLength(0);
+  });
+
+  it("falls back to the link's label as the title when the page has no H1", async () => {
+    pages = new Map([[TARGET, "---\ndescription: No heading here.\n---\nBody text.\n"]]);
+    renderMd(LINK_MD);
+    hover(link());
+    await advance(400);
+    await advance(0);
+
+    const card = screen.getByRole("tooltip");
+    expect(card.firstElementChild?.textContent).toBe(LABEL);
+    expect(card.textContent).toContain("No heading here.");
+  });
+
   it("does not attach a card to plain markdown links", async () => {
     renderMd("A [plain link](other.md) here.");
     const a = screen.getByRole("link", { name: "plain link" });
