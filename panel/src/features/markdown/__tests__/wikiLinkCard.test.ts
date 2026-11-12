@@ -67,6 +67,62 @@ describe("parseCardContent", () => {
     expect(words[body.length]).toBe(" ");
   });
 
+  it.each([
+    [">", "Folded across two lines."],
+    [">-", "Folded across two lines."],
+    ["|", "Folded across two lines."],
+    ["|+", "Folded across two lines."],
+  ])("parseCardContent reads a `description: %s` block scalar", (indicator, expected) => {
+    const md = [
+      "---",
+      `description: ${indicator}`,
+      "  Folded across",
+      "  two lines.",
+      "type: concept",
+      "---",
+      "# T",
+    ].join("\n");
+    expect(parseCardContent(md)).toEqual({ title: "T", description: expected });
+  });
+
+  it("parseCardContent treats an empty block-scalar description as absent", () => {
+    const md = ["---", "description: >", "type: concept", "---", "# T", "", "The excerpt."].join("\n");
+    expect(parseCardContent(md)).toEqual({ title: "T", excerpt: "The excerpt." });
+  });
+
+  it("parseCardContent does not take a `#` line inside a leading fence as the title", () => {
+    const md = ["```sh", "# Example", "echo hi", "```", "", "# Real title", "", "Body."].join("\n");
+    expect(parseCardContent(md)).toEqual({ title: "Real title", excerpt: "Body." });
+  });
+
+  it("parseCardContent closes a fence only with the opener's char and at least its length", () => {
+    const md = [
+      "# T",
+      "",
+      "````md",
+      "~~~",
+      "Not prose.",
+      "```",
+      "Still not prose.",
+      "````",
+      "",
+      "The real summary.",
+    ].join("\n");
+    expect(parseCardContent(md).excerpt).toBe("The real summary.");
+  });
+
+  it.each([
+    ["a heading", "## Next section"],
+    ["a fence", "```"],
+    ["a list", "- item"],
+    ["a quote", "> quoted"],
+    ["a table", "| a | b |"],
+    ["a rule", "***"],
+  ])("parseCardContent ends the excerpt paragraph at %s", (_, block) => {
+    const md = ["# T", "", "First sentence.", block, "Second sentence."].join("\n");
+    expect(parseCardContent(md).excerpt).toBe("First sentence.");
+  });
+
   it("parseCardContent tolerates a page without frontmatter or H1", () => {
     expect(parseCardContent("Just a line of prose.")).toEqual({ excerpt: "Just a line of prose." });
     expect(parseCardContent("")).toEqual({});

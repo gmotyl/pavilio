@@ -50,20 +50,34 @@ export function parseWikiLink(raw: string): WikiLink | null {
 /** Same-length run of spaces, so offsets outside code stay valid. */
 const blank = (s: string) => s.replace(/[^\n]/g, " ");
 
+type Fence = { char: string; len: number };
+
+const FENCE_MARK = /^ {0,3}(`{3,}|~{3,})/;
+
+/** The code fence `line` opens (≤3 spaces of indent, then 3+ backticks or tildes), else null. */
+export function fenceOpener(line: string): Fence | null {
+  const open = FENCE_MARK.exec(line);
+  return open ? { char: open[1][0], len: open[1].length } : null;
+}
+
+/** Whether `line` closes `fence`: the same character, at least as long, and nothing after it. */
+export function closesFence(line: string, fence: Fence): boolean {
+  const mark = FENCE_MARK.exec(line);
+  return !!mark && mark[1][0] === fence.char && mark[1].length >= fence.len
+    && line.slice(mark[0].length).trim() === "";
+}
+
 /** Replace fenced code blocks and inline code spans with whitespace. */
 function maskCode(markdown: string): string {
   const lines = markdown.split("\n");
-  let fence: { char: string; len: number } | null = null;
+  let fence: Fence | null = null;
   for (let i = 0; i < lines.length; i++) {
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i]);
     if (fence) {
-      const close = open && open[1][0] === fence.char && open[1].length >= fence.len
-        && lines[i].slice(open[0].length).trim() === "";
+      if (closesFence(lines[i], fence)) fence = null;
       lines[i] = blank(lines[i]);
-      if (close) fence = null;
-    } else if (open) {
-      fence = { char: open[1][0], len: open[1].length };
-      lines[i] = blank(lines[i]);
+    } else {
+      fence = fenceOpener(lines[i]);
+      if (fence) lines[i] = blank(lines[i]);
     }
   }
   // Inline code: a backtick run closed by a run of the same length (CommonMark).
