@@ -120,8 +120,9 @@ const IMAGE_RE = new RegExp(String.raw`!\[${LINK_TEXT}\]${LINK_TAIL}`, "g");
 const LINK_RE = new RegExp(String.raw`\[(${LINK_TEXT})\]${LINK_TAIL}`, "g");
 
 /**
- * `[[target]]` / `[[target|label]]`, on one line. The inside may be blank so an
- * empty `[[ ]]` is caught (and dropped) here rather than left to the link rule.
+ * `[[target]]` / `[[target|label]]`, on one line. The inside may be empty (`*`,
+ * not `+`) so a bare `[[]]` is caught (and dropped) here rather than left to the
+ * link rule; a blank `[[ ]]` would match either way.
  */
 const WIKILINK_RE = /\[\[([^\[\]\n]*)\]\]/g;
 
@@ -462,11 +463,13 @@ function reduceLinks(segment: string): string {
 
 /**
  * Replaces each wikilink with the label the page renders for it — the explicit
- * `|label`, else the target's short label — so spoken text equals the link
- * text, and play-from-here can match the rendered block to its unit. The label
- * then goes through the rest of the pipeline like any prose (a concept page's
- * `resizable-pane` is a name like any other). An unparsable `[[…]]` renders as
- * nothing a listener could use, so it is dropped.
+ * `|label`, else the target's short label — so for a parsable wikilink the
+ * spoken text equals the link text, and play-from-here can match the rendered
+ * block to its unit. The label then goes through the rest of the pipeline like
+ * any prose (a concept page's `resizable-pane` is a name like any other). An
+ * unparsable `[[…]]` is the exception: the renderer leaves it as literal text,
+ * but speech drops it (per spec), since the raw brackets and path are nothing a
+ * listener could use.
  */
 function reduceWikiLinks(segment: string): string {
   return segment.replace(WIKILINK_RE, (_match, inner: string) => parseWikiLink(inner)?.label ?? "");

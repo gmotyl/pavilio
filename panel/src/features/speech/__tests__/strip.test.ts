@@ -276,7 +276,8 @@ describe("stripToSpeakableText", () => {
   });
 
   // Wikilinks are spoken as their rendered label: the short label of the target,
-  // or the explicit `|label`. Spoken text then equals the rendered link text.
+  // or the explicit `|label`. For a parsable wikilink, spoken text then equals
+  // the rendered link text.
   it("speaks an unlabelled wikilink as its short label", () => {
     const spoken = stripToSpeakableText(
       "Rate the typing ([[wiki/sources/context-snapshot-2026-10-21-speech]]; [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]).",
@@ -303,5 +304,16 @@ describe("stripToSpeakableText", () => {
 
   it("drops an unparsable wikilink", () => {
     expect(stripToSpeakableText("Broken [[ ]] and [[../escape]] links.")).toBe("Broken and links.");
+  });
+
+  // A wikilink followed by a `[ref]` or `(url)` tail must be reduced before the
+  // markdown-link rule runs: the other way round, the link rule takes the inner
+  // `[wiki/…]` plus the tail as one link and leaves the outer brackets behind.
+  it("wikilinks are reduced before markdown links", () => {
+    expect(
+      stripToSpeakableText(
+        "see [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]][ref] and [[wiki/concepts/x]](https://example.com)",
+      ),
+    ).toBe("see repos resize answer pane[ref] and x(⟦link⟧)");
   });
 });
