@@ -345,6 +345,28 @@ describe("install:kokoro", () => {
     expect(readFileSync(secretsFile, "utf8")).toBe("A=1\n");
   });
 
+  it("uninstall warns when the environment PANEL_TTS_SERVER_CTL still lists kokoroctl", async () => {
+    const warning = /warning: PANEL_TTS_SERVER_CTL in the environment still lists .*kokoroctl.*update it separately/;
+    expect(await main([], fakes().deps)).toBe(0);
+    writeSecrets(`A=1\nPANEL_TTS_SERVER_CTL=${FOREIGN_CTL}:${ctlPath}\n`);
+    const listed = fakes();
+    listed.deps.env.PANEL_TTS_SERVER_CTL = `${FOREIGN_CTL}:${ctlPath}`;
+
+    expect(await main(["--uninstall"], listed.deps)).toBe(0);
+
+    expect(listed.output()).toMatch(warning);
+    expect(readFileSync(secretsFile, "utf8")).toBe(`A=1\nPANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
+
+    // Unset, or set without kokoroctl: nothing for the user to fix by hand.
+    for (const value of [undefined, FOREIGN_CTL]) {
+      expect(await main([], fakes().deps)).toBe(0);
+      const other = fakes();
+      if (value) other.deps.env.PANEL_TTS_SERVER_CTL = value;
+      expect(await main(["--uninstall"], other.deps)).toBe(0);
+      expect(other.output()).not.toMatch(/in the environment still lists/);
+    }
+  });
+
   it("uninstall leaves files it did not create", async () => {
     expect(await main([], fakes().deps)).toBe(0);
     writeFileSync(join(installDir, "kokoro.log"), "log\n");
