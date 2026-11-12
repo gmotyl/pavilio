@@ -19,7 +19,7 @@ const PROJECT_PREFIX = /^([A-Za-z0-9][\w.-]*):(.+)$/;
 // Optional record kind (source-page `<kind>` list), a date, an optional time
 // (`_08-02-58`, `_1945`), then the descriptive remainder.
 const DATED_NAME =
-  /^(?:(?:note|memo|progress|adr|proposal|design|snippet|context-snapshot|context)-)?\d{4}-\d{2}-\d{2}(?:[_-]\d{2}-?\d{2}(?:-?\d{2})?)?[-_](.+)$/;
+  /^(?:(?:note|memo|progress|adr|proposal|design|file|article|snippet|context-snapshot|context)-)?\d{4}-\d{2}-\d{2}(?:[_-]\d{2}-?\d{2}(?:-?\d{2})?)?[-_](.+)$/;
 
 /** Display text for a wikilink target with no explicit label (design § Decisions 1). */
 export function shortLabel(target: string): string {

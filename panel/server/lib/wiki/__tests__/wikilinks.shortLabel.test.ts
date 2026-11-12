@@ -7,6 +7,11 @@ describe("shortLabel", () => {
     expect(shortLabel("wiki/sources/context-snapshot-2026-10-21-speech")).toBe("speech");
   });
 
+  it("shortLabel strips the file and article source kinds", () => {
+    expect(shortLabel("wiki/sources/file-2026-10-13-runbook")).toBe("runbook");
+    expect(shortLabel("wiki/sources/article-2026-10-13-edge-tts-voices")).toBe("edge tts voices");
+  });
+
   it("shortLabel strips a time after the date (dashed and compact)", () => {
     expect(shortLabel("wiki/sources/note-2026-10-26_09-39-29_middleware_language_parameter_handling"))
       .toBe("middleware language parameter handling");
