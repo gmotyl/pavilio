@@ -18,13 +18,17 @@ import { join, resolve } from "node:path";
 const REPO_ROOT = resolve(__dirname, "../../..");
 const README_PATH = join(REPO_ROOT, "README.md");
 const README = readFileSync(README_PATH, "utf8");
+// The install details (bootstrap steps, platform notes, notes safety) moved out
+// of the README into this doc; the README keeps only the three commands.
+const INSTALL_DOC_PATH = join(REPO_ROOT, "docs/install.md");
+const readInstallDoc = () => readFileSync(INSTALL_DOC_PATH, "utf8");
 
 /** Every heading in the document, in order, with its level and offset. */
-function headings() {
+function headings(doc: string = README) {
   const found: Array<{ level: number; text: string; start: number; end: number }> = [];
   const re = /^(#{2,6})[ \t]+(.+?)[ \t]*$/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(README)) !== null) {
+  while ((m = re.exec(doc)) !== null) {
     found.push({ level: m[1].length, text: m[2], start: m.index, end: re.lastIndex });
   }
   return found;
@@ -35,22 +39,22 @@ function headings() {
  * at the same level or higher. Matched on a normalised prefix so the test does
  * not break on an added em dash or a reworded tail.
  */
-function section(headingPrefix: string): string {
-  const all = headings();
+function section(headingPrefix: string, doc: string = README): string {
+  const all = headings(doc);
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   const i = all.findIndex((h) => norm(h.text).startsWith(norm(headingPrefix)));
-  expect(i, `README has no heading starting with "${headingPrefix}"`).toBeGreaterThanOrEqual(0);
+  expect(i, `document has no heading starting with "${headingPrefix}"`).toBeGreaterThanOrEqual(0);
   const here = all[i];
   const next = all.slice(i + 1).find((h) => h.level <= here.level);
-  return README.slice(here.end, next ? next.start : README.length);
+  return doc.slice(here.end, next ? next.start : doc.length);
 }
 
 /** Position of the first heading whose text starts with the given prefix. */
-function headingIndex(headingPrefix: string): number {
-  const all = headings();
+function headingIndex(headingPrefix: string, doc: string = README): number {
+  const all = headings(doc);
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   const found = all.find((h) => norm(h.text).startsWith(norm(headingPrefix)));
-  expect(found, `README has no heading starting with "${headingPrefix}"`).toBeTruthy();
+  expect(found, `document has no heading starting with "${headingPrefix}"`).toBeTruthy();
   return found!.start;
 }
 
@@ -72,9 +76,9 @@ function mentions(body: string, needle: string | RegExp): boolean {
 
 describe("README Quick Start", () => {
   it("Quick Start opens with exactly clone, pnpm bootstrap, pnpm start", () => {
-    // Before the optional-extras pitch, not after it: the first thing a reader
-    // needs is the thing that makes the panel exist.
-    expect(headingIndex("Quick Start")).toBeLessThan(headingIndex("Recommended Skills"));
+    // Before the everyday-commands reference, not after it: the first thing a
+    // reader needs is the thing that makes the panel exist.
+    expect(headingIndex("Quick Start")).toBeLessThan(headingIndex("Everyday commands"));
 
     const lines = firstCodeBlock(section("Quick Start"));
     expect(lines).toHaveLength(3);
@@ -102,14 +106,24 @@ describe("README Quick Start", () => {
     }
   });
 
-  it("platform notes cover the WSL shortcut, UAC, and the notes-safety rebase", () => {
-    const quickStart = section("Quick Start");
+  it("Quick Start links docs/install.md for the details", () => {
+    // The README keeps only the three commands; everything a first run might
+    // trip over lives in docs/install.md, and the Quick Start must say where.
+    expect(section("Quick Start")).toMatch(/\]\(\.?\/?docs\/install\.md(#[^)]*)?\)/);
+  });
 
-    // Both platforms get a note of their own under Quick Start.
-    expect(quickStart).toMatch(/^###\s+macOS/m);
-    expect(quickStart).toMatch(/^###\s+WSL2/m);
+  it("docs/install.md platform notes cover the WSL shortcut, UAC, and the notes-safety rebase", () => {
+    expect(existsSync(INSTALL_DOC_PATH), "docs/install.md must exist").toBe(true);
+    const install = readInstallDoc();
 
-    const wsl = section("WSL2");
+    // Both platforms get a note of their own.
+    expect(install).toMatch(/^###\s+macOS/m);
+    expect(install).toMatch(/^###\s+WSL2/m);
+
+    // The naming rule the bare `pnpm <name>` spellings depend on.
+    expect(mentions(install, /`bootstrap`, not `setup`/)).toBe(true);
+
+    const wsl = section("WSL2", install);
     // The shortcut setup writes, by name.
     expect(mentions(wsl, "shortcut"), "WSL2 note must mention the desktop shortcut").toBe(true);
     // The one-time elevation prompt the launcher's portproxy step raises.
@@ -123,7 +137,7 @@ describe("README Quick Start", () => {
     ).toBe(true);
     expect(mentions(wsl, "pnpm bootstrap"), "WSL2 note must say to re-run setup").toBe(true);
 
-    const notes = section("Keep your notes safe");
+    const notes = section("Keep your notes safe", install);
     // What the notes actually are: commits, on main, in this workspace.
     expect(mentions(notes, /commits?\b/i)).toBe(true);
     // Leading \b on purpose: without it the optional backticks collapse the
@@ -145,6 +159,11 @@ describe("README Quick Start", () => {
     // aliases of exactly that command.
     expect(notes).toMatch(/`pnpm pull`/);
     expect(notes).not.toMatch(/`pnpm (run )?(update|upgrade|up)`(?!\s*(is|runs|would|and))/);
+    // The one agent sync/pull leaves stale: Codex has to be refreshed by hand.
+    expect(notes, "must say sync/pull do not refresh Codex").toMatch(
+      /`pnpm sync`[\s\S]{0,40}`pnpm pull`[\s\S]{0,40}refresh[\s\S]{0,80}\bnot\b\W*Codex/i,
+    );
+    expect(notes, "must say how to refresh Codex by hand").toMatch(/`pnpm setup:codex`/);
   });
 
   it("no package script is named after a command pnpm resolves itself", () => {
@@ -209,10 +228,11 @@ describe("README Quick Start", () => {
     }
     expect(broken, "README links a path that is not in the repo").toEqual([]);
 
-    // The two fork/upstream sections are one section now, and it still carries
-    // what made Option B worth reading: the side-by-side clone, and what
-    // scripts/update.sh does with them.
-    const teams = section("Teams");
+    // The two fork/upstream sections are one section now — moved to
+    // docs/workspaces.md — and it still carries what made Option B worth
+    // reading: the side-by-side clone, and what scripts/update.sh does with them.
+    const workspaces = readFileSync(join(REPO_ROOT, "docs/workspaces.md"), "utf8");
+    const teams = section("Teams", workspaces);
     expect(teams).toMatch(/git clone\b[\s\S]*pavilio\.git/);
     expect((teams.match(/git clone\b/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(mentions(teams, /same parent|side by side|side-by-side/i)).toBe(true);
@@ -220,7 +240,9 @@ describe("README Quick Start", () => {
     expect(mentions(teams, "pnpm pull")).toBe(true);
 
     // The old headings are gone, not duplicated alongside the new one.
-    expect(README).not.toMatch(/^##\s+Using as Your Upstream/m);
-    expect(README).not.toMatch(/^###\s+Option [AB]\b/m);
+    for (const doc of [README, workspaces]) {
+      expect(doc).not.toMatch(/^##\s+Using as Your Upstream/m);
+      expect(doc).not.toMatch(/^###\s+Option [AB]\b/m);
+    }
   });
 });

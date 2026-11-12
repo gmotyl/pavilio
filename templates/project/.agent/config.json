@@ -1,9 +1,0 @@
-{
-  "provider": "{{PROVIDER}}",
-  "provider_options": {},
-  "features": [],
-  "notifications": {
-    "enabled": true,
-    "style": "system-sounds"
-  }
-}
