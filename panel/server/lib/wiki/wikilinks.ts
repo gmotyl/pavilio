@@ -11,16 +11,29 @@ export type WikiLink = {
   raw: string; // text between the brackets, as written
   project?: string; // set only when the link carries a `<project>:` prefix
   target: string; // project-relative path, "/"-separated, without `.md`
-  label: string; // text after `|`, else `raw` without the label part
+  label: string; // trimmed text after `|`, else shortLabel(target)
 };
 
 const PROJECT_PREFIX = /^([A-Za-z0-9][\w.-]*):(.+)$/;
+
+// Optional record kind (source-page `<kind>` list), a date, an optional time
+// (`_08-02-58`, `_1945`), then the descriptive remainder.
+const DATED_NAME =
+  /^(?:(?:note|memo|progress|adr|proposal|design|snippet|context-snapshot|context)-)?\d{4}-\d{2}-\d{2}(?:[_-]\d{2}-?\d{2}(?:-?\d{2})?)?[-_](.+)$/;
+
+/** Display text for a wikilink target with no explicit label (design § Decisions 1). */
+export function shortLabel(target: string): string {
+  const name = target.slice(target.lastIndexOf("/") + 1);
+  const dated = DATED_NAME.exec(name);
+  const rest = dated ? dated[1].replace(/[-_]/g, " ").trim() : "";
+  return rest || name;
+}
 
 /** Parse the inside of `[[…]]`; null when it is not a usable link (empty, or escapes the project). */
 export function parseWikiLink(raw: string): WikiLink | null {
   const pipe = raw.indexOf("|");
   const ref = (pipe === -1 ? raw : raw.slice(0, pipe)).trim();
-  const label = pipe === -1 ? ref : raw.slice(pipe + 1).trim() || ref;
+  const explicit = pipe === -1 ? "" : raw.slice(pipe + 1).trim();
   let project: string | undefined;
   let path = ref;
   const prefixed = PROJECT_PREFIX.exec(ref);
@@ -31,7 +44,7 @@ export function parseWikiLink(raw: string): WikiLink | null {
   path = path.trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\.md$/i, "");
   const segments = path.split("/");
   if (!path || segments.some((s) => s === "" || s === "." || s === "..")) return null;
-  return { raw, ...(project ? { project } : {}), target: path, label };
+  return { raw, ...(project ? { project } : {}), target: path, label: explicit || shortLabel(path) };
 }
 
 /** Same-length run of spaces, so offsets outside code stay valid. */
