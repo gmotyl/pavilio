@@ -43,7 +43,11 @@ const LINK = /\[\[([^[\]\n]+)\]\]/g;
 /** Nodes whose text must not become links: code is verbatim, and links cannot nest. */
 const SKIP = new Set(["code", "inlineCode", "html", "link", "linkReference", "definition"]);
 
-function splitText(value: string, fromProject: string | undefined): MdNode[] | null {
+function splitText(
+  value: string,
+  fromProject: string | undefined,
+  generated: Set<string> | undefined,
+): MdNode[] | null {
   const out: MdNode[] = [];
   let last = 0;
   for (const match of value.matchAll(LINK)) {
@@ -52,6 +56,7 @@ function splitText(value: string, fromProject: string | undefined): MdNode[] | n
     const at = match.index ?? 0;
     if (at > last) out.push({ type: "text", value: value.slice(last, at) });
     const path = wikiLinkPath(link, fromProject);
+    if (path) generated?.add(path);
     const text: MdNode = { type: "text", value: link.label };
     out.push(
       path
@@ -75,18 +80,22 @@ function splitText(value: string, fromProject: string | undefined): MdNode[] | n
   return out;
 }
 
-function transform(node: MdNode, fromProject: string | undefined): void {
+function transform(
+  node: MdNode,
+  fromProject: string | undefined,
+  generated: Set<string> | undefined,
+): void {
   if (!node.children) return;
   const next: MdNode[] = [];
   for (const child of node.children) {
     if (child.type === "text" && child.value) {
-      const parts = splitText(child.value, fromProject);
+      const parts = splitText(child.value, fromProject, generated);
       if (parts) {
         next.push(...parts);
         continue;
       }
     } else if (!SKIP.has(child.type)) {
-      transform(child, fromProject);
+      transform(child, fromProject, generated);
     }
     next.push(child);
   }
@@ -97,8 +106,14 @@ function transform(node: MdNode, fromProject: string | undefined): void {
  * Remark plugin: rewrites `[[…]]` in mdast `text` nodes into links to the viewer route
  * (`/view/<project>/<path>.md`), or to the wiki tab for wiki pages. Code nodes carry `value`,
  * not text children, so fences and inline code stay verbatim.
+ *
+ * `generated`, when given, receives the path of every link the plugin itself created. It is the
+ * only trustworthy list of wikilinks in a render: raw HTML can author a `data-wikilink`
+ * attribute, and a raw-source scan also sees `[[…]]` inside comments, HTML and link text.
  */
-export default function remarkWikiLinks(options: { basePath?: string } = {}) {
+export default function remarkWikiLinks(
+  options: { basePath?: string; generated?: Set<string> } = {},
+) {
   const fromProject = owningProject(options.basePath);
-  return (tree: MdNode) => transform(tree, fromProject);
+  return (tree: MdNode) => transform(tree, fromProject, options.generated);
 }

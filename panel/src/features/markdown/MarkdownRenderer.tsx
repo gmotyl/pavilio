@@ -228,10 +228,14 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
   const missingWikiLinks = useMissingWikiLinks(targets);
   // Only paths the remark plugin generated from `[[…]]` are wikilinks: raw HTML can carry an
   // authored `data-wikilink`, which must not get a card (and a read of an arbitrary path).
-  // Read through a ref for the same reason as `contentRef` below.
-  const targetSet = useMemo(() => new Set(targets ? targets.split("\n") : []), [targets]);
-  const wikiLinkTargetsRef = useRef(targetSet);
-  wikiLinkTargetsRef.current = targetSet;
+  // `targets` is no allowlist — it scans the raw source, comments and link text included — so
+  // the plugin fills this set itself while ReactMarkdown parses, before any anchor renders.
+  // A fresh set per document, so a path dropped from the source drops out of it too; refilling
+  // it on a re-render of the same document only re-adds the same paths. Read through a ref for
+  // the same reason as `contentRef` below.
+  const generatedWikiLinks = useMemo(() => new Set<string>(), [content, basePath]);
+  const wikiLinkTargetsRef = useRef(generatedWikiLinks);
+  wikiLinkTargetsRef.current = generatedWikiLinks;
   // Read through a ref, not a memo dependency: new override functions are new
   // component types, so every keystroke in a live preview would remount the
   // whole tree (mermaid diagrams included) just to refresh the quote text.
@@ -404,7 +408,7 @@ export default function MarkdownRenderer({ content, basePath }: MarkdownRenderer
   return (
     <div className="prose prose-invert prose-zinc max-w-none">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath }]]}
+        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath, generated: generatedWikiLinks }]]}
         rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw]}
         components={components}
       >

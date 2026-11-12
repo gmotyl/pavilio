@@ -134,6 +134,35 @@ describe("WikiLinkHoverCard", () => {
     expect(screen.getByRole("tooltip").textContent).toContain(TARGET);
   });
 
+  // `[[…]]` the remark plugin leaves alone (raw HTML, link text, inline code) still shows up in a
+  // raw-source scan, so a spoof anchor naming that path must not ride on it.
+  it.each([
+    ["an HTML comment", "<!-- [[wiki/secret]] -->"],
+    ["markdown link text", "[[[wiki/secret]]](https://example.com/)"],
+    ["inline code", "`[[wiki/secret]]`"],
+  ])("a spoof anchor whose path appears only in %s gets no card and no read", async (_, decoy) => {
+    const SPOOF = "pavilio/wiki/secret.md";
+    existing.add(SPOOF);
+    pages.set(SPOOF, "# Secret\n\nShould never be read.");
+    renderMd(`${LINK_MD}\n\n${decoy}\n\n<a href="/elsewhere" data-wikilink="${SPOOF}">spoof</a>`);
+    await advance(300);
+    const spoof = screen.getByRole("link", { name: "spoof" });
+    hover(spoof);
+    act(() => spoof.focus());
+    await advance(1000);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(spoof.hasAttribute("aria-describedby")).toBe(false);
+    expect(readCalls()).toHaveLength(0);
+
+    // The genuine wikilink in the same document still gets its card.
+    act(() => spoof.blur());
+    hover(link());
+    await advance(400);
+    await advance(0);
+    expect(screen.getByRole("tooltip").textContent).toContain(TARGET);
+  });
+
   it("does not open or fetch when the pointer leaves early", async () => {
     renderMd(LINK_MD);
     hover(link());
