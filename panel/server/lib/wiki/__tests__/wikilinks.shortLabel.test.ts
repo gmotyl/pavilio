@@ -31,6 +31,23 @@ describe("shortLabel", () => {
     expect(shortLabel("wiki/sources/youtube-x9Ux-Anb_vk")).toBe("youtube-x9Ux-Anb_vk");
     expect(shortLabel("wiki/concepts/resizable-pane")).toBe("resizable-pane");
   });
+
+  it("shortLabel drops long numeric ids", () => {
+    expect(shortLabel("wiki/sources/confluence-4671504424")).toBe("confluence");
+    expect(shortLabel("wiki/sources/confluence-4671504424-team-setup")).toBe("confluence-team-setup");
+    expect(shortLabel("wiki/sources/jira-ABC-42")).toBe("jira-ABC-42");
+    expect(shortLabel("wiki/sources/youtube-x9Ux-Anb_vk")).toBe("youtube-x9Ux-Anb_vk");
+    expect(shortLabel("wiki/concepts/resizable-pane")).toBe("resizable-pane");
+  });
+
+  it("shortLabel falls back to the file name when only a long id remains", () => {
+    expect(shortLabel("wiki/sources/4671504424")).toBe("4671504424");
+  });
+
+  it("shortLabel drops long numeric ids from a dated remainder too", () => {
+    expect(shortLabel("wiki/sources/progress-2026-09-23-repos-resize-answer-pane")).toBe("repos resize answer pane");
+    expect(shortLabel("wiki/sources/note-2026-10-26_ticket_12345678_fix")).toBe("ticket fix");
+  });
 });
 
 describe("parseWikiLink label", () => {
