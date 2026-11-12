@@ -291,6 +291,12 @@ describe("stripToSpeakableText", () => {
     );
   });
 
+  it("speaks a wikilink with a long numeric id without the digits", () => {
+    const spoken = stripToSpeakableText("See [[wiki/sources/confluence-4671504424]] for details.");
+    expect(spoken).toBe("See confluence for details.");
+    expect(spoken).not.toMatch(/\d/);
+  });
+
   it("speaks an explicit wikilink label", () => {
     expect(stripToSpeakableText("Ask [[metro:wiki/entities/jane-doe|Jane]] first.")).toBe("Ask Jane first.");
   });

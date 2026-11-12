@@ -21,12 +21,24 @@ const PROJECT_PREFIX = /^([A-Za-z0-9][\w.-]*):(.+)$/;
 const DATED_NAME =
   /^(?:(?:note|memo|progress|adr|proposal|design|file|article|snippet|context-snapshot|context)-)?\d{4}-\d{2}-\d{2}(?:[_-]\d{2}-?\d{2}(?:-?\d{2})?)?[-_](.+)$/;
 
+// A `-`/`_`-separated segment that is all digits, 6+ long (e.g. a Confluence page id),
+// together with its leading separator; the lookahead keeps the next separator for the next match.
+const LONG_NUMBER_SEGMENT = /(?:^|[-_])\d{6,}(?=[-_]|$)/g;
+
+/** Drop long numeric id segments, keeping the remaining separators; "" when nothing remains. */
+function dropLongNumbers(name: string): string {
+  return name.replace(LONG_NUMBER_SEGMENT, "").replace(/^[-_]+|[-_]+$/g, "");
+}
+
 /** Display text for a wikilink target with no explicit label (design § Decisions 1). */
 export function shortLabel(target: string): string {
   const name = target.slice(target.lastIndexOf("/") + 1);
   const dated = DATED_NAME.exec(name);
-  const rest = dated ? dated[1].replace(/[-_]/g, " ").trim() : "";
-  return rest || name;
+  if (dated) {
+    const rest = dropLongNumbers(dated[1]).replace(/[-_]/g, " ").trim();
+    return rest || name;
+  }
+  return dropLongNumbers(name) || name;
 }
 
 /** Parse the inside of `[[…]]`; null when it is not a usable link (empty, or escapes the project). */
