@@ -21,10 +21,20 @@ async function loadPanelConfig() {
 describe("panel workspace root", () => {
   it("uses matching default candidate for workspace root and projects directory without realpath normalization", async () => {
     vi.stubEnv("PAVILIO_WORKSPACE_ROOT", undefined);
+    vi.doMock("fs", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("fs")>();
+      const moduleRootIdentity = actual.realpathSync(MODULE_ROOT);
+      return {
+        ...actual,
+        realpathSync: (path: string) =>
+          path === DEFAULT_ROOT ? moduleRootIdentity : actual.realpathSync(path as never),
+      };
+    });
     const config = await loadPanelConfig();
 
     expect(config.WORKSPACE_ROOT).toBe(DEFAULT_ROOT);
     expect(config.default.projectsDir).toBe(join(DEFAULT_ROOT, "projects"));
+    expect(dirname(config.default.preferencesPath)).toBe(join(DEFAULT_ROOT, ".pavilio", "preferences"));
   });
 
   it("uses valid explicit override for workspace root and projects directory", async () => {
@@ -52,7 +62,7 @@ describe("panel workspace root", () => {
     await expect(loadPanelConfig()).rejects.toThrow(message);
   });
 
-  it.each(["unavailable", "mismatched"]) (
+  it.each(["unavailable", "mismatched"])(
     "falls back to module root when default candidate is %s",
     async (candidateStatus) => {
       vi.stubEnv("PAVILIO_WORKSPACE_ROOT", undefined);
