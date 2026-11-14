@@ -44,7 +44,7 @@ const { useITermShortcuts } = await import("../../projects/useITermShortcuts");
 const { useFullscreenLayerActive } = await import("../../shell/Layout/fullscreenLayer");
 const { forgetAnswerPane, getAnswerPaneState } = await import("../answerPaneState");
 
-const sessions: SessionMeta[] = CELLS.map((id, i) => ({
+const SESSIONS: SessionMeta[] = CELLS.map((id, i) => ({
   id,
   name: id,
   project: "vector",
@@ -55,6 +55,8 @@ const sessions: SessionMeta[] = CELLS.map((id, i) => ({
 
 /** A surface wired the way `ProjectTerminalsSurface` wires it. */
 function Surface({ speech, startMaximized }: { speech: GridSpeech; startMaximized: boolean }) {
+  const [sessions, setSessions] = useState(SESSIONS);
+  const [minimisedIds, setMinimisedIds] = useState<string[]>([]);
   const [focusedId, setFocusedId] = useState<string | null>("cell-a");
   const [maximized, setMaximized] = useState(startMaximized);
   const handles = useRef<Map<string, TerminalHandle>>(new Map());
@@ -80,7 +82,7 @@ function Surface({ speech, startMaximized }: { speech: GridSpeech; startMaximize
         sessions={sessions}
         focusedId={focusedId}
         onFocus={setFocusedId}
-        onDeleteSession={() => {}}
+        onDeleteSession={(id) => setSessions((cur) => cur.filter((x) => x.id !== id))}
         onUpdateSession={() => {}}
         allSessions={sessions}
         maximized={maximized}
@@ -91,6 +93,9 @@ function Surface({ speech, startMaximized }: { speech: GridSpeech; startMaximize
         onCreateTerminal={() => {}}
         onNavTo={() => {}}
         tiles={[]}
+        minimisedIds={minimisedIds}
+        onMinimise={(id) => setMinimisedIds((cur) => [...cur, id])}
+        onRestore={(id) => setMinimisedIds((cur) => cur.filter((x) => x !== id))}
         speech={speech}
         fullscreen={fullscreen}
       />
@@ -247,5 +252,67 @@ describe("TerminalFullscreenLayer", () => {
     await act(async () => {});
     expect(paneOf("cell-a")).not.toBeNull();
     expect(paneOf("cell-b")).toBeNull();
+  });
+
+  it("a cell that leaves the grid closes its layer and releases the chrome", async () => {
+    await renderSurface();
+    // Minimised from its own header, inside the layer.
+    await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+    expect(layer("cell")).toContainElement(terminalOf("cell-a"));
+    expect(chromeCovered()).toBe("true");
+    await click(screen.getByTestId("terminal-cell-minimise-cell-a"));
+    expect(layer("cell")).toBeNull();
+    expect(chromeCovered()).toBe("false");
+    // The layer went with the cell, not just its host: restored, the cell is
+    // back in the grid, not fullscreen again.
+    await click(screen.getByTestId("minimised-tray-pill-cell-a"));
+    expect(terminalOf("cell-a")).toBeInTheDocument();
+    expect(layer("cell")).toBeNull();
+    expect(chromeCovered()).toBe("false");
+
+    // Killed, after the confirmation.
+    await click(screen.getByTestId("terminal-cell-fullscreen-cell-b"));
+    expect(layer("cell")).toContainElement(terminalOf("cell-b"));
+    await click(screen.getByTestId("terminal-cell-kill-cell-b"));
+    await click(screen.getByTestId("confirm-close-terminal-confirm"));
+    expect(screen.queryByLabelText("terminal input cell-b")).toBeNull();
+    expect(layer("cell")).toBeNull();
+    expect(chromeCovered()).toBe("false");
+  });
+
+  it("a cell layer in Max stays visible after focus moves to another cell", async () => {
+    await renderSurface({ maximized: true });
+    await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+    await click(screen.getByTestId("terminal-toolbar-chip-cell-b"));
+    expect(screen.getByTestId("maximized").textContent).toBe("true");
+
+    const host = layer("cell")!;
+    expect(host).toContainElement(terminalOf("cell-a"));
+    // Max now hides cell-a's wrapper ...
+    expect(host.parentElement!.style.visibility).toBe("hidden");
+    expect(host.parentElement!.style.pointerEvents).toBe("none");
+    // ... and the layer does not inherit it.
+    expect(host.style.visibility).toBe("visible");
+    expect(host.style.pointerEvents).toBe("auto");
+  });
+
+  it("opening and closing a cell layer keeps the same host and cell nodes", async () => {
+    await renderSurface();
+    const cellNode = terminalOf("cell-a").closest("[data-terminal-cell]")!;
+    const hostNode = cellNode.parentElement!;
+    const holder = document.querySelector('[data-holder="cell-a"]');
+    expect(hostNode.className).toBe("contents");
+
+    await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+    expect(layer("cell")).toBe(hostNode);
+    expect(hostNode.firstElementChild).toBe(cellNode);
+    expect(document.querySelector('[data-holder="cell-a"]')).toBe(holder);
+
+    await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+    expect(layer("cell")).toBeNull();
+    expect(terminalOf("cell-a").closest("[data-terminal-cell]")).toBe(cellNode);
+    expect(cellNode.parentElement).toBe(hostNode);
+    expect(hostNode.className).toBe("contents");
+    expect(document.querySelector('[data-holder="cell-a"]')).toBe(holder);
   });
 });
