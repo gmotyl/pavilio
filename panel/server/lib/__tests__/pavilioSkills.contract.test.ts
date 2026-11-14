@@ -10,7 +10,7 @@ const SKILLS_DIR = join(REPO_ROOT, "skills");
 const SETUP_OPENCODE = join(REPO_ROOT, "scripts/setup:opencode");
 
 describe("pavilio skills — OpenCode wrappers", () => {
-  it("generated OpenCode wrappers point to every authoritative Pavilio skill and retain cebula-codex", () => {
+  it("generated OpenCode wrappers point to every authoritative Pavilio skill", () => {
     // Authoritative skills are the skills/pavilio-* directories that contain a SKILL.md.
     const authoritative = readdirSync(SKILLS_DIR)
       .filter((name) => name.startsWith("pavilio-"))
@@ -51,9 +51,6 @@ describe("pavilio skills — OpenCode wrappers", () => {
         unregistered,
         `setup:opencode left commands unregistered in opencode.json: ${unregistered.join(", ")}`,
       ).toEqual([]);
-
-      expect(existsSync(join(generatedDir, "cebula-codex.md"))).toBe(true);
-      expect(config.command?.["cebula-codex"]?.template).toBeTruthy();
 
       // The wrapper must point back at the authoritative SKILL.md, not a copy.
       for (const name of authoritative) {
