@@ -107,7 +107,6 @@ export function renderPane(speech: GridSpeech, props: Partial<AnswerPaneProps> =
       <AnswerPane
         sessionId="cell-a"
         speech={speech}
-        onClose={() => {}}
         send={() => true}
         {...props}
       />

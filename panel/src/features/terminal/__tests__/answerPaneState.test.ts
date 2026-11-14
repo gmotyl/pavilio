@@ -38,7 +38,7 @@ describe("answerPaneState", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     const after = getAnswerPaneState("s-1");
     expect(after).not.toBe(before);
-    expect(after).toEqual({ open: true });
+    expect(after).toEqual({ open: true, hiddenByChoice: false });
 
     unsubscribe();
     setAnswerPaneOpen("s-1", false);
@@ -72,7 +72,7 @@ describe("answerPaneState", () => {
     markSeenUtterances("s-1", ["u-1"]);
 
     forgetAnswerPane("s-1");
-    expect(getAnswerPaneState("s-1")).toEqual({ open: false });
+    expect(getAnswerPaneState("s-1")).toEqual({ open: false, hiddenByChoice: false });
     // The seen set went with it: the first call seeds again.
     expect(markSeenUtterances("s-1", ["u-9"])).toEqual([]);
   });
@@ -107,5 +107,57 @@ describe("answerPaneState", () => {
 
     act(() => setAnswerPaneOpen("s-2", false));
     expect(result.current).toBe(false);
+  });
+});
+
+/**
+ * A pane hidden by choice: the user closed it (eye or Alt+Shift+O), and new
+ * answers do not reopen it until the user shows it again. Per session, in
+ * memory only.
+ */
+describe("answerPaneState hidden by choice", () => {
+  it("a user close sets it, a user open clears it", () => {
+    setAnswerPaneOpen("s-1", true, { byUser: true });
+    expect(getAnswerPaneState("s-1")).toEqual({ open: true, hiddenByChoice: false });
+
+    setAnswerPaneOpen("s-1", false, { byUser: true });
+    expect(getAnswerPaneState("s-1")).toEqual({ open: false, hiddenByChoice: true });
+
+    setAnswerPaneOpen("s-1", true, { byUser: true });
+    expect(getAnswerPaneState("s-1")).toEqual({ open: true, hiddenByChoice: false });
+  });
+
+  it("a user close of an already closed pane still records the choice and notifies", () => {
+    const listener = vi.fn();
+    subscribeAnswerPane(listener);
+    setAnswerPaneOpen("s-1", false, { byUser: true });
+    expect(getAnswerPaneState("s-1").hiddenByChoice).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("hidden-by-choice is per session", () => {
+    setAnswerPaneOpen("s-1", true, { byUser: true });
+    setAnswerPaneOpen("s-1", false, { byUser: true });
+    expect(getAnswerPaneState("s-1").hiddenByChoice).toBe(true);
+    expect(getAnswerPaneState("s-2").hiddenByChoice).toBe(false);
+  });
+
+  it("hiding the speech bar is not a choice to hide the pane", () => {
+    // A close that is not the user's (the bar was hidden) neither sets the flag
+    // nor clears one the user had set.
+    setAnswerPaneOpen("s-1", true);
+    setAnswerPaneOpen("s-1", false);
+    expect(getAnswerPaneState("s-1")).toEqual({ open: false, hiddenByChoice: false });
+
+    setAnswerPaneOpen("s-1", false, { byUser: true });
+    setAnswerPaneOpen("s-1", true);
+    expect(getAnswerPaneState("s-1").hiddenByChoice).toBe(true);
+  });
+
+  it("forgetAnswerPane drops it, as a reload does", () => {
+    setAnswerPaneOpen("s-1", false, { byUser: true });
+    expect(getAnswerPaneState("s-1").hiddenByChoice).toBe(true);
+    forgetAnswerPane("s-1");
+    expect(getAnswerPaneState("s-1").hiddenByChoice).toBe(false);
   });
 });

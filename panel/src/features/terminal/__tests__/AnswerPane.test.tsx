@@ -258,11 +258,11 @@ describe("rendering", () => {
    *  where it is spent, and `sendOnDeadSocket.test.tsx` is where a dead one is. */
   const NO_SEND = (): boolean => true;
 
-  function paneElement(speech: GridSpeech, onClose: () => void = () => {}) {
+  function paneElement(speech: GridSpeech) {
     // MarkdownRenderer calls useNavigate, so the body needs a router.
     return (
       <MemoryRouter>
-        <AnswerPane sessionId="cell-a" speech={speech} onClose={onClose} send={NO_SEND} />
+        <AnswerPane sessionId="cell-a" speech={speech} send={NO_SEND} />
       </MemoryRouter>
     );
   }
@@ -522,7 +522,7 @@ describe("rendering", () => {
 
       render(
         <MemoryRouter>
-          <AnswerPane sessionId="cell-p" speech={speechOf(h)} onClose={() => {}} send={NO_SEND} />
+          <AnswerPane sessionId="cell-p" speech={speechOf(h)} send={NO_SEND} />
         </MemoryRouter>,
       );
 
@@ -553,7 +553,7 @@ describe("rendering", () => {
 
       render(
         <MemoryRouter>
-          <AnswerPane sessionId="cell-p" speech={speechOf(h)} onClose={() => {}} send={NO_SEND} />
+          <AnswerPane sessionId="cell-p" speech={speechOf(h)} send={NO_SEND} />
         </MemoryRouter>,
       );
       expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "cold");
@@ -690,24 +690,6 @@ describe("rendering", () => {
       expect(speech.onJumpToUnit).not.toHaveBeenCalled();
     });
 
-    it("Escape closes", () => {
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      render(paneElement(speechOf(h), onClose));
-
-      // From the root, where focus lands on open…
-      fireEvent.keyDown(screen.getByTestId("answer-pane-cell-a"), { key: "Escape" });
-      expect(onClose).toHaveBeenCalledTimes(1);
-
-      // …and from a block deep inside the text.
-      fireEvent.keyDown(screen.getByText(/^The first paragraph/), { key: "Escape" });
-      expect(onClose).toHaveBeenCalledTimes(2);
-
-      // Other keys are not Escape.
-      fireEvent.keyDown(screen.getByTestId("answer-pane-cell-a"), { key: "Enter" });
-      expect(onClose).toHaveBeenCalledTimes(2);
-    });
-
     it("gestures inside the pane never reach the cell", () => {
       const h = harness(MARKDOWN, null);
       const speech = speechOf(h);
@@ -719,7 +701,7 @@ describe("rendering", () => {
       render(
         <MemoryRouter>
           <div onMouseDown={cell.mouseDown} onClick={cell.click} onDragStart={cell.dragStart}>
-            <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={NO_SEND} />
+            <AnswerPane sessionId="cell-a" speech={speech} send={NO_SEND} />
           </div>
         </MemoryRouter>,
       );
@@ -739,166 +721,6 @@ describe("rendering", () => {
       // is text and starts nothing.
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
       expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
-    });
-
-    it("Escape inside the pane does not reach the cell", () => {
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      const cell = { keyDown: vi.fn() };
-
-      // The cell's key handling is the terminal's: an Escape that leaked out of
-      // the pane would land in the shell as a keystroke.
-      render(
-        <MemoryRouter>
-          <div onKeyDown={cell.keyDown}>
-            <AnswerPane sessionId="cell-a" speech={speechOf(h)} onClose={onClose} send={NO_SEND} />
-          </div>
-        </MemoryRouter>,
-      );
-
-      fireEvent.keyDown(h1(), { key: "Escape" });
-      expect(onClose).toHaveBeenCalledTimes(1);
-      expect(cell.keyDown).not.toHaveBeenCalled();
-
-      // Only Escape is the pane's to keep: any other key still bubbles.
-      fireEvent.keyDown(h1(), { key: "a" });
-      expect(cell.keyDown).toHaveBeenCalledTimes(1);
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-
-    it("Escape closes the pane when focus is on the body", () => {
-      // Switching browser tabs and coming back leaves focus on `document.body`:
-      // nothing in the pane sees the key, so a window-level listener has to.
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      const { unmount } = render(paneElement(speechOf(h), onClose));
-      (document.activeElement as HTMLElement | null)?.blur();
-      expect(document.activeElement).toBe(document.body);
-
-      fireEvent.keyDown(document.body, { key: "Escape" });
-      expect(onClose).toHaveBeenCalledTimes(1);
-
-      // Other keys are still nobody's business.
-      fireEvent.keyDown(document.body, { key: "Enter" });
-      expect(onClose).toHaveBeenCalledTimes(1);
-
-      // Gone with the pane: a closed pane listens to nothing.
-      unmount();
-      fireEvent.keyDown(document.body, { key: "Escape" });
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-
-    it("Escape with a wikilink hover card open is the card's, not the pane's", () => {
-      // The card closes itself on Escape from a window capture listener that is
-      // registered after the pane's, so the pane has to step aside while one is open.
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      render(paneElement(speechOf(h), onClose));
-      (document.activeElement as HTMLElement | null)?.blur();
-      const card = document.createElement("div");
-      card.setAttribute("data-wikilink-hover-card", "");
-      document.body.appendChild(card);
-      try {
-        fireEvent.keyDown(document.body, { key: "Escape" });
-        expect(onClose).not.toHaveBeenCalled();
-      } finally {
-        card.remove();
-      }
-      fireEvent.keyDown(document.body, { key: "Escape" });
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-
-    it("Escape in the cell's terminal closes the pane even with a hover card open", () => {
-      // The card does not consume an Escape typed into an editor (it just
-      // closes), so the pane must not step aside for it either: the key would
-      // otherwise reach the shell with the pane still open.
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      render(
-        <MemoryRouter>
-          <div className="relative">
-            <div className="xterm">
-              <textarea aria-label="terminal input" />
-            </div>
-            <AnswerPane sessionId="cell-a" speech={speechOf(h)} onClose={onClose} send={NO_SEND} />
-          </div>
-        </MemoryRouter>,
-      );
-      const card = document.createElement("div");
-      card.setAttribute("data-wikilink-hover-card", "");
-      document.body.appendChild(card);
-      try {
-        fireEvent.keyDown(screen.getByLabelText("terminal input"), { key: "Escape" });
-        expect(onClose).toHaveBeenCalledTimes(1);
-      } finally {
-        card.remove();
-      }
-    });
-
-    it("Escape in the cell's terminal closes the pane", () => {
-      // Greg's rule: if the terminal has focus and the pane is open, Escape
-      // closes the pane. The pane is a sibling of the xterm container inside the
-      // cell's wrapper, and that is how it knows the terminal is its own. The
-      // key must not reach the shell either: the pane listens in the capture
-      // phase on `window`, so xterm's textarea never sees the keydown at all.
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      render(
-        <MemoryRouter>
-          <div className="relative">
-            <div className="xterm">
-              <textarea aria-label="terminal input" />
-            </div>
-            <AnswerPane sessionId="cell-a" speech={speechOf(h)} onClose={onClose} send={NO_SEND} />
-          </div>
-        </MemoryRouter>,
-      );
-      const input = screen.getByLabelText("terminal input");
-      const terminalSawKey = vi.fn();
-      input.addEventListener("keydown", terminalSawKey);
-      input.focus();
-      expect(document.activeElement).toBe(input);
-
-      // `fireEvent` returns false when a listener called `preventDefault`.
-      const notCancelled = fireEvent.keyDown(input, { key: "Escape" });
-      expect(notCancelled).toBe(false);
-      expect(onClose).toHaveBeenCalledTimes(1);
-      expect(terminalSawKey).not.toHaveBeenCalled();
-
-      // Any other key is the terminal's, untouched.
-      expect(fireEvent.keyDown(input, { key: "a" })).toBe(true);
-      expect(terminalSawKey).toHaveBeenCalledTimes(1);
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
-
-    it("Escape in another cell's terminal belongs to that terminal", () => {
-      // A TUI in a different cell may use Escape (Claude Code interrupts on
-      // it): its keystrokes are nobody else's, so this pane stays open and the
-      // key goes through to that terminal untouched.
-      const h = harness(MARKDOWN, null);
-      const onClose = vi.fn();
-      render(
-        <MemoryRouter>
-          <div className="relative">
-            <div className="xterm">
-              <textarea aria-label="other terminal input" />
-            </div>
-          </div>
-          <div className="relative">
-            <AnswerPane sessionId="cell-a" speech={speechOf(h)} onClose={onClose} send={NO_SEND} />
-          </div>
-        </MemoryRouter>,
-      );
-      const input = screen.getByLabelText("other terminal input");
-      const terminalSawKey = vi.fn();
-      input.addEventListener("keydown", terminalSawKey);
-      input.focus();
-      expect(document.activeElement).toBe(input);
-
-      const notCancelled = fireEvent.keyDown(input, { key: "Escape" });
-      expect(notCancelled).toBe(true);
-      expect(onClose).not.toHaveBeenCalled();
-      expect(terminalSawKey).toHaveBeenCalledTimes(1);
     });
 
     it("Enter on a link inside a block follows the link and plays nothing", () => {
@@ -1316,7 +1138,7 @@ describe("rendering", () => {
             <AnswerPane
               sessionId="cell-a"
               speech={speechOf(h)}
-              onClose={() => {}}
+             
               send={NO_SEND}
             />
           </MemoryRouter>,
@@ -1695,7 +1517,7 @@ describe("play buttons", () => {
       const rerenderWith = (speech: GridSpeech): void =>
         view.rerender(
           <MemoryRouter>
-            <AnswerPane sessionId="cell-a" speech={speech} onClose={() => {}} send={() => true} />
+            <AnswerPane sessionId="cell-a" speech={speech} send={() => true} />
           </MemoryRouter>,
         );
       const expectLevel = (units: readonly SpeechUnit[], blockless: number[]): void => {

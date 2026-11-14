@@ -188,7 +188,6 @@ function renderPaneFor(sessionId = SESSION, areaHeight = AREA): RenderedPane {
       <AnswerPane
         sessionId={sessionId}
         speech={readySpeech({ queueFor: () => QUEUE })}
-        onClose={() => {}}
         send={() => true}
       />
     </MemoryRouter>

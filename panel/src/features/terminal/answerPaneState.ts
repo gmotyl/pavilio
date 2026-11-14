@@ -16,6 +16,11 @@
  * In memory on purpose: a reload starts every pane closed, as the spec asks. A
  * session that is destroyed drops its entry (see `destroyTerminal`).
  *
+ * A pane can also be HIDDEN BY CHOICE: the user closed it (the eye or
+ * Alt+Shift+O, both `byUser`), and new answers do not reopen it until the user
+ * shows it again. A close that is not the user's — hiding the speech bar —
+ * neither sets nor clears it. In memory like the rest: a reload forgets it.
+ *
  * `useAnswerPaneState` reads through `useSyncExternalStore`, so a snapshot is
  * referentially stable between changes — replaced only when a value actually
  * changes, never rebuilt per read — the same rule `GridSpeech.subscribeProgress`
@@ -26,6 +31,8 @@ import { useSyncExternalStore } from "react";
 export interface AnswerPaneSnapshot {
   /** Whether the cell's pane is open. */
   readonly open: boolean;
+  /** The user closed the pane; arrivals do not reopen it until the user shows it. */
+  readonly hiddenByChoice: boolean;
 }
 
 interface Entry {
@@ -49,7 +56,7 @@ function entryFor(sessionId: string): Entry {
   let entry = entries.get(sessionId);
   if (!entry) {
     entry = {
-      snapshot: { open: false },
+      snapshot: { open: false, hiddenByChoice: false },
       seen: null,
     };
     entries.set(sessionId, entry);
@@ -62,10 +69,20 @@ export function getAnswerPaneState(sessionId: string): AnswerPaneSnapshot {
   return entryFor(sessionId).snapshot;
 }
 
-export function setAnswerPaneOpen(sessionId: string, open: boolean): void {
+/**
+ * Opens or closes the session's pane. `byUser` marks the user's own toggle:
+ * a user close sets `hiddenByChoice`, a user open clears it; any other write
+ * leaves the flag as it was.
+ */
+export function setAnswerPaneOpen(
+  sessionId: string,
+  open: boolean,
+  opts?: { byUser?: boolean },
+): void {
   const entry = entryFor(sessionId);
-  if (entry.snapshot.open === open) return;
-  entry.snapshot = { ...entry.snapshot, open };
+  const hiddenByChoice = opts?.byUser ? !open : entry.snapshot.hiddenByChoice;
+  if (entry.snapshot.open === open && entry.snapshot.hiddenByChoice === hiddenByChoice) return;
+  entry.snapshot = { open, hiddenByChoice };
   notify();
 }
 
@@ -102,7 +119,7 @@ export function forgetAnswerPane(sessionId: string): void {
   notify();
 }
 
-/** The session's `{ open }`, re-rendering the caller when it changes. */
+/** The session's `{ open, hiddenByChoice }`, re-rendering the caller when it changes. */
 export function useAnswerPaneState(sessionId: string): AnswerPaneSnapshot {
   return useSyncExternalStore(
     subscribeAnswerPane,

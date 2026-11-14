@@ -137,7 +137,9 @@ function runCommand(
   submitToPty(sessionId, send, command, {
     onDelivered: () => {
       noteAgentStarting(sessionId);
-      setAnswerPaneOpen(sessionId, true);
+      // A press is the user asking to watch this cell's answer: a user open,
+      // which also clears a pane they had hidden by choice.
+      setAnswerPaneOpen(sessionId, true, { byUser: true });
       onDelivered?.();
     },
     onFailed: (stage) => {

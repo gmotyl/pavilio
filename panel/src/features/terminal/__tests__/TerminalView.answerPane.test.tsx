@@ -55,7 +55,7 @@ vi.mock("../terminalInstances", () => {
       };
       return {
         sessionId,
-        // `focus` is the xterm Terminal's own — what Escape in the pane lands on.
+        // `focus` is the xterm Terminal's own.
         terminal: { cols: 80, rows: 24, refresh: () => {}, focus: term.focus },
         fitAddon: {},
         holder,
@@ -396,21 +396,6 @@ describe("TerminalView and the answer pane", () => {
     await settleTerminal();
     expect(pane()).toBeNull();
   });
-
-  it("Escape puts focus back in the terminal", async () => {
-    const speech = answeredSpeech();
-    render(cell(speech));
-    await settleTerminal();
-    fireEvent.click(eye());
-    const opened = pane();
-    expect(opened).not.toBeNull();
-    expect(term.focus).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(opened!, { key: "Escape" });
-    expect(pane()).toBeNull();
-    // The xterm Terminal's own focus — so the next question can be typed at once.
-    expect(term.focus).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("TerminalView opens the pane on a new answer", () => {
@@ -427,7 +412,7 @@ describe("TerminalView opens the pane on a new answer", () => {
     const opened = pane();
     expect(opened).not.toBeNull();
     expect(eye()).toHaveAttribute("aria-pressed", "true");
-    // Focus lands on the pane so Escape works at once.
+    // Focus lands on the pane so it can be read from the keyboard at once.
     expect(document.activeElement).toBe(opened);
   });
 

@@ -9,7 +9,6 @@ import {
 } from "react";
 import { Pause, Play } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
-import { wikiLinkHoverCardTakesEscape } from "../markdown/WikiLinkHoverCard";
 import { CopyIconButton } from "../shell/CopyIconButton";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
@@ -33,12 +32,6 @@ import { segmentStateFor } from "./segmentState";
 export interface AnswerPaneProps {
   sessionId: string;
   speech: GridSpeech;
-  /**
-   * Escape was pressed — inside the pane, anywhere outside a terminal, or in
-   * this cell's own terminal (another cell's terminal keeps its Escape).
-   * `TerminalView` closes the pane and refocuses the terminal.
-   */
-  onClose: () => void;
   /**
    * The cell's own PTY write, handed straight to the composer. `TerminalView`
    * reads it off the live instance at call time — the same one the bar's
@@ -289,7 +282,6 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
 export function AnswerPane({
   sessionId,
   speech,
-  onClose,
   send,
 }: AnswerPaneProps) {
   // Global, and read here rather than passed in: whether a pane carries a
@@ -452,7 +444,7 @@ export function AnswerPane({
   // was open would stay marked after the answer had already arrived.
 
   // Focus lands on the root the moment it opens — also when it opened itself —
-  // so Escape works at once and the read → Escape → type loop needs no mouse.
+  // so the answer can be scrolled and read from the keyboard at once.
   useEffect(() => {
     rootRef.current?.focus();
   }, []);
@@ -482,55 +474,9 @@ export function AnswerPane({
     return () => observer.disconnect();
   }, []);
 
-  // Escape closes the pane from wherever focus is while it is open —
-  // switching browser tabs and coming back leaves it on `document.body`, a
-  // click leaves it on the bar or in the cell's own terminal — and a pane
-  // that then ignores Escape reads as stuck. Greg's rule (2026-09-16): if the
-  // terminal has focus and the pane is open, Escape closes the pane.
-  //
-  // Capture phase on `window`, not a bubble listener on `document`: xterm
-  // reads keys from its own textarea's `keydown` handler, at the target, and
-  // a key that reached it is already in the PTY by the time it bubbles.
-  // Capture on the window runs before the target phase, and `stopPropagation`
-  // here ends the dispatch for every node still ahead in the path — the
-  // textarea's own target-phase listener included (only another listener on
-  // `window` itself would need `stopImmediatePropagation`) — so with
-  // `preventDefault` the shell never sees the key. The accepted
-  // cost for a TUI that uses Escape (Claude Code interrupts on it): the first
-  // Escape closes the pane, the second interrupts — one deliberate keystroke
-  // more, in exchange for a pane that always answers the key it advertises.
-  //
-  // Only THIS cell's terminal, though. The pane is mounted by `TerminalView`
-  // as a sibling of the xterm container inside the terminal area — the
-  // positioned box that holds the two — so an xterm under the root's parent is
-  // the cell's own; an xterm anywhere else is another cell's TUI, and its
-  // Escape is left alone.
-  //
-  // An Escape inside the pane never gets here: this listener bails out when
-  // the target is inside the root, so `onClose` runs once per keypress — from
-  // the root's own `onKeyDown` below, whose `stopPropagation` is what keeps
-  // the key from the cell, not what prevents a double close.
-  //
-  // An open wikilink hover card owns Escape: its own window capture listener,
-  // registered after this one, closes just the card and stops the key. Not an
-  // Escape typed into an editor (this cell's terminal included): the card
-  // closes without consuming it, so this listener handles it as usual.
-  useEffect(() => {
-    const onWindowKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      if (wikiLinkHoverCardTakesEscape(e)) return;
-      const target = e.target instanceof Element ? e.target : null;
-      const root = rootRef.current;
-      if (root && target && root.contains(target)) return;
-      const xterm = target?.closest(".xterm") ?? null;
-      if (xterm && !root?.parentElement?.contains(xterm)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onWindowKeyDown, true);
-    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
-  }, [onClose]);
+  // No Escape handling here, on purpose: only the eye and Alt+Shift+O close
+  // the pane, so Escape always reaches the focused terminal — a TUI that uses
+  // it (Claude Code interrupts on it) never pays a keystroke to the pane.
 
   // Mark the blocks. Re-run when the text, the units or the spoken unit
   // change; a tick inside a unit never gets here because the snapshot above
@@ -697,11 +643,6 @@ export function AnswerPane({
       onDragStart={(e) => {
         e.preventDefault();
         e.stopPropagation();
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        e.stopPropagation();
-        onClose();
       }}
     >
       <div

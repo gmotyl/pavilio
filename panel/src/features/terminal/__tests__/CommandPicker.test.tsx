@@ -1,16 +1,15 @@
 /**
  * The command picker at the composer: a `/` at the start of an empty draft
  * opens a filtering list of the workspace's skills, and while it is open the
- * composer offers it Up, Down and Enter first, and closes it on Escape before
- * Escape can close the pane. The best ranked entry is always highlighted, and
+ * composer offers it Up, Down and Enter first, and closes it on Escape (the
+ * pane itself never closes on Escape). The best ranked entry is always highlighted, and
  * Enter in an open picker never sends: it picks, closes the picker when nothing
  * matches, or does nothing while the list loads. A literal `/command` is sent
  * with Escape, then Enter.
  *
  * Asserted through `AnswerPane`, like `AnswerComposer.send.test.tsx` ("send"), because two of
- * the criteria are about keys the PANE owns — Escape closes the pane from its
- * root, Enter sends from the field — and the picker's whole job is to take
- * them first and give them back. A harness that rendered the picker alone
+ * the criteria are about keys the pane's field owns — Escape, Enter sends —
+ * and the picker's whole job is to take them first and give them back. A harness that rendered the picker alone
  * could not see either handover.
  */
 import { act, createRef } from "react";
@@ -102,12 +101,11 @@ function stubSkillsFetch() {
 }
 
 const send = vi.fn((_data: string) => true);
-const onClose = vi.fn();
 
 function renderPane() {
   return render(
     <MemoryRouter>
-      <AnswerPane sessionId="cell-a" speech={readySpeech()} onClose={onClose} send={send} />
+      <AnswerPane sessionId="cell-a" speech={readySpeech()} send={send} />
     </MemoryRouter>,
   );
 }
@@ -133,7 +131,6 @@ const expectSubmitted = async (body: string): Promise<void> => {
 beforeEach(async () => {
   served = SKILLS;
   send.mockClear();
-  onClose.mockClear();
   __resetAnswerWaitingForTests();
   __resetPtySubmitForTests();
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
@@ -196,23 +193,9 @@ describe("CommandPicker", () => {
     await user.keyboard("{Escape}");
 
     expect(picker()).not.toBeInTheDocument();
-    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("answer-pane-cell-a")).toBeInTheDocument();
     // The slash the user may have meant to send survives.
     expect(field().value).toBe("/");
-  });
-
-  it("Escape closes the pane once the picker is closed", async () => {
-    const user = userEvent.setup();
-    renderPane();
-
-    await user.click(field());
-    await user.keyboard("/");
-    await options();
-    await user.keyboard("{Escape}");
-    expect(onClose).not.toHaveBeenCalled();
-
-    await user.keyboard("{Escape}");
-    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("Enter picks while open and does not send", async () => {
