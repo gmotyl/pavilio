@@ -38,7 +38,7 @@ export function isNotificationClickMessage(data: unknown): data is NotificationC
 
 /**
  * The project's terminal tab — where a session's cell lives. The same target
- * `QuickTerminalModal` and the phone sidebar use to land on a session, rather
+ * the phone sidebar uses to land on a session, rather
  * than the bare `/project/<name>`, which `ProjectRedirect` may resolve to notes:
  * tapping a session's notification and landing anywhere but its terminals
  * would miss the point of the tap. Percent-encoded, because a project name may
@@ -83,8 +83,8 @@ export interface ArrivalDeps {
  * The page's half of a tap: go to the project and, when the session is still
  * there, focus its cell and count the tap as arriving at it.
  *
- * The cell is focused the way every other cross-project jump does it
- * (`QuickTerminalModal.openDotTarget`, the spine drawer): persist the focus
+ * The cell is focused the way every other cross-project jump does it (the
+ * spine drawer, the sidebar session row): persist the focus
  * for the project first, so a surface that mounts on the navigation reads it,
  * then navigate, then broadcast on the next tick for a surface that is already
  * mounted on that project and will not remount.

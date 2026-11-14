@@ -381,9 +381,8 @@ describe("the answer pane's bottom edge", () => {
  *
  * Both heights are `project`-scoped, and the project is looked up rather than
  * threaded down — so there is a real state in which the pane is on screen and
- * the scope is not known yet: a cell mounted by `QuickTerminalModal`, which
- * fetches its own list and never touches `sessionStore`, and every cell on
- * screen for the 8s after a failed session load. The store is emptied here to
+ * the scope is not known yet: every cell on screen for the 8s after a failed
+ * session load. The store is emptied here to
  * put the pane in exactly that state.
  *
  * What the pane must do there is what `writeTerminalFocus` already does with an

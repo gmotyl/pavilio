@@ -411,7 +411,7 @@ describe("LauncherPills", () => {
     it("sends the bare command when the session carries an empty project", async () => {
       const user = userEvent.setup();
       const send = vi.fn((_data: string) => true);
-      // A session with no project of its own — a quick terminal, say. The list
+      // A session with no project of its own — created with a blank one. The list
       // HAS loaded and the cell IS in it, so a lookup that only guarded
       // `undefined` would send a trailing separator with nothing after it.
       await seedSessions([session("cell-a", "")]);

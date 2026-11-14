@@ -4,7 +4,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from "@testing-library/react";
 import { useRef } from "react";
@@ -49,8 +48,7 @@ vi.mock("../terminalInstances", async (importOriginal) => {
   };
 });
 
-// xterm cannot render in jsdom. Both shapes of the import are stubbed:
-// the grid imports it by name, QuickTerminalModal by default.
+// xterm cannot render in jsdom. Both shapes of the import are stubbed.
 vi.mock("../TerminalView", () => ({
   default: ({ sessionId }: { sessionId: string }) => (
     <div data-testid={`terminal-view-${sessionId}`} />
@@ -114,8 +112,6 @@ import { TerminalMobileRail } from "../TerminalMobileRail";
 import { TerminalSpine } from "../TerminalSpine";
 import { TerminalSpineDrawer } from "../TerminalSpineDrawer";
 import { TerminalsSurface } from "../TerminalsSurface";
-import QuickTerminalModal from "../QuickTerminalModal";
-import { TerminalDrawerProvider } from "../useTerminalDrawer";
 import LeftSidebar from "../../shell/LeftSidebar";
 import { TerminalSpeechHost } from "../TerminalSpeechHost";
 
@@ -256,25 +252,6 @@ function renderSidebar(sessions: SessionMeta[]) {
   fireEvent.click(screen.getByTestId("sidebar-project-expand-pavilio"));
 }
 
-async function renderQuickFinder(sessions: SessionMeta[]) {
-  stubSessionsFetch(sessions);
-  render(
-    <MemoryRouter initialEntries={["/project/pavilio"]}>
-      <TerminalDrawerProvider>
-        <QuickTerminalModal />
-      </TerminalDrawerProvider>
-    </MemoryRouter>,
-  );
-  fireEvent.keyDown(window, { key: "o", metaKey: true });
-  // Wait for the FETCHED session to be on screen, not merely for the modal:
-  // the modal opens one tick before its session list resolves.
-  await waitFor(() =>
-    expect(
-      screen.getByTestId(`terminal-view-${sessions[0]?.id}`),
-    ).toBeInTheDocument(),
-  );
-}
-
 /** The real surface, with its real children — nothing about it is stubbed. */
 function renderTerminalsSurface(sessions: SessionMeta[]) {
   function Harness() {
@@ -333,28 +310,6 @@ describe("terminal surfaces label a session by its title", () => {
     expect(screen.queryByText("pavilio-1")).not.toBeInTheDocument();
   });
 
-  it("the quick finder shows the title", async () => {
-    await renderQuickFinder([auto()]);
-
-    // The `${project} / …` composite in the dropdown button.
-    const dropdown = screen.getByTestId("quick-terminal-project-dropdown");
-    expect(dropdown).toHaveTextContent(TITLE);
-    expectTruncatedLabel(within(dropdown).getByTitle(TITLE), TITLE);
-
-    // The dot's tooltip, current project — the label alone.
-    expect(screen.getByTestId("quick-terminal-dot-s1")).toHaveAttribute(
-      "title",
-      TITLE,
-    );
-
-    // The row in the session dropdown.
-    fireEvent.click(dropdown);
-    const option = await waitFor(() =>
-      screen.getByTestId("quick-terminal-option-s1"),
-    );
-    expectTruncatedLabel(within(option).getByTitle(TITLE), TITLE);
-  });
-
   it("the sidebar session row shows the title", () => {
     renderSidebar([auto()]);
 
@@ -382,7 +337,6 @@ describe("terminal surfaces label a session by its title", () => {
     const surfaces: Array<[string, () => void | Promise<void>]> = [
       ["cell header", () => renderGrid([renamed()])],
       ["tab strip", () => renderToolbar([renamed()])],
-      ["quick finder", () => renderQuickFinder([renamed()])],
       ["sidebar", () => renderSidebar([renamed()])],
       ["drawer", () => renderDrawer([renamed()])],
     ];

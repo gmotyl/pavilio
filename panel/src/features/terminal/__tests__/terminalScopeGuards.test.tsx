@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 /**
  * The blank-scope guards in `features/terminal`, spelt the way the rest of this
@@ -15,19 +15,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * throws a TypeError; the guarded form falls through to the declared default
  * and writes nothing, which is what a scope nobody resolved should do.
  *
- * There is no live bug at these four sites today — that is the point of fixing
+ * There is no live bug at these sites today — that is the point of fixing
  * them now rather than after the third one.
  */
 
-vi.mock("../TerminalView", () => ({
-  default: ({ sessionId }: { sessionId: string }) => <div data-testid={`tv-${sessionId}`} />,
-  TerminalView: ({ sessionId }: { sessionId: string }) => <div data-testid={`tv-${sessionId}`} />,
-}));
-vi.mock("../TerminalActivityLed", () => ({
-  TerminalActivityLed: () => <span />,
-}));
-
-import { orderProjectSessions } from "../QuickTerminalModal";
 import { useTerminalMaximized } from "../useTerminalMaximized";
 import { useTerminalOrdering } from "../useTerminalOrdering";
 import { readTerminalFocus, writeTerminalFocus, type SessionMeta } from "../useTerminalSessions";
@@ -88,16 +79,5 @@ describe("an unresolved scope does not throw", () => {
 
     expect(result.current.sessionOrder).toEqual([]);
     expect(localStorage.length).toBe(0);
-  });
-
-  it("orderProjectSessions falls back to the declared default order", () => {
-    // A session whose own `project` is unresolved: without one, the filter
-    // matches nothing and returns before the guard is ever reached.
-    const sessions = [session("sess-7f3a91c4", UNRESOLVED), session("sess-0b2e55d1", "pavilio")];
-
-    expect(() => orderProjectSessions(sessions, UNRESOLVED)).not.toThrow();
-    expect(orderProjectSessions(sessions, UNRESOLVED).map((s) => s.id)).toEqual([
-      "sess-7f3a91c4",
-    ]);
   });
 });

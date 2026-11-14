@@ -254,7 +254,7 @@ export default function LeftSidebar() {
       // (this effect has not re-subscribed yet) and is dropped. Nothing is lost
       // only because every broadcaster calls `writeTerminalFocus` *before*
       // dispatching (useTerminalSessions.setFocusedId, createTerminalSession,
-      // QuickTerminalModal, TerminalsSurface, and the sidebar row click
+      // TerminalsSurface, the notification tap, and the sidebar row click
       // below), and the
       // [currentProject] effect underneath re-reads that storage immediately
       // after the switch. A future broadcaster that dispatches without

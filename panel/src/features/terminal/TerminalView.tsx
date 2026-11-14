@@ -25,8 +25,7 @@ interface TerminalViewProps {
   onReady?: (api: TerminalHandle) => void;
   /**
    * The panel's speech host. Passed by every grid cell; absent only where a
-   * terminal is shown outside one (the quick-terminal modal), which is the one
-   * place with no cell transport to offer.
+   * terminal is shown outside one, which has no cell transport to offer.
    */
   speech?: GridSpeech;
   /**

@@ -427,7 +427,7 @@ describe("LeftSidebar project link", () => {
   });
 
   /**
-   * `QuickTerminalModal` builds the identical `/project/<name>/iterm` target
+   * `projectTerminalsPath` builds the identical `/project/<name>/iterm` target
    * with `encodeURIComponent`, and for a while the sidebar built it without —
    * two spellings of one destination, differing only for the names that need
    * encoding. These pin the encoded spelling end to end: the route still

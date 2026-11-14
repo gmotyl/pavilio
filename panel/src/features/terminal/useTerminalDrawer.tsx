@@ -43,8 +43,7 @@ interface DrawerCtx {
   /** Current route cannot host the drawer. Derived every render, never stored. */
   suppressed: boolean;
   /**
-   * A conflicting overlay (the Cmd+O quick-terminal modal) is up and owns the
-   * single pooled xterm holder. Session-only — never persisted, so a conflict
+   * A conflicting overlay is up and owns the single pooled xterm holder. Session-only — never persisted, so a conflict
    * cannot outlive itself or a reload.
    */
   overlayActive: boolean;
