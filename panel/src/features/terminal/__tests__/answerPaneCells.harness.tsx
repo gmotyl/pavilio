@@ -65,10 +65,17 @@ export function cellsHost(): { speech: GridSpeech; arrive: (sessionId: CellId) =
   };
 }
 
-/** Both cells, `focusedId` the grid's focused one. */
+/**
+ * Both cells, `focusedId` the grid's focused one. `speechBarVisible` sets
+ * every cell's speech row; `hiddenRows` hides the row of just those cells.
+ */
 export function cellsGrid(
   speech: GridSpeech,
-  { focusedId = "cell-b", speechBarVisible = true }: { focusedId?: CellId; speechBarVisible?: boolean } = {},
+  {
+    focusedId = "cell-b",
+    speechBarVisible = true,
+    hiddenRows = [],
+  }: { focusedId?: CellId; speechBarVisible?: boolean; hiddenRows?: readonly CellId[] } = {},
 ) {
   return (
     <MemoryRouter>
@@ -78,7 +85,7 @@ export function cellsGrid(
             sessionId={id}
             speech={speech}
             focused={id === focusedId}
-            speechBarVisible={speechBarVisible}
+            speechBarVisible={speechBarVisible && !hiddenRows.includes(id)}
           />
         </div>
       ))}

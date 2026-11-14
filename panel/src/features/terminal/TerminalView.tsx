@@ -206,25 +206,24 @@ export function TerminalView({
     setAnswerPaneOpen(sessionId, !getAnswerPaneState(sessionId).open, { byUser: true });
   }, [sessionId]);
 
-  // Alt+Shift+O toggles the FOCUSED cell's pane. Every cell with a bar
-  // registers the window listener, and on a match each one stops the key from
-  // reaching a terminal — but stopping it does not silence the other cells'
-  // listeners on the same `window`, so each decides for itself whether it is
-  // the target: the cell holding DOM focus if any cell does (its terminal or
-  // its pane), otherwise the grid's focused cell. An auto-repeat of the held
-  // key is ignored, so holding it does not flicker the pane.
+  // Alt+Shift+O toggles the FOCUSED cell's pane. EVERY view registers the
+  // window listener, whether or not it has a speech row to toggle, because the
+  // key must never reach a shell: on a match each one stops it from reaching a
+  // terminal. Stopping it does not silence the other views' listeners on the
+  // same `window`, so each decides for itself whether it is the target: the
+  // cell holding DOM focus if any cell does (its terminal or its pane),
+  // otherwise the grid's focused cell. A target whose speech row is hidden has
+  // no pane to show, so the key is swallowed and does nothing. An auto-repeat
+  // of the held key is ignored, so holding it does not flicker the pane.
   const rootRef = useRef<HTMLDivElement>(null);
-  usePanelShortcut(
-    "KeyO",
-    (e) => {
-      if (e.repeat) return;
-      const active = document.activeElement;
-      const owner = active?.closest("[data-terminal-view]") ?? null;
-      if (owner ? owner !== rootRef.current : !focused) return;
-      toggleAnswer();
-    },
-    !!speech && speechBarVisible,
-  );
+  usePanelShortcut("KeyO", (e) => {
+    if (e.repeat) return;
+    const active = document.activeElement;
+    const owner = active?.closest("[data-terminal-view]") ?? null;
+    if (owner ? owner !== rootRef.current : !focused) return;
+    if (!speech || !speechBarVisible) return;
+    toggleAnswer();
+  });
 
   // Latest-refs so changing callbacks don't blow away the mount effect.
   // Parent re-renders (e.g. a session opened, killed or renamed anywhere in

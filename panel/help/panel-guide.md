@@ -16,7 +16,7 @@
 | `Alt+Shift+T` | Toggle terminal fullscreen (the whole terminal container) |
 | `Alt+Shift+O` | Toggle the focused cell's answer pane (same as the eye button at the end of its speech row; only while that row is shown) |
 
-The `Alt+Shift` shortcuts work even while a terminal has focus — the terminal never sees them. The one exception is `Alt+Shift+O`: while the cell's speech row is hidden it is not bound, so the key passes through to the terminal. They are desktop-only (inactive in the phone layout).
+The `Alt+Shift` shortcuts work even while a terminal has focus — the terminal never sees them. That includes `Alt+Shift+O`: while the focused cell's speech row is hidden it does nothing, but it still never reaches the terminal. They are desktop-only (inactive in the phone layout).
 
 ## Navigation
 
@@ -84,7 +84,7 @@ Every terminal surface (a project's terminal tab, the Terminals view, the `Cmd+B
 The same shortcut or button closes the layer, and so does navigating elsewhere. Pressing the other shortcut switches between the two layers. Fullscreen is never remembered. `Esc` does **not** close it — `Esc` always goes to the focused terminal.
 
 ### Answer Pane
-Each terminal cell's answer pane shows the agent's latest answer. Toggle it with the eye button at the end of the cell's speech row (the row below the cell header), or `Alt+Shift+O` while the cell has focus. Both are available only while the speech row is shown — hide the row and the shortcut passes through to the terminal; `Esc` does not close it. Closing it yourself keeps it closed when the next answer arrives (until you show it again or reload). Its bottom-edge opacity is set per project (see Project View).
+Each terminal cell's answer pane shows the agent's latest answer. Toggle it with the eye button at the end of the cell's speech row (the row below the cell header), or `Alt+Shift+O` while the cell has focus. Both work only while the speech row is shown — with the row hidden the shortcut does nothing (it still never reaches the terminal). `Esc` does not close the pane: pressed inside it, `Esc` goes to the cell's terminal and puts the focus back there. Closing it yourself keeps it closed when the next answer arrives (until you show it again or reload). Its bottom-edge opacity is set per project (see Project View).
 
 ### Terminal Viewport Reader
 xterm renders to a canvas, so the browser's "Read Aloud" / screen-reader / find-in-page features can't see anything. Each terminal cell has a Printer icon in its header (after the speech controls, just before the Minimise / Maximise / Fullscreen buttons) that opens a modal with a plain-DOM, fully styled snapshot of what's currently on screen.

@@ -90,6 +90,39 @@ describe("Alt+Shift+O", () => {
     expect(getAnswerPaneState("cell-b").hiddenByChoice).toBe(false);
   });
 
+  it("is swallowed but does nothing while the focused cell's row is hidden", async () => {
+    const { speech } = cellsHost();
+    renderCells(speech, { focusedId: "cell-b", hiddenRows: ["cell-b"] });
+    await settleCells();
+    expect(document.activeElement).toBe(terminalOf("cell-b"));
+    const shellB = terminalKeys("cell-b");
+
+    // From the focused (hidden-row) cell's terminal: cancelled, never reaches
+    // the shell, and no pane toggles — not this cell's, not the visible one's.
+    expect(pressAltShiftO(terminalOf("cell-b"))).toBe(false);
+    expect(shellB).not.toHaveBeenCalled();
+    expect(getAnswerPaneState("cell-b").open).toBe(false);
+    expect(getAnswerPaneState("cell-a").open).toBe(false);
+    expect(paneOf("cell-a")).toBeNull();
+
+    // No DOM focus: the grid's focused cell is the hidden one — still nothing.
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(pressAltShiftO(document.body)).toBe(false);
+    expect(getAnswerPaneState("cell-b").open).toBe(false);
+    expect(paneOf("cell-a")).toBeNull();
+  });
+
+  it("is swallowed even when no cell shows its row", async () => {
+    const { speech } = cellsHost();
+    renderCells(speech, { focusedId: "cell-b", speechBarVisible: false });
+    await settleCells();
+    const shellB = terminalKeys("cell-b");
+
+    expect(pressAltShiftO(terminalOf("cell-b"))).toBe(false);
+    expect(shellB).not.toHaveBeenCalled();
+    for (const id of CELLS) expect(getAnswerPaneState(id).open).toBe(false);
+  });
+
   it("the eye is a user toggle too", async () => {
     const { speech } = cellsHost();
     renderCells(speech);
