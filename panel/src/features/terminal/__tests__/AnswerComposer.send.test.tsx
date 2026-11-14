@@ -743,10 +743,11 @@ describe("send", () => {
           "ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER",
         );
 
-        // The hint and the grip paint the pane's own ground rather than the
-        // field's well, which is what keeps the composer reading as one box
+        // The hint and the grip paint the pane's own ground — the speech row's;
+        // the pane box itself is transparent behind a faded body — rather than
+        // the field's well, which is what keeps the composer reading as one box
         // inside the surface instead of three stacked strips.
-        const surface = cssRule(".answer-pane").match(/background:\s*([^;]+)/)?.[1].trim();
+        const surface = cssRule(".speech-bar").match(/background:\s*([^;]+)/)?.[1].trim();
         // Vacuity guard: an undeclared ground would make the matches below vacuous.
         expect(surface).toBeTruthy();
         expect(cssRule(".answer-pane-hint")).toMatch(
@@ -812,7 +813,9 @@ describe("send", () => {
         // Darker than BOTH, not merely different from them: the pane and the
         // speech bar share `#17171d`, the cell keeps the xterm's own, and what
         // YOU type is neither agent nor shell.
-        const pane = ground(".answer-pane");
+        // The pane box is transparent behind a faded body; its rows paint the
+        // ground, so the meta row is where the pane's ground is read.
+        const pane = ground(".answer-pane-meta");
         expect(pane).toBe("#17171d");
         expect(luminance(composer)).toBeLessThan(luminance(pane));
         expect(luminance(composer)).toBeLessThan(luminance(xtermGround()));

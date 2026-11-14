@@ -1031,27 +1031,27 @@ describe("rendering", () => {
         return found.length > 0 ? found[found.length - 1][1].trim() : null;
       };
 
-      /**
-       * What a surface inside the pane actually shows: its own `background` if
-       * it declares one, else the pane's, which is what shows through an
-       * undeclared one.
-       */
-      const shows = (selector: string): string | null =>
-        background(selector) ?? background(".answer-pane");
-
       it("paints the pane on the speech surface, not the terminal ground", () => {
         // Quoted from the row's own rule rather than repeated as a literal, so
         // the two grounds cannot drift apart without this failing.
         const row = background(".speech-bar");
         expect(row).not.toBeNull();
-        expect(background(".answer-pane")).toBe(row);
+        // The stylesheet leaves the pane transparent, so a body faded by the
+        // project's answer opacity shows the terminal through it; at the
+        // default 100 the pane puts the row's ground back inline.
+        expect(background(".answer-pane")).toBe("transparent");
+        renderPane(readySpeech());
+        const probe = document.createElement("div");
+        probe.style.background = row!;
+        expect(screen.getByTestId("answer-pane-cell-a").style.background).toBe(probe.style.background);
 
         // The body stops painting the xterm's ground under the text. A second,
         // darker surface inside the pane is precisely the card the pane has
         // stopped being — the text well and the switch row are one ground now,
-        // with the row's hairline for the seam.
-        expect(shows(".answer-pane-body")).not.toBe("var(--bg-base)");
-        expect(shows(".answer-pane-body")).toBe(row);
+        // with the row's hairline for the seam. Painted inline by the pane.
+        expect(screen.getByTestId("answer-pane-body-cell-a").style.background).toBe(
+          probe.style.background,
+        );
 
         // Dropping the paint must not have moved the geometry the rail reads:
         // the body is still the positioned grid whose first column is the rail.
@@ -1059,11 +1059,11 @@ describe("rendering", () => {
         expect(body).toMatch(/position:\s*relative/);
         expect(body).toMatch(/display:\s*grid/);
 
-        // The switch row paints nothing of its own, so it shows the same ground.
-        // The composer is the exception, deliberately: it declares the third
-        // ground of design.md's three, darker than both, and
+        // The switch row paints the same ground itself (the pane behind it is
+        // transparent). The composer's FIELD is the exception, deliberately: it
+        // declares the third ground of design.md's three, darker than both, and
         // `AnswerComposer.send.test.tsx` ("send") reads that out of the stylesheet.
-        expect(shows(".answer-pane-meta")).toBe(row);
+        expect(background(".answer-pane-meta")).toBe(row);
       });
 
       /**

@@ -86,6 +86,17 @@ const BLOCK_ATTRIBUTES = ["data-unit", "data-speaking"] as const;
 export const MIN_PANE_HEIGHT = 120;
 const PANE_HEIGHT_STEP = 24;
 
+/** The pane's own ground — the speech row's, not `--bg-surface`. */
+const ANSWER_GROUND = "#17171d";
+
+/**
+ * The answer body's paint at a bottom-edge opacity of `opacity` (0–100): solid
+ * at the top, fading linearly to `opacity` percent of the ground at the bottom.
+ */
+function answerBodyGradient(opacity: number): string {
+  return `linear-gradient(to bottom, ${ANSWER_GROUND} 0%, color-mix(in srgb, ${ANSWER_GROUND} ${opacity}%, transparent) 100%)`;
+}
+
 /**
  * The pane's rows that are neither the body nor the composer's field row
  * (whose stored height already includes its own 13px of padding), with the
@@ -378,6 +389,28 @@ export function AnswerPane({
   // snapshots stay four.
   const held = useAnswerHeld(sessionId);
   const activity = useActivityState(sessionId);
+  // Either wave the body can draw: the waiting state's, or the one moved
+  // above the text while the user holds an answer and the agent still works.
+  const waveShown = waiting || (held && activity === "busy");
+
+  // The body's bottom-edge opacity, remembered per project and portable — see
+  // its declaration. Below 100 the pane goes transparent behind the body and
+  // the body paints the fade; the meta row and the composer keep the ground.
+  const [opacityBottom] = useScopedPreference(
+    preferences.answerOpacityBottom,
+    projectOfSession(sessionId),
+  );
+  /**
+   * Whether the composer's field holds focus. Typing a reply over a see-through
+   * body would put the terminal's output under the eye that is writing, so the
+   * body goes solid then — unless a wave is shown, which is the pane saying
+   * "the agent is working" and keeps the fade.
+   */
+  const [composerFocused, setComposerFocused] = useState(false);
+  const isComposerField = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.classList.contains("answer-pane-composer-field");
+  const translucent = opacityBottom < 100;
+  const bodySolid = !translucent || (composerFocused && !waveShown);
 
   /**
    * How many answers arrived after the last one this cell played and have not
@@ -616,9 +649,12 @@ export function AnswerPane({
       role="region"
       aria-label="Answer"
       tabIndex={-1}
-      style={
-        appliedHeight === null
-          ? undefined
+      style={{
+        // Solid at 100 — exactly today's surface — and transparent (the
+        // stylesheet's) below it, so the body's fade shows the terminal.
+        ...(translucent ? null : { background: ANSWER_GROUND }),
+        ...(appliedHeight === null
+          ? null
           : {
               height: `${appliedHeight}px`,
               // The bottom inset is given up in the same breath as the height
@@ -633,8 +669,16 @@ export function AnswerPane({
               // For the frame between a cell shrinking and the observer above
               // re-clamping: the pane never paints past the area it covers.
               maxHeight: "100%",
-            }
-      }
+            }),
+      }}
+      // Delegated from the root: the composer's field is the composer's, and
+      // whether it holds focus matters only to the paint up here.
+      onFocus={(e) => {
+        if (isComposerField(e.target)) setComposerFocused(true);
+      }}
+      onBlur={(e) => {
+        if (isComposerField(e.target)) setComposerFocused(false);
+      }}
       // The cell header is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here — as on the bar.
       draggable={false}
@@ -649,6 +693,7 @@ export function AnswerPane({
         ref={bodyRef}
         className="answer-pane-body"
         data-testid={`answer-pane-body-${sessionId}`}
+        style={{ background: bodySolid ? ANSWER_GROUND : answerBodyGradient(opacityBottom) }}
         // Delegated: the blocks are react-markdown's elements, so what the
         // pointer and focus are over is read here, on the ancestor that
         // outlives them. This only reveals a Play; nothing here plays.
