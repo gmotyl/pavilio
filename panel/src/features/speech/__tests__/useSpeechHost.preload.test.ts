@@ -712,9 +712,16 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
     visibility = "visible";
     visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   });
+  let addedSpy: ReturnType<typeof vi.spyOn> | undefined;
+  let removedSpy: ReturnType<typeof vi.spyOn> | undefined;
+
   afterEach(() => {
     visibilitySpy?.mockRestore();
     visibilitySpy = undefined;
+    addedSpy?.mockRestore();
+    addedSpy = undefined;
+    removedSpy?.mockRestore();
+    removedSpy = undefined;
   });
 
   /** The tab's visibility changes to `state`, as the browser reports it. */
@@ -807,13 +814,22 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
   });
 
   it("an unmounted host ignores visibility changes", async () => {
+    const added = vi.spyOn(document, "addEventListener");
     const removed = vi.spyOn(document, "removeEventListener");
+    addedSpy = added;
+    removedSpy = removed;
     const { units, unmount } = await armedWithFailedUnit();
     const before = requestedTexts().length;
+    const handlers = added.mock.calls
+      .filter(([type]) => type === "visibilitychange")
+      .map(([, handler]) => handler);
+    expect(handlers).toHaveLength(1);
 
     unmount();
-    expect(removed.mock.calls.some(([type]) => type === "visibilitychange")).toBe(true);
-    removed.mockRestore();
+    // The real check: the host removes the very listener it added. The
+    // "requests nothing" assertions below cannot catch a leak on their own,
+    // since React ignores state updates after unmount.
+    expect(removed).toHaveBeenCalledWith("visibilitychange", handlers[0]);
     await becomes("hidden");
     await becomes("visible");
 
