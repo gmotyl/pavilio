@@ -5,7 +5,8 @@
  * `linear-gradient(to bottom, #17171d 0%, color-mix(in srgb, #17171d n%, transparent) 100%)`
  * and the pane itself is transparent behind it; at 100, or while the composer's
  * input holds focus and no wave is shown, the body is the solid `#17171d`. The
- * meta row and the composer's rows always keep the solid ground.
+ * meta row and the composer's rows — the Retry Enter row among them — always
+ * keep the solid ground.
  */
 import { act, cleanup, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
-import { __resetAnswerWaitingForTests, beginWaiting } from "../answerWaiting";
+import { __resetAnswerRetryForTests, armRetryOffer, beginRetryTicket, RETRY_OFFER_MS } from "../answerRetry";
+import { __resetAnswerWaitingForTests, beginWaiting, holdAnswer } from "../answerWaiting";
+import { _applyEventForTests, _resetForTests as resetActivityForTests } from "../useTerminalActivityChannel";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 import { answerSpeech, renderPane } from "./answerPane.harness";
 
@@ -46,6 +49,12 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   __resetAnswerWaitingForTests();
+  __resetAnswerRetryForTests();
+  resetActivityForTests();
+  // Global, not per project: a test that switches the composer off must not
+  // leave the next one without a field to focus.
+  writePreference(preferences.answerComposerEnabled, true);
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -114,6 +123,7 @@ describe("AnswerPane answer opacity", () => {
       ".answer-pane-grip",
       ".answer-pane-hint",
       ".answer-pane-drag",
+      ".answer-pane-retry-row",
     ]) {
       expect([selector, cssRule(selector)]).toEqual([
         selector,
@@ -150,5 +160,51 @@ describe("AnswerPane answer opacity", () => {
     expect(wave()).not.toBeNull();
     expect(document.activeElement).toBe(field());
     expect(body().style.background).toBe(gradient(40));
+  });
+
+  it("the held wave keeps the gradient even with composer focus", () => {
+    setOpacity(40);
+    mount();
+    act(() => field().focus());
+    expect(body().style.background).toBe(SOLID);
+    // The user stepped back to an answer while the agent still works: the
+    // wave moves above the text, and the pane is still saying "working".
+    act(() => {
+      holdAnswer(SESSION);
+      _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
+    });
+    expect(document.activeElement).toBe(field());
+    expect(body().style.background).toBe(gradient(40));
+  });
+
+  it("switching the composer off while its field is focused restores the gradient", () => {
+    setOpacity(40);
+    mount();
+    act(() => field().focus());
+    expect(body().style.background).toBe(SOLID);
+    // The field unmounts with focus in it, which fires no blur.
+    act(() => writePreference(preferences.answerComposerEnabled, false));
+    expect(screen.queryByTestId(`answer-pane-composer-${SESSION}`)).toBeNull();
+    expect(body().style.background).toBe(gradient(40));
+  });
+
+  it("an offered Retry Enter sits in a solid row of its own", () => {
+    vi.useFakeTimers();
+    setOpacity(40);
+    mount();
+    act(() => {
+      armRetryOffer(SESSION, beginRetryTicket(SESSION));
+    });
+    act(() => {
+      vi.advanceTimersByTime(RETRY_OFFER_MS);
+    });
+    const button = screen.getByTestId(`answer-pane-retry-enter-${SESSION}`);
+    const row = button.parentElement as HTMLElement;
+    // The button is not a bare child of the transparent pane: its gutter is
+    // the row's padding, painted with the composer's ground.
+    expect(row.classList.contains("answer-pane-retry-row")).toBe(true);
+    expect(cssRule(".answer-pane-retry-row")).toMatch(/background:\s*#17171d/);
+    expect(cssRule(".answer-pane-retry-row")).toMatch(/padding:\s*0 13px 7px/);
+    expect(cssRule(".answer-pane-retry-enter")).not.toMatch(/margin/);
   });
 });

@@ -407,6 +407,10 @@ export function AnswerPane({
    * "the agent is working" and keeps the fade.
    */
   const [composerFocused, setComposerFocused] = useState(false);
+  // A field removed while it holds focus fires no blur, so switching the
+  // composer off would leave the body solid over a composer that is gone.
+  // Adjusted during render, React's pattern for state that follows a prop.
+  if (!composerOn && composerFocused) setComposerFocused(false);
   const isComposerField = (target: EventTarget | null): boolean =>
     target instanceof Element && target.classList.contains("answer-pane-composer-field");
   const translucent = opacityBottom < 100;

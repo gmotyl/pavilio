@@ -1675,31 +1675,39 @@ input[type="checkbox"] {
    while the colour lived in an inline style. Tertiary (#6d6b67) on this row's
    #17171d is 3.36:1, and WCAG AA asks 4.5:1 of normal text — which 10px
    JetBrains Mono emphatically is. Secondary (#9d9b97) is 6.43:1.
-   `AnswerComposer.reconnect.test.tsx` ("pending row") computes both ratios rather than
-   trusting this comment. */
+   `AnswerComposer.reconnect.test.tsx` ("pending row") computes both ratios
+   rather than trusting this comment. */
 .answer-pane-send-failed[data-state="pending"] {
   color: var(--text-secondary);
 }
 
 /* The one manual Return, offered when a submit the socket accepted produced
    nothing at all. It shares the notice row's furniture — the same strip ground
-   of #17171d, laid under the translucent accent here (the pane behind it is
-   transparent when the body fades) and only TINTED by it, the same 13px gutter, the same 10px
-   JetBrains Mono — because it is the same strip of the pane answering the same
-   question, and a control drawn in the pane's ordinary UI font here would read
-   as part of the answer above rather than as part of the composer below.
+   of #17171d, the same 13px gutter, the same 10px JetBrains Mono — because it
+   is the same strip of the pane answering the same question, and a control
+   drawn in the pane's ordinary UI font here would read as part of the answer
+   above rather than as part of the composer below.
 
-   `align-self: flex-start` because this is a BUTTON in a column of full-width
-   rows: left to stretch it would be a click target running the width of the
-   pane for an action the user must take deliberately and exactly once.
+   The ground and the gutter belong to the ROW, not the button: the pane behind
+   it is transparent when the body fades, and a gutter made of the button's
+   margin would be a transparent frame with the terminal showing through it,
+   in the composer that is meant to stay solid. */
+.answer-pane-retry-row {
+  flex: none;
+  /* A row of one, so the button keeps its own width instead of the pane's:
+     left to stretch it would be a click target running the width of the pane
+     for an action the user must take deliberately and exactly once. */
+  display: flex;
+  padding: 0 13px 7px;
+  background: #17171d;
+}
 
-   The accent, not `--red`: nothing has failed. The submit went, and this is
+/* The accent, not `--red`: nothing has failed. The submit went, and this is
    the offer to press the key again — so it wears what the send button wears,
-   at the size of the row it sits in. */
+   at the size of the row it sits in. Its own #17171d stays under the tint so
+   the contrast it is measured on is stated here, not borrowed from the row. */
 .answer-pane-retry-enter {
   flex: none;
-  align-self: flex-start;
-  margin: 0 13px 7px;
   padding: 3px 9px;
   border: 0;
   border-radius: 5px;

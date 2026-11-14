@@ -1262,14 +1262,18 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           words in it; this one has words, and an `aria-label` repeating them
           would only be a second copy to keep in step. */}
       {retryOffered ? (
-        <button
-          type="button"
-          className="answer-pane-retry-enter"
-          data-testid={`answer-pane-retry-enter-${sessionId}`}
-          onClick={retryEnter}
-        >
-          Retry Enter
-        </button>
+        // The row carries the ground and the gutter, so no part of the strip
+        // is transparent when the body fades — see `.answer-pane-retry-row`.
+        <div className="answer-pane-retry-row">
+          <button
+            type="button"
+            className="answer-pane-retry-enter"
+            data-testid={`answer-pane-retry-enter-${sessionId}`}
+            onClick={retryEnter}
+          >
+            Retry Enter
+          </button>
+        </div>
       ) : null}
       {/* Desktop only: two of the three keys it names do not exist on a phone.
           The fourth fact is the picker's, and it is the half of teaching the
