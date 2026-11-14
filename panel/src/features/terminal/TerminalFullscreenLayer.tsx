@@ -13,11 +13,42 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
+/**
+ * An open modal above the layer — Quick Finder, the confirm and import
+ * dialogs, alerts. Focus inside one belongs to it, not to the layer's trap.
+ */
+const MODAL_SELECTOR = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
+
+/**
+ * Whether Tab can actually land on `el`: not taken out of the order
+ * (negative tabindex, disabled, `[hidden]`/`[inert]` ancestor) and rendered —
+ * no `display: none` up to the layer, and not `visibility: hidden` (which is
+ * inherited, so the element's own computed value already says it). Computed
+ * styles only, no layout boxes, so it holds in jsdom too.
+ */
+function isTabStop(el: HTMLElement, layer: HTMLElement): boolean {
+  if (el.tabIndex < 0) return false;
+  if ((el as HTMLButtonElement).disabled) return false;
+  if (el.closest("[hidden], [inert]")) return false;
+  const view = el.ownerDocument.defaultView ?? window;
+  const visibility = view.getComputedStyle(el).visibility;
+  if (visibility === "hidden" || visibility === "collapse") return false;
+  for (let node: HTMLElement | null = el; node && node !== layer; node = node.parentElement) {
+    if (view.getComputedStyle(node).display === "none") return false;
+  }
+  return true;
+}
+
 /** The layer's Tab stops, in document order. */
 function focusablesIn(layer: HTMLElement): HTMLElement[] {
-  return Array.from(layer.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => !el.closest("[hidden], [inert]"),
+  return Array.from(layer.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) =>
+    isTabStop(el, layer),
   );
+}
+
+/** Whether `el` sits outside the layer, inside an open modal over it. */
+function inModalOutside(el: Element | null, layer: HTMLElement): boolean {
+  return !!el && !layer.contains(el) && !!el.closest(MODAL_SELECTOR);
 }
 
 /**
@@ -58,7 +89,8 @@ function initialFocusTarget(layer: HTMLElement, kind: "cell" | "terminal"): HTML
  * element is still connected and focus has not since been placed elsewhere on
  * purpose. Tab inside the xterm is never touched: xterm writes it to the PTY
  * and cancels the event itself, and the trap skips cancelled events and
- * anything inside `.xterm` besides. Escape is not handled here at all.
+ * anything inside `.xterm` besides. Nor is Tab inside an open modal outside the
+ * layer (Quick Finder sits above it). Escape is not handled here at all.
  */
 export function TerminalFullscreenLayer({
   open,
@@ -85,6 +117,10 @@ export function TerminalFullscreenLayer({
       if (layer.querySelector("[data-terminal-fullscreen]")) return;
       const target = e.target instanceof Element ? e.target : null;
       if (target?.closest(".xterm")) return;
+      // A modal over the layer (Quick Finder, a confirm dialog) keeps its own
+      // Tab order; only focus loose on the body or the covered chrome is pulled
+      // back in.
+      if (inModalOutside(target, layer) || inModalOutside(document.activeElement, layer)) return;
       const items = focusablesIn(layer);
       const first = items[0];
       const last = items[items.length - 1];

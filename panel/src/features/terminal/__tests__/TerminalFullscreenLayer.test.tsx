@@ -39,6 +39,7 @@ vi.mock("../useDefaultTerminalUsers", () => ({
 }));
 
 const { TerminalsSurface } = await import("../TerminalsSurface");
+const { TerminalFullscreenLayer } = await import("../TerminalFullscreenLayer");
 const { useTerminalFullscreen } = await import("../useTerminalFullscreen");
 const { useITermShortcuts } = await import("../../projects/useITermShortcuts");
 const { useFullscreenLayerActive } = await import("../../shell/Layout/fullscreenLayer");
@@ -380,6 +381,90 @@ describe("TerminalFullscreenLayer", () => {
       await click(screen.getByTestId("terminal-toolbar-fullscreen"));
       expect(layer("terminal")).not.toBeNull();
       expect(document.activeElement).toBe(terminalOf("cell-b"));
+    });
+    describe("Tab stops and modals, on a bare layer", () => {
+      it("skips a trailing tabIndex=-1 control: Tab from the last real stop wraps", async () => {
+        render(
+          <TerminalFullscreenLayer open kind="terminal">
+            <button data-testid="first">first</button>
+            <button data-testid="last">last</button>
+            {/* The surface's md:hidden shortcut bar, still mounted on desktop. */}
+            <div className="md:hidden">
+              <button tabIndex={-1} data-testid="shortcut">Esc</button>
+            </div>
+          </TerminalFullscreenLayer>,
+        );
+        await act(async () => {});
+        const last = screen.getByTestId("last");
+        last.focus();
+        expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
+        expect(document.activeElement).toBe(screen.getByTestId("first"));
+        expect(fireEvent.keyDown(screen.getByTestId("first"), { key: "Tab", shiftKey: true })).toBe(false);
+        expect(document.activeElement).toBe(last);
+      });
+
+      it("skips controls in a visibility:hidden or display:none cell", async () => {
+        render(
+          <TerminalFullscreenLayer open kind="terminal">
+            <button data-testid="first">first</button>
+            <button data-testid="last">last</button>
+            {/* Max keeps the other cells mounted, hidden. */}
+            <div style={{ visibility: "hidden" }}>
+              <button data-testid="hidden-cell">kill</button>
+            </div>
+            <div style={{ display: "none" }}>
+              <button data-testid="none-cell">kill</button>
+            </div>
+            <button disabled>disabled</button>
+          </TerminalFullscreenLayer>,
+        );
+        await act(async () => {});
+        const last = screen.getByTestId("last");
+        last.focus();
+        expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
+        expect(document.activeElement).toBe(screen.getByTestId("first"));
+        expect(fireEvent.keyDown(screen.getByTestId("first"), { key: "Tab", shiftKey: true })).toBe(false);
+        expect(document.activeElement).toBe(last);
+      });
+
+      it("leaves Tab alone inside an open modal above the layer", async () => {
+        render(
+          <>
+            <TerminalFullscreenLayer open kind="terminal">
+              <button data-testid="first">first</button>
+            </TerminalFullscreenLayer>
+            {/* Quick Finder: z-[100], above the z-[90] layer. */}
+            <div role="dialog" aria-modal="true">
+              <input data-testid="finder" />
+              <button data-testid="finder-next">next</button>
+            </div>
+          </>,
+        );
+        await act(async () => {});
+        const input = screen.getByTestId("finder");
+        input.focus();
+        expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
+        expect(document.activeElement).toBe(input);
+        expect(fireEvent.keyDown(input, { key: "Tab", shiftKey: true })).toBe(true);
+        expect(document.activeElement).toBe(input);
+      });
+
+      it("still pulls focus back in from covered chrome outside any modal", async () => {
+        render(
+          <>
+            <button data-testid="chrome">chrome</button>
+            <TerminalFullscreenLayer open kind="terminal">
+              <button data-testid="first">first</button>
+              <button data-testid="last">last</button>
+            </TerminalFullscreenLayer>
+          </>,
+        );
+        await act(async () => {});
+        const chrome = screen.getByTestId("chrome");
+        chrome.focus();
+        expect(fireEvent.keyDown(chrome, { key: "Tab" })).toBe(false);
+        expect(document.activeElement).toBe(screen.getByTestId("first"));
+      });
     });
   });
 });
