@@ -22,7 +22,7 @@ Agent guidance for the `panel/` app. Read this before making panel-specific chan
 - `projects/` — dashboard, project page, project/favorites hooks
 - `realtime/` — shared websocket invalidation hook
 - `search/` — quick finder, grep row, grep result type
-- `shell/` — layout, sidebars, breadcrumbs, wide mode/sidebar state hooks
+- `shell/` — layout, sidebars, breadcrumbs, focus layout toggle, sidebar state and panel shortcut hooks
 
 ## Naming Conventions
 
