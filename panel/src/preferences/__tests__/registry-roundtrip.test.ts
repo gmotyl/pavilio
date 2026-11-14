@@ -34,7 +34,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "shell.rightSidebar.section.expanded": [true, false],
   "shell.project.expanded": [true, false],
   "shell.research.collapsed": [true, false],
-  "view.wide": [true, false],
+  "layout.focus": [true, false],
   "fileList.sidebarCollapsed": [true, false],
   "wiki.sessionStartIngest": [true, false],
   "search.includeArchived": [true, false],
@@ -59,6 +59,8 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "shell.rightSidebar.width": [264, 0, 200, 440, 344.5, -1],
   "speech.answerComposer.height": [62, 0, 40, 320, 96.5, -1],
   "speech.answerPane.height": [4000, 0, 120, 720, 344.5, -1],
+  // Bounded 0–100: only in-range values round-trip; the rest read as 100.
+  "speech.answerPane.opacityBottom": [100, 0, 5, 40, 99.5],
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
   "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
@@ -137,7 +139,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 59;
+const DECLARATION_COUNT = 60;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

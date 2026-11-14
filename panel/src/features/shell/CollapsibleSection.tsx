@@ -17,8 +17,8 @@ export default function CollapsibleSection({ storageKey, title, icon, children }
   // Toggled through an UPDATER below, never `setExpanded(!expanded)`: two
   // clicks in one tick are batched against a single render closure, so a
   // closure read makes both compute the same flip and the pair collapses into
-  // one instead of cancelling. Same rule as `useSidebarState`, `useWideMode`
-  // and `QuickFinder`.
+  // one instead of cancelling. Same rule as `useSidebarState` and
+  // `QuickFinder`.
   const [expanded, setExpanded] = usePreference(
     preferences.rightSidebarSectionExpanded,
     storageKey,

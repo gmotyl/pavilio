@@ -18,6 +18,7 @@ const PORTABLE = [
   "git.commitsOpen",
   "git.viewMode",
   "git.worktree.expanded",
+  "layout.focus",
   "plans.runBanner.expanded",
   "plans.runBanner.launcher",
   "plans.taskPrompt",
@@ -38,6 +39,7 @@ const PORTABLE = [
   "shell.rightSidebar.width",
   "speech.answerComposer.on",
   "speech.answerPane.autoOpen",
+  "speech.answerPane.opacityBottom",
   "speech.engine",
   "speech.cascadeOrder",
   "speech.pronunciationByEngine",
@@ -50,7 +52,6 @@ const PORTABLE = [
   "terminal.maximized",
   "time.form.resetAutoOnSave",
   "time.report",
-  "view.wide",
   "wiki.sessionStartIngest",
   "wiki.writerModel",
 ];
@@ -109,10 +110,6 @@ const NOT_YET_DECLARED: readonly string[] = [];
  * every value re-derived from the hook it replaces. A second copy on purpose:
  * derived from the registry it would assert nothing, which is exactly how nine
  * mutated defaults once passed green.
- *
- * The one row that deliberately does NOT reproduce today's behavior is
- * `view.wide` — `useWideMode` reads `=== "true"` and so opens compact; this
- * change flips it.
  */
 const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   [
@@ -132,6 +129,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["git.commitsOpen", true, "repo"],
   ["git.viewMode", "flat", "global"],
   ["git.worktree.expanded", false, "repo"],
+  // Off: a fresh browser shows the breadcrumb and title rows.
+  ["layout.focus", false, "global"],
   ["nav.lastFile", null, "project"],
   ["nav.lastPath", null, "project"],
   ["nav.lastReposQuery", null, "project"],
@@ -175,6 +174,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   // Not a height so much as the word "full": taller than any terminal area, so
   // the pane clamps to the area it is in and an unresized one covers it.
   ["speech.answerPane.height", 4000, "project"],
+  // Fully opaque: an untouched project renders today's solid answer pane.
+  ["speech.answerPane.opacityBottom", 100, "project"],
   ["speech.armedCell", null, "global"],
   ["speech.modes", null, "global"],
   ["speech.engine", "edge", "global"],
@@ -214,7 +215,6 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["terminal.order", [], "project"],
   ["time.form.resetAutoOnSave", false, "project"],
   ["time.report", { period: "this-week", format: "text", detail: "detailed" }, "project"],
-  ["view.wide", true, "project"],
   // On unless the user opts out: design.md's Cost section names `false` as the escape hatch.
   ["wiki.sessionStartIngest", true, "global"],
   ["wiki.writerModel", "haiku", "global"],
@@ -328,8 +328,7 @@ describe("the declaration table", () => {
   });
 
   it("every declaration's default and scope match a hand-written table", () => {
-    // AC 4, and the only test that bites it: nine mutated defaults — the
-    // wide-mode flip among them — once passed green because every other
+    // AC 4, and the only test that bites it: nine mutated defaults once passed green because every other
     // assertion here reads the registry and compares it against itself.
     // Transcribed by hand from the declarations, each value re-derived from
     // the hook it replaces. Do NOT generate this from `ALL_PREFERENCES`.
@@ -611,5 +610,78 @@ describe("the sidebar's Research section", () => {
     expect(collapsed.default).toBe(false);
     // Unset reads false: the section opens expanded.
     expect(readPreference(preferences.researchSectionCollapsed)).toBe(false);
+  });
+});
+
+describe("the focus layout and the answer opacity", () => {
+  beforeEach(() => {
+    globals.__PAVILIO_PREFS__ = { version: 1 };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+  });
+
+  afterEach(() => {
+    delete globals.__PAVILIO_PREFS__;
+    localStorage.clear();
+    sessionStorage.clear();
+    __resetPreferenceStoreForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("declares focusLayout as a global portable boolean defaulting to false", () => {
+    const focus = keyOf("layout.focus");
+    expect(focus).toBe(preferences.focusLayout);
+    expect(focus.scope).toBe("global");
+    expect(focus.portable).toBe(true);
+    expect(focus.default).toBe(false);
+    expect(focus.codec.parse("true")).toBe(true);
+    expect(focus.codec.parse("false")).toBe(false);
+    expect(readPreference(preferences.focusLayout)).toBe(false);
+  });
+
+  it("declares answerOpacityBottom per project, portable, defaulting to 100", () => {
+    const opacity = keyOf("speech.answerPane.opacityBottom");
+    expect(opacity).toBe(preferences.answerOpacityBottom);
+    expect(opacity.scope).toBe("project");
+    expect(opacity.portable).toBe(true);
+    expect(opacity.default).toBe(100);
+
+    writePreference(preferences.answerOpacityBottom, 40, ALPHA);
+    expect(readPreference(preferences.answerOpacityBottom, ALPHA)).toBe(40);
+    // Per project: the other one keeps the solid default.
+    expect(readPreference(preferences.answerOpacityBottom, BETA)).toBe(100);
+    // Portable: the value lands in the workspace document under its scoped key.
+    expect(globals.__PAVILIO_PREFS__).toEqual({
+      version: 1,
+      [`speech.answerPane.opacityBottom@${ALPHA}`]: 40,
+    });
+  });
+
+  it("answerOpacityBottom falls back to 100 for out-of-range or malformed values", () => {
+    // Written straight into the document, the way a hand edit would land.
+    for (const stored of [-1, 101, 500, "abc", "", null, true, { n: 40 }]) {
+      __resetPreferenceStoreForTests();
+      globals.__PAVILIO_PREFS__ = {
+        version: 1,
+        [`speech.answerPane.opacityBottom@${ALPHA}`]: stored,
+      };
+      expect(readPreference(preferences.answerOpacityBottom, ALPHA), String(stored)).toBe(100);
+    }
+    // The bounds themselves are values, not fallbacks.
+    for (const stored of [0, 55, 100]) {
+      __resetPreferenceStoreForTests();
+      globals.__PAVILIO_PREFS__ = {
+        version: 1,
+        [`speech.answerPane.opacityBottom@${ALPHA}`]: stored,
+      };
+      expect(readPreference(preferences.answerOpacityBottom, ALPHA)).toBe(stored);
+    }
+  });
+
+  it("no wide-mode preference is declared", () => {
+    expect(ALL_PREFERENCES.find((d) => d.key === "view.wide")).toBeUndefined();
+    expect("wideMode" in preferences).toBe(false);
   });
 });

@@ -5,8 +5,6 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import ProjectView from "../ProjectView";
 import { PAVILIO_FILE_MIME_TYPE } from "../../explorer/useFileDrag";
 import { mockFetchResponses } from "../../../test-utils";
-import { preferences } from "../../../preferences/declarations";
-import { storageKey } from "../../../preferences/types";
 
 const MODIFIED = Date.parse("2026-09-20T10:00:00Z");
 
@@ -269,17 +267,17 @@ describe("the mockup fill chain", () => {
     for (const cls of VIEW_FILL) expect(classesOf(view())).not.toContain(cls);
   });
 
-  it("keeps the compact width cap when wide mode is off and a mockup is open", async () => {
+  it("an old compact choice no longer caps the width of an open mockup", async () => {
     const prefs = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
       .__PAVILIO_PREFS__!;
-    prefs[storageKey(preferences.wideMode, "mockups")] = false;
+    // Written by a panel that still had the compact view; read by nothing now.
+    prefs["view.wide@mockups"] = false;
     renderMockups(["pavilio/mockups/boot-legend.html"], {
       file: "pavilio/mockups/boot-legend.html",
     });
 
     await screen.findByTestId("file-list-sidebar-detail");
-    // Width and height are independent: the fill must not disturb the clamp.
-    expect(classesOf(view())).toContain("max-w-5xl");
+    expect(classesOf(view())).not.toContain("max-w-5xl");
     expect(classesOf(view())).toEqual(expect.arrayContaining(VIEW_FILL));
   });
 });

@@ -1,9 +1,12 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { useContext } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { buildReadUrl } from "../MarkdownViewer";
 import MarkdownViewer from "../MarkdownViewer";
 import { jsonResponse, stubFetch } from "../../../test-utils";
+import { FloatingActionProvider } from "../../shell/Layout";
+import { FloatingActionContext } from "../../shell/Layout/FloatingActionProvider";
 
 // ---------- unit tests for the pure helper ----------
 
@@ -98,5 +101,53 @@ describe("MarkdownViewer failed read", () => {
     );
 
     await waitFor(() => expect(view.queryByText("Loading...")).toBeNull());
+  });
+});
+
+/** The shell's floating-action slot, so anything the viewer hands it is on screen. */
+function FloatingSlot() {
+  const { action } = useContext(FloatingActionContext);
+  return <div data-testid="floating-slot">{action}</div>;
+}
+
+describe("MarkdownViewer layout", () => {
+  beforeEach(() => {
+    stubFetch({}, () => jsonResponse({ content: "# Hello", absolutePath: "/fake/path.md" }));
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        onopen = null;
+        onmessage = null;
+        onclose = null;
+        onerror = null;
+        close() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("markdown viewer renders no wide toggle", async () => {
+    // A compact choice an older panel wrote stays in the file, read by nothing.
+    (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__![
+      "view.wide@viewer"
+    ] = false;
+    const view = render(
+      <FloatingActionProvider>
+        <MemoryRouter initialEntries={["/view/pavilio/notes/hello.md"]}>
+          <Routes>
+            <Route path="/view/*" element={<MarkdownViewer />} />
+          </Routes>
+        </MemoryRouter>
+        <FloatingSlot />
+      </FloatingActionProvider>,
+    );
+
+    await waitFor(() => expect(view.queryByText("Loading...")).toBeNull());
+    expect(await screen.findByText("Hello")).toBeTruthy();
+    expect(screen.queryByTestId("wide-toggle")).toBeNull();
+    expect(view.container.querySelector(".max-w-5xl")).toBeNull();
   });
 });

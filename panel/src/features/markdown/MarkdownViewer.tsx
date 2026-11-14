@@ -10,9 +10,6 @@ import { useDocSpeech } from "../projects/docSpeech";
 import { PlayFromHere } from "../speech/PlayFromHere";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
-import { useFloatingAction } from "../shell/Layout";
-import { useWideMode } from "../shell/useWideMode";
-import WideToggle from "../shell/WideToggle";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { encodePathSegments, viewFilePath } from "./viewRoute";
@@ -53,7 +50,6 @@ export default function MarkdownViewer() {
   // flag would only catch up one render later.
   const [loadedPath, setLoadedPath] = useState<string | null>(null);
   const loading = loadedPath !== filePath;
-  const [wide, toggleWide] = useWideMode("viewer");
   const { lastMessage } = useWebSocket();
 
   // The path the latest read is for: a slower read of the previous file must
@@ -160,11 +156,6 @@ export default function MarkdownViewer() {
     [absolutePath, workspaceRoot, content, loading, isMockup, speech?.key, speech?.text],
   );
 
-  useFloatingAction(<WideToggle wide={wide} onToggle={toggleWide} />, [
-    wide,
-    toggleWide,
-  ]);
-
   if (loading)
     return (
       <div className="p-6" style={{ color: "var(--text-muted)" }}>
@@ -190,7 +181,7 @@ export default function MarkdownViewer() {
     );
 
   return (
-    <div className={`p-6 ${wide ? "" : "max-w-5xl"}`}>
+    <div className="p-6">
       <ImageDropZone targetMarkdown={filePath}>
         {isMarkdown ? (
           // Always the same wrapper, so the renderer (and its mermaid

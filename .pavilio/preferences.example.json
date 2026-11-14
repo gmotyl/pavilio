@@ -4,5 +4,5 @@
   "shell.leftSidebar.expanded": true,
   "terminal.drawer.width": 480,
   "time.report@example-project": {"period":"this-week","format":"text","detail":"detailed"},
-  "view.wide@example-project": true
+  "layout.focus": false
 }

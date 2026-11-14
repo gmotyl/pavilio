@@ -78,7 +78,7 @@ const FIXTURES: Record<string, Fixture> = {
   "shell.rightSidebar.section.expanded": { value: false, scopeArg: "skills" },
   "shell.project.expanded": { value: true, scopeArg: "pavilio" },
   "shell.research.collapsed": { value: true },
-  "view.wide": { value: false, scopeArg: "viewer" },
+  "layout.focus": { value: true },
 
   // ── File list and project lists ──────────────────────────────────────────
   "fileList.sort": { value: { sortKey: "name", sortDir: "asc" } },
@@ -148,6 +148,7 @@ const FIXTURES: Record<string, Fixture> = {
   // remembered per project must still never leave this machine.
   "speech.answerComposer.height": { value: 148, scopeArg: "pavilio" },
   "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
+  "speech.answerPane.opacityBottom": { value: 40, scopeArg: "pavilio" },
   "speech.armedCell": { value: "sess-0b2e55d1" },
   "speech.modes": { value: { "sess-0b2e55d1": "autoplay" } },
   // Non-portable and naming no session: whether this browser can reach the
@@ -262,8 +263,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(59);
-    expect(portable.length).toBe(45);
+    expect(ALL_PREFERENCES.length).toBe(60);
+    expect(portable.length).toBe(46);
     expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

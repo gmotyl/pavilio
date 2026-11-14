@@ -38,8 +38,7 @@ describe("CollapsibleSection", () => {
    * of cancelling. Only an updater — `setExpanded((v) => !v)` — resolves the
    * second call against the first one's result.
    *
-   * The same property `useSidebarState`, `useWideMode` and `QuickFinder` each
-   * assert; this section was the one place in the migration that lost it.
+   * The same property `useSidebarState` and `QuickFinder` each assert; this section was the one place in the migration that lost it.
    */
   it("composes two toggles in one tick", async () => {
     render(
