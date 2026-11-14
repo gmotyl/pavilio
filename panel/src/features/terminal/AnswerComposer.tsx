@@ -15,6 +15,7 @@ import {
   clearDraft,
   getDraft,
   holdCaret,
+  onDraftCleared,
   releaseCaret,
   setDraft,
   takeHeldCaret,
@@ -627,6 +628,20 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   }, [sessionId]);
 
   /**
+   * A spent draft empties whichever composer is mounted for the session — see
+   * `onDraftCleared`. A layout effect so the subscription is in place in the
+   * same commit as the mount, before any delivery can land.
+   */
+  useLayoutEffect(
+    () =>
+      onDraftCleared(sessionId, () => {
+        setText("");
+        setPasted([]);
+      }),
+    [sessionId],
+  );
+
+  /**
    * The composer's own load of the known skill names — see `knownSkills`.
    * Once per mount (the pane mounts the composer per open), silent on failure:
    * an empty set only means a hand-typed `/name` is sent as typed.
@@ -774,9 +789,9 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     if (getDraft(sessionId) !== submitted) return;
     // The one thing that consumes a draft. Nothing else in this file — or in
     // the pane above it — calls `clearDraft`.
+    // `clearDraft` empties the field through the subscription below — this
+    // composer's if it is still mounted, or the one a rebuild put in its place.
     clearDraft(sessionId);
-    setText("");
-    setPasted([]);
   };
 
   /** The one way out of this field, whichever control asked for it. */

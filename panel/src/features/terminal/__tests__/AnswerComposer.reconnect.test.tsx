@@ -335,6 +335,55 @@ describe("reconnect wait", () => {
       expect(noticeText()).toMatch(/not sent/i);
     });
   });
+
+  /**
+   * A cell rebuilt during the wait. The submit outlives the composer that
+   * made it — `submitToPty` holds its callbacks, nothing cancels them on
+   * unmount — and the composer mounted in its place is seeded from the store,
+   * which still holds the reply because nothing has been delivered yet. When
+   * the retry lands, the delivery must empty THAT field, not just the store
+   * and the unmounted one, or the next Enter sends the reply twice.
+   */
+  describe("a cell rebuilt while a send waits for the reconnect", () => {
+    it("a delivered retry clears the composer mounted in its place", () => {
+      let open = false;
+      const send = vi.fn((_data: string) => open);
+      const first = renderComposer(send);
+
+      field().focus();
+      submit("ship it");
+      expect(field().value).toBe("ship it");
+
+      // The rebuild: the focused composer goes, a new one for the same
+      // session comes, seeded from the still-unspent draft.
+      first.unmount();
+      renderComposer(send);
+      expect(field().value).toBe("ship it");
+
+      open = true;
+      socketCameBack();
+
+      expect(getDraft(SESSION)).toBe("");
+      expect(field().value).toBe("");
+    });
+
+    it("text typed into the rebuilt composer during the wait survives the delivery", () => {
+      let open = false;
+      const send = vi.fn((_data: string) => open);
+      const first = renderComposer(send);
+
+      submit("first reply");
+      first.unmount();
+      renderComposer(send);
+      fireEvent.change(field(), { target: { value: "a whole new thought" } });
+
+      open = true;
+      socketCameBack();
+
+      expect(field().value).toBe("a whole new thought");
+      expect(getDraft(SESSION)).toBe("a whole new thought");
+    });
+  });
 });
 
 /**

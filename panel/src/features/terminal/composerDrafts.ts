@@ -78,9 +78,44 @@ export function setDraft(sessionId: string, text: string): void {
   drafts.set(sessionId, text);
 }
 
+/**
+ * Who to tell when a session's draft is spent — the composer mounted for that
+ * session right now, if any.
+ *
+ * A send can be delivered by a composer that is no longer mounted: the
+ * reconnect wait is up to three seconds, `submitToPty` holds the callbacks
+ * across it, and a cell rebuilt inside the wait mounts a NEW composer seeded
+ * from this store, which still holds the reply because nothing has been
+ * delivered yet. The delivering closure's `setText("")` reaches only the
+ * unmounted one, so without this the rebuilt field would keep the sent reply
+ * under the next Enter. The clear is announced here instead, and whichever
+ * composer is mounted for the session empties itself.
+ */
+const clearListeners = new Map<string, Set<() => void>>();
+
 /** Forget this cell's draft. The send that consumed it is the only caller. */
 export function clearDraft(sessionId: string): void {
   drafts.delete(sessionId);
+  for (const fn of [...(clearListeners.get(sessionId) ?? [])]) fn();
+}
+
+/**
+ * Be told when this session's draft is cleared. The mounted composer
+ * subscribes for its lifetime; returns the unsubscribe.
+ */
+export function onDraftCleared(sessionId: string, fn: () => void): () => void {
+  let set = clearListeners.get(sessionId);
+  if (!set) {
+    set = new Set();
+    clearListeners.set(sessionId, set);
+  }
+  set.add(fn);
+  return () => {
+    const current = clearListeners.get(sessionId);
+    if (!current) return;
+    current.delete(fn);
+    if (current.size === 0) clearListeners.delete(sessionId);
+  };
 }
 
 /**
@@ -111,4 +146,5 @@ export function releaseCaret(sessionId: string): void {
 export function __resetComposerDraftsForTests(): void {
   drafts.clear();
   carets.clear();
+  clearListeners.clear();
 }

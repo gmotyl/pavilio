@@ -15,13 +15,14 @@
  * drafts separate per session" is also the proof that the teardown ran: the
  * test above it leaves `cell-a` written.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   __resetComposerDraftsForTests,
   clearDraft,
   getDraft,
   holdCaret,
+  onDraftCleared,
   releaseCaret,
   setDraft,
   takeHeldCaret,
@@ -42,6 +43,21 @@ describe("composerDrafts", () => {
     clearDraft("cell-b");
 
     expect(getDraft("cell-b")).toBe("");
+  });
+
+  it("a clear tells the session's subscribers, and only them", () => {
+    const mine = vi.fn();
+    const theirs = vi.fn();
+    const off = onDraftCleared("cell-a", mine);
+    onDraftCleared("cell-b", theirs);
+
+    clearDraft("cell-a");
+    expect(mine).toHaveBeenCalledTimes(1);
+    expect(theirs).not.toHaveBeenCalled();
+
+    off();
+    clearDraft("cell-a");
+    expect(mine).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a draft out of browser storage", () => {
