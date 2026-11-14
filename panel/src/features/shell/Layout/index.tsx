@@ -2,6 +2,8 @@ import { useContext, useEffect, useRef, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { PanelRight } from "lucide-react";
 import { Breadcrumbs } from "../Breadcrumbs";
+import FocusToggle, { isFocusablePath, useFocusLayout } from "../FocusToggle";
+import { usePanelShortcut } from "../usePanelShortcut";
 import LeftSidebar from "../LeftSidebar";
 import SidebarHamburger from "../SidebarHamburger";
 import RightSidebar from "../RightSidebar";
@@ -120,6 +122,15 @@ export function Layout({ children }: LayoutProps) {
   const drawer = useTerminalDrawer();
 
   /**
+   * Focus drops the breadcrumb row — on project pages only, where the tab row
+   * takes the toggle over. Alt+Shift+F flips it from anywhere, a focused
+   * terminal included; the hook skips it below `md`, where focus never applies.
+   */
+  const focus = useFocusLayout();
+  const hideBreadcrumbs = focus.active && isFocusablePath(location.pathname);
+  usePanelShortcut("KeyF", focus.toggle);
+
+  /**
    * The right toggle is viewport-anchored, but a docked drawer sits between the
    * sidebar and <main> — without this it floats over the drawer's header and
    * resize edge, covering its ✕. Push it outward by the drawer's width when
@@ -221,7 +232,7 @@ export function Layout({ children }: LayoutProps) {
             ref={scrollRef}
             className={`overflow-auto h-full${fullscreenLayer ? "" : " isolate"}`}
           >
-            <Breadcrumbs />
+            {!hideBreadcrumbs && <Breadcrumbs trailing={<FocusToggle />} />}
             {children}
           </div>
         </ScrollContainerContext.Provider>

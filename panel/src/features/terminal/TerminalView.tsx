@@ -7,13 +7,19 @@ import {
   type LiveTerminal,
 } from "./terminalInstances";
 import { AnswerPane } from "./AnswerPane";
-import { markSeenUtterances, setAnswerPaneOpen, useAnswerPaneState } from "./answerPaneState";
+import {
+  getAnswerPaneState,
+  markSeenUtterances,
+  setAnswerPaneOpen,
+  useAnswerPaneState,
+} from "./answerPaneState";
 import { useAnswerWaiting } from "./answerWaiting";
 import { BootLegend } from "./BootLegend";
 import { captureBufferSnapshot } from "./bufferSnapshot";
 import { SpeechControlBar } from "./SpeechControlBar";
 import { useMobileReconnect } from "./useMobileReconnect";
 import { viewportLooksBlank } from "./viewportBlank";
+import { usePanelShortcut } from "../shell/usePanelShortcut";
 import { getStoredAutoOpenAnswer } from "../speech/autoOpenAnswer";
 import type { GridSpeech } from "../speech/types";
 import { utteranceUnderCursor, type UtteranceQueue } from "../speech/utteranceQueue";
@@ -25,8 +31,7 @@ interface TerminalViewProps {
   onReady?: (api: TerminalHandle) => void;
   /**
    * The panel's speech host. Passed by every grid cell; absent only where a
-   * terminal is shown outside one (the quick-terminal modal), which is the one
-   * place with no cell transport to offer.
+   * terminal is shown outside one, which has no cell transport to offer.
    */
   speech?: GridSpeech;
   /**
@@ -104,7 +109,8 @@ export function TerminalView({
 
   // Hiding the bar CLOSES the pane rather than merely covering it — a pane
   // without its bar has no eye to close it, and one that came back unasked
-  // when the bar returned would be a surprise.
+  // when the bar returned would be a surprise. Not a user close: the pane is
+  // not hidden by choice, so the next answer may open it again.
   //
   // The legend follows for free: it is a derivation over `answerOpen` among
   // other stores (see `legendShown` below), and closing the pane here already
@@ -137,8 +143,15 @@ export function TerminalView({
     // The preference is read HERE, at arrival, rather than held as a copy: a
     // change in Settings reaches a cell that already exists. The bar's
     // visibility outranks it, as it outranks the eye. The arrival is still
-    // recorded above: it is not held back for the bar's return.
-    if (arrived && speechBarVisible && getStoredAutoOpenAnswer()) {
+    // recorded above: it is not held back for the bar's return. A pane the
+    // user hid by choice stays hidden until the user shows it again; read at
+    // arrival from the store, like the preference.
+    if (
+      arrived &&
+      speechBarVisible &&
+      getStoredAutoOpenAnswer() &&
+      !getAnswerPaneState(sessionId).hiddenByChoice
+    ) {
       setAnswerPaneOpen(sessionId, true);
     }
   }, [sessionId, queue, speechBarVisible]);
@@ -177,9 +190,8 @@ export function TerminalView({
    * - **An arriving utterance** moves the cursor onto it, so `answer` stops
    *   being null and the legend and the answer trade places by construction —
    *   no effect has to notice the arrival and turn anything off.
-   * - **Escape and the eye** already close the pane (`closeAnswer`,
-   *   `SpeechControlBar`'s toggle); a closed pane fails `open` and the legend
-   *   is gone with it.
+   * - **The eye and Alt+Shift+O** close the pane (`toggleAnswer`); a closed
+   *   pane fails `open` and the legend is gone with it.
    * - **Hiding the bar** closes the pane above; showing it again reopens
    *   neither the pane nor the legend, because nothing here reopens it.
    * - **It is shown every time**, on every cell, because there is no
@@ -188,13 +200,30 @@ export function TerminalView({
   const answer = queue ? utteranceUnderCursor(queue) : null;
   const legendShown = answerOpen && !waiting && answer === null && speechBarVisible;
 
-  // Escape in the pane: close it and put the keyboard back in the terminal,
-  // so the next question can be typed at once. `LiveTerminal.terminal` is the
-  // xterm `Terminal`; its own `focus()` is what lands the caret in the PTY.
-  const closeAnswer = useCallback(() => {
-    setAnswerPaneOpen(sessionId, false);
-    instRef.current?.terminal.focus();
+  // The user's own toggle — the eye, or Alt+Shift+O. `byUser`, so a close
+  // hides the pane by choice and an open clears that (see `answerPaneState`).
+  const toggleAnswer = useCallback(() => {
+    setAnswerPaneOpen(sessionId, !getAnswerPaneState(sessionId).open, { byUser: true });
   }, [sessionId]);
+
+  // Alt+Shift+O toggles the FOCUSED cell's pane. EVERY view registers the
+  // window listener, whether or not it has a speech row to toggle, because the
+  // key must never reach a shell: on a match each one stops it from reaching a
+  // terminal. Stopping it does not silence the other views' listeners on the
+  // same `window`, so each decides for itself whether it is the target: the
+  // cell holding DOM focus if any cell does (its terminal or its pane),
+  // otherwise the grid's focused cell. A target whose speech row is hidden has
+  // no pane to show, so the key is swallowed and does nothing. An auto-repeat
+  // of the held key is ignored, so holding it does not flicker the pane.
+  const rootRef = useRef<HTMLDivElement>(null);
+  usePanelShortcut("KeyO", (e) => {
+    if (e.repeat) return;
+    const active = document.activeElement;
+    const owner = active?.closest("[data-terminal-view]") ?? null;
+    if (owner ? owner !== rootRef.current : !focused) return;
+    if (!speech || !speechBarVisible) return;
+    toggleAnswer();
+  });
 
   // Latest-refs so changing callbacks don't blow away the mount effect.
   // Parent re-renders (e.g. a session opened, killed or renamed anywhere in
@@ -336,6 +365,11 @@ export function TerminalView({
     return instRef.current?.send(data) ?? false;
   }, []);
 
+  // Read off `instRef` at call time, like `send`.
+  const focusTerminal = useCallback((): void => {
+    instRef.current?.focus();
+  }, []);
+
   const isViewportBlank = useCallback(() => {
     const inst = instRef.current;
     // No instance yet is not evidence of a blank screen — don't ask for a nudge.
@@ -370,13 +404,13 @@ export function TerminalView({
     // cell has anything to say, so a first utterance changes no box. The row is
     // still a SIBLING of the container, never a child, so nothing inside the
     // observed box moves when its contents change.
-    <div className="w-full h-full relative flex flex-col">
+    <div ref={rootRef} data-terminal-view="" className="w-full h-full relative flex flex-col">
       {speech && speechBarVisible ? (
         <SpeechControlBar
           sessionId={sessionId}
           speech={speech}
           answerOpen={answerOpen}
-          onToggleAnswer={() => setAnswerPaneOpen(sessionId, !answerOpen)}
+          onToggleAnswer={toggleAnswer}
           send={send}
         />
       ) : null}
@@ -430,11 +464,11 @@ export function TerminalView({
           <AnswerPane
             sessionId={sessionId}
             speech={speech}
-            onClose={closeAnswer}
             // The same `send` the row's pills take — one transport to the PTY,
             // reached from the two places the user can type into this cell
             // without touching the terminal.
             send={send}
+            focusTerminal={focusTerminal}
           />
         ) : null}
       </div>

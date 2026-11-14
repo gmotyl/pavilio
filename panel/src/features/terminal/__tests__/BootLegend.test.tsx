@@ -475,15 +475,14 @@ describe("the boot legend", () => {
     expect(pane()).not.toBeNull();
   });
 
-  it("Escape closes the pane and the legend with it", async () => {
+  it("closing the pane with the eye takes the legend with it", async () => {
     render(cell(arrivingSpeech(SESSION)));
     fireEvent.click(eye());
     expect(legend()).not.toBeNull();
 
-    // `AnswerPane` closes on Escape in the window's own capture-phase
-    // listener; the legend carries none of its own any more (see `BootLegend`)
-    // — a closed pane simply fails `answerOpen` and the derivation follows.
-    fireEvent.keyDown(document, { key: "Escape" });
+    // The legend carries no close of its own (see `BootLegend`) — a closed
+    // pane simply fails `answerOpen` and the derivation follows.
+    fireEvent.click(eye());
 
     await waitFor(() => expect(pane()).toBeNull());
     expect(legend()).toBeNull();
@@ -916,7 +915,7 @@ describe("the boot legend and the command picker", () => {
         .map(([, fn]) => fn);
       expect(resizeListeners.length).toBeGreaterThan(0);
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.click(eye());
       await waitFor(() => expect(legend()).toBeNull());
 
       expect(legendRO!.disconnected).toBe(true);

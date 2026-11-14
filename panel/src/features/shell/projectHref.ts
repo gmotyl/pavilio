@@ -13,9 +13,9 @@
  * the destination with it; it is never stored, because being on a phone is a
  * fact about the viewport, not a preference.
  *
- * The name is percent-encoded, matching `QuickTerminalModal`, which builds the
- * same `/project/<name>/iterm` target. A project may be named with a space or a
- * `#`, and unencoded those do not survive the trip: a `#` starts the fragment,
+ * The name is percent-encoded, matching `projectTerminalsPath`, which builds
+ * the same `/project/<name>/iterm` target. A project may be named with a space
+ * or a `#`, and unencoded those do not survive the trip: a `#` starts the fragment,
  * so the route would see a truncated name. Encoding is safe on the far side —
  * `matchProjectFromPath` decodes the segment itself, and the router hands
  * `useParams` the decoded form, which is what every preference scope downstream

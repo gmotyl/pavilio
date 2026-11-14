@@ -7,8 +7,7 @@
  * replaces, so the migration and the one-time seed have a single map to work
  * from.
  *
- * Defaults reproduce today's behavior exactly, with one deliberate exception
- * noted at `view.wide`.
+ * Defaults reproduce the behavior of the hooks they replaced.
  *
  * NO MIGRATION SHIPS, AND THAT IS THE DESIGN. design.md's Migration section is
  * explicit: "Existing `localStorage` values are not migrated by code. No
@@ -64,6 +63,23 @@ export interface TerminalLauncher {
 function clampedNum(min: number, max: number): PreferenceCodec<number> {
   return {
     parse: (raw) => Math.min(max, Math.max(min, num.parse(raw))),
+    serialize: num.serialize,
+  };
+}
+
+/**
+ * A number that must lie in `[min, max]`. Unlike `clampedNum`, a value outside
+ * the range is not pulled to the nearest bound: it throws, so the store falls
+ * back to the declared default — a hand-edited 500 is a mistake, not "as much
+ * as possible".
+ */
+function boundedNum(min: number, max: number): PreferenceCodec<number> {
+  return {
+    parse(raw) {
+      const value = num.parse(raw);
+      if (value < min || value > max) throw new Error(`out of range ${min}–${max}: ${raw}`);
+      return value;
+    },
     serialize: num.serialize,
   };
 }
@@ -454,16 +470,15 @@ export const preferences = {
     portable: true,
   }),
   /**
-   * Scope argument: the view key, e.g. "viewer", "repos", "notes".
-   *
-   * The one default that does NOT reproduce today's behavior. `useWideMode`
-   * reads `=== "true"`, so a fresh browser opens every view compact; wide is
-   * the better starting point and this is where that flip is made.
+   * The focus layout: on `md` and up, the shell breadcrumb row and the project
+   * title row are hidden. One switch for every tab and project — it replaced
+   * the per-view wide/compact toggle (`view.wide`), whose stored values stay in
+   * the workspace file, read by nothing.
    */
-  wideMode: definePreference({
-    key: "view.wide", // was: panel-wide-<viewKey>
-    scope: "project",
-    default: true,
+  focusLayout: definePreference({
+    key: "layout.focus", // was: nothing — new with the focus layout
+    scope: "global",
+    default: false,
     codec: bool,
     portable: true,
   }),
@@ -922,6 +937,19 @@ export const preferences = {
     default: ANSWER_PANE_FULL_HEIGHT,
     codec: num,
     portable: false,
+  }),
+  /**
+   * Opacity (0–100) of the answer body's bottom edge; the top edge is always
+   * solid. Per project and portable, unlike the pane's height: it is a matter
+   * of taste, not of this window's viewport. 100 renders the solid pane; a
+   * stored value outside 0–100 or not a number reads as 100.
+   */
+  answerOpacityBottom: definePreference({
+    key: "speech.answerPane.opacityBottom", // was: nothing — new with the slider
+    scope: "project",
+    default: 100,
+    codec: boundedNum(0, 100),
+    portable: true,
   }),
   /**
    * LEGACY: the one cell that used to be allowed to speak on its own — a

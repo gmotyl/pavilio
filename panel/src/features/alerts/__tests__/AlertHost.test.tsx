@@ -72,10 +72,10 @@ describe("AlertHost", () => {
   it("the region stacks above the modal tier", () => {
     render(<AlertHost />);
     act(() => {
-      alerts.info("over the quick terminal");
+      alerts.info("over the quick finder");
     });
 
-    // Modals (Quick finder, Quick terminal) sit at z-[100]; an alert raised
+    // Modals (Quick finder and the other dialogs) sit at z-[100]; an alert raised
     // while one is open must still show.
     const z = Number(screen.getByTestId("alert-region").style.zIndex);
     expect(z).toBeGreaterThan(100);

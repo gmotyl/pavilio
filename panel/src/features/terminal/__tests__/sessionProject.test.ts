@@ -75,11 +75,9 @@ describe("projectOfSession", () => {
    * resolve. `null` is what `useScopedPreference` needs to hear in order to
    * read the declared default and persist nothing.
    *
-   * This is reachable in the panel, not only here. `QuickTerminalModal`
-   * fetches its own session list and mounts a full cell off it without ever
-   * touching `sessionStore`; and before the store's first successful load — or
-   * for the 8s after any failed one — its list is empty for every cell on
-   * screen.
+   * This is reachable in the panel, not only here: before the store's first
+   * successful load — or for the 8s after any failed one — its list is empty
+   * for every cell on screen.
    */
   it("answers null for a session the list does not carry", async () => {
     await seedSessions([session("cell-a", "alpha")]);

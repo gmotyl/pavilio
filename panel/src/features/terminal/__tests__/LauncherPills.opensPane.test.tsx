@@ -123,7 +123,7 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 
 // Imported after the mocks so they pick them up.
 const { TerminalView } = await import("../TerminalView");
-const { forgetAnswerPane } = await import("../answerPaneState");
+const { forgetAnswerPane, getAnswerPaneState } = await import("../answerPaneState");
 const { __resetAnswerWaitingForTests, getAnswerWaiting } = await import("../answerWaiting");
 const { __resetPtySubmitForTests } = await import("../ptySubmit");
 const { _applyEventForTests, _resetForTests } = await import("../useTerminalActivityChannel");
@@ -400,5 +400,33 @@ describe("a launcher press opens the answer pane", () => {
     expect(screen.getByTestId(`answer-pane-body-${SESSION}`)).toHaveTextContent(
       "the deploy is unblocked",
     );
+  });
+
+  it("a launcher press clears a pane hidden by choice", async () => {
+    setStoredAutoOpenAnswer(true);
+    const speech = arrivingSpeech();
+    const view = render(cell(speech));
+    // Hidden by choice: the eye opens the pane, the eye closes it again.
+    const eye = screen.getByTestId(`speech-bar-eye-${SESSION}`);
+    fireEvent.click(eye);
+    fireEvent.click(eye);
+    expect(pane()).toBeNull();
+    expect(getAnswerPaneState(SESSION).hiddenByChoice).toBe(true);
+
+    // The press is the user asking to watch the cell: a user open, which
+    // clears the choice rather than only opening the pane over it.
+    fireEvent.click(launcher());
+    await settleSubmit();
+    expect(pane()).not.toBeNull();
+    expect(getAnswerPaneState(SESSION)).toEqual({ open: true, hiddenByChoice: false });
+
+    // Closed by a non-choice (the bar hidden and back), so only the auto-open
+    // rule can bring it back — and a new answer does.
+    view.rerender(cell(speech, false));
+    view.rerender(cell(speech, true));
+    expect(pane()).toBeNull();
+    speech.arrive();
+    view.rerender(cell(speech));
+    expect(pane()).not.toBeNull();
   });
 });

@@ -374,11 +374,11 @@ describe("the bar always carries the eye and the transport", () => {
 
   /**
    * The bug this whole change is for, driven through the cell that owns both
-   * halves: the pane's open state lives in `answerPaneState`, Escape is
-   * `TerminalView`'s document listener, and the eye is on the bar. A test of
+   * halves: the pane's open state lives in `answerPaneState`, Alt+Shift+O is
+   * `TerminalView`'s window listener, and the eye is on the bar. A test of
    * the bar alone would assert a callback fired.
    */
-  it("the eye reopens a pane closed with Escape", async () => {
+  it("the eye reopens a pane closed with Alt+Shift+O", async () => {
     render(
       <MemoryRouter>
         <TerminalView sessionId={SESSION} speech={speechWith()} speechBarVisible />
@@ -395,9 +395,9 @@ describe("the bar always carries the eye and the transport", () => {
     });
     expect(screen.queryByTestId(`answer-pane-${SESSION}`)).not.toBeNull();
 
-    // Escape puts the keyboard back in the terminal and takes the pane away.
+    // The shortcut takes the pane away.
     act(() => {
-      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.keyDown(document, { key: "Ø", code: "KeyO", altKey: true, shiftKey: true });
     });
     expect(screen.queryByTestId(`answer-pane-${SESSION}`)).toBeNull();
 

@@ -117,8 +117,8 @@ const POP_SETTLE_MS = 300;
 /**
  * The fixed full-viewport layer fullscreen toggles on the element that already
  * holds the mockup. Above the panel chrome (sidebars, terminal drawer, z-50
- * popovers), below the modal tier (z-[100]: Quick finder, Quick terminal and
- * the other dialogs) and alerts (110). The classes change on the same node,
+ * popovers), below the modal tier (z-[100]: Quick finder and the other
+ * dialogs) and alerts (110). The classes change on the same node,
  * never a new parent, so the iframe is not re-mounted and an interactive
  * mockup keeps its state.
  */
@@ -278,7 +278,7 @@ export function MockupFrame({
     // can block the injected script, a page the frame navigates to has none,
     // and the opaque-origin frame's messages cannot be told from the mockup's.
     // A modal above the layer owns Escape: one that handled it (Quick finder
-    // marks it) or is still open (the Quick terminal leaves Escape to xterm)
+    // marks it) or is still open (one that leaves Escape to its own content)
     // closes alone, and the mockup stays fullscreen behind it.
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;

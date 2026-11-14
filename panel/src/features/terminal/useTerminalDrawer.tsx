@@ -43,13 +43,7 @@ interface DrawerCtx {
   /** Current route cannot host the drawer. Derived every render, never stored. */
   suppressed: boolean;
   /**
-   * A conflicting overlay (the Cmd+O quick-terminal modal) is up and owns the
-   * single pooled xterm holder. Session-only — never persisted, so a conflict
-   * cannot outlive itself or a reload.
-   */
-  overlayActive: boolean;
-  /**
-   * open && !suppressed && !overlayActive && !narrowViewport — what the drawer
+   * open && !suppressed && !narrowViewport — what the drawer
    * actually renders on. The narrow-viewport term has no field of its own on
    * this context: nothing outside the provider ever needed to tell the reasons
    * apart, and a published fact with no reader is a promise the next change
@@ -63,7 +57,6 @@ interface DrawerCtx {
   maxWidth: number;
   side: DrawerSide;
   setOpen: (v: boolean) => void;
-  setOverlayActive: (v: boolean) => void;
   toggle: () => void;
   setWidth: (v: number) => void;
   setSide: (v: DrawerSide) => void;
@@ -82,9 +75,6 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
   const [storedWidth, setStoredWidthPref] = usePreference(preferences.terminalDrawerWidth);
   const [viewport, setViewport] = useState(() => window.innerWidth);
   const [side, setSidePref] = usePreference(preferences.terminalDrawerSide);
-  // Deliberately never persisted: an overlay conflict is a transient fact about
-  // this session, not a preference.
-  const [overlayActive, setOverlayActive] = useState(false);
   /**
    * The viewport is too narrow to share with a drawer. On a phone the terminal
    * has a tab of its own — it is what the panel is open for there — and the
@@ -149,7 +139,7 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
 
   const match = matchProjectFromPath(location.pathname);
   const suppressed = !match || match.section === "iterm";
-  const visible = open && !suppressed && !overlayActive && !narrowViewport;
+  const visible = open && !suppressed && !narrowViewport;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -169,13 +159,11 @@ export function TerminalDrawerProvider({ children }: { children: ReactNode }) {
       value={{
         open,
         suppressed,
-        overlayActive,
         visible,
         width,
         maxWidth,
         side,
         setOpen,
-        setOverlayActive,
         toggle,
         setWidth,
         setSide,

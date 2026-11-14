@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import { useTerminalMaximized } from "./useTerminalMaximized";
+import { useTerminalFullscreen } from "./useTerminalFullscreen";
 import TerminalsSurface from "./TerminalsSurface";
 import { destroyTerminal } from "./terminalInstances";
 import type { TerminalHandle } from "./TerminalView";
@@ -35,6 +36,9 @@ export function TerminalsPage() {
   // The panel's single host, read from context — the same rule
   // ProjectTerminalsSurface follows. Still passed down to the grid explicitly.
   const speech = usePanelSpeech();
+  // This surface's own fullscreen layer: local, never persisted, closed by any
+  // navigation and dropped with the surface.
+  const fullscreen = useTerminalFullscreen();
 
   // Global-view delete: works for any session regardless of owning project.
   const handleDelete = useCallback(
@@ -110,6 +114,7 @@ export function TerminalsPage() {
       onMinimise={minimise}
       onRestore={restore}
       speech={speech}
+      fullscreen={fullscreen}
     />
   );
 }

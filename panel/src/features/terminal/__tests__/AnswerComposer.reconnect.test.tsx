@@ -906,12 +906,15 @@ describe("pending row", () => {
       // rule repainted with some other pair has to arrive here as a mismatch
       // rather than quietly go on scoring the old one.
       expect(rule.color).toBe("var(--accent)");
-      expect(rule.background).toBe("var(--accent-dim)");
+      expect(rule.background).toBe(
+        "linear-gradient(var(--accent-dim), var(--accent-dim)), #17171d",
+      );
 
-      // The button paints no opaque ground of its own — `--accent-dim` is 15%
-      // accent, and what shows through is whatever `.answer-pane` painted, which
-      // is the same #17171d the notice row above states outright.
-      const ground = over(tokenValue("--accent-dim"), declarationsOf(".answer-pane").background);
+      // `--accent-dim` is 15% accent laid over the button's own #17171d — the
+      // pane behind it is transparent when the body fades, so the ground the
+      // tint used to borrow from `.answer-pane` is stated here, the same one
+      // the notice row above states outright.
+      const ground = over(tokenValue("--accent-dim"), declarationsOf(".answer-pane-send-failed").background);
 
       // Same bar as the row it sits beside, and for the same reason: 10px
       // JetBrains Mono is normal text, so 4.5:1 and not 3:1. `--accent`

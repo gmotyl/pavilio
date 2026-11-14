@@ -14,7 +14,6 @@ import Dashboard from "./features/projects/Dashboard";
 import ProjectRedirect from "./features/projects/ProjectRedirect";
 import ProjectView from "./features/projects/ProjectView";
 import QuickFinder from "./features/search/QuickFinder";
-import QuickTerminalModal from "./features/terminal/QuickTerminalModal";
 import { TerminalDrawerProvider } from "./features/terminal/useTerminalDrawer";
 import { BreadcrumbActionsProvider } from "./features/shell/Breadcrumbs";
 import { FloatingActionProvider, Layout } from "./features/shell/Layout";
@@ -52,7 +51,6 @@ function AppShell() {
                 them because exactly one host may exist for the whole panel —
                 see its comment just below. */}
             <QuickFinder />
-            <QuickTerminalModal />
             <FaviconUpdater />
             {/* One speech host for the whole panel: above the routes AND above
                 the drawer Layout mounts, so the two terminals surfaces that can

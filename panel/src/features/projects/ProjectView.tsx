@@ -33,11 +33,11 @@ import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectSettingsCard from "./ProjectSettingsCard";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
+import FocusToggle, { useFocusLayout } from "../shell/FocusToggle";
+import { useSidebarState } from "../shell/useSidebarState";
 import { useLastPath } from "../shell/useLastPath";
-import { useFloatingAction, useScrollContainer } from "../shell/Layout";
+import { useScrollContainer } from "../shell/Layout";
 import { useReposTabMemory } from "../shell/useReposTabMemory";
-import { useWideMode } from "../shell/useWideMode";
-import WideToggle from "../shell/WideToggle";
 import { openInVSCode } from "../shell/vscode";
 import { useProjects, type Project } from "./useProjects";
 import ArchivedBanner from "./ArchivedBanner";
@@ -106,17 +106,7 @@ export default function ProjectView() {
   const scrollContainerRef = useScrollContainer();
   useTabScrollMemory(name, section, scrollContainerRef ?? { current: null });
 
-  const [wide, toggleWide] = useWideMode(section || "overview");
   const [gitViewMode, setGitViewMode] = useGitViewMode();
-  const wideToggle = <WideToggle wide={wide} onToggle={toggleWide} />;
-
-  // Every tab, the repos tab included. The repos tab used to be excepted
-  // because RepoBlock rendered a second copy through GitChanges — but that one
-  // lived in the commit row, which GitChanges only reaches when the working
-  // tree is dirty, so a clean repository had no toggle at all. One floating
-  // action instead: same mechanism MarkdownViewer uses, and reliably visible in
-  // both wide and compact.
-  useFloatingAction(wideToggle, [section, wide, toggleWide]);
 
   const commitsOpen = useCommitsOpenMap();
 
@@ -271,24 +261,31 @@ export default function ProjectView() {
       isMockupFile(selectedFile),
   );
 
+  // Focus layout (md+ only): no title row, and the toggle moves into the tab
+  // row. The sidebar is read, never written — focus leaves it as it was.
+  const focus = useFocusLayout();
+  const leftSidebar = useSidebarState("leftSidebar");
+
   return (
     <div className={`relative${fillsHeight ? " md:h-full" : ""}`}>
     <div
       data-testid="project-view"
-      className={`p-6 ${wide ? "" : "max-w-5xl"}${
+      className={`p-6${
         fillsHeight ? " md:flex md:flex-col md:h-full md:min-h-0" : ""
       }`}
     >
       {/* Desktop-only big title */}
-      <div className="hidden md:flex items-center mb-4">
-        <h1 className="text-2xl font-semibold capitalize">
-          {name}
-        </h1>
-        <TimeTrackingLink
-          minutes={todayMinutes}
-          to={`/project/${name}/time`}
-        />
-      </div>
+      {!focus.active && (
+        <div data-testid="project-title-row" className="hidden md:flex items-center mb-4">
+          <h1 className="text-2xl font-semibold capitalize">
+            {name}
+          </h1>
+          <TimeTrackingLink
+            minutes={todayMinutes}
+            to={`/project/${name}/time`}
+          />
+        </div>
+      )}
 
       {archived && name && (
         <ArchivedBanner
@@ -303,6 +300,9 @@ export default function ProjectView() {
         tabs={tabs}
         searchActive={isReposSearch && search.active}
         onToggleSearch={onToggleSearch}
+        focus={focus.active}
+        hamburgerInset={focus.active && !leftSidebar.expanded}
+        trailing={focus.active ? <FocusToggle /> : null}
       />
 
       {isReposSearch && search.active && (
@@ -390,7 +390,7 @@ export default function ProjectView() {
               onCommitsOpenChange={(open) =>
                 commitsOpen.setOpen(repo.path, open)
               }
-              showListSidebar={wide}
+              showListSidebar
               liveHighlight={
                 search.active && search.query.trim().length >= 2
                   ? search.query.trim()

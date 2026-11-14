@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from "react";
+import { useEffect, useLayoutEffect, type RefObject } from "react";
 import { TerminalToolbar } from "./TerminalToolbar";
 import { TerminalLayoutGrid } from "./TerminalLayoutGrid";
 import { TerminalShortcutBar } from "./TerminalShortcutBar";
@@ -21,6 +21,8 @@ import type { RepoEntry } from "../projects/useProjects";
 import type { LayoutPreset, TileLayout } from "./tileLayout";
 import type { LayoutCommitKind } from "./orderingReducer";
 import type { GridSpeech } from "../speech/types";
+import { TerminalFullscreenLayer } from "./TerminalFullscreenLayer";
+import type { TerminalFullscreen } from "./useTerminalFullscreen";
 
 export interface TerminalsSurfaceProps {
   // Current project context
@@ -81,6 +83,13 @@ export interface TerminalsSurfaceProps {
   // Fill the parent container's height instead of a viewport-relative calc.
   // Used when embedded in the Cmd+B drawer.
   fill?: boolean;
+
+  /**
+   * This surface's fullscreen layer (`useTerminalFullscreen`), owned by the
+   * host so it is local to it and closes on its route changes. Absent, the
+   * surface offers no fullscreen controls.
+   */
+  fullscreen?: TerminalFullscreen;
 }
 
 const NONE: string[] = [];
@@ -111,6 +120,7 @@ export function TerminalsSurface({
   speech,
   standalone = false,
   fill = false,
+  fullscreen,
 }: TerminalsSurfaceProps) {
   // Dismiss attention state as soon as the user focuses a terminal — the
   // green "done" LED is a "check me" notification that clears on first look.
@@ -192,140 +202,166 @@ export function TerminalsSurface({
   const shortcutBarYielded = useAnyAnswerPaneOpen(visibleId ? [visibleId] : []);
   const isMobile = useIsMobile();
 
+  // The fullscreen layer is desktop only: below `md` there are no controls and
+  // an open layer is not shown (the state itself is the host's, and transient).
+  const fullscreenState =
+    fullscreen && !isMobile ? fullscreen.state : ({ kind: "closed" } as const);
+  const terminalLayerOpen = fullscreenState.kind === "terminal";
+  const fullscreenCellId = fullscreenState.kind === "cell" ? fullscreenState.sessionId : null;
+  // A cell that left the grid (killed, or minimised elsewhere) takes its layer
+  // with it, rather than reappearing fullscreen should the id come back.
+  const closeFullscreen = fullscreen?.close;
+  const fullscreenCellGone =
+    fullscreenCellId !== null && !visibleSessions.some((s) => s.id === fullscreenCellId);
+  useEffect(() => {
+    if (fullscreenCellGone) closeFullscreen?.();
+  }, [fullscreenCellGone, closeFullscreen]);
+
+  // The terminal layer lifts this whole container (tab strip, spine, grid) in
+  // place; inside it the container simply fills the layer.
+  const fillsBox = fill || terminalLayerOpen;
+
   return (
-    <div
-      className={`flex flex-col relative ${
-        fill
-          ? "h-full"
-          : standalone
-            ? "h-[calc(100dvh-2.25rem)]"
-            : "h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)]"
-      }`}
-      style={{
-        ...(standalone || fill ? {} : { margin: "-1.5rem", marginTop: 0 }),
-        touchAction: "pan-y",
-        overscrollBehaviorX: "contain",
-        // Cap to the visual viewport so the on-screen keyboard can never push
-        // the shortcut bar or xterm cursor below the fold. `--vv-height` is
-        // written by `useVisualViewport`; on desktop (or pre-hydration) the
-        // fallback resolves to 100dvh so there's no functional change.
-        ...(fill ? {} : { maxHeight: "var(--vv-height, 100dvh)" }),
-      }}
-    >
-      {/* Desktop toolbar */}
-      <div className="hidden md:block">
-        <TerminalToolbar
-          sessions={sessions}
-          focusedId={focusedId}
-          maximized={maximized}
-          currentProject={currentProject}
-          repos={repos}
-          onFocus={handleFocus}
-          onCreate={(opts) => {
-            onCreateTerminal(opts || {});
-          }}
-          onDelete={onDeleteSession}
-          onRename={(id, n) => onUpdateSession(id, { name: n })}
-          onToggleMaximize={onToggleMaximize}
-          onReorder={onReorder ?? (() => {})}
-          onReconnect={handleReconnect}
-          onApplyPreset={onApplyPreset}
-          minimisedIds={minimisedIds}
-          onRestore={handleRestore}
-        />
-      </div>
-
-      {/* Mobile session-dot rail */}
-      <div className="md:hidden">
-        <TerminalMobileRail
-          sessions={sessions}
-          focusedId={focusedId}
-          currentProject={currentProject}
-          onFocus={handleFocus}
-          onCreate={(opts) => {
-            onCreateTerminal(opts || {});
-          }}
-          onReconnect={handleReconnect}
-          minimisedIds={minimisedIds}
-          onRestore={handleRestore}
-        />
-      </div>
-
-      {/* Terminal area: grid only. On mobile, the top rail handles session
-          switching — the left-column spine is redundant and steals 16px of
-          horizontal space. Drop the p-1 gutter on mobile too so the grid
-          fills edge-to-edge. */}
-      <div className="flex-1 min-h-0 flex relative">
+    <TerminalFullscreenLayer open={terminalLayerOpen} kind="terminal">
+      <div
+        ref={fullscreen?.surfaceRef}
+        className={`flex flex-col relative ${
+          fillsBox
+            ? "h-full"
+            : standalone
+              ? "h-[calc(100dvh-2.25rem)]"
+              : "h-[calc(100dvh-5rem)] md:h-[calc(100dvh-10rem)]"
+        }`}
+        style={{
+          ...(standalone || fillsBox ? {} : { margin: "-1.5rem", marginTop: 0 }),
+          touchAction: "pan-y",
+          overscrollBehaviorX: "contain",
+          // Cap to the visual viewport so the on-screen keyboard can never push
+          // the shortcut bar or xterm cursor below the fold. `--vv-height` is
+          // written by `useVisualViewport`; on desktop (or pre-hydration) the
+          // fallback resolves to 100dvh so there's no functional change.
+          ...(fillsBox ? {} : { maxHeight: "var(--vv-height, 100dvh)" }),
+        }}
+      >
+        {/* Desktop toolbar */}
         <div className="hidden md:block">
-          <TerminalSpine
-            sessions={sessions}
-            focusedId={focusedId}
-            onFocus={handleFocus}
-            onOpenDrawer={() => onSetDrawerOpen(true)}
-          />
-        </div>
-        <div className="flex-1 min-w-0 p-0 md:p-1">
-          <TerminalLayoutGrid
+          <TerminalToolbar
             sessions={sessions}
             focusedId={focusedId}
             maximized={maximized}
+            currentProject={currentProject}
+            repos={repos}
             onFocus={handleFocus}
-            onExit={onDeleteSession}
-            onReady={(sessionId, handle) => {
-              terminalHandlesRef.current.set(sessionId, handle);
+            onCreate={(opts) => {
+              onCreateTerminal(opts || {});
             }}
-
+            onDelete={onDeleteSession}
             onRename={(id, n) => onUpdateSession(id, { name: n })}
-            tiles={tiles}
-            onPlace={onPlace}
-            minimisedIds={minimisedIds}
-            onMinimise={handleMinimise}
             onToggleMaximize={onToggleMaximize}
-            speech={speech}
+            onReorder={onReorder ?? (() => {})}
+            onReconnect={handleReconnect}
+            onApplyPreset={onApplyPreset}
+            minimisedIds={minimisedIds}
+            onRestore={handleRestore}
+            fullscreen={terminalLayerOpen}
+            onToggleFullscreen={fullscreen && !isMobile ? fullscreen.toggleTerminal : undefined}
           />
         </div>
 
-        {/* Cross-project drawer, opened from the desktop spine. Never on a
-            phone: there the global corner ☰ (the left sidebar) is the one
-            menu, so a second session list would only duplicate it. */}
-        {drawerOpen && !isMobile && (
-          <TerminalSpineDrawer
-            sessions={allSessions}
+        {/* Mobile session-dot rail */}
+        <div className="md:hidden">
+          <TerminalMobileRail
+            sessions={sessions}
             focusedId={focusedId}
             currentProject={currentProject}
-            onFocus={(sessionId, sessionProject) => {
-              // Persist first, then navigate or focus — LeftSidebar re-reads
-              // the stored focus across a project switch.
-              writeTerminalFocus(sessionProject, sessionId);
-              if (sessionProject === currentProject) {
-                handleFocus(sessionId);
-              } else {
-                onNavTo(`/project/${sessionProject}/iterm`);
-              }
-              onSetDrawerOpen(false);
+            onFocus={handleFocus}
+            onCreate={(opts) => {
+              onCreateTerminal(opts || {});
             }}
-            onClose={() => onSetDrawerOpen(false)}
+            onReconnect={handleReconnect}
+            minimisedIds={minimisedIds}
+            onRestore={handleRestore}
+          />
+        </div>
+
+        {/* Terminal area: grid only. On mobile, the top rail handles session
+            switching — the left-column spine is redundant and steals 16px of
+            horizontal space. Drop the p-1 gutter on mobile too so the grid
+            fills edge-to-edge. */}
+        <div className="flex-1 min-h-0 flex relative">
+          <div className="hidden md:block">
+            <TerminalSpine
+              sessions={sessions}
+              focusedId={focusedId}
+              onFocus={handleFocus}
+              onOpenDrawer={() => onSetDrawerOpen(true)}
+            />
+          </div>
+          <div className="flex-1 min-w-0 p-0 md:p-1">
+            <TerminalLayoutGrid
+              sessions={sessions}
+              focusedId={focusedId}
+              maximized={maximized}
+              onFocus={handleFocus}
+              onExit={onDeleteSession}
+              onReady={(sessionId, handle) => {
+                terminalHandlesRef.current.set(sessionId, handle);
+              }}
+
+              onRename={(id, n) => onUpdateSession(id, { name: n })}
+              tiles={tiles}
+              onPlace={onPlace}
+              minimisedIds={minimisedIds}
+              onMinimise={handleMinimise}
+              onToggleMaximize={onToggleMaximize}
+              fullscreenCellId={fullscreenCellId}
+              onToggleCellFullscreen={fullscreen && !isMobile ? fullscreen.toggleCell : undefined}
+              speech={speech}
+            />
+          </div>
+
+          {/* Cross-project drawer, opened from the desktop spine. Never on a
+              phone: there the global corner ☰ (the left sidebar) is the one
+              menu, so a second session list would only duplicate it. */}
+          {drawerOpen && !isMobile && (
+            <TerminalSpineDrawer
+              sessions={allSessions}
+              focusedId={focusedId}
+              currentProject={currentProject}
+              onFocus={(sessionId, sessionProject) => {
+                // Persist first, then navigate or focus — LeftSidebar re-reads
+                // the stored focus across a project switch.
+                writeTerminalFocus(sessionProject, sessionId);
+                if (sessionProject === currentProject) {
+                  handleFocus(sessionId);
+                } else {
+                  onNavTo(`/project/${sessionProject}/iterm`);
+                }
+                onSetDrawerOpen(false);
+              }}
+              onClose={() => onSetDrawerOpen(false)}
+            />
+          )}
+        </div>
+
+        {/* Mobile shortcut bar — yields its row to an open answer pane */}
+        {!shortcutBarYielded && (
+          <TerminalShortcutBar
+            onSend={(data) => {
+              if (!visibleId) return;
+              const handle = terminalHandlesRef.current.get(visibleId);
+              handle?.send(data);
+              // Re-focus the xterm on the next frame so subsequent taps on
+              // the on-screen keyboard still go into the terminal.
+              requestAnimationFrame(() => handle?.focus());
+            }}
+            onToggleKeyboard={() => {
+              if (visibleId) terminalHandlesRef.current.get(visibleId)?.focus();
+            }}
           />
         )}
       </div>
-
-      {/* Mobile shortcut bar — yields its row to an open answer pane */}
-      {!shortcutBarYielded && (
-        <TerminalShortcutBar
-          onSend={(data) => {
-            if (!visibleId) return;
-            const handle = terminalHandlesRef.current.get(visibleId);
-            handle?.send(data);
-            // Re-focus the xterm on the next frame so subsequent taps on
-            // the on-screen keyboard still go into the terminal.
-            requestAnimationFrame(() => handle?.focus());
-          }}
-          onToggleKeyboard={() => {
-            if (visibleId) terminalHandlesRef.current.get(visibleId)?.focus();
-          }}
-        />
-      )}
-    </div>
+    </TerminalFullscreenLayer>
   );
 }
 

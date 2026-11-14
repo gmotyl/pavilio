@@ -222,7 +222,6 @@ const renderPane = (): RenderResult =>
       <AnswerPane
         sessionId={SESSION}
         speech={speech}
-        onClose={() => {}}
         send={send}
       />
     </MemoryRouter>,

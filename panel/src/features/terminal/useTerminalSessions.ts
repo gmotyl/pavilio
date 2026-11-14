@@ -16,8 +16,8 @@ export const TERMINAL_FOCUS_EVENT = "panel-terminal-focus";
  * it was — only the key and the codec moved.
  *
  * Both helpers live here, and every writer of the focused session imports
- * them: this hook, `createTerminalSession`, `QuickTerminalModal`,
- * `TerminalsSurface`, and `LeftSidebar`. That is not tidiness — `LeftSidebar`
+ * them: this hook, `createTerminalSession`, `TerminalsSurface`, and
+ * `LeftSidebar`. That is not tidiness — `LeftSidebar`
  * READS this key and drops a focus broadcast whose project does not match, so a
  * reader on a different key from its writers highlights nothing. One pair of
  * functions is what keeps them from drifting apart again.

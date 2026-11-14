@@ -302,20 +302,17 @@ export interface AnswerComposerProps {
  *
  * ## Why Escape is not handled here
  *
- * It is handled by the pane's root, which already stops Escape from anywhere
- * inside it, closes the pane and keeps the key from the cell. A second handler
- * on the field would be a second `onClose` path for one keystroke and would
- * have to repeat the stop — so the field simply lets the key bubble the three
- * nodes to the root that owns it.
+ * Nothing in the pane closes on Escape: only the eye and Alt+Shift+O do, so
+ * the field lets the key go like any other.
  *
  * The one exception is the command picker. While it is open the field takes
- * Escape first, closes the picker, and stops the key there, so the pane stays
- * open; once the picker is closed Escape bubbles to the root exactly as before.
+ * Escape first, closes the picker, and stops the key there; once the picker
+ * is closed Escape passes untouched again.
  *
  * ## Why the text is mirrored into a module store
  *
  * `useState` is the field's value, but it is not where the draft LIVES. The
- * pane is mounted only while it is open, so every Escape destroys this
+ * pane is mounted only while it is open, so every close destroys this
  * component — and a reply is typically written in the middle of reading, with
  * a glance back at the terminal underneath. `composerDrafts` outlives the
  * mount, so the field is seeded from it and every change is written back to
@@ -1265,14 +1262,18 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
           words in it; this one has words, and an `aria-label` repeating them
           would only be a second copy to keep in step. */}
       {retryOffered ? (
-        <button
-          type="button"
-          className="answer-pane-retry-enter"
-          data-testid={`answer-pane-retry-enter-${sessionId}`}
-          onClick={retryEnter}
-        >
-          Retry Enter
-        </button>
+        // The row carries the ground and the gutter, so no part of the strip
+        // is transparent when the body fades — see `.answer-pane-retry-row`.
+        <div className="answer-pane-retry-row">
+          <button
+            type="button"
+            className="answer-pane-retry-enter"
+            data-testid={`answer-pane-retry-enter-${sessionId}`}
+            onClick={retryEnter}
+          >
+            Retry Enter
+          </button>
+        </div>
       ) : null}
       {/* Desktop only: two of the three keys it names do not exist on a phone.
           The fourth fact is the picker's, and it is the half of teaching the

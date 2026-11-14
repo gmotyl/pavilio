@@ -5,7 +5,7 @@
  *
  * The pane is rendered only while it is open — `TerminalView` mounts it and
  * unmounts it — so the composer's `useState` is destroyed every time the user
- * presses Escape to look at the terminal underneath. A reply is written in the
+ * closes the pane to look at the terminal underneath. A reply is written in the
  * middle of reading: glance at the output, go back, finish the sentence. With
  * the text in React state that round trip silently eats it, and the failure is
  * the worst kind — invisible until the sentence is already gone. Module state

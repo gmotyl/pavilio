@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { LayoutGrid, Maximize2, Minus, Printer, X } from "lucide-react";
+import { LayoutGrid, Maximize, Maximize2, Minimize2, Minus, Printer, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
@@ -26,6 +26,7 @@ import {
   type PlacementOverlayHandle,
 } from "./TerminalPlacementOverlay";
 import { TerminalSeamHandles } from "./TerminalSeamHandles";
+import { TerminalFullscreenLayer } from "./TerminalFullscreenLayer";
 import type { GridSpeech } from "../speech/types";
 import type { LayoutCommitKind } from "./orderingReducer";
 import { GRID, expandPreset, getLayoutPresets, type TileLayout } from "./tileLayout";
@@ -73,6 +74,13 @@ interface Props {
   onMinimise?: (id: string) => void;
   /** Flip Max — the same toggle the toolbar's Max/Grid control calls. */
   onToggleMaximize?: () => void;
+  /** The session whose cell fullscreen layer is open, if any. */
+  fullscreenCellId?: string | null;
+  /**
+   * Toggle a cell's fullscreen layer. Absent, no cell header carries the
+   * control; it is desktop only either way.
+   */
+  onToggleCellFullscreen?: (id: string) => void;
 }
 
 export function TerminalLayoutGrid({
@@ -89,6 +97,8 @@ export function TerminalLayoutGrid({
   minimisedIds,
   onMinimise,
   onToggleMaximize,
+  fullscreenCellId = null,
+  onToggleCellFullscreen,
 }: Props) {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia(MOBILE_QUERY).matches,
@@ -205,35 +215,44 @@ export function TerminalLayoutGrid({
     );
   }
 
+  // Each cell sits in its own layer host, always mounted, so lifting it into
+  // fullscreen restyles the same DOM instead of re-rendering the cell (and its
+  // pooled xterm) somewhere else. Closed, the host is `display: contents` and
+  // the cell stays a grid item. Never on a phone, which has no controls.
+  const fullscreenId = isMobile ? null : fullscreenCellId;
   const cell = (session: SessionMeta, style?: React.CSSProperties) => (
-    <TerminalCell
-      key={session.id}
-      session={session}
-      focused={session.id === focusedId}
-      onFocus={onFocus}
-      onExit={onExit}
-      onRequestExit={setPendingCloseId}
-      onReady={onReady}
-      onRename={onRename}
-      onDragStart={() => overlayRef.current?.begin(session.id)}
-      onDragEnd={() => overlayRef.current?.end()}
-      // The last visible session cannot leave the grid: an empty grid with
-      // live sessions behind it would be a dead end.
-      canMinimise={visibleIds.length > 1}
-      onMinimise={onMinimise}
-      // Mobile always shows one terminal, so there is nothing to maximise.
-      showMaximise={!isMobile}
-      maximized={maximized}
-      onMaximise={() => {
-        // In Max the control reads Grid and only turns Max off, keeping focus.
-        // Otherwise the pressed cell is the one Max shows — focus it first so
-        // the toggle does not maximise whichever cell had focus before.
-        if (!maximized) onFocus(session.id);
-        onToggleMaximize?.();
-      }}
-      speech={speech}
-      style={{ height: "100%", ...style }}
-    />
+    <TerminalFullscreenLayer key={session.id} open={session.id === fullscreenId} kind="cell">
+      <TerminalCell
+        session={session}
+        focused={session.id === focusedId}
+        onFocus={onFocus}
+        onExit={onExit}
+        onRequestExit={setPendingCloseId}
+        onReady={onReady}
+        onRename={onRename}
+        onDragStart={() => overlayRef.current?.begin(session.id)}
+        onDragEnd={() => overlayRef.current?.end()}
+        // The last visible session cannot leave the grid: an empty grid with
+        // live sessions behind it would be a dead end.
+        canMinimise={visibleIds.length > 1}
+        onMinimise={onMinimise}
+        // Mobile always shows one terminal, so there is nothing to maximise.
+        showMaximise={!isMobile}
+        maximized={maximized}
+        onMaximise={() => {
+          // In Max the control reads Grid and only turns Max off, keeping focus.
+          // Otherwise the pressed cell is the one Max shows — focus it first so
+          // the toggle does not maximise whichever cell had focus before.
+          if (!maximized) onFocus(session.id);
+          onToggleMaximize?.();
+        }}
+        showFullscreen={!isMobile && !!onToggleCellFullscreen}
+        fullscreen={session.id === fullscreenId}
+        onToggleFullscreen={() => onToggleCellFullscreen?.(session.id)}
+        speech={speech}
+        style={{ height: "100%", ...style }}
+      />
+    </TerminalFullscreenLayer>
   );
 
   // Mobile OR explicit maximize: render only focused (or first) fullscreen.
@@ -361,6 +380,9 @@ interface CellProps {
   showMaximise: boolean;
   maximized: boolean;
   onMaximise: () => void;
+  showFullscreen: boolean;
+  fullscreen: boolean;
+  onToggleFullscreen: () => void;
   speech: GridSpeech;
   style?: React.CSSProperties;
 }
@@ -380,6 +402,9 @@ function TerminalCell({
   showMaximise,
   maximized,
   onMaximise,
+  showFullscreen,
+  fullscreen,
+  onToggleFullscreen,
   speech,
   style,
 }: CellProps) {
@@ -495,6 +520,9 @@ function TerminalCell({
 
   return (
     <div
+      // Read by `focusedTerminalSurface`: focus on this cell's xterm or header
+      // makes it the surface's focused cell (the Alt+Shift+C target).
+      data-terminal-cell={session.id}
       className="relative w-full overflow-hidden rounded-md group flex flex-col"
       style={{
         height: "100%",
@@ -511,6 +539,7 @@ function TerminalCell({
     >
       {/* Cell header — the whole row is a drag handle for swapping cells */}
       <div
+        data-terminal-cell-header=""
         className="flex items-center gap-1.5 shrink-0"
         // A definite height (mockup S's 30px) so the mark below can be a
         // fixed square: `aspect-ratio` on a stretched item in an auto-height
@@ -736,6 +765,22 @@ function TerminalCell({
               {maximized ? <LayoutGrid size={11} /> : <Maximize2 size={11} />}
             </CellIconButton>
           )}
+          {showFullscreen && (
+            // ⛶ lifts this cell into the fullscreen layer; inside it, ⤡ leaves.
+            // Not an arrival either, so the cell click stops here too.
+            <CellIconButton
+              testId={`terminal-cell-fullscreen-${session.id}`}
+              title={fullscreen ? "Exit fullscreen" : "Fullscreen: this cell over the whole panel"}
+              ariaLabel={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              pressed={fullscreen}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleFullscreen();
+              }}
+            >
+              {fullscreen ? <Minimize2 size={11} /> : <Maximize size={11} />}
+            </CellIconButton>
+          )}
           <CellIconButton
             testId={`terminal-cell-kill-${session.id}`}
             title="Kill session"
@@ -797,6 +842,7 @@ function CellIconButton({
   testId,
   ariaLabel,
   disabled,
+  pressed,
 }: {
   children: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
@@ -805,12 +851,15 @@ function CellIconButton({
   testId?: string;
   ariaLabel?: string;
   disabled?: boolean;
+  /** A toggle's state, as `aria-pressed`; absent for plain buttons. */
+  pressed?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
       aria-label={ariaLabel}
+      aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
       data-testid={testId}

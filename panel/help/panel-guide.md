@@ -11,6 +11,12 @@
 | `Enter` | Open selected file |
 | `Esc` | Close Quick Finder / current modal |
 | `Cmd+U` (Mac) / `Ctrl+U` (Windows/Linux) | Open Terminal Viewport Reader for the focused terminal (toggle) |
+| `Alt+Shift+F` (`Option+Shift+F` on Mac) | Toggle the focus layout |
+| `Alt+Shift+C` | Toggle cell fullscreen for the focused terminal cell |
+| `Alt+Shift+T` | Toggle terminal fullscreen (the whole terminal container) |
+| `Alt+Shift+O` | Toggle the focused cell's answer pane (same as the eye button at the end of its speech row; only while that row is shown) |
+
+The `Alt+Shift` shortcuts work even while a terminal has focus — the terminal never sees them. That includes `Alt+Shift+O`: while the focused cell's speech row is hidden it does nothing, but it still never reaches the terminal. They are desktop-only (inactive in the phone layout).
 
 ## Navigation
 
@@ -19,6 +25,7 @@
 - **Left sidebar** — projects list, active agents, git summary
 - **Right sidebar** — file tree for current project, skills list
 - **Sidebar toggles** — collapse/expand buttons on sidebar edges
+- **Focus layout** — the focus toggle (or `Alt+Shift+F`) hides the breadcrumb row and the project title row on project pages (`/project/<name>` and its section tabs, except the time page) to give the page more room; page tabs, terminal strip and cells stay. Other pages keep both rows. The toggle sits in the breadcrumb row, and at the right end of the page-tab row while focus is on. Desktop only: on a phone focus layout is inactive, so the breadcrumb row stays — and the project title row is desktop-only anyway.
 
 ## Features
 
@@ -33,6 +40,8 @@ In Quick Finder, type `?` followed by your query to search project knowledge usi
 
 ### Project View
 Click a project in the left sidebar to see its PROJECT.md, decisions, plans, and notes. Use the section tabs to navigate.
+
+The project's settings card has an **Answer panel opacity (bottom)** slider (0–100%, default 100%): it fades the bottom edge of that project's terminal answer panes, while their top edge stays solid.
 
 ### Markdown Viewer
 All `.md` files render with GitHub-flavored markdown. Relative links resolve within the panel. The "Open in VS Code" button opens the file in VS Code. Drag-and-drop images onto markdown files to optimize and embed them.
@@ -67,11 +76,21 @@ Full terminal sessions (general-purpose shells) in the browser. Keyboard shortcu
 
 Note that `Ctrl+Shift+C` is **not** copy here, which is where it differs from most terminals — `Ctrl+C` took over that job.
 
+### Terminal Fullscreen
+Every terminal surface (a project's terminal tab, the Terminals view, the `Cmd+B` drawer) can be shown fullscreen, above the panel chrome:
+- **Cell fullscreen** — one cell with its header, speech row and answer pane. Open it with the ⛶ button in the cell header or `Alt+Shift+C` (acts on the cell that last had focus; it does nothing until a cell on that surface has had focus).
+- **Terminal fullscreen** — the whole terminal container (tab strip and grid). Open it with the ⛶ button in the terminal toolbar or `Alt+Shift+T`.
+
+The same shortcut or button closes the layer, and so does navigating elsewhere. Pressing the other shortcut switches between the two layers. Fullscreen is never remembered. `Esc` does **not** close it — `Esc` always goes to the focused terminal.
+
+### Answer Pane
+Each terminal cell's answer pane shows the agent's latest answer. Toggle it with the eye button at the end of the cell's speech row (the row below the cell header), or `Alt+Shift+O` while the cell has focus. Both work only while the speech row is shown — with the row hidden the shortcut does nothing (it still never reaches the terminal). `Esc` does not close the pane: pressed inside it, `Esc` goes to the cell's terminal and puts the focus back there. Closing it yourself keeps it closed when the next answer arrives (until you show it again or reload). Its bottom-edge opacity is set per project (see Project View).
+
 ### Terminal Viewport Reader
-xterm renders to a canvas, so the browser's "Read Aloud" / screen-reader / find-in-page features can't see anything. Each terminal cell has an Eye icon in its header (between the title and the Maximize button) that opens a modal with a plain-DOM, fully styled snapshot of what's currently on screen.
+xterm renders to a canvas, so the browser's "Read Aloud" / screen-reader / find-in-page features can't see anything. Each terminal cell has a Printer icon in its header (after the speech controls, just before the Minimise / Maximise / Fullscreen buttons) that opens a modal with a plain-DOM, fully styled snapshot of what's currently on screen.
 
 **Open it with:**
-- The Eye icon on the cell header, or
+- The Printer icon on the cell header, or
 - `Cmd+U` / `Ctrl+U` while the terminal is focused.
 
 **Inside the modal:**

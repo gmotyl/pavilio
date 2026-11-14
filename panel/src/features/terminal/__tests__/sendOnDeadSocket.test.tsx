@@ -109,7 +109,6 @@ function renderPane(send: (data: string) => boolean) {
       <AnswerPane
         sessionId={SESSION}
         speech={speechIn()}
-        onClose={() => {}}
         send={send}
       />
     </MemoryRouter>,

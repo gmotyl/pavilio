@@ -160,7 +160,6 @@ const paneTree = (speech: GridSpeech) => (
     <AnswerPane
       sessionId={SESSION}
       speech={speech}
-      onClose={() => {}}
       send={send}
     />
   </MemoryRouter>
@@ -179,7 +178,6 @@ const surfaceTree = (speech: GridSpeech) => (
     <AnswerPane
       sessionId={SESSION}
       speech={speech}
-      onClose={() => {}}
       send={send}
     />
   </MemoryRouter>
@@ -216,7 +214,6 @@ const twoCellTree = (speech: GridSpeech, other: string) => (
     <AnswerPane
       sessionId={SESSION}
       speech={speech}
-      onClose={() => {}}
       send={send}
     />
     <SpeechControlBar

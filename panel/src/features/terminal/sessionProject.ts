@@ -18,14 +18,7 @@ import { getSessions } from "./sessionStore";
  *
  * ## When it answers `null`
  *
- * Three ways, and none of them is hypothetical.
- *
- * A session the store has never carried. `QuickTerminalModal` is mounted
- * app-wide in `App.tsx` and opens on Cmd/Ctrl+O from any project route; it
- * fetches `/api/terminal/sessions` itself, into its own `useState`, and never
- * touches `sessionStore`. So the cell it mounts — a full `TerminalView`, answer
- * pane and all — is drawn off a list that is a SEPARATE request from the
- * store's, and a session present in one is not thereby present in the other.
+ * Two ways, and neither of them is hypothetical.
  *
  * A store that has not loaded yet, or whose load failed. `load()` keeps the
  * list it already has when the fetch throws, answers non-2xx, or returns a

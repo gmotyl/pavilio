@@ -9,7 +9,6 @@ import {
 } from "react";
 import { Pause, Play } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
-import { wikiLinkHoverCardTakesEscape } from "../markdown/WikiLinkHoverCard";
 import { CopyIconButton } from "../shell/CopyIconButton";
 import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
@@ -34,12 +33,6 @@ export interface AnswerPaneProps {
   sessionId: string;
   speech: GridSpeech;
   /**
-   * Escape was pressed — inside the pane, anywhere outside a terminal, or in
-   * this cell's own terminal (another cell's terminal keeps its Escape).
-   * `TerminalView` closes the pane and refocuses the terminal.
-   */
-  onClose: () => void;
-  /**
    * The cell's own PTY write, handed straight to the composer. `TerminalView`
    * reads it off the live instance at call time — the same one the bar's
    * launcher pills send with, so a reply typed here and a pill clicked up there
@@ -49,6 +42,12 @@ export interface AnswerPaneProps {
    * acts on that, by keeping a reply the socket refused.
    */
   send: (data: string) => boolean;
+  /**
+   * Puts DOM focus back on the cell's xterm. Used when an Escape pressed in the
+   * pane is handed to the terminal: the key goes to the PTY and the keyboard
+   * goes back with it, so the next key lands where the TUI is listening.
+   */
+  focusTerminal?: () => void;
 }
 
 /**
@@ -92,6 +91,17 @@ const BLOCK_ATTRIBUTES = ["data-unit", "data-speaking"] as const;
  */
 export const MIN_PANE_HEIGHT = 120;
 const PANE_HEIGHT_STEP = 24;
+
+/** The pane's own ground — the speech row's, not `--bg-surface`. */
+const ANSWER_GROUND = "#17171d";
+
+/**
+ * The answer body's paint at a bottom-edge opacity of `opacity` (0–100): solid
+ * at the top, fading linearly to `opacity` percent of the ground at the bottom.
+ */
+function answerBodyGradient(opacity: number): string {
+  return `linear-gradient(to bottom, ${ANSWER_GROUND} 0%, color-mix(in srgb, ${ANSWER_GROUND} ${opacity}%, transparent) 100%)`;
+}
 
 /**
  * The pane's rows that are neither the body nor the composer's field row
@@ -289,8 +299,8 @@ export function minPaneHeight(composerOn: boolean, composerHeight: number): numb
 export function AnswerPane({
   sessionId,
   speech,
-  onClose,
   send,
+  focusTerminal,
 }: AnswerPaneProps) {
   // Global, and read here rather than passed in: whether a pane carries a
   // composer at all is one answer for the whole panel, so the pane reads and
@@ -386,6 +396,32 @@ export function AnswerPane({
   // snapshots stay four.
   const held = useAnswerHeld(sessionId);
   const activity = useActivityState(sessionId);
+  // Either wave the body can draw: the waiting state's, or the one moved
+  // above the text while the user holds an answer and the agent still works.
+  const waveShown = waiting || (held && activity === "busy");
+
+  // The body's bottom-edge opacity, remembered per project and portable — see
+  // its declaration. Below 100 the pane goes transparent behind the body and
+  // the body paints the fade; the meta row and the composer keep the ground.
+  const [opacityBottom] = useScopedPreference(
+    preferences.answerOpacityBottom,
+    projectOfSession(sessionId),
+  );
+  /**
+   * Whether the composer's field holds focus. Typing a reply over a see-through
+   * body would put the terminal's output under the eye that is writing, so the
+   * body goes solid then — unless a wave is shown, which is the pane saying
+   * "the agent is working" and keeps the fade.
+   */
+  const [composerFocused, setComposerFocused] = useState(false);
+  // A field removed while it holds focus fires no blur, so switching the
+  // composer off would leave the body solid over a composer that is gone.
+  // Adjusted during render, React's pattern for state that follows a prop.
+  if (!composerOn && composerFocused) setComposerFocused(false);
+  const isComposerField = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.classList.contains("answer-pane-composer-field");
+  const translucent = opacityBottom < 100;
+  const bodySolid = !translucent || (composerFocused && !waveShown);
 
   /**
    * How many answers arrived after the last one this cell played and have not
@@ -452,7 +488,7 @@ export function AnswerPane({
   // was open would stay marked after the answer had already arrived.
 
   // Focus lands on the root the moment it opens — also when it opened itself —
-  // so Escape works at once and the read → Escape → type loop needs no mouse.
+  // so the answer can be scrolled and read from the keyboard at once.
   useEffect(() => {
     rootRef.current?.focus();
   }, []);
@@ -482,55 +518,19 @@ export function AnswerPane({
     return () => observer.disconnect();
   }, []);
 
-  // Escape closes the pane from wherever focus is while it is open —
-  // switching browser tabs and coming back leaves it on `document.body`, a
-  // click leaves it on the bar or in the cell's own terminal — and a pane
-  // that then ignores Escape reads as stuck. Greg's rule (2026-09-16): if the
-  // terminal has focus and the pane is open, Escape closes the pane.
-  //
-  // Capture phase on `window`, not a bubble listener on `document`: xterm
-  // reads keys from its own textarea's `keydown` handler, at the target, and
-  // a key that reached it is already in the PTY by the time it bubbles.
-  // Capture on the window runs before the target phase, and `stopPropagation`
-  // here ends the dispatch for every node still ahead in the path — the
-  // textarea's own target-phase listener included (only another listener on
-  // `window` itself would need `stopImmediatePropagation`) — so with
-  // `preventDefault` the shell never sees the key. The accepted
-  // cost for a TUI that uses Escape (Claude Code interrupts on it): the first
-  // Escape closes the pane, the second interrupts — one deliberate keystroke
-  // more, in exchange for a pane that always answers the key it advertises.
-  //
-  // Only THIS cell's terminal, though. The pane is mounted by `TerminalView`
-  // as a sibling of the xterm container inside the terminal area — the
-  // positioned box that holds the two — so an xterm under the root's parent is
-  // the cell's own; an xterm anywhere else is another cell's TUI, and its
-  // Escape is left alone.
-  //
-  // An Escape inside the pane never gets here: this listener bails out when
-  // the target is inside the root, so `onClose` runs once per keypress — from
-  // the root's own `onKeyDown` below, whose `stopPropagation` is what keeps
-  // the key from the cell, not what prevents a double close.
-  //
-  // An open wikilink hover card owns Escape: its own window capture listener,
-  // registered after this one, closes just the card and stops the key. Not an
-  // Escape typed into an editor (this cell's terminal included): the card
-  // closes without consuming it, so this listener handles it as usual.
-  useEffect(() => {
-    const onWindowKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
-      if (wikiLinkHoverCardTakesEscape(e)) return;
-      const target = e.target instanceof Element ? e.target : null;
-      const root = rootRef.current;
-      if (root && target && root.contains(target)) return;
-      const xterm = target?.closest(".xterm") ?? null;
-      if (xterm && !root?.parentElement?.contains(xterm)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onWindowKeyDown, true);
-    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
-  }, [onClose]);
+  // Escape never closes the pane: only the eye and Alt+Shift+O do. And because
+  // the pane takes focus when it opens (also when it opened itself), an Escape
+  // pressed here would otherwise reach no terminal at all — a TUI that uses it
+  // (Claude Code interrupts on it) would get nothing. So an Escape that nothing
+  // inside the pane consumed (the command picker closing, a wiki hover card) is
+  // delivered to the cell's PTY as ESC, the same transport the xterm's own
+  // input uses, and the keyboard goes back to the xterm with it. The event is
+  // neither cancelled nor stopped, so outer listeners still see it.
+  const onEscapeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing) return;
+    send("\x1b");
+    focusTerminal?.();
+  };
 
   // Mark the blocks. Re-run when the text, the units or the spoken unit
   // change; a tick inside a unit never gets here because the snapshot above
@@ -670,9 +670,12 @@ export function AnswerPane({
       role="region"
       aria-label="Answer"
       tabIndex={-1}
-      style={
-        appliedHeight === null
-          ? undefined
+      style={{
+        // Solid at 100 — exactly today's surface — and transparent (the
+        // stylesheet's) below it, so the body's fade shows the terminal.
+        ...(translucent ? null : { background: ANSWER_GROUND }),
+        ...(appliedHeight === null
+          ? null
           : {
               height: `${appliedHeight}px`,
               // The bottom inset is given up in the same breath as the height
@@ -687,8 +690,17 @@ export function AnswerPane({
               // For the frame between a cell shrinking and the observer above
               // re-clamping: the pane never paints past the area it covers.
               maxHeight: "100%",
-            }
-      }
+            }),
+      }}
+      // Delegated from the root: the composer's field is the composer's, and
+      // whether it holds focus matters only to the paint up here.
+      onFocus={(e) => {
+        if (isComposerField(e.target)) setComposerFocused(true);
+      }}
+      onBlur={(e) => {
+        if (isComposerField(e.target)) setComposerFocused(false);
+      }}
+      onKeyDown={onEscapeKey}
       // The cell header is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here — as on the bar.
       draggable={false}
@@ -698,16 +710,12 @@ export function AnswerPane({
         e.preventDefault();
         e.stopPropagation();
       }}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        e.stopPropagation();
-        onClose();
-      }}
     >
       <div
         ref={bodyRef}
         className="answer-pane-body"
         data-testid={`answer-pane-body-${sessionId}`}
+        style={{ background: bodySolid ? ANSWER_GROUND : answerBodyGradient(opacityBottom) }}
         // Delegated: the blocks are react-markdown's elements, so what the
         // pointer and focus are over is read here, on the ancestor that
         // outlives them. This only reveals a Play; nothing here plays.

@@ -106,10 +106,9 @@ vi.mock("../useTerminalActivityChannel", () => ({
  * cell's own PTY.
  *
  * Everything here is asserted through `AnswerPane`, not against the composer in
- * isolation, and that is deliberate. Three of the six criteria are about the
- * composer's PLACE rather than its behavior — Escape is stopped by the pane's
- * root, the switch that unmounts it sits in the pane's meta row, and the grip is
- * the pane's own bottom row — so a harness that rendered the field alone would
+ * isolation, and that is deliberate. Some of the criteria are about the
+ * composer's PLACE rather than its behavior — the switch that unmounts it sits
+ * in the pane's meta row, and the grip is the pane's own bottom row — so a harness that rendered the field alone would
  * be pinning a component no user ever meets. The pane's other half stays out of
  * the way: an empty queue means no utterance under the cursor, so the markdown
  * renderer is never mounted and the body is empty.
@@ -134,17 +133,8 @@ describe("send", () => {
     await waitFor(() => expect(send.mock.calls).toEqual([[body], ["\r"]]));
   };
 
-  const onClose = vi.fn();
-
-  /** An ancestor of the pane — the cell, as far as a bubbling key is concerned. */
-  const cellKeys = vi.fn();
-
-  /** Everything that got past the React root: the window-level reach. */
-  const documentKeys = vi.fn();
-
   /**
-   * The tree a pane is mounted in — the cell around it included, because the
-   * Escape test asserts what that ancestor did NOT see. Separate from
+   * The tree a pane is mounted in, the cell around it included. Separate from
    * `renderPane` so a test can hand the same shape to `rerender` and keep the
    * React instance alive across a change of answer.
    */
@@ -153,13 +143,8 @@ describe("send", () => {
     // only the draft test that puts an answer under the cursor mounts it, but
     // one tree for every test is cheaper than two shapes to keep in step.
     <MemoryRouter>
-      <div data-testid="cell" onKeyDown={cellKeys}>
-        <AnswerPane
-          sessionId={sessionId}
-          speech={speech}
-          onClose={onClose}
-          send={send}
-        />
+      <div data-testid="cell">
+        <AnswerPane sessionId={sessionId} speech={speech} send={send} />
       </div>
     </MemoryRouter>
   );
@@ -249,9 +234,6 @@ describe("send", () => {
     // Same reason, one module along: a queued return from the previous test
     // would fire into this one's `send`.
     __resetPtySubmitForTests();
-    onClose.mockClear();
-    cellKeys.mockClear();
-    documentKeys.mockClear();
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
     installMatchMedia();
     // Without a session list the pane cannot name its project, and a height
@@ -367,27 +349,6 @@ describe("send", () => {
       expect(send).not.toHaveBeenCalled();
     });
 
-    it("closes the pane on Escape without reaching the terminal", async () => {
-      const user = userEvent.setup();
-      renderPane();
-      document.addEventListener("keydown", documentKeys);
-
-      try {
-        await user.click(field());
-        await user.keyboard("{Escape}");
-
-        // Two claims, and the second is the one a "did it close" test would miss:
-        // the key is stopped inside the pane, so neither the cell around it nor
-        // anything listening past the React root — the TUI's own handlers — ever
-        // sees the Escape.
-        expect(onClose).toHaveBeenCalledTimes(1);
-        expect(cellKeys).not.toHaveBeenCalled();
-        expect(documentKeys).not.toHaveBeenCalled();
-      } finally {
-        document.removeEventListener("keydown", documentKeys);
-      }
-    });
-
     it("unmounts the composer and its grip when the switch is off", async () => {
       const user = userEvent.setup();
       renderPane();
@@ -461,31 +422,31 @@ describe("send", () => {
      * mounted pane rather than against the draft store, which is pinned on its
      * own in `composerDrafts.test.ts`.
      *
-     * Closing is Escape, not `unmount()`, and that is the whole point of
-     * `PaneHarness`: `TerminalView` renders the pane only while it is open, so
-     * the real close is the pane's own `onClose` taking it out of the tree. A
-     * test that unmounted by hand would pin the remount but leave the close path
-     * itself — the Escape handler, and anything a future hand hung off it —
-     * untested, and a `clearDraft` added there would not redden a thing.
+     * Closing is the host taking the pane out of the tree, not `unmount()`, and
+     * that is the whole point of `PaneHarness`: `TerminalView` renders the pane
+     * only while it is open, so the real close (the eye, or Alt+Shift+O) is the
+     * host dropping it while the rest of the cell stays mounted.
      */
     describe("drafts", () => {
       /**
        * The pane as its host renders it: on screen while it is open, gone when
-       * it closes itself, and rebuilt from nothing when it is opened again.
+       * the host closes it, and rebuilt from nothing when it is opened again.
        */
       function PaneHarness({ sessionId, speech }: { sessionId: string; speech: GridSpeech }) {
         const [open, setOpen] = useState(true);
         return (
           <MemoryRouter>
-            <div data-testid="cell" onKeyDown={cellKeys}>
+            <div data-testid="cell">
               <button data-testid="reopen" onClick={() => setOpen(true)}>
                 Open the pane
+              </button>
+              <button data-testid="close" onClick={() => setOpen(false)}>
+                Close the pane
               </button>
               {open ? (
                 <AnswerPane
                   sessionId={sessionId}
                   speech={speech}
-                  onClose={() => setOpen(false)}
                   send={send}
                 />
               ) : null}
@@ -494,9 +455,9 @@ describe("send", () => {
         );
       }
 
-      /** Escape from inside the field — the way a reader actually leaves the pane. */
+      /** The host's close — what the eye does. */
       async function closePane(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-        await user.keyboard("{Escape}");
+        await user.click(screen.getByTestId("close"));
         // Genuinely out of the tree: every assertion after a reopen is about a
         // field that was built again, not one that was never taken down.
         expect(screen.queryByTestId("answer-pane-composer-cell-a")).toBeNull();
@@ -782,10 +743,11 @@ describe("send", () => {
           "ENTER SENDS · SHIFT+ENTER NEWLINE · ESC CLOSES THE ANSWER",
         );
 
-        // The hint and the grip paint the pane's own ground rather than the
-        // field's well, which is what keeps the composer reading as one box
+        // The hint and the grip paint the pane's own ground — the speech row's;
+        // the pane box itself is transparent behind a faded body — rather than
+        // the field's well, which is what keeps the composer reading as one box
         // inside the surface instead of three stacked strips.
-        const surface = cssRule(".answer-pane").match(/background:\s*([^;]+)/)?.[1].trim();
+        const surface = cssRule(".speech-bar").match(/background:\s*([^;]+)/)?.[1].trim();
         // Vacuity guard: an undeclared ground would make the matches below vacuous.
         expect(surface).toBeTruthy();
         expect(cssRule(".answer-pane-hint")).toMatch(
@@ -851,7 +813,9 @@ describe("send", () => {
         // Darker than BOTH, not merely different from them: the pane and the
         // speech bar share `#17171d`, the cell keeps the xterm's own, and what
         // YOU type is neither agent nor shell.
-        const pane = ground(".answer-pane");
+        // The pane box is transparent behind a faded body; its rows paint the
+        // ground, so the meta row is where the pane's ground is read.
+        const pane = ground(".answer-pane-meta");
         expect(pane).toBe("#17171d");
         expect(luminance(composer)).toBeLessThan(luminance(pane));
         expect(luminance(composer)).toBeLessThan(luminance(xtermGround()));
