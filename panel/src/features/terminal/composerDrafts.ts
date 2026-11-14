@@ -58,6 +58,12 @@ const drafts = new Map<string, string>();
 export interface HeldCaret {
   start: number;
   end: number;
+  /**
+   * Which edge of a selection is the moving one. Without it a backward
+   * (Shift+Left) selection comes back forward, and the next Shift+Arrow moves
+   * the edge the user was not moving.
+   */
+  direction?: "forward" | "backward" | "none";
 }
 
 const carets = new Map<string, HeldCaret>();
@@ -123,7 +129,7 @@ export function onDraftCleared(sessionId: string, fn: () => void): () => void {
  * was unmounted. Only the composer's own unmount cleanup calls it.
  */
 export function holdCaret(sessionId: string, caret: HeldCaret): void {
-  carets.set(sessionId, { start: caret.start, end: caret.end });
+  carets.set(sessionId, { start: caret.start, end: caret.end, direction: caret.direction });
 }
 
 /** Returns and forgets the held caret: one mount reclaims it, never two. */

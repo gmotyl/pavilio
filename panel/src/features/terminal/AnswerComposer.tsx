@@ -618,11 +618,19 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     if (field && held) {
       const length = field.value.length;
       field.focus({ preventScroll: true });
-      field.setSelectionRange(Math.min(held.start, length), Math.min(held.end, length));
+      field.setSelectionRange(
+        Math.min(held.start, length),
+        Math.min(held.end, length),
+        held.direction,
+      );
     }
     return () => {
       if (!field || document.activeElement !== field) return;
-      holdCaret(sessionId, { start: field.selectionStart, end: field.selectionEnd });
+      holdCaret(sessionId, {
+        start: field.selectionStart,
+        end: field.selectionEnd,
+        direction: field.selectionDirection,
+      });
       setTimeout(() => releaseCaret(sessionId), 0);
     };
   }, [sessionId]);

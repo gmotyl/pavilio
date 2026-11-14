@@ -236,6 +236,25 @@ describe("the composer draft across an arrival and a cell remount", () => {
     });
   });
 
+  it("a rebuilt composer keeps a backward selection backward", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const cell = await mountOpen();
+
+    await user.click(field());
+    await user.keyboard("half a reply");
+    // A Shift+Left selection: anchored at the end, the moving edge at 5. With
+    // the direction lost, the next Shift+Arrow would move the wrong edge.
+    field().setSelectionRange(5, 12, "backward");
+
+    cell.remount();
+    await settle();
+
+    expect({
+      active: observe().active,
+      selection: [field().selectionStart, field().selectionEnd, field().selectionDirection],
+    }).toEqual({ active: "composer", selection: [5, 12, "backward"] });
+  });
+
   it("an arriving answer does not focus a composer the user was not in", async () => {
     const host = speechHost();
     let generation = 0;
