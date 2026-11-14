@@ -53,7 +53,9 @@ const { forgetAnswerPane, setAnswerPaneOpen } = await import("../answerPaneState
 const { __resetComposerDraftsForTests, getDraft } = await import("../composerDrafts");
 
 const SESSION = "cell-a";
-const MARKDOWN = "# Deploy plan\n\nThe migration has to finish before traffic moves.\n";
+/** Answer `n`'s text: every arrival says something new, so the pane visibly moves to it. */
+const answerText = (n: number): string =>
+  `# Deploy plan ${n}\n\nThe migration has to finish before traffic moves.\n`;
 
 /**
  * A ready host with one answer already under the cursor (old news — it seeds
@@ -62,14 +64,17 @@ const MARKDOWN = "# Deploy plan\n\nThe migration has to finish before traffic mo
  */
 function speechHost(): { speech: GridSpeech; arrive: () => void } {
   let at = 1;
-  const file = (base: UtteranceQueue): UtteranceQueue =>
-    utteranceQueueReducer(base, {
+  let units = prepare(answerText(at)).units;
+  const file = (base: UtteranceQueue): UtteranceQueue => {
+    const text = answerText(at);
+    units = prepare(text).units;
+    return utteranceQueueReducer(base, {
       type: "arrived",
-      utterance: { id: `${SESSION}-u-${at}`, sessionId: SESSION, text: MARKDOWN, at: at++ },
+      utterance: { id: `${SESSION}-u-${at}`, sessionId: SESSION, text, at: at++ },
       speaking: false,
     });
+  };
   let queue = file(emptyUtteranceQueue);
-  const units = prepare(MARKDOWN).units;
   const speech = readySpeech({
     queueFor: () => queue,
     unitsFor: () => units,
@@ -162,14 +167,16 @@ describe("the composer draft across an arrival and a cell remount", () => {
     cell.arrive();
     cell.rerender();
     await settle();
+    // The arrival really reached the pane — without this the scenario would
+    // pass just as well with no answer having arrived at all.
+    expect(screen.getByTestId(`answer-pane-body-${SESSION}`)).toHaveTextContent("Deploy plan 2");
 
     await user.keyboard("ply");
 
     expect(observe()).toEqual({ field: "half a reply", store: "half a reply", active: "composer" });
   });
 
-  // red on main — composer-draft-lost-on-answer (2026-10-07); flipped to it() by the fix task
-  it.fails("keeps the draft and later keystrokes when the cell is rebuilt mid-typing", async () => {
+  it("keeps the draft and later keystrokes when the cell is rebuilt mid-typing", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const cell = await mountOpen();
 
@@ -185,8 +192,7 @@ describe("the composer draft across an arrival and a cell remount", () => {
     expect(observe()).toEqual({ field: "half a reply", store: "half a reply", active: "composer" });
   });
 
-  // red on main — composer-draft-lost-on-answer (2026-10-07); flipped to it() by the fix task
-  it.fails("keeps the draft when an arriving answer rebuilds the cell", async () => {
+  it("keeps the draft when an arriving answer rebuilds the cell", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const cell = await mountOpen();
 
@@ -202,15 +208,15 @@ describe("the composer draft across an arrival and a cell remount", () => {
     expect(observe()).toEqual({ field: "half a reply", store: "half a reply", active: "composer" });
   });
 
-  // red on main — composer-draft-lost-on-answer (2026-10-07); flipped to it() by the fix task
-  it.fails("a rebuilt composer that held focus keeps focus and caret", async () => {
+  it("a rebuilt composer that held focus keeps focus and caret", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const cell = await mountOpen();
 
     await user.click(field());
     await user.keyboard("half a reply");
-    // The caret mid-text, not at the end: a fresh textarea puts it at the end
-    // on its own, so only a caret that was really restored passes.
+    // The caret mid-text, neither at the start nor at the end: a rebuilt
+    // textarea starts at [0,0] in jsdom and wherever the browser puts it in a
+    // real one, so only a caret that was really restored passes.
     await user.keyboard("{ArrowLeft}{ArrowLeft}{ArrowLeft}");
     expect(field().selectionStart).toBe(9);
 
@@ -243,6 +249,8 @@ describe("the composer draft across an arrival and a cell remount", () => {
     // It auto-opened, with the composer in it — and the composer was not focused.
     expect(screen.getByTestId(`answer-pane-${SESSION}`)).toBeInTheDocument();
     expect(document.activeElement).not.toBe(field());
+    // Where it went instead: the pane's root, as an opening pane always does.
+    expect(activeName()).toBe('div[aria-label="Answer"][data-testid="answer-pane-cell-a"]');
 
     // Nor by a further arrival, nor by one that rebuilds the cell.
     host.arrive();
@@ -254,6 +262,30 @@ describe("the composer draft across an arrival and a cell remount", () => {
     view.rerender(body(host.speech, ++generation));
     await settle();
     expect(document.activeElement).not.toBe(field());
+    // The rebuilt focused cell still hands the keyboard to its terminal: the
+    // terminal yields only to a composer that really held focus, not to every
+    // remount.
+    expect(activeName()).toBe('textarea[aria-label="terminal input cell-a"]');
     expect(field().value).toBe("");
+  });
+
+  it("a remount after the user left the composer does not refocus it", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const cell = await mountOpen();
+
+    await user.click(field());
+    await user.keyboard("half a re");
+    // Clicked elsewhere: the reply is parked, the user is not in it any more.
+    await user.click(screen.getByTestId(`answer-pane-body-${SESSION}`));
+    expect(document.activeElement).not.toBe(field());
+
+    cell.remount();
+    await settle();
+
+    expect(observe()).toEqual({
+      field: "half a re",
+      store: "half a re",
+      active: 'textarea[aria-label="terminal input cell-a"]',
+    });
   });
 });
