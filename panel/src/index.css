@@ -276,6 +276,17 @@ code, pre, .font-mono {
   width: 40px;
 }
 
+/* The same reservation, made by the project page-tab row in the focus layout
+ * while the left sidebar is collapsed: with the breadcrumb row gone the tab
+ * row is the top row, and the fixed button would sit on its first tab. The
+ * row already starts inside the page's `p-6` (24px), so 24px more puts the
+ * first tab at 48px — past the button's right edge (16px `left` + 24px wide)
+ * with the row's own `gap-2` to spare. Checked against `.sidebar-hamburger` by
+ * `ProjectView.focus.test.tsx`. */
+.tab-row-hamburger-inset {
+  padding-left: 24px;
+}
+
 /* Diff viewer */
 .diff-line-add {
   background: var(--green-dim);

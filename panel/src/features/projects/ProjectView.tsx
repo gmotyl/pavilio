@@ -33,6 +33,8 @@ import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectSettingsCard from "./ProjectSettingsCard";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
+import FocusToggle, { useFocusLayout } from "../shell/FocusToggle";
+import { useSidebarState } from "../shell/useSidebarState";
 import { useLastPath } from "../shell/useLastPath";
 import { useScrollContainer } from "../shell/Layout";
 import { useReposTabMemory } from "../shell/useReposTabMemory";
@@ -252,6 +254,11 @@ export default function ProjectView() {
   // section test it renders under — one rule, no second code path. A mockup is
   // framed content that should fill what is left of the viewport; every other
   // file is a document the page scrolls.
+  // Focus layout (md+ only): no title row, and the toggle moves into the tab
+  // row. The sidebar is read, never written — focus leaves it as it was.
+  const focus = useFocusLayout();
+  const leftSidebar = useSidebarState("leftSidebar");
+
   const fillsHeight = Boolean(
     section &&
       !SPECIAL_SECTIONS.has(section) &&
@@ -268,15 +275,17 @@ export default function ProjectView() {
       }`}
     >
       {/* Desktop-only big title */}
-      <div className="hidden md:flex items-center mb-4">
-        <h1 className="text-2xl font-semibold capitalize">
-          {name}
-        </h1>
-        <TimeTrackingLink
-          minutes={todayMinutes}
-          to={`/project/${name}/time`}
-        />
-      </div>
+      {!focus.active && (
+        <div data-testid="project-title-row" className="hidden md:flex items-center mb-4">
+          <h1 className="text-2xl font-semibold capitalize">
+            {name}
+          </h1>
+          <TimeTrackingLink
+            minutes={todayMinutes}
+            to={`/project/${name}/time`}
+          />
+        </div>
+      )}
 
       {archived && name && (
         <ArchivedBanner
@@ -291,6 +300,9 @@ export default function ProjectView() {
         tabs={tabs}
         searchActive={isReposSearch && search.active}
         onToggleSearch={onToggleSearch}
+        focus={focus.active}
+        hamburgerInset={focus.active && !leftSidebar.expanded}
+        trailing={focus.active ? <FocusToggle /> : null}
       />
 
       {isReposSearch && search.active && (

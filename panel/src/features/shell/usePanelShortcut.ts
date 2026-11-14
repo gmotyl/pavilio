@@ -14,6 +14,10 @@ export type PanelShortcutCode = "KeyF" | "KeyC" | "KeyT" | "KeyO";
  * arrives as `Ï`). Any extra Cmd/Ctrl, or Alt without Shift, is not a match and
  * passes through untouched.
  *
+ * Auto-repeat (`event.repeat`, a held chord) is swallowed like a match but does
+ * not call `handler` again: every binding here is a toggle, and holding the
+ * keys must not keep flipping it.
+ *
  * Inactive below `md` (the phone layout `useIsMobile` reports) and while
  * `enabled` is false: the key then reaches whatever has focus. The latest
  * `handler` is always the one called, without re-registering the listener.
@@ -36,6 +40,7 @@ export function usePanelShortcut(
       if (e.code !== code) return;
       e.preventDefault();
       e.stopPropagation();
+      if (e.repeat) return;
       handlerRef.current(e);
     };
     window.addEventListener("keydown", onKeyDown, true);

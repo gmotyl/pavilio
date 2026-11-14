@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, Search, Terminal } from "lucide-react";
 import type { ProjectTab } from "./useProjectTabs";
@@ -79,12 +79,35 @@ interface BarProps {
   tabs: ProjectTab[];
   searchActive: boolean;
   onToggleSearch: () => void;
+  /**
+   * Focus layout: no breadcrumb row above, so the row sticks to the very top
+   * instead of below the breadcrumb's 36px.
+   */
+  focus?: boolean;
+  /**
+   * Keep the fixed sidebar hamburger's corner clear — set in focus while the
+   * left sidebar is collapsed, when the button would otherwise sit on the
+   * first tab. The width lives in `index.css`.
+   */
+  hamburgerInset?: boolean;
+  /** Controls after the search button, at the row's right end. */
+  trailing?: ReactNode;
 }
 
-export function ProjectTabsBar({ tabs, searchActive, onToggleSearch }: BarProps) {
+export function ProjectTabsBar({
+  tabs,
+  searchActive,
+  onToggleSearch,
+  focus = false,
+  hamburgerInset = false,
+  trailing,
+}: BarProps) {
   return (
     <div
-      className="hidden md:flex gap-2 mb-4 text-sm items-center sticky top-9 z-20 py-2"
+      data-testid="project-tabs-bar"
+      className={`hidden md:flex gap-2 mb-4 text-sm items-center sticky ${
+        focus ? "top-0" : "top-9"
+      } z-20 py-2${hamburgerInset ? " tab-row-hamburger-inset" : ""}`}
       style={{
         background: "var(--bg-base)",
         borderBottom: "1px solid var(--border-subtle)",
@@ -140,6 +163,7 @@ export function ProjectTabsBar({ tabs, searchActive, onToggleSearch }: BarProps)
       >
         <Search size={14} />
       </button>
+      {trailing}
     </div>
   );
 }

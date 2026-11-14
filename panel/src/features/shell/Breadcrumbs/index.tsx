@@ -1,4 +1,4 @@
-import { useContext, type CSSProperties } from "react";
+import { useContext, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronRight, Home } from "lucide-react";
 import {
@@ -91,7 +91,12 @@ function parsePath(pathname: string): Crumb[] {
   }));
 }
 
-export function Breadcrumbs() {
+interface BreadcrumbsProps {
+  /** Shell controls at the row's right end, after the page's own actions. */
+  trailing?: ReactNode;
+}
+
+export function Breadcrumbs({ trailing }: BreadcrumbsProps = {}) {
   const { pathname } = useLocation();
   const { actions } = useContext(BreadcrumbActionsContext);
   const crumbs = parsePath(pathname);
@@ -186,8 +191,11 @@ export function Breadcrumbs() {
         );
       })}
 
-      {actions && (
-        <div className="ml-auto flex items-center gap-1">{actions}</div>
+      {(actions || trailing) && (
+        <div className="ml-auto flex items-center gap-1">
+          {actions}
+          {trailing}
+        </div>
       )}
     </nav>
   );

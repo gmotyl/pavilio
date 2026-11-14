@@ -87,6 +87,25 @@ describe("usePanelShortcut", () => {
     expect(xterm.reached).toHaveBeenCalledTimes(misses.length);
   });
 
+  it("swallows auto-repeat without calling the handler again", () => {
+    const handler = vi.fn();
+    renderHook(() => usePanelShortcut("KeyF", handler));
+    const init = { key: "F", code: "KeyF", altKey: true, shiftKey: true };
+
+    press(xterm.textarea, init);
+    // Holding the chord: the OS repeats keydown with `repeat` set. A toggle
+    // bound here must not flip on every repeat, and the shell must not get
+    // the repeats either.
+    const repeated = [
+      press(xterm.textarea, { ...init, repeat: true }),
+      press(xterm.textarea, { ...init, repeat: true }),
+    ];
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    for (const event of repeated) expect(event.defaultPrevented).toBe(true);
+    expect(xterm.reached).not.toHaveBeenCalled();
+  });
+
   it("is inactive below md", () => {
     installMatchMedia({ mobile: true });
     const handler = vi.fn();
