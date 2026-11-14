@@ -76,6 +76,16 @@ export const terminalInstancesMock = () => ({
 });
 
 /**
+ * What each mounted cell wrote to its PTY through the instance's `send`, by
+ * session, in order. Cleared with {@link resetInputSent}.
+ */
+export const inputSent = new Map<string, string[]>();
+
+export function resetInputSent(): void {
+  inputSent.clear();
+}
+
+/**
  * The pool as a mounted `TerminalView` sees it, for suites that render whole
  * cells. Each session's holder carries the xterm DOM the keyboard rules are
  * about — a `.xterm` host with its helper textarea, labelled
@@ -112,7 +122,12 @@ export const terminalViewInstancesMock = () => {
         fitAddon: {},
         holder,
         ws: { readyState: 1, send: () => {} },
-        send: () => true,
+        send: (data: string) => {
+          const sent = inputSent.get(sessionId) ?? [];
+          sent.push(data);
+          inputSent.set(sessionId, sent);
+          return true;
+        },
         fit: () => {},
         focus,
         addExitListener: () => () => {},

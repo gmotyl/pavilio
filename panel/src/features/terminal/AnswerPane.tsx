@@ -42,6 +42,12 @@ export interface AnswerPaneProps {
    * acts on that, by keeping a reply the socket refused.
    */
   send: (data: string) => boolean;
+  /**
+   * Puts DOM focus back on the cell's xterm. Used when an Escape pressed in the
+   * pane is handed to the terminal: the key goes to the PTY and the keyboard
+   * goes back with it, so the next key lands where the TUI is listening.
+   */
+  focusTerminal?: () => void;
 }
 
 /**
@@ -294,6 +300,7 @@ export function AnswerPane({
   sessionId,
   speech,
   send,
+  focusTerminal,
 }: AnswerPaneProps) {
   // Global, and read here rather than passed in: whether a pane carries a
   // composer at all is one answer for the whole panel, so the pane reads and
@@ -511,9 +518,19 @@ export function AnswerPane({
     return () => observer.disconnect();
   }, []);
 
-  // No Escape handling here, on purpose: only the eye and Alt+Shift+O close
-  // the pane, so Escape always reaches the focused terminal — a TUI that uses
-  // it (Claude Code interrupts on it) never pays a keystroke to the pane.
+  // Escape never closes the pane: only the eye and Alt+Shift+O do. And because
+  // the pane takes focus when it opens (also when it opened itself), an Escape
+  // pressed here would otherwise reach no terminal at all — a TUI that uses it
+  // (Claude Code interrupts on it) would get nothing. So an Escape that nothing
+  // inside the pane consumed (the command picker closing, a wiki hover card) is
+  // delivered to the cell's PTY as ESC, the same transport the xterm's own
+  // input uses, and the keyboard goes back to the xterm with it. The event is
+  // neither cancelled nor stopped, so outer listeners still see it.
+  const onEscapeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing) return;
+    send("\x1b");
+    focusTerminal?.();
+  };
 
   // Mark the blocks. Re-run when the text, the units or the spoken unit
   // change; a tick inside a unit never gets here because the snapshot above
@@ -683,6 +700,7 @@ export function AnswerPane({
       onBlur={(e) => {
         if (isComposerField(e.target)) setComposerFocused(false);
       }}
+      onKeyDown={onEscapeKey}
       // The cell header is `draggable` and the cell root focuses on click, so
       // every gesture that could reach either has to stop here — as on the bar.
       draggable={false}

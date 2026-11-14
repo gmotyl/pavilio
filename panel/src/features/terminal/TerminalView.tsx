@@ -366,6 +366,11 @@ export function TerminalView({
     return instRef.current?.send(data) ?? false;
   }, []);
 
+  // Read off `instRef` at call time, like `send`.
+  const focusTerminal = useCallback((): void => {
+    instRef.current?.focus();
+  }, []);
+
   const isViewportBlank = useCallback(() => {
     const inst = instRef.current;
     // No instance yet is not evidence of a blank screen — don't ask for a nudge.
@@ -464,6 +469,7 @@ export function TerminalView({
             // reached from the two places the user can type into this cell
             // without touching the terminal.
             send={send}
+            focusTerminal={focusTerminal}
           />
         ) : null}
       </div>

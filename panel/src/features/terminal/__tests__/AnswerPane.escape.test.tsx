@@ -1,9 +1,12 @@
 /**
- * The answer pane handles no Escape at all. Only the eye and Alt+Shift+O
- * close it, so Escape always reaches the focused terminal — a TUI that uses it
- * (Claude Code interrupts on it) is never one keystroke behind the pane.
+ * The answer pane never closes on Escape. Only the eye and Alt+Shift+O close
+ * it, so Escape always reaches the cell's terminal — a TUI that uses it
+ * (Claude Code interrupts on it) is never one keystroke behind the pane. An
+ * Escape pressed while focus sits in the pane is handed to the cell's PTY and
+ * focus goes back to its xterm, unless something inside the pane (the command
+ * picker, a wiki hover card) consumed it first.
  */
-import { fireEvent } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StubResizeObserver, installMatchMedia } from "../../../test-utils";
 import {
@@ -28,8 +31,10 @@ vi.mock("../../speech/synth", async (importOriginal) => ({
 }));
 
 const { forgetAnswerPane } = await import("../answerPaneState");
+const { inputSent, resetInputSent } = await import("./answerPane.mocks");
 
 beforeEach(() => {
+  resetInputSent();
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia();
@@ -100,5 +105,66 @@ describe("the answer pane and Escape", () => {
       document.removeEventListener("keydown", ancestor);
     }
     expect(paneOf("cell-a")).not.toBeNull();
+  });
+
+  it("escape in the pane goes to the cell's terminal and the pane stays open", async () => {
+    const { speech } = cellsHost();
+    renderCells(speech);
+    await settleCells();
+    fireEvent.click(eyeOf("cell-a"));
+    const pane = paneOf("cell-a")!;
+    expect(document.activeElement).toBe(pane);
+    resetInputSent();
+
+    fireEvent.keyDown(pane, { key: "Escape" });
+
+    expect(inputSent.get("cell-a")).toEqual(["\x1b"]);
+    expect(inputSent.get("cell-b")).toBeUndefined();
+    expect(document.activeElement).toBe(terminalOf("cell-a"));
+    expect(paneOf("cell-a")).not.toBeNull();
+  });
+
+  it("escape from inside the pane's body goes to the terminal too", async () => {
+    const { speech } = cellsHost();
+    renderCells(speech);
+    await settleCells();
+    fireEvent.click(eyeOf("cell-a"));
+    resetInputSent();
+    const body = paneOf("cell-a")!.querySelector<HTMLElement>(".answer-pane-body")!;
+
+    fireEvent.keyDown(body, { key: "Escape" });
+
+    expect(inputSent.get("cell-a")).toEqual(["\x1b"]);
+    expect(document.activeElement).toBe(terminalOf("cell-a"));
+  });
+
+  it("an escape the command picker consumes reaches no terminal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) })),
+    );
+    try {
+      const { speech } = cellsHost();
+      renderCells(speech);
+      await settleCells();
+      fireEvent.click(eyeOf("cell-a"));
+      const field = screen.getByTestId("answer-pane-composer-cell-a");
+      field.focus();
+      fireEvent.click(screen.getByTestId("answer-pane-skills-chip-cell-a"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(screen.queryByRole("listbox")).not.toBeNull();
+      resetInputSent();
+
+      fireEvent.keyDown(field, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(inputSent.get("cell-a")).toBeUndefined();
+      expect(document.activeElement).toBe(field);
+      expect(paneOf("cell-a")).not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
