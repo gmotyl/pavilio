@@ -14,21 +14,21 @@ const MODULE_ROOT = resolve(__dirname, "..");
 const DEFAULT_WORKSPACE_ROOT = "/srv/git/prv/projects";
 
 function selectWorkspaceRoot(): string {
-  const override = process.env.PAVILIO_WORKSPACE_ROOT;
+  const override = process.env.PAVILIO_CANONICAL_ROOT;
   const moduleRootIdentity = realpathSync(MODULE_ROOT);
 
   if (override !== undefined) {
     if (!isAbsolute(override)) {
-      throw new Error("Invalid PAVILIO_WORKSPACE_ROOT: must be an absolute path to the same repository.");
+      throw new Error("Invalid PAVILIO_CANONICAL_ROOT: must be an absolute path to the same repository.");
     }
     let overrideIdentity: string;
     try {
       overrideIdentity = realpathSync(override);
     } catch {
-      throw new Error("Invalid PAVILIO_WORKSPACE_ROOT: path is inaccessible or does not exist.");
+      throw new Error("Invalid PAVILIO_CANONICAL_ROOT: path is inaccessible or does not exist.");
     }
     if (overrideIdentity !== moduleRootIdentity) {
-      throw new Error("Invalid PAVILIO_WORKSPACE_ROOT: must identify the same repository.");
+      throw new Error("Invalid PAVILIO_CANONICAL_ROOT: must identify the same repository.");
     }
     return override;
   }

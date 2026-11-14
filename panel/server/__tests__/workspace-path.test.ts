@@ -30,8 +30,8 @@ function sameDirectory(a: string, b: string): boolean {
 
 function runSetup(script: string, outRoot: string, workspaceRoot?: string) {
   const env: NodeJS.ProcessEnv = { ...process.env, PAVILIO_OPENCODE_OUT: outRoot };
-  delete env.PAVILIO_WORKSPACE_ROOT;
-  if (workspaceRoot !== undefined) env.PAVILIO_WORKSPACE_ROOT = workspaceRoot;
+  delete env.PAVILIO_CANONICAL_ROOT;
+  if (workspaceRoot !== undefined) env.PAVILIO_CANONICAL_ROOT = workspaceRoot;
   return spawnSync("bash", [script], { env, encoding: "utf8" });
 }
 
@@ -86,7 +86,7 @@ describe("OpenCode workspace path selection", () => {
       for (const [override, diagnostic] of cases) {
         const result = runSetup(SETUP_OPENCODE, outRoot, override);
         expect(result.status, `override ${override} unexpectedly succeeded`).not.toBe(0);
-        expect(result.stderr).toContain("PAVILIO_WORKSPACE_ROOT");
+        expect(result.stderr).toContain("PAVILIO_CANONICAL_ROOT");
         expect(result.stderr).toContain(diagnostic);
         expect(existsSync(join(outRoot, "opencode.json"))).toBe(false);
         rmSync(outRoot, { recursive: true, force: true });

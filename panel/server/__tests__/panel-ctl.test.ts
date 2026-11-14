@@ -195,7 +195,7 @@ beforeEach(() => {
       "  })",
       "  .listen(port, '127.0.0.1', () => {",
       "    console.log('stub panel listening on ' + port);",
-      "    console.log('PAVILIO_WORKSPACE_ROOT=' + process.env.PAVILIO_WORKSPACE_ROOT);",
+      "    console.log('PAVILIO_CANONICAL_ROOT=' + process.env.PAVILIO_CANONICAL_ROOT);",
       "    console.log('Panel bound to http://127.0.0.1:' + port + ' (loopback only)');",
       "  });",
       "",
@@ -242,16 +242,16 @@ describe("scripts/panel process control", () => {
 
     expect(runPanel("start").status).toBe(0);
     expect(await waitUntil(() => panelLog().includes("stub panel listening"))).toBe(true);
-    expect(panelLog()).toContain(`PAVILIO_WORKSPACE_ROOT=${realpathSync(repo)}`);
+    expect(panelLog()).toContain(`PAVILIO_CANONICAL_ROOT=${realpathSync(repo)}`);
   });
 
   it("panel launcher exports valid explicit workspace override", async () => {
     const aliasRoot = join(sandbox, "workspace-alias");
     symlinkSync(repo, aliasRoot, "dir");
 
-    expect(runPanel("start", { PAVILIO_WORKSPACE_ROOT: aliasRoot }).status).toBe(0);
+    expect(runPanel("start", { PAVILIO_CANONICAL_ROOT: aliasRoot }).status).toBe(0);
     expect(await waitUntil(() => panelLog().includes("stub panel listening"))).toBe(true);
-    expect(panelLog()).toContain(`PAVILIO_WORKSPACE_ROOT=${aliasRoot}`);
+    expect(panelLog()).toContain(`PAVILIO_CANONICAL_ROOT=${aliasRoot}`);
   });
 
   it("panel launcher rejects invalid override before starting", () => {
@@ -264,10 +264,10 @@ describe("scripts/panel process control", () => {
     ];
 
     for (const [override, diagnostic] of cases) {
-      const result = runPanel("start", { PAVILIO_WORKSPACE_ROOT: override });
+      const result = runPanel("start", { PAVILIO_CANONICAL_ROOT: override });
 
       expect(result.status, `override ${override} unexpectedly succeeded`).not.toBe(0);
-      expect(result.output).toContain("PAVILIO_WORKSPACE_ROOT");
+      expect(result.output).toContain("PAVILIO_CANONICAL_ROOT");
       expect(result.output).toContain(diagnostic);
       expect(panelLog()).toBe("");
       expect(portOpen(port)).toBe(false);
@@ -277,7 +277,7 @@ describe("scripts/panel process control", () => {
   it("panel launcher falls back to invocation root for unavailable or mismatched default", async () => {
     expect(runPanel("start").status).toBe(0);
     expect(await waitUntil(() => panelLog().includes("stub panel listening"))).toBe(true);
-    expect(panelLog()).toContain(`PAVILIO_WORKSPACE_ROOT=${realpathSync(repo)}`);
+    expect(panelLog()).toContain(`PAVILIO_CANONICAL_ROOT=${realpathSync(repo)}`);
   });
 
   it("start detaches the server from the calling shell and logs to panel/.panel.log", async () => {

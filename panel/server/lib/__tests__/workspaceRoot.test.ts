@@ -20,7 +20,7 @@ async function loadPanelConfig() {
 
 describe("panel workspace root", () => {
   it("uses matching default candidate for workspace root and projects directory without realpath normalization", async () => {
-    vi.stubEnv("PAVILIO_WORKSPACE_ROOT", undefined);
+    vi.stubEnv("PAVILIO_CANONICAL_ROOT", undefined);
     vi.doMock("fs", async (importOriginal) => {
       const actual = await importOriginal<typeof import("fs")>();
       const moduleRootIdentity = actual.realpathSync(MODULE_ROOT);
@@ -42,7 +42,7 @@ describe("panel workspace root", () => {
     try {
       const override = join(dir, "same-repository");
       symlinkSync(MODULE_ROOT, override);
-      vi.stubEnv("PAVILIO_WORKSPACE_ROOT", override);
+      vi.stubEnv("PAVILIO_CANONICAL_ROOT", override);
 
       const config = await loadPanelConfig();
       expect(config.WORKSPACE_ROOT).toBe(override);
@@ -57,15 +57,15 @@ describe("panel workspace root", () => {
     ["inaccessible", join(tmpdir(), "missing-workspace-root"), "inaccessible"],
     ["different repository", tmpdir(), "same repository"],
   ])("rejects %s override", async (_label, override, message) => {
-    vi.stubEnv("PAVILIO_WORKSPACE_ROOT", override);
-    await expect(loadPanelConfig()).rejects.toThrow(`PAVILIO_WORKSPACE_ROOT`);
+    vi.stubEnv("PAVILIO_CANONICAL_ROOT", override);
+    await expect(loadPanelConfig()).rejects.toThrow(`PAVILIO_CANONICAL_ROOT`);
     await expect(loadPanelConfig()).rejects.toThrow(message);
   });
 
   it.each(["unavailable", "mismatched"])(
     "falls back to module root when default candidate is %s",
     async (candidateStatus) => {
-      vi.stubEnv("PAVILIO_WORKSPACE_ROOT", undefined);
+      vi.stubEnv("PAVILIO_CANONICAL_ROOT", undefined);
       vi.doMock("fs", async (importOriginal) => {
         const actual = await importOriginal<typeof import("fs")>();
         return {

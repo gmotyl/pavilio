@@ -9,7 +9,7 @@ SOURCE_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 # Keep the selected spelling for generated paths, while comparing filesystem
 # identity so a symlink to this checkout is accepted as the same repository.
-if ! WORKSPACE_ROOT="$(python3 - "$SOURCE_ROOT" "${PAVILIO_WORKSPACE_ROOT+x}" "${PAVILIO_WORKSPACE_ROOT:-}" <<'PY'
+if ! WORKSPACE_ROOT="$(python3 - "$SOURCE_ROOT" "${PAVILIO_CANONICAL_ROOT+x}" "${PAVILIO_CANONICAL_ROOT:-}" <<'PY'
 import os, sys
 
 source_root, override_is_set, override = sys.argv[1:]
@@ -23,13 +23,13 @@ def same_directory(left, right):
 
 if override_is_set:
     if not os.path.isabs(override):
-        print("Invalid PAVILIO_WORKSPACE_ROOT: must be an absolute path to the same repository.", file=sys.stderr)
+        print("Invalid PAVILIO_CANONICAL_ROOT: must be an absolute path to the same repository.", file=sys.stderr)
         sys.exit(2)
     if not os.path.isdir(override):
-        print("Invalid PAVILIO_WORKSPACE_ROOT: path is inaccessible or does not exist.", file=sys.stderr)
+        print("Invalid PAVILIO_CANONICAL_ROOT: path is inaccessible or does not exist.", file=sys.stderr)
         sys.exit(2)
     if not same_directory(source_root, override):
-        print("Invalid PAVILIO_WORKSPACE_ROOT: must identify the same repository.", file=sys.stderr)
+        print("Invalid PAVILIO_CANONICAL_ROOT: must identify the same repository.", file=sys.stderr)
         sys.exit(2)
     print(override)
 elif same_directory(source_root, "/srv/git/prv/projects"):
