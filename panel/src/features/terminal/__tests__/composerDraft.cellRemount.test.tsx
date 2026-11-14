@@ -148,6 +148,7 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
   installMatchMedia();
   forgetAnswerPane(SESSION);
+  forgetAnswerPane("cell-b");
   __resetComposerDraftsForTests();
   setStoredAutoOpenAnswer(true);
 });
@@ -287,5 +288,54 @@ describe("the composer draft across an arrival and a cell remount", () => {
       store: "half a re",
       active: 'textarea[aria-label="terminal input cell-a"]',
     });
+  });
+
+  it("a caret held by a pane closed mid-typing does not focus the composer on a later open", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await mountOpen();
+
+    await user.click(field());
+    await user.keyboard("half a re");
+
+    // Closed while the field holds focus: the composer unmounts holding the
+    // caret, and nothing mounts in the same commit to reclaim it.
+    act(() => setAnswerPaneOpen(SESSION, false));
+    expect(screen.queryByTestId(`answer-pane-${SESSION}`)).toBeNull();
+    // The end of the task the composer was taken down in: the hold is dropped.
+    await settle();
+
+    // Opened again much later, by the eye: nobody was typing in this field.
+    act(() => setAnswerPaneOpen(SESSION, true, { byUser: true }));
+    await settle();
+
+    expect(field().value).toBe("half a re");
+    expect(document.activeElement).not.toBe(field());
+  });
+
+  it("the focused cell's terminal yields only to a composer inside that cell", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const OTHER = "cell-b";
+    const host = speechHost();
+    const grid = (focusedId: string) => (
+      <MemoryRouter>
+        <TerminalView sessionId={SESSION} speech={host.speech} focused={focusedId === SESSION} speechBarVisible />
+        <TerminalView sessionId={OTHER} speech={host.speech} focused={focusedId === OTHER} speechBarVisible />
+      </MemoryRouter>
+    );
+    setAnswerPaneOpen(SESSION, true, { byUser: true });
+    const view = render(grid(SESSION));
+    await settle();
+
+    await user.click(field());
+    await user.keyboard("half a re");
+    expect(document.activeElement).toBe(field());
+
+    // The user moves to cell B: B's terminal takes the keyboard, because the
+    // composer holding focus is A's, not B's.
+    view.rerender(grid(OTHER));
+    await settle();
+
+    expect(activeName()).toBe(`textarea[aria-label="terminal input ${OTHER}"]`);
+    expect(getDraft(SESSION)).toBe("half a re");
   });
 });

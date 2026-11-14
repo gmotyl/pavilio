@@ -584,12 +584,6 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
   }, [caretRequest]);
 
   /**
-   * Set while this composer is being taken down, so a blur the removal itself
-   * causes is not read as the user leaving the field — see the effect below.
-   */
-  const unmounting = useRef(false);
-
-  /**
    * Focus and caret across a rebuilt cell — see `composerDrafts`.
    *
    * On mount: a caret held for this session means the composer this one
@@ -606,9 +600,8 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    *
    * The removal may or may not blur the field: Chrome moves focus to `<body>`
    * without a blur event, other engines and jsdom may fire one. Either way it
-   * comes after the hold is recorded, and `unmounting` makes `onBlur` ignore
-   * it — and React does not deliver an event on a node already detached from
-   * its root in the first place.
+   * comes after the hold is recorded, and React does not deliver an event on
+   * a node already detached from its root, so `onBlur` never sees it.
    *
    * The hold is dropped again at the end of this task: the rebuilt composer
    * mounts in the same commit and has taken it by then. One nobody took — the
@@ -620,7 +613,6 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    */
   useLayoutEffect(() => {
     const field = fieldRef.current;
-    unmounting.current = false;
     const held = takeHeldCaret(sessionId);
     if (field && held) {
       const length = field.value.length;
@@ -628,7 +620,6 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
       field.setSelectionRange(Math.min(held.start, length), Math.min(held.end, length));
     }
     return () => {
-      unmounting.current = true;
       if (!field || document.activeElement !== field) return;
       holdCaret(sessionId, { start: field.selectionStart, end: field.selectionEnd });
       setTimeout(() => releaseCaret(sessionId), 0);
@@ -1255,11 +1246,10 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               reconnectOnActivate(sessionId);
             }}
             // Leaving the field: a rebuild after this has no caret to give
-            // back. Not when the blur is the field's own removal — see the
-            // focus-and-caret effect above.
-            onBlur={() => {
-              if (!unmounting.current) releaseCaret(sessionId);
-            }}
+            // back. Defensive — a hold is only written during unmount, and the
+            // removal delivers no blur (see the focus-and-caret effect above),
+            // so this never drops a hold a rebuild is about to reclaim.
+            onBlur={() => releaseCaret(sessionId)}
             onPaste={onPaste}
           />
         </div>

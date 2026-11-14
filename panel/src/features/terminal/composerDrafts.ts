@@ -45,6 +45,11 @@
  *   mark nobody reclaimed in the rebuild itself (the composer switched off, the
  *   pane closed from the keyboard) cannot focus a field opened much later.
  *
+ * The zero-delay release assumes the rebuild happens within one commit — true
+ * for the grid's keyed maximize swap. If a rebuild ever spanned a macrotask,
+ * the caret would not be reclaimed and focus would fall back to the old
+ * behaviour; the draft is still kept.
+ *
  * In memory only, like the drafts and for the same reason.
  */
 const drafts = new Map<string, string>();

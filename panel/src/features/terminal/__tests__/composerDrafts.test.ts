@@ -9,7 +9,7 @@
  * them here while failing the user: those live in `AnswerComposer.send.test.tsx` ("send"),
  * against a composer that is actually mounted, typed into and sent from.
  *
- * Nothing in this file resets the module itself. The store is a tab-scoped
+ * Only the last test calls the reset itself, to pin what it clears. The store is a tab-scoped
  * singleton and `test-setup.ts` clears it between tests the same way it clears
  * the session store and the sidebar fold — so the first assertion of "keeps
  * drafts separate per session" is also the proof that the teardown ran: the
@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  __resetComposerDraftsForTests,
   clearDraft,
   getDraft,
   holdCaret,
@@ -107,5 +108,13 @@ describe("composerDrafts", () => {
     expect(takeHeldCaret("cell-a")).toBeNull();
     expect(takeHeldCaret("cell-b")).toEqual({ start: 5, end: 7 });
     expect(getDraft("cell-a")).toBe("reply to a");
+  });
+
+  it("the test teardown forgets held carets too", () => {
+    holdCaret("cell-a", { start: 3, end: 3 });
+
+    __resetComposerDraftsForTests();
+
+    expect(takeHeldCaret("cell-a")).toBeNull();
   });
 });
