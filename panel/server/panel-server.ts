@@ -59,6 +59,7 @@ import { isEnabled } from "./lib/autoSyncState.js";
 import { setupWebSocket, setupFileWatcher, getWss } from "./watcher.js";
 import { pruneDeadAgents } from "./lib/agent-registry.js";
 import { registerPanelServer } from "./lib/panel-listener.js";
+import { listenIpv6Loopback } from "./lib/ipv6-loopback.js";
 import { sweepNames } from "./lib/terminal-identity.js";
 import { listSessions } from "./lib/terminal-manager.js";
 import { listOsUsers } from "./lib/os-users.js";
@@ -314,6 +315,11 @@ export async function startPanel(
   // has no business starting — a scheduler committing to a repo out of a
   // process that is about to exit with PortUnavailableError is the worst of it.
   await bound;
+
+  // After the IPv4 bind, never instead of it: the IPv6 loopback listener is a
+  // convenience for Windows hosts (see lib/ipv6-loopback.ts) and never fails
+  // startup. It stays up across LAN rebinds — loopback is loopback either way.
+  await listenIpv6Loopback(server, port);
 
   setInterval(pruneDeadAgents, 30_000);
 
