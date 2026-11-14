@@ -72,4 +72,33 @@ describe("the answer pane and Escape", () => {
     expect(paneOf("cell-a")).not.toBeNull();
     expect(paneOf("cell-b")).not.toBeNull();
   });
+
+  it("escape in the pane bubbles out to its ancestors", async () => {
+    const { speech } = cellsHost();
+    renderCells(speech);
+    await settleCells();
+    fireEvent.click(eyeOf("cell-a"));
+    const pane = paneOf("cell-a")!;
+    expect(pane).not.toBeNull();
+
+    // A listener above the whole React tree: a stopPropagation anywhere on the
+    // pane's path would keep the key from reaching it.
+    const ancestor = vi.fn();
+    document.addEventListener("keydown", ancestor);
+    try {
+      pane.focus();
+      expect(fireEvent.keyDown(pane, { key: "Escape" })).toBe(true);
+      // From inside the pane too, not only its root.
+      const body = pane.querySelector<HTMLElement>(".answer-pane-body")!;
+      expect(fireEvent.keyDown(body, { key: "Escape" })).toBe(true);
+      expect(ancestor).toHaveBeenCalledTimes(2);
+      expect(ancestor.mock.calls.map(([event]) => (event as KeyboardEvent).key)).toEqual([
+        "Escape",
+        "Escape",
+      ]);
+    } finally {
+      document.removeEventListener("keydown", ancestor);
+    }
+    expect(paneOf("cell-a")).not.toBeNull();
+  });
 });

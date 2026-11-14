@@ -1138,7 +1138,6 @@ describe("rendering", () => {
             <AnswerPane
               sessionId="cell-a"
               speech={speechOf(h)}
-             
               send={NO_SEND}
             />
           </MemoryRouter>,

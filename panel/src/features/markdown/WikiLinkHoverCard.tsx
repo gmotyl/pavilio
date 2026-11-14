@@ -28,7 +28,7 @@ const EDGE_PX = 8;
  * Matches an open hover card. While one is up, Escape is the card's unless it
  * was typed into an editor (see `wikiLinkHoverCardTakesEscape`).
  */
-export const WIKILINK_HOVER_CARD_SELECTOR = "[data-wikilink-hover-card]";
+const WIKILINK_HOVER_CARD_SELECTOR = "[data-wikilink-hover-card]";
 
 /** Input types that are controls, not text fields: Escape on them is not typed into anything. */
 const NON_TEXT_INPUT_TYPES = ["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image", "hidden"];
@@ -45,10 +45,9 @@ const EDITOR_SELECTOR = [
 /**
  * Whether an open hover card consumes this Escape. Not when it was typed into
  * an editor: the card then closes without consuming it, and the editor's owner
- * (a terminal, a form, the answer pane) still gets the key. Another Escape
- * owner that listens earlier in the dispatch steps aside only when this is true.
+ * (a terminal, a form, the answer composer) still gets the key.
  */
-export function wikiLinkHoverCardTakesEscape(e: KeyboardEvent): boolean {
+function wikiLinkHoverCardTakesEscape(e: KeyboardEvent): boolean {
   if (e.key !== "Escape") return false;
   if (!document.querySelector(WIKILINK_HOVER_CARD_SELECTOR)) return false;
   const target = e.target instanceof Element ? e.target : null;
@@ -147,8 +146,7 @@ export default function WikiLinkHoverCard({ path, label, children }: WikiLinkHov
 
   // Escape closes the card wherever focus is: a hover-opened card never had focus.
   // Window capture phase, so the key is consumed before any outer Escape owner
-  // sees it (the answer pane would close itself); the pane's own window capture
-  // listener is registered earlier and steps aside via wikiLinkHoverCardTakesEscape.
+  // sees it — a dialog or viewer around the markdown would otherwise close too.
   // An Escape typed into an editor (an xterm cell, an input) is not consumed:
   // the card just closes and the key goes on to its owner.
   useEffect(() => {
