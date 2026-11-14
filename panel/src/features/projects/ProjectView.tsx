@@ -254,17 +254,17 @@ export default function ProjectView() {
   // section test it renders under — one rule, no second code path. A mockup is
   // framed content that should fill what is left of the viewport; every other
   // file is a document the page scrolls.
-  // Focus layout (md+ only): no title row, and the toggle moves into the tab
-  // row. The sidebar is read, never written — focus leaves it as it was.
-  const focus = useFocusLayout();
-  const leftSidebar = useSidebarState("leftSidebar");
-
   const fillsHeight = Boolean(
     section &&
       !SPECIAL_SECTIONS.has(section) &&
       selectedFile &&
       isMockupFile(selectedFile),
   );
+
+  // Focus layout (md+ only): no title row, and the toggle moves into the tab
+  // row. The sidebar is read, never written — focus leaves it as it was.
+  const focus = useFocusLayout();
+  const leftSidebar = useSidebarState("leftSidebar");
 
   return (
     <div className={`relative${fillsHeight ? " md:h-full" : ""}`}>

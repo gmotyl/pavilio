@@ -287,6 +287,16 @@ code, pre, .font-mono {
   padding-left: 24px;
 }
 
+/* The mirror image on the right: the focus toggle at the right end of the
+ * breadcrumb row (`px-6`) or the focus tab row (inside the page's `p-6`) ends
+ * 24px from `<main>`'s right edge, while the collapsed right sidebar toggle
+ * (`.sidebar-toggle`, 8px `right` + 24px wide) reaches 32px in, in the same
+ * top band. 16px more puts the button's right edge at 40px — 8px clear.
+ * Checked against `.sidebar-toggle` by `ProjectView.focus.test.tsx`. */
+.focus-toggle-sidebar-inset {
+  margin-right: 16px;
+}
+
 /* Diff viewer */
 .diff-line-add {
   background: var(--green-dim);

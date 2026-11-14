@@ -38,9 +38,9 @@ function press(target: EventTarget, init: KeyboardEventInit): KeyboardEvent {
 
 const ALT_SHIFT_F = { key: "Ï", code: "KeyF", altKey: true, shiftKey: true };
 
-function renderLayout() {
+function renderLayout(entry = "/project/pavilio/iterm") {
   return render(
-    <MemoryRouter initialEntries={["/project/pavilio/iterm"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <FloatingActionProvider>
         <TerminalDrawerProvider>
           <Layout>
@@ -121,6 +121,25 @@ describe("Layout focus layout", () => {
         "aria-expanded",
         String(expanded),
       );
+      unmount();
+    }
+  });
+
+  it("focus hides the breadcrumb row on project pages only", () => {
+    writePreference(preferences.focusLayout, true);
+
+    // No tab row on these pages to take the toggle over, so the breadcrumb
+    // row stays — and with it the only way back out of focus.
+    for (const entry of ["/settings", "/project/pavilio/time"]) {
+      const { unmount } = renderLayout(entry);
+      expect(breadcrumbRow()).toBeInTheDocument();
+      expect(breadcrumbRow()).toContainElement(screen.getByTestId("focus-layout-toggle"));
+      unmount();
+    }
+
+    for (const entry of ["/project/pavilio", "/project/pavilio/iterm"]) {
+      const { unmount } = renderLayout(entry);
+      expect(breadcrumbRow()).not.toBeInTheDocument();
       unmount();
     }
   });

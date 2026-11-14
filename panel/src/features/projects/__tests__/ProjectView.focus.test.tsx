@@ -4,7 +4,12 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { installMatchMedia } from "../../../test-utils";
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
-import { HAMBURGER, cssPx, leftPadding } from "../../shell/__tests__/hamburgerGeometry";
+import {
+  HAMBURGER,
+  cssPx,
+  leftPadding,
+  rightPadding,
+} from "../../shell/__tests__/hamburgerGeometry";
 
 vi.mock("../../realtime/useWebSocket", () => ({
   useWebSocket: () => ({ lastMessage: null }),
@@ -195,5 +200,45 @@ describe("ProjectView focus layout", () => {
     renderShell();
     await flush();
     expect(tabRow()).not.toHaveClass("tab-row-hamburger-inset");
+  });
+
+  it("focus toggle clears the collapsed right sidebar toggle in both rows", async () => {
+    // jsdom does no layout, so add up what does it, in px from <main>'s right
+    // edge. The sidebar toggle is placed against the layout container, which
+    // a collapsed (zero-width) right sidebar leaves flush with <main>.
+    const sidebarToggleReach = () =>
+      parseFloat(screen.getByTestId("sidebar-toggle-right").style.right) +
+      cssPx(".sidebar-toggle", "width");
+    const inset = cssPx(".focus-toggle-sidebar-inset", "margin-right");
+
+    writePreference(preferences.rightSidebarExpanded, false);
+    writePreference(preferences.focusLayout, true);
+    const focused = renderShell();
+    await flush();
+    // Focus: the toggle ends the tab row, which sits inside the page padding.
+    let toggle = within(tabRow()).getByTestId("focus-layout-toggle");
+    expect(toggle).toHaveClass("focus-toggle-sidebar-inset");
+    expect(rightPadding(screen.getByTestId("project-view")) + inset).toBeGreaterThan(
+      sidebarToggleReach(),
+    );
+    focused.unmount();
+
+    // Normal: the toggle ends the breadcrumb row, inside its own padding.
+    writePreference(preferences.focusLayout, false);
+    const normal = renderShell();
+    await flush();
+    toggle = within(breadcrumbRow()!).getByTestId("focus-layout-toggle");
+    expect(toggle).toHaveClass("focus-toggle-sidebar-inset");
+    expect(rightPadding(breadcrumbRow()!) + inset).toBeGreaterThan(sidebarToggleReach());
+    normal.unmount();
+
+    // Expanded: the sidebar toggle straddles the seam, reaching only
+    // TOGGLE_SEAM_INSET (12px) into <main> — inside the rows' 24px padding.
+    writePreference(preferences.rightSidebarExpanded, true);
+    renderShell();
+    await flush();
+    expect(screen.getByTestId("focus-layout-toggle")).not.toHaveClass(
+      "focus-toggle-sidebar-inset",
+    );
   });
 });

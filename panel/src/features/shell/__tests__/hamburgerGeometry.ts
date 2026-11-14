@@ -92,6 +92,12 @@ export function leftPadding(el: Element): number {
   return found ? Number(found[1]) * UNIT : 0;
 }
 
+/** The right inset a `p-N`, `px-N` or `pr-N` class puts on an element. */
+export function rightPadding(el: Element): number {
+  const found = el.className.match(/(?:^|\s)p[xr]?-(\d+)(?:\s|$)/);
+  return found ? Number(found[1]) * UNIT : 0;
+}
+
 /** The `gap-N` a flex row puts between its children. */
 export function flexGap(el: Element): number {
   const found = el.className.match(/(?:^|\s)gap-(\d+)(?:\s|$)/);

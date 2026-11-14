@@ -4,6 +4,7 @@ import { matchPath } from "react-router-dom";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { useIsMobile } from "./useIsMobile";
+import { useSidebarState } from "./useSidebarState";
 
 /**
  * The focus layout: the shell breadcrumb row and the project title row hidden,
@@ -37,10 +38,17 @@ export function isFocusablePath(pathname: string): boolean {
  * The control that flips the focus layout. Rendered in the breadcrumb row
  * normally and at the right end of the page-tab row in focus; nothing below
  * `md`, where focus does not apply.
+ *
+ * Both rows put it at the right end of `<main>`, in the same top band as the
+ * right sidebar's collapsed toggle — which is viewport-anchored, so it lands on
+ * this button's right edge. While that sidebar is collapsed the button steps
+ * in by `.focus-toggle-sidebar-inset`; expanded, the sidebar toggle straddles
+ * the seam and reaches too little into `<main>` to matter.
  */
 export default function FocusToggle() {
   const { enabled, toggle } = useFocusLayout();
   const isMobile = useIsMobile();
+  const rightSidebar = useSidebarState("rightSidebar");
   if (isMobile) return null;
 
   const label = enabled ? "Exit focus layout" : "Focus layout";
@@ -53,7 +61,9 @@ export default function FocusToggle() {
       aria-pressed={enabled}
       aria-label={label}
       title={`${label} (Alt+Shift+F)`}
-      className="flex items-center px-1.5 py-1 rounded-md transition-colors"
+      className={`flex items-center px-1.5 py-1 rounded-md transition-colors${
+        rightSidebar.expanded ? "" : " focus-toggle-sidebar-inset"
+      }`}
       style={{ color: enabled ? "var(--accent)" : "var(--text-tertiary)" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
