@@ -29,7 +29,7 @@ function sameDirectory(a: string, b: string): boolean {
 }
 
 function runSetup(script: string, outRoot: string, workspaceRoot?: string) {
-  const env = { ...process.env, PAVILIO_OPENCODE_OUT: outRoot };
+  const env: NodeJS.ProcessEnv = { ...process.env, PAVILIO_OPENCODE_OUT: outRoot };
   delete env.PAVILIO_WORKSPACE_ROOT;
   if (workspaceRoot !== undefined) env.PAVILIO_WORKSPACE_ROOT = workspaceRoot;
   return spawnSync("bash", [script], { env, encoding: "utf8" });
