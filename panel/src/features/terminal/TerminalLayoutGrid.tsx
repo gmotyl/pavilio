@@ -520,6 +520,9 @@ function TerminalCell({
 
   return (
     <div
+      // Read by `focusedTerminalSurface`: focus on this cell's xterm or header
+      // makes it the surface's focused cell (the Alt+Shift+C target).
+      data-terminal-cell={session.id}
       className="relative w-full overflow-hidden rounded-md group flex flex-col"
       style={{
         height: "100%",
@@ -536,6 +539,7 @@ function TerminalCell({
     >
       {/* Cell header — the whole row is a drag handle for swapping cells */}
       <div
+        data-terminal-cell-header=""
         className="flex items-center gap-1.5 shrink-0"
         // A definite height (mockup S's 30px) so the mark below can be a
         // fixed square: `aspect-ratio` on a stretched item in an auto-height

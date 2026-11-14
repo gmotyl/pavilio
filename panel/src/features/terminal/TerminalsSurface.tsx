@@ -224,6 +224,7 @@ export function TerminalsSurface({
   return (
     <TerminalFullscreenLayer open={terminalLayerOpen} kind="terminal">
       <div
+        ref={fullscreen?.surfaceRef}
         className={`flex flex-col relative ${
           fillsBox
             ? "h-full"
