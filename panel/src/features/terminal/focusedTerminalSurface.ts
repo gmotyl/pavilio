@@ -18,7 +18,12 @@
 interface SurfaceEntry {
   root: HTMLElement | null;
   detach: (() => void) | null;
-  /** When this surface last took focus (or registered), on a shared counter. */
+  /**
+   * When this surface last took focus, on a shared counter; 0 until it does, so
+   * a surface that mounts without focus (the drawer opened by Cmd+B) never
+   * outranks one that really held focus. A lone never-focused surface still
+   * wins, since the pick starts below 0.
+   */
   seq: number;
   focusedCell: string | null;
   layerOpen: boolean;
@@ -31,7 +36,7 @@ const targets = new WeakMap<Event, string | null>();
 function entry(id: string): SurfaceEntry {
   let e = surfaces.get(id);
   if (!e) {
-    e = { root: null, detach: null, seq: ++clock, focusedCell: null, layerOpen: false };
+    e = { root: null, detach: null, seq: 0, focusedCell: null, layerOpen: false };
     surfaces.set(id, e);
   }
   return e;

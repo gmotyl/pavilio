@@ -90,11 +90,30 @@ async function renderTwo() {
   await settleCells();
 }
 
+/** The project tab alone; `drawer(true)` mounts the drawer next to it, `drawer(false)` drops it. */
+async function renderTabWithDrawerToggle() {
+  const { speech } = cellsHost();
+  const tree = (withDrawer: boolean) => (
+    <MemoryRouter>
+      <Surface name="tab" ids={["cell-a", "cell-b"]} speech={speech} />
+      {withDrawer && <Surface name="drawer" ids={["cell-c", "cell-d"]} speech={speech} />}
+    </MemoryRouter>
+  );
+  const { rerender } = render(tree(false));
+  await settleCells();
+  return async (withDrawer: boolean) => {
+    rerender(tree(withDrawer));
+    await settleCells();
+  };
+}
+
 const xterm = (id: string) => screen.getByLabelText(`terminal input ${id}`);
 const toolbarButton = (surface: "tab" | "drawer") =>
   screen
     .getByTestId(`surface-${surface}`)
     .querySelector<HTMLElement>('[data-testid="terminal-toolbar-maximize"]')!;
+const cellHeader = (id: string) =>
+  document.querySelector<HTMLElement>(`[data-terminal-cell="${id}"] [data-terminal-cell-header]`)!;
 const layers = () => Array.from(document.querySelectorAll<HTMLElement>("[data-terminal-fullscreen]"));
 const layer = (kind: "cell" | "terminal") =>
   document.querySelector<HTMLElement>(`[data-terminal-fullscreen="${kind}"]`);
@@ -216,5 +235,83 @@ describe("fullscreen shortcuts", () => {
     await press("KeyC");
     expect(layers()).toHaveLength(1);
     expect(layer("cell")).toContainElement(xterm("cell-d"));
+  });
+
+  it("a surface mounted without taking focus does not beat the one that last held it", async () => {
+    const drawer = await renderTabWithDrawerToggle();
+    xterm("cell-a").focus();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+
+    // The drawer opens (Cmd+B does not focus it): the tab is still the target.
+    await drawer(true);
+    await press("KeyT", document.body);
+    expect(layers()).toHaveLength(1);
+    expect(layer("terminal")).toContainElement(xterm("cell-a"));
+    expect(layer("terminal")).not.toContainElement(xterm("cell-c"));
+  });
+
+  it("the surface holding focus beats a surface mounted after it", async () => {
+    const drawer = await renderTabWithDrawerToggle();
+    xterm("cell-a").focus();
+    await drawer(true);
+    // A pointer-down on the drawer's header that moves no focus (Safari)
+    // makes the drawer the latest used, but the tab still holds focus.
+    fireEvent.pointerDown(cellHeader("cell-c"));
+    expect(document.activeElement).toBe(xterm("cell-a"));
+
+    await press("KeyT");
+    expect(layers()).toHaveLength(1);
+    expect(layer("terminal")).toContainElement(xterm("cell-a"));
+    expect(layer("terminal")).not.toContainElement(xterm("cell-c"));
+  });
+
+  it("a pointer-down on a cell header makes it the focused cell without a focus change", async () => {
+    await renderTwo();
+    xterm("cell-a").focus();
+    fireEvent.pointerDown(cellHeader("cell-b"));
+    expect(document.activeElement).toBe(xterm("cell-a"));
+
+    await press("KeyC");
+    expect(layers()).toHaveLength(1);
+    expect(layer("cell")).toContainElement(xterm("cell-b"));
+    expect(layer("cell")).not.toContainElement(xterm("cell-a"));
+  });
+
+  it("after the focused drawer unmounts, Alt+Shift+T acts on the tab", async () => {
+    const drawer = await renderTabWithDrawerToggle();
+    await drawer(true);
+    xterm("cell-a").focus();
+    xterm("cell-c").focus();
+
+    await drawer(false);
+    expect(screen.queryByTestId("surface-drawer")).toBeNull();
+    await press("KeyT", document.body);
+    expect(layers()).toHaveLength(1);
+    expect(layer("terminal")).toContainElement(xterm("cell-a"));
+  });
+
+  it("Alt+Shift+T over an open cell layer switches to the terminal layer", async () => {
+    await renderTwo();
+    xterm("cell-a").focus();
+    await press("KeyC");
+    expect(layer("cell")).toContainElement(xterm("cell-a"));
+
+    await press("KeyT");
+    expect(layers()).toHaveLength(1);
+    expect(layer("terminal")).toContainElement(xterm("cell-a"));
+    expect(layer("terminal")).toContainElement(xterm("cell-b"));
+  });
+
+  it("Alt+Shift+C over an open terminal layer switches to the focused cell's layer", async () => {
+    await renderTwo();
+    xterm("cell-b").focus();
+    await press("KeyT");
+    expect(layer("terminal")).toContainElement(xterm("cell-b"));
+
+    await press("KeyC");
+    expect(layers()).toHaveLength(1);
+    expect(layer("cell")).toContainElement(xterm("cell-b"));
+    expect(layer("cell")).not.toContainElement(xterm("cell-a"));
   });
 });
