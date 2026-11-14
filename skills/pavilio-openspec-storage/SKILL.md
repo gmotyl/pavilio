@@ -23,7 +23,7 @@ openspec/
       specs/
         <capability>/spec.md     — requirement deltas (ADDED/MODIFIED/REMOVED)
     archive/
-      YYYY-MM-DD-<change-id>/     — a shipped change, moved here on archive
+      YYYY-MM-DD-<slug>/          — a shipped change, moved here on archive (one date only)
   specs/
     <capability>/spec.md         — living specs: current behavior, one file per capability
 ```
@@ -101,7 +101,7 @@ One logical change coordinating several repositories uses **one shared change id
 Archival is implemented in skill logic — **git-mv + markdown fold, exactly as today** — never by shelling out to an OpenSpec binary. See [[pavilio-archive-plan]] for the step list. In summary:
 
 1. Fold the change's delta specs (`changes/<id>/specs/<capability>/spec.md`) into the living specs (`openspec/specs/<capability>/spec.md`): `ADDED` appends, `MODIFIED` rewrites in place, `REMOVED` deletes.
-2. `git mv` the change directory to `openspec/changes/archive/YYYY-MM-DD-<change-id>/`.
+2. `git mv` the change directory to `openspec/changes/archive/<archived-name>/` — the change id unchanged when it already starts with `YYYY-MM-DD-`, otherwise `<merge-date>-<change-id>`. The archived name never carries two dates.
 
 Validation is skill-level (structure + delta-shape checks), not an external binary. **A fold or validation failure leaves the active change directory and the living specs unchanged** and reports the error — archival is all-or-nothing.
 
