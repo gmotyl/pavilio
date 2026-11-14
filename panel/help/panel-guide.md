@@ -25,7 +25,7 @@ The `Alt+Shift` shortcuts work even while a terminal has focus — the terminal 
 - **Left sidebar** — projects list, active agents, git summary
 - **Right sidebar** — file tree for current project, skills list
 - **Sidebar toggles** — collapse/expand buttons on sidebar edges
-- **Focus layout** — the focus toggle (or `Alt+Shift+F`) hides the breadcrumb row and the project title row on project pages (`/project/<name>` and its section tabs, except the time page) to give the page more room; page tabs, terminal strip and cells stay. Other pages keep both rows. The toggle sits in the breadcrumb row, and at the right end of the page-tab row while focus is on. Desktop only: on a phone both rows always show.
+- **Focus layout** — the focus toggle (or `Alt+Shift+F`) hides the breadcrumb row and the project title row on project pages (`/project/<name>` and its section tabs, except the time page) to give the page more room; page tabs, terminal strip and cells stay. Other pages keep both rows. The toggle sits in the breadcrumb row, and at the right end of the page-tab row while focus is on. Desktop only: on a phone focus layout is inactive, so the breadcrumb row stays — and the project title row is desktop-only anyway.
 
 ## Features
 
