@@ -393,6 +393,8 @@ export interface Channel {
   arriveLocal(utterance: Utterance): void;
   /** Forgets a key's queue, heard set and language entirely. */
   drop(sessionId: string): void;
+  /** Realtime reconnects seen since mount; monotonic, 0 on mount. A warming opportunity. */
+  reconnects: number;
 }
 
 const LATEST_URL = "/api/speech/latest";
@@ -966,5 +968,6 @@ export function useUtteranceChannel({
     markHeard,
     arriveLocal,
     drop,
+    reconnects,
   };
 }
