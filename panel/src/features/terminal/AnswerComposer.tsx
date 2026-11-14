@@ -11,7 +11,14 @@ import {
   consumeRetryOffer,
   useRetryOffered,
 } from "./answerRetry";
-import { clearDraft, getDraft, setDraft } from "./composerDrafts";
+import {
+  clearDraft,
+  getDraft,
+  holdCaret,
+  releaseCaret,
+  setDraft,
+  takeHeldCaret,
+} from "./composerDrafts";
 import { imageFromClipboardItems, uploadPastedImage } from "./imagePaste";
 import { submitToPty, type SubmitFailure } from "./ptySubmit";
 import { projectOfSession } from "./sessionProject";
@@ -152,6 +159,22 @@ function slashTypedAt(before: string, after: string, caret: number): number | nu
 /** The file a path ends in — the chip's whole text. */
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+/**
+ * Whether a composer field inside `within` holds the keyboard — the reply being
+ * typed there is the user's, and the pane's root focus and the terminal's own
+ * focus-on-visible both yield to it (see the focus-and-caret effect in
+ * {@link AnswerComposer}).
+ */
+export function composerFieldHasFocus(within: Element | null): boolean {
+  const active = document.activeElement;
+  return (
+    within !== null &&
+    active instanceof HTMLTextAreaElement &&
+    active.classList.contains("answer-pane-composer-field") &&
+    within.contains(active)
+  );
 }
 
 export interface AnswerComposerProps {
@@ -559,6 +582,49 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     pendingCaret.current = null;
     field.setSelectionRange(caret, caret);
   }, [caretRequest]);
+
+  /**
+   * Focus and caret across a rebuilt cell — see `composerDrafts`.
+   *
+   * On mount: a caret held for this session means the composer this one
+   * replaces was taken down while the user was typing in it, so this one takes
+   * focus and the selection back, clamped to the restored text. With nothing
+   * held (the eye, an auto-open on an arrival) nothing is focused — the field
+   * still has no autofocus.
+   *
+   * On unmount: if the field holds focus, its selection is held for the next
+   * mount. A LAYOUT effect on purpose: React runs layout cleanups before it
+   * removes the host nodes, so here the field is still attached, still
+   * `document.activeElement` and its selection still readable. A passive
+   * cleanup runs after the removal, when focus is already on `<body>`.
+   *
+   * The removal may or may not blur the field: Chrome moves focus to `<body>`
+   * without a blur event, other engines and jsdom may fire one. Either way it
+   * comes after the hold is recorded, and React does not deliver an event on
+   * a node already detached from its root, so `onBlur` never sees it.
+   *
+   * The hold is dropped again at the end of this task: the rebuilt composer
+   * mounts in the same commit and has taken it by then. One nobody took — the
+   * composer switched off in the rebuilt pane, the pane closed from the
+   * keyboard or with the speech row — must not focus a field opened later.
+   *
+   * Taking focus here counts as the user's own: `onFocus` runs and may repair
+   * the socket, which is fine — the user was already in this field.
+   */
+  useLayoutEffect(() => {
+    const field = fieldRef.current;
+    const held = takeHeldCaret(sessionId);
+    if (field && held) {
+      const length = field.value.length;
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(Math.min(held.start, length), Math.min(held.end, length));
+    }
+    return () => {
+      if (!field || document.activeElement !== field) return;
+      holdCaret(sessionId, { start: field.selectionStart, end: field.selectionEnd });
+      setTimeout(() => releaseCaret(sessionId), 0);
+    };
+  }, [sessionId]);
 
   /**
    * The composer's own load of the known skill names — see `knownSkills`.
@@ -1179,6 +1245,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
               dismissAttentionOnArrival(sessionId);
               reconnectOnActivate(sessionId);
             }}
+            // Leaving the field: a rebuild after this has no caret to give
+            // back. Defensive — a hold is only written during unmount, and the
+            // removal delivers no blur (see the focus-and-caret effect above),
+            // so this never drops a hold a rebuild is about to reclaim.
+            onBlur={() => releaseCaret(sessionId)}
             onPaste={onPaste}
           />
         </div>

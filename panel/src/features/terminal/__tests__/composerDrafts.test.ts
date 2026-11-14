@@ -9,7 +9,7 @@
  * them here while failing the user: those live in `AnswerComposer.send.test.tsx` ("send"),
  * against a composer that is actually mounted, typed into and sent from.
  *
- * Nothing in this file resets the module itself. The store is a tab-scoped
+ * Only the last test calls the reset itself, to pin what it clears. The store is a tab-scoped
  * singleton and `test-setup.ts` clears it between tests the same way it clears
  * the session store and the sidebar fold — so the first assertion of "keeps
  * drafts separate per session" is also the proof that the teardown ran: the
@@ -17,7 +17,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { clearDraft, getDraft, setDraft } from "../composerDrafts";
+import {
+  __resetComposerDraftsForTests,
+  clearDraft,
+  getDraft,
+  holdCaret,
+  releaseCaret,
+  setDraft,
+  takeHeldCaret,
+} from "../composerDrafts";
 
 describe("composerDrafts", () => {
   it("answers an empty string for a session that has never been typed in", () => {
@@ -64,5 +72,49 @@ describe("composerDrafts", () => {
 
     expect(getDraft("cell-a")).toBe("");
     expect(getDraft("cell-b")).toBe("reply to b");
+  });
+
+  it("takeHeldCaret returns the held caret once", () => {
+    expect(takeHeldCaret("cell-a")).toBeNull();
+
+    holdCaret("cell-a", { start: 4, end: 9 });
+
+    // One rebuilt composer reclaims the field; a second mount for the same
+    // session (the eye, an auto-open) must not be handed focus as well.
+    expect(takeHeldCaret("cell-a")).toEqual({ start: 4, end: 9 });
+    expect(takeHeldCaret("cell-a")).toBeNull();
+  });
+
+  it("a blur releases the held caret", () => {
+    holdCaret("cell-a", { start: 3, end: 3 });
+
+    releaseCaret("cell-a");
+
+    expect(takeHeldCaret("cell-a")).toBeNull();
+  });
+
+  it("drafts and carets do not leak between sessions", () => {
+    setDraft("cell-a", "reply to a");
+    holdCaret("cell-a", { start: 2, end: 2 });
+
+    expect(getDraft("cell-b")).toBe("");
+    expect(takeHeldCaret("cell-b")).toBeNull();
+
+    // A release is as narrow as a hold: leaving one cell's field must not
+    // drop the caret another cell is about to reclaim.
+    holdCaret("cell-b", { start: 5, end: 7 });
+    releaseCaret("cell-a");
+
+    expect(takeHeldCaret("cell-a")).toBeNull();
+    expect(takeHeldCaret("cell-b")).toEqual({ start: 5, end: 7 });
+    expect(getDraft("cell-a")).toBe("reply to a");
+  });
+
+  it("the test teardown forgets held carets too", () => {
+    holdCaret("cell-a", { start: 3, end: 3 });
+
+    __resetComposerDraftsForTests();
+
+    expect(takeHeldCaret("cell-a")).toBeNull();
   });
 });
