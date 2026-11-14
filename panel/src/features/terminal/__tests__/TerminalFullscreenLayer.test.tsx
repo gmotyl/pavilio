@@ -315,4 +315,71 @@ describe("TerminalFullscreenLayer", () => {
     expect(hostNode.className).toBe("contents");
     expect(document.querySelector('[data-holder="cell-a"]')).toBe(holder);
   });
+
+  describe("keyboard focus stays inside an open layer", () => {
+    const FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusablesIn = (host: HTMLElement) => Array.from(host.querySelectorAll<HTMLElement>(FOCUSABLE));
+
+    it("Tab from the last control wraps to the first, Shift+Tab from the first to the last", async () => {
+      await renderSurface();
+      fireEvent.click(eyeOf("cell-a"));
+      await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+      const host = layer("cell")!;
+      const items = focusablesIn(host);
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      expect(last.closest(".xterm")).toBeNull();
+
+      last.focus();
+      expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
+      expect(document.activeElement).toBe(first);
+
+      expect(fireEvent.keyDown(first, { key: "Tab", shiftKey: true })).toBe(false);
+      expect(document.activeElement).toBe(last);
+    });
+
+    it("Tab inside the xterm is left to the terminal", async () => {
+      await renderSurface();
+      await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+      const host = layer("cell")!;
+      // With no pane open the terminal's textarea is the layer's last stop:
+      // exactly where a trap would wrongly take the key.
+      const items = focusablesIn(host);
+      expect(items[items.length - 1]).toBe(terminalOf("cell-a"));
+      const reached = terminalKeys("cell-a");
+      terminalOf("cell-a").focus();
+
+      expect(fireEvent.keyDown(terminalOf("cell-a"), { key: "Tab" })).toBe(true);
+      expect(fireEvent.keyDown(terminalOf("cell-a"), { key: "Tab", shiftKey: true })).toBe(true);
+      expect(reached).toHaveBeenCalledTimes(2);
+      expect(document.activeElement).toBe(terminalOf("cell-a"));
+    });
+
+    it("opening moves focus in, closing gives it back", async () => {
+      await renderSurface();
+      const outside = screen.getByTestId("terminal-toolbar-reconnect");
+      outside.focus();
+      expect(document.activeElement).toBe(outside);
+
+      // A cell layer opened while focus is outside it: focus lands on its xterm.
+      await click(screen.getByTestId("terminal-cell-fullscreen-cell-a"));
+      expect(document.activeElement).toBe(terminalOf("cell-a"));
+
+      // Closed from its own exit control: focus goes back where it was.
+      const exit = screen.getByTestId("terminal-cell-fullscreen-cell-a");
+      exit.focus();
+      await click(exit);
+      expect(layer("cell")).toBeNull();
+      expect(document.activeElement).toBe(outside);
+    });
+
+    it("a terminal layer keeps focus that is already inside it", async () => {
+      await renderSurface();
+      terminalOf("cell-b").focus();
+      await click(screen.getByTestId("terminal-toolbar-fullscreen"));
+      expect(layer("terminal")).not.toBeNull();
+      expect(document.activeElement).toBe(terminalOf("cell-b"));
+    });
+  });
 });
