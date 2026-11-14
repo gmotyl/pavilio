@@ -1,5 +1,15 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Maximize2, LayoutGrid, X, ChevronDown, FolderGit2, RotateCw } from "lucide-react";
+import {
+  Plus,
+  Maximize,
+  Maximize2,
+  Minimize2,
+  LayoutGrid,
+  X,
+  ChevronDown,
+  FolderGit2,
+  RotateCw,
+} from "lucide-react";
 import type { SessionMeta, CreateSessionOpts } from "./useTerminalSessions";
 import { nextProjectName, sessionLabel } from "./useTerminalSessions";
 import { useProjectColors } from "./useProjectColors";
@@ -32,6 +42,13 @@ interface Props {
   minimisedIds?: string[];
   /** Bring a minimised session back into the grid (and focus it). */
   onRestore?: (id: string) => void;
+  /** Whether this surface's terminal fullscreen layer is open. */
+  fullscreen?: boolean;
+  /**
+   * Toggle the terminal fullscreen layer. Absent, the control is not rendered:
+   * the surface offers no layer (below `md`, or a caller that wires none).
+   */
+  onToggleFullscreen?: () => void;
 }
 
 export function TerminalToolbar({
@@ -50,6 +67,8 @@ export function TerminalToolbar({
   onApplyPreset,
   minimisedIds = NONE,
   onRestore,
+  fullscreen = false,
+  onToggleFullscreen,
 }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
@@ -417,6 +436,23 @@ export function TerminalToolbar({
         >
           <RotateCw size={13} />
         </button>
+        {onToggleFullscreen && (
+          // ⛶ enters the layer, ⤡ leaves it — the same pair as the cell header.
+          <button
+            type="button"
+            data-testid="terminal-toolbar-fullscreen"
+            onClick={onToggleFullscreen}
+            aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen terminal"}
+            aria-pressed={fullscreen}
+            className="flex items-center px-2.5 transition-colors"
+            style={{ color: "var(--text-secondary)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            title={fullscreen ? "Exit fullscreen" : "Fullscreen: tab strip and grid over the whole panel"}
+          >
+            {fullscreen ? <Minimize2 size={13} /> : <Maximize size={13} />}
+          </button>
+        )}
         <button
           type="button"
           data-testid="terminal-toolbar-maximize"

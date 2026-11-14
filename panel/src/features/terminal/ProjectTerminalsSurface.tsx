@@ -7,6 +7,7 @@ import { useTerminalSessions } from "./useTerminalSessions";
 import type { CreateSessionOpts } from "./useTerminalSessions";
 import { createTerminalSession } from "./createTerminalSession";
 import { useTerminalMaximized } from "./useTerminalMaximized";
+import { useTerminalFullscreen } from "./useTerminalFullscreen";
 import { useAllTerminalSessions } from "./useAllTerminalSessions";
 import type { TerminalHandle } from "./TerminalView";
 import { usePanelSpeech } from "../speech/SpeechHostProvider";
@@ -40,6 +41,9 @@ export default function ProjectTerminalsSurface({
   // hosting it would be two players and two armed cells. Still passed down to
   // the grid explicitly: the prop is what proves this surface is wired.
   const speech = usePanelSpeech();
+  // This surface's own fullscreen layer: local, never persisted, closed by any
+  // navigation and dropped with the surface.
+  const fullscreen = useTerminalFullscreen();
 
   const createTerminal = useCallback(
     async (opts: CreateSessionOpts = {}) => {
@@ -100,6 +104,7 @@ export default function ProjectTerminalsSurface({
       onMinimise={terminal.minimise}
       onRestore={terminal.restore}
       speech={speech}
+      fullscreen={fullscreen}
       fill={fill}
     />
   );

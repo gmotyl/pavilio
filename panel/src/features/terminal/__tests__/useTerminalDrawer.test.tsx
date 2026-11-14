@@ -68,8 +68,6 @@ function Probe() {
     open,
     visible,
     suppressed,
-    overlayActive,
-    setOverlayActive,
     width,
     maxWidth,
     setWidth,
@@ -82,13 +80,6 @@ function Probe() {
       <span data-testid="open">{String(open)}</span>
       <span data-testid="visible">{String(visible)}</span>
       <span data-testid="suppressed">{String(suppressed)}</span>
-      <span data-testid="overlay-active">{String(overlayActive)}</span>
-      <button data-testid="overlay-on" onClick={() => setOverlayActive(true)}>
-        overlay on
-      </button>
-      <button data-testid="overlay-off" onClick={() => setOverlayActive(false)}>
-        overlay off
-      </button>
       <span data-testid="width">{width}</span>
       <span data-testid="max">{maxWidth}</span>
       <button data-testid="grow" onClick={() => setWidth(5000)}>
@@ -231,44 +222,6 @@ describe("useTerminalDrawer", () => {
     expect(openPref()).toBe(true);
   });
 
-  it("lets an overlay suppress visibility without touching the stored open intent", () => {
-    setOpenPref(true);
-    setup("/project/vector/memo");
-    expect(screen.getByTestId("visible")).toHaveTextContent("true");
-    expect(screen.getByTestId("overlay-active")).toHaveTextContent("false");
-
-    act(() => {
-      fireEvent.click(screen.getByTestId("overlay-on"));
-    });
-    expect(screen.getByTestId("overlay-active")).toHaveTextContent("true");
-    expect(screen.getByTestId("visible")).toHaveTextContent("false");
-    // intent untouched, in memory and on disk
-    expect(screen.getByTestId("open")).toHaveTextContent("true");
-    expect(openPref()).toBe(true);
-
-    act(() => {
-      fireEvent.click(screen.getByTestId("overlay-off"));
-    });
-    expect(screen.getByTestId("visible")).toHaveTextContent("true");
-  });
-
-  it("never persists overlayActive", () => {
-    setup("/project/vector/memo");
-    act(() => {
-      fireEvent.click(screen.getByTestId("overlay-on"));
-    });
-    // Nowhere at all: not in the workspace document, and not in browser
-    // storage either — the drawer writes nothing to the latter any more.
-    const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> })
-      .__PAVILIO_PREFS__!;
-    expect(Object.keys(doc).some((k) => k.toLowerCase().includes("overlay"))).toBe(false);
-    expect(localStorage.length).toBe(0);
-    // and a fresh mount starts with no overlay
-    cleanup();
-    setup("/project/vector/memo");
-    expect(screen.getByTestId("overlay-active")).toHaveTextContent("false");
-  });
-
   it("caps width at viewport minus the main-content floor, not a fixed 900", () => {
     setup("/project/vector/memo");
     // jsdom viewport is 1024 wide → 1024 - 360 = 664
@@ -408,16 +361,6 @@ describe("useTerminalDrawer", () => {
       expect(screen.getByTestId("visible")).toHaveTextContent("false");
       act(() => {
         fireEvent.click(screen.getByTestId("to-memo"));
-      });
-      expect(screen.getByTestId("visible")).toHaveTextContent("true");
-
-      // and still by a conflicting overlay
-      act(() => {
-        fireEvent.click(screen.getByTestId("overlay-on"));
-      });
-      expect(screen.getByTestId("visible")).toHaveTextContent("false");
-      act(() => {
-        fireEvent.click(screen.getByTestId("overlay-off"));
       });
       expect(screen.getByTestId("visible")).toHaveTextContent("true");
 
