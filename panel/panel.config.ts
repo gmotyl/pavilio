@@ -1,6 +1,7 @@
-import { resolve } from "path";
+import { isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { realpathSync } from "fs";
 import { machineHostname } from "./server/lib/machineName.js";
 import { preferencesPathFor } from "./server/lib/preferencesPath.js";
 
@@ -9,7 +10,39 @@ const __dirname = dirname(__filename);
 
 /** One level above panel/ — the repo root in a source clone, the workspace
  *  root in the rsync mirror where panel/ is itself a synced copy. */
-export const WORKSPACE_ROOT = resolve(__dirname, "..");
+const MODULE_ROOT = resolve(__dirname, "..");
+const DEFAULT_WORKSPACE_ROOT = "/srv/git/prv/projects";
+
+function selectWorkspaceRoot(): string {
+  const override = process.env.PAVILIO_CANONICAL_ROOT;
+  const moduleRootIdentity = realpathSync(MODULE_ROOT);
+
+  if (override !== undefined) {
+    if (!isAbsolute(override)) {
+      throw new Error("Invalid PAVILIO_CANONICAL_ROOT: must be an absolute path to the same repository.");
+    }
+    let overrideIdentity: string;
+    try {
+      overrideIdentity = realpathSync(override);
+    } catch {
+      throw new Error("Invalid PAVILIO_CANONICAL_ROOT: path is inaccessible or does not exist.");
+    }
+    if (overrideIdentity !== moduleRootIdentity) {
+      throw new Error("Invalid PAVILIO_CANONICAL_ROOT: must identify the same repository.");
+    }
+    return override;
+  }
+
+  try {
+    if (realpathSync(DEFAULT_WORKSPACE_ROOT) === moduleRootIdentity) return DEFAULT_WORKSPACE_ROOT;
+  } catch {
+    // The canonical Mac path is optional; fall back to the module's root.
+  }
+  return MODULE_ROOT;
+}
+
+/** Selected logical spelling is retained even when it resolves through a symlink. */
+export const WORKSPACE_ROOT = selectWorkspaceRoot();
 
 export interface PanelConfig {
   /** Absolute path to the projects directory (contains project subfolders with PROJECT.md) */
@@ -84,7 +117,7 @@ function answerWaveDebounceMsFromEnv(): number {
 }
 
 const defaults: PanelConfig = {
-  projectsDir: resolve(__dirname, "../projects"),
+  projectsDir: join(WORKSPACE_ROOT, "projects"),
   port: 3010,
   agentRegistryPath: resolve(process.env.HOME || "~", ".agent-registry.json"),
   // The hostname stands in for machineId until panel.config.local.ts is merged.

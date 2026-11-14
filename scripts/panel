@@ -20,7 +20,42 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+
+# Keep the selected spelling for the panel's environment and paths, while
+# comparing filesystem identity so a symlink to this checkout is accepted.
+if ! REPO_ROOT="$(python3 - "$SOURCE_ROOT" "${PAVILIO_CANONICAL_ROOT+x}" "${PAVILIO_CANONICAL_ROOT:-}" <<'PY'
+import os, sys
+
+source_root, override_is_set, override = sys.argv[1:]
+
+def same_directory(left, right):
+    try:
+        a, b = os.stat(left), os.stat(right)
+        return a.st_dev == b.st_dev and a.st_ino == b.st_ino
+    except OSError:
+        return False
+
+if override_is_set:
+    if not os.path.isabs(override):
+        print("Invalid PAVILIO_CANONICAL_ROOT: must be an absolute path to the same repository.", file=sys.stderr)
+        sys.exit(2)
+    if not os.path.isdir(override):
+        print("Invalid PAVILIO_CANONICAL_ROOT: path is inaccessible or does not exist.", file=sys.stderr)
+        sys.exit(2)
+    if not same_directory(source_root, override):
+        print("Invalid PAVILIO_CANONICAL_ROOT: must identify the same repository.", file=sys.stderr)
+        sys.exit(2)
+    print(override)
+elif same_directory(source_root, "/srv/git/prv/projects"):
+    print("/srv/git/prv/projects")
+else:
+    print(source_root)
+PY
+)"; then
+  exit 1
+fi
+export PAVILIO_CANONICAL_ROOT="$REPO_ROOT"
 
 # Toolchain resolution is shared with the launcher and the setup scripts, so a
 # double-clicked shortcut with no dotfiles read finds node the same way.
