@@ -14,7 +14,7 @@ import PaneResizer from "../shell/PaneResizer";
 import { useResizableRow, type RowBounds } from "../shell/useResizableRow";
 import { ANSWER_PANE_FULL_HEIGHT, preferences } from "../../preferences/declarations";
 import { usePreference, useScopedPreference } from "../../preferences/usePreference";
-import { ANSWER_COMPOSER_BOUNDS, AnswerComposer } from "./AnswerComposer";
+import { ANSWER_COMPOSER_BOUNDS, AnswerComposer, composerFieldHasFocus } from "./AnswerComposer";
 import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaitingView";
 import { noteRetrySentOn } from "./answerRetry";
 import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
@@ -489,8 +489,15 @@ export function AnswerPane({
 
   // Focus lands on the root the moment it opens — also when it opened itself —
   // so the answer can be scrolled and read from the keyboard at once.
+  //
+  // Except when the composer already took it: a pane rebuilt with its cell
+  // while the user was typing has a composer that reclaimed focus and caret in
+  // its own (layout) mount effect, which runs before this one. Moving focus to
+  // the root then would send the rest of the reply to the pane's shortcuts.
   useEffect(() => {
-    rootRef.current?.focus();
+    const root = rootRef.current;
+    if (!root || composerFieldHasFocus(root)) return;
+    root.focus();
   }, []);
 
   // Measure the terminal area: the pane's ceiling, and the number the drag is

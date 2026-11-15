@@ -6,6 +6,7 @@ import {
   releaseTerminal,
   type LiveTerminal,
 } from "./terminalInstances";
+import { composerFieldHasFocus } from "./AnswerComposer";
 import { AnswerPane } from "./AnswerPane";
 import {
   getAnswerPaneState,
@@ -331,8 +332,16 @@ export function TerminalView({
     const inst = instRef.current;
     if (!focused || !inst) return;
     // Re-fit + focus when becoming visible (e.g., maximize toggle).
+    //
+    // The focus yields to a reply in progress: when the cell was rebuilt while
+    // the user was typing in its composer, the rebuilt composer has reclaimed
+    // focus and caret by now (see `composerDrafts`), and taking it here would
+    // send the rest of the reply to the shell. Only a composer that really
+    // holds focus counts — after a maximize or a remount with the user
+    // anywhere else, the terminal takes the keyboard as before.
     const rafId = requestAnimationFrame(() => {
       followBottomAcrossResize(inst.terminal, inst.fit);
+      if (composerFieldHasFocus(rootRef.current)) return;
       inst.focus();
     });
     return () => cancelAnimationFrame(rafId);
