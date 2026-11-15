@@ -66,7 +66,9 @@ stay active and migrate as active changes in step 4.
 
 For each archived plan under `projects/<project>/plans/archived/<stem>*`, `git mv` its
 files into `projects/<project>/plans/openspec/changes/archive/YYYY-MM-DD-<stem>/`,
-mapping filenames onto the OpenSpec change shape:
+mapping filenames onto the OpenSpec change shape. The dir name carries exactly one date: a stem that
+already starts with `YYYY-MM-DD-` has that date replaced, never a second one stacked in front.
+
 
 - `<stem>-design.md` → `design.md`
 - `<stem>-implementation.md` / `<stem>-plan.md` → `tasks.md`
