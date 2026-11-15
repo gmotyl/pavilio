@@ -51,6 +51,7 @@ import { utteranceUnderCursor } from "../utteranceQueue";
 import { refreshSessions } from "../../terminal/sessionStore";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
+import { playPressCount, resetPlayPressesForTests } from "../playPresses";
 
 /**
  * One click on the cell's play/pause, routed exactly as the bar's
@@ -1399,5 +1400,45 @@ describe("useSpeechHost — the answerWaiting port", () => {
 
     await settle(() => second.result.current.onPrevious("cell-b"));
     expect(second.result.current.queueFor("cell-b").cursor).toBe(1);
+  });
+});
+
+/**
+ * The answer pane goes solid on the user's play press, from whichever surface
+ * it came — so the host, which every surface calls, is where the press is
+ * noted. A pause is not a press, and neither is autoplay starting a run.
+ */
+describe("useSpeechHost — play presses", () => {
+  beforeEach(resetPlayPressesForTests);
+
+  it("notes Play, Resume and Read from here for the cell pressed, never Pause", async () => {
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    await emitUtterance("cell-a", "u-1", response(3));
+
+    await settle(() => result.current.onSpeak("cell-a"));
+    expect(playPressCount("cell-a")).toBe(1);
+    await settle(() => result.current.onPause("cell-a"));
+    expect(playPressCount("cell-a")).toBe(1);
+    await settle(() => result.current.onResume("cell-a"));
+    expect(playPressCount("cell-a")).toBe(2);
+    await settle(() => result.current.onJumpToUnit("cell-a", 2));
+    expect(playPressCount("cell-a")).toBe(3);
+    expect(playPressCount("cell-b")).toBe(0);
+  });
+
+  it("autoplay starting a run is not a press", async () => {
+    const units = unitsOf(response(3));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a"); // armed
+      result.current.cycleSpeechMode("cell-a"); // autoplay
+    });
+    await emitUtterance("cell-a", "u-1", response(3));
+    expect(played).toEqual([`blob:${units[0]}`]);
+    expect(playPressCount("cell-a")).toBe(0);
   });
 });

@@ -72,6 +72,7 @@ import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "
 import { useUtteranceChannel } from "./useUtteranceChannel";
 import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
 import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
+import { notePlayPress } from "./playPresses";
 
 /**
  * How many utterances an autoplay cell's record keeps.
@@ -1135,6 +1136,7 @@ export function useSpeechHost({
 
   const onSpeak = useCallback(
     (sessionId: string): void => {
+      notePlayPress(sessionId);
       // The click is the gesture the element needs; every later programmatic
       // play rides on it.
       unlock();
@@ -1304,6 +1306,7 @@ export function useSpeechHost({
   const onResume = useCallback(
     (sessionId: string): void => {
       if (pausedSessionId !== sessionId) return;
+      notePlayPress(sessionId);
       // Deliberately NOT `player.unlock()`: the element is holding the paused
       // unit, so unlocking would play it here rather than through `resume()` —
       // and the gesture was already spent on the click that started the run.
@@ -1663,6 +1666,7 @@ export function useSpeechHost({
       const utterance = utteranceUnderCursor(queueFor(sessionId));
       if (!utterance) return;
 
+      notePlayPress(sessionId);
       unlock();
       // NOT `player.jumpToUnit`, for two independent reasons, either of which
       // on its own would be enough:

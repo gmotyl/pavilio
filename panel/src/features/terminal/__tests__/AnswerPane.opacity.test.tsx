@@ -3,8 +3,11 @@
  *
  * Contract: at a value n below 100 the body paints
  * `linear-gradient(to bottom, #17171d 0%, color-mix(in srgb, #17171d n%, transparent) 100%)`
- * and the pane itself is transparent behind it; at 100, or while the composer's
- * input holds focus and no wave is shown, the body is the solid `#17171d`. The
+ * and the pane itself is transparent behind it; at 100 the body is the solid
+ * `#17171d`. Below 100 it is solid by the user's last gesture: composer focus or
+ * a play press makes it solid, composer blur fades it, a wave fades it (and a
+ * press under a wave changes nothing), and a wave clearing hands it back to
+ * the composer's focus. The
  * meta row and the composer's rows — the Retry Enter row among them — always
  * keep the solid ground.
  */
@@ -18,6 +21,7 @@ import { __resetAnswerRetryForTests, armRetryOffer, beginRetryTicket, RETRY_OFFE
 import { __resetAnswerWaitingForTests, beginWaiting, holdAnswer } from "../answerWaiting";
 import { _applyEventForTests, _resetForTests as resetActivityForTests } from "../useTerminalActivityChannel";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
+import { notePlayPress, resetPlayPressesForTests } from "../../speech/playPresses";
 import { answerSpeech, renderPane } from "./answerPane.harness";
 
 // The activity channel dials a WebSocket at import time; a socket that never
@@ -51,6 +55,7 @@ afterEach(() => {
   __resetAnswerWaitingForTests();
   __resetAnswerRetryForTests();
   resetActivityForTests();
+  resetPlayPressesForTests();
   // Global, not per project: a test that switches the composer off must not
   // leave the next one without a field to focus.
   writePreference(preferences.answerComposerEnabled, true);
@@ -185,6 +190,89 @@ describe("AnswerPane answer opacity", () => {
     // The field unmounts with focus in it, which fires no blur.
     act(() => writePreference(preferences.answerComposerEnabled, false));
     expect(screen.queryByTestId(`answer-pane-composer-${SESSION}`)).toBeNull();
+    expect(body().style.background).toBe(gradient(40));
+  });
+
+  it("a play press makes the body solid, and pausing keeps it", () => {
+    setOpacity(40);
+    mount();
+    expect(body().style.background).toBe(gradient(40));
+    act(() => notePlayPress(SESSION));
+    expect(body().style.background).toBe(SOLID);
+    // A pause is not a gesture the body answers: nothing moves.
+    expect(body().style.background).toBe(SOLID);
+    // Another cell's press is not this one's.
+    act(() => notePlayPress("cell-b"));
+    expect(body().style.background).toBe(SOLID);
+  });
+
+  it("composer blur after a play press fades the body — the last gesture wins", () => {
+    setOpacity(40);
+    mount();
+    act(() => notePlayPress(SESSION));
+    act(() => field().focus());
+    expect(body().style.background).toBe(SOLID);
+    act(() => pane().focus());
+    expect(body().style.background).toBe(gradient(40));
+    // And a press after the blur makes it solid again.
+    act(() => notePlayPress(SESSION));
+    expect(body().style.background).toBe(SOLID);
+  });
+
+  it("a wave fades a played body, a press under it changes nothing, and its clearing falls back to focus", () => {
+    setOpacity(40);
+    mount();
+    act(() => notePlayPress(SESSION));
+    expect(body().style.background).toBe(SOLID);
+    act(() => {
+      holdAnswer(SESSION);
+      _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
+    });
+    expect(wave()).not.toBeNull();
+    expect(body().style.background).toBe(gradient(40));
+    act(() => notePlayPress(SESSION));
+    expect(body().style.background).toBe(gradient(40));
+    // The wave clears with the composer unfocused: the fade stays.
+    act(() => _applyEventForTests({ sessionId: SESSION, state: "idle", at: 2 }));
+    expect(wave()).toBeNull();
+    expect(body().style.background).toBe(gradient(40));
+  });
+
+  it("a wave clearing while the composer is focused makes the body solid", () => {
+    setOpacity(40);
+    mount();
+    act(() => field().focus());
+    act(() => {
+      holdAnswer(SESSION);
+      _applyEventForTests({ sessionId: SESSION, state: "busy", at: 1 });
+    });
+    expect(body().style.background).toBe(gradient(40));
+    act(() => _applyEventForTests({ sessionId: SESSION, state: "idle", at: 2 }));
+    expect(wave()).toBeNull();
+    expect(document.activeElement).toBe(field());
+    expect(body().style.background).toBe(SOLID);
+  });
+
+  it("a pane opened over a run already under way starts solid — the press came before it", () => {
+    setOpacity(40);
+    for (const state of ["speaking", "stalled", "paused"] as const) {
+      renderPane(answerSpeech(ANSWER, { stateFor: vi.fn(() => state) }).speech);
+      expect([state, body().style.background]).toEqual([state, SOLID]);
+      cleanup();
+    }
+    // Nothing playing: the fade, as before.
+    for (const state of ["ready", "heard"] as const) {
+      renderPane(answerSpeech(ANSWER, { stateFor: vi.fn(() => state) }).speech);
+      expect([state, body().style.background]).toEqual([state, gradient(40)]);
+      cleanup();
+    }
+  });
+
+  it("a pane opened over a run while a wave is shown still fades", () => {
+    setOpacity(40);
+    act(() => beginWaiting(SESSION, "u-1"));
+    renderPane(answerSpeech(ANSWER, { stateFor: vi.fn(() => "speaking" as const) }).speech);
+    expect(wave()).not.toBeNull();
     expect(body().style.background).toBe(gradient(40));
   });
 

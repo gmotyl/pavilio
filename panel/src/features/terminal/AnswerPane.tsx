@@ -18,6 +18,7 @@ import { ANSWER_COMPOSER_BOUNDS, AnswerComposer, composerFieldHasFocus } from ".
 import { AnswerWaiting, AnswerWaitingNext } from "./AnswerWaitingView";
 import { noteRetrySentOn } from "./answerRetry";
 import { beginWaiting, releaseAnswer, useAnswerHeld, useAnswerWaiting } from "./answerWaiting";
+import { usePlayPressCount } from "../speech/playPresses";
 import { projectOfSession } from "./sessionProject";
 import { useActivityState } from "./useTerminalActivityChannel";
 import { speechCacheState, subscribeSpeechCache } from "../speech/synth";
@@ -408,20 +409,51 @@ export function AnswerPane({
     projectOfSession(sessionId),
   );
   /**
-   * Whether the composer's field holds focus. Typing a reply over a see-through
-   * body would put the terminal's output under the eye that is writing, so the
-   * body goes solid then — unless a wave is shown, which is the pane saying
-   * "the agent is working" and keeps the fade.
+   * Whether the composer's field holds focus — kept on its own because it is
+   * what the body falls back to when a wave clears.
    */
   const [composerFocused, setComposerFocused] = useState(false);
+  /**
+   * Whether the body is solid by the user's last gesture, set by events, the
+   * last one winning:
+   * - the composer's field takes focus → solid (typing over a see-through body
+   *   would put the terminal's output under the eye that is writing);
+   * - it loses focus → fade;
+   * - a play press (Play, Resume, *Read from here*, any surface) → solid, so
+   *   the text read along with the voice is not over the terminal. Pausing
+   *   changes nothing; autoplay is not a press.
+   * - a wave appears → fade, and while it is shown a press changes nothing:
+   *   the wave is the pane saying "the agent is working";
+   * - the wave clears → whatever the focus says.
+   */
+  // A pane opened over a run already under way — the bar's Play is usable
+  // while the pane is closed — starts solid: the press it would have answered
+  // happened before it mounted. Playing, buffering or paused alike; a shown
+  // wave still wins.
+  const [solidByGesture, setSolidByGesture] = useState(() => {
+    const state = speech.stateFor(sessionId);
+    return !waveShown && (state === "speaking" || state === "stalled" || state === "paused");
+  });
+  const playPresses = usePlayPressCount(sessionId);
+  // The two inputs that act on their CHANGE, not their value. Adjusted during
+  // render, React's pattern for state that follows a prop.
+  const [seen, setSeen] = useState({ playPresses, waveShown });
+  if (seen.playPresses !== playPresses || seen.waveShown !== waveShown) {
+    setSeen({ playPresses, waveShown });
+    if (waveShown) setSolidByGesture(false);
+    else if (seen.waveShown) setSolidByGesture(composerFocused);
+    else setSolidByGesture(true);
+  }
   // A field removed while it holds focus fires no blur, so switching the
   // composer off would leave the body solid over a composer that is gone.
-  // Adjusted during render, React's pattern for state that follows a prop.
-  if (!composerOn && composerFocused) setComposerFocused(false);
+  if (!composerOn && composerFocused) {
+    setComposerFocused(false);
+    setSolidByGesture(false);
+  }
   const isComposerField = (target: EventTarget | null): boolean =>
     target instanceof Element && target.classList.contains("answer-pane-composer-field");
   const translucent = opacityBottom < 100;
-  const bodySolid = !translucent || (composerFocused && !waveShown);
+  const bodySolid = !translucent || (solidByGesture && !waveShown);
 
   /**
    * How many answers arrived after the last one this cell played and have not
@@ -702,10 +734,14 @@ export function AnswerPane({
       // Delegated from the root: the composer's field is the composer's, and
       // whether it holds focus matters only to the paint up here.
       onFocus={(e) => {
-        if (isComposerField(e.target)) setComposerFocused(true);
+        if (!isComposerField(e.target)) return;
+        setComposerFocused(true);
+        setSolidByGesture(true);
       }}
       onBlur={(e) => {
-        if (isComposerField(e.target)) setComposerFocused(false);
+        if (!isComposerField(e.target)) return;
+        setComposerFocused(false);
+        setSolidByGesture(false);
       }}
       onKeyDown={onEscapeKey}
       // The cell header is `draggable` and the cell root focuses on click, so
