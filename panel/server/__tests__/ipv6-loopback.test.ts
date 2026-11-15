@@ -1,7 +1,21 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createServer, request, type Server } from "http";
-import { createServer as createNetServer, type Server as NetServer, type AddressInfo } from "net";
-import { listenIpv6Loopback } from "../lib/ipv6-loopback.js";
+import { createServer as createNetServer, Server as NetServerClass, type Server as NetServer, type AddressInfo } from "net";
+import { closeIpv6Loopback, listenIpv6Loopback } from "../lib/ipv6-loopback.js";
+
+/**
+ * Whether this host can bind `[::1]` at all. Containers and CI runners without
+ * IPv6 cannot, and there the listener's whole job is to warn and step aside —
+ * which the EAFNOSUPPORT test covers on every host.
+ */
+async function ipv6LoopbackWorks(): Promise<boolean> {
+  const probe = createNetServer();
+  return new Promise((resolve) => {
+    probe.once("error", () => resolve(false));
+    probe.listen({ port: 0, host: "::1", ipv6Only: true }, () => probe.close(() => resolve(true)));
+  });
+}
+const hasIpv6Loopback = await ipv6LoopbackWorks();
 
 const closers: Array<() => Promise<void>> = [];
 
@@ -33,7 +47,7 @@ function get(host: string, port: number): Promise<string> {
 }
 
 describe("listenIpv6Loopback", () => {
-  it("serves the panel's own handler on [::1] with a loopback remote address", async () => {
+  it.runIf(hasIpv6Loopback)("serves the panel's own handler on [::1] with a loopback remote address", async () => {
     const { server, port } = await ipv4Panel();
     const companion = await listenIpv6Loopback(server, port);
     expect(companion).not.toBeNull();
@@ -44,7 +58,7 @@ describe("listenIpv6Loopback", () => {
     expect(await get("127.0.0.1", port)).toBe("remote=127.0.0.1");
   });
 
-  it("warns and resolves null when [::1]:<port> is already taken", async () => {
+  it.runIf(hasIpv6Loopback)("warns and resolves null when [::1]:<port> is already taken", async () => {
     const { server, port } = await ipv4Panel();
     const squatter = createNetServer();
     await new Promise<void>((r) => squatter.listen({ port, host: "::1", ipv6Only: true }, r));
@@ -53,5 +67,35 @@ describe("listenIpv6Loopback", () => {
 
     await expect(listenIpv6Loopback(server, port)).resolves.toBeNull();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("EADDRINUSE"));
+  });
+
+  it.runIf(hasIpv6Loopback)("closeIpv6Loopback() frees [::1]:<port>", async () => {
+    const { server, port } = await ipv4Panel();
+    expect(await listenIpv6Loopback(server, port)).not.toBeNull();
+
+    await closeIpv6Loopback();
+
+    const probe = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen({ port, host: "::1", ipv6Only: true }, () => resolve());
+    });
+    closeLater(probe);
+  });
+
+  it("warns and resolves null on a host without IPv6 (EAFNOSUPPORT)", async () => {
+    // Runs everywhere: the bind failure is simulated, not needed from the host.
+    const { server, port } = await ipv4Panel();
+    vi.spyOn(NetServerClass.prototype, "listen").mockImplementation(function (this: NetServer) {
+      const err = Object.assign(new Error("listen EAFNOSUPPORT: address family not supported ::1"), {
+        code: "EAFNOSUPPORT",
+      });
+      process.nextTick(() => this.emit("error", err));
+      return this;
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(listenIpv6Loopback(server, port)).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("EAFNOSUPPORT"));
   });
 });
