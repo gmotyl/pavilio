@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,7 +70,15 @@ describe("fixture git identity", () => {
     commit();
     const config = readFileSync(join(repo, ".git", "config"), "utf8");
     expect(config).not.toMatch(/^\s*\[user\]/m);
-    expect(config).not.toMatch(/user\./);
+    // .git/config is INI (`[user]` then `name = …`), so ask git for the keys
+    // rather than grepping for a dotted `user.` that never appears there.
+    // --get-regexp exits 1 when nothing matches.
+    const keys = spawnSync("git", ["config", "--local", "--get-regexp", "^user\\."], {
+      cwd: repo,
+      env: isolatedEnv(),
+      encoding: "utf8",
+    });
+    expect({ status: keys.status, stdout: keys.stdout }).toEqual({ status: 1, stdout: "" });
   });
 
   it("a spawn's own GIT_AUTHOR_NAME overrides the fixture identity", () => {
