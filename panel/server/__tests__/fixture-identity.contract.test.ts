@@ -23,6 +23,9 @@ import { relative, resolve } from "node:path";
  * comment line also breaks a match, so no match can run through one.
  * A bare read without `--get` (`git config user.name`) is flagged too — it is
  * indistinguishable from a write here; write reads as `--get`.
+ * A section rename into `user` (`git config --rename-section old user`, or the
+ * `config rename-section` subcommand) is flagged as well: it moves `old.name` /
+ * `old.email` into `user.*` and so persists an identity just like a set.
  */
 const PANEL = resolve(__dirname, "../..");
 const SELF = relative(PANEL, __filename);
@@ -33,25 +36,41 @@ const Q = "['\"`]";
 // Instead the read/removal flags are excluded: a sequence containing one of
 // them is a read or an unset, never a write. The subcommand forms `config get`,
 // `config list`, `config unset` never match, since only `set` is accepted there.
-const READ = "(?:--get(?:-all|-regexp|-urlmatch)?|-l|--list|--unset(?:-all)?|--remove-section|--rename-section)(?![\\w-])";
+// `--rename-section` is not here: it writes, and RENAME_* below catch it.
+const READ = "(?:--get(?:-all|-regexp|-urlmatch)?|-l|--list|--unset(?:-all)?|--remove-section)(?![\\w-])";
 // Options that take their value as the next argument (`--file <x>`).
 const VALUE_OPT = "(?:--file|-f|--blob|--type|--value|--comment)";
 // One option token, `--opt` or `--opt=value`, that is not a read/removal flag.
 const OPT = `(?!${READ})-`;
+// Zero or more spawn-arg options: <"--opt[=x]"> | <"--file", x>, each followed by a comma.
+const SPAWN_OPTS =
+  `(?:(?:${Q}${VALUE_OPT}${Q}\\s*,\\s*[^,\\u0000]+|${Q}${OPT}[^'"\`,\\n\\u0000]*${Q})\\s*,\\s*)*`;
 // "config", ["set",] [<"--opt[=x]"> | <"--file", x>]* "user.name|user.email"
 // `\s` spans newlines, so a call split across lines matches as one; a value
 // never crosses a comma or a comment barrier.
 const SPAWN_ARGS = new RegExp(
-  `${Q}config${Q}\\s*,\\s*(?:${Q}set${Q}\\s*,\\s*)?` +
-    `(?:(?:${Q}${VALUE_OPT}${Q}\\s*,\\s*[^,\\u0000]+|${Q}${OPT}[^'"\`,\\n\\u0000]*${Q})\\s*,\\s*)*` +
-    `${Q}user\\.(?:name|email)${Q}`,
+  `${Q}config${Q}\\s*,\\s*(?:${Q}set${Q}\\s*,\\s*)?${SPAWN_OPTS}${Q}user\\.(?:name|email)${Q}`,
   "g",
 );
-// git [<global opts: -C <dir>, -c <k=v>, --opt[=x]>] config [set] [--opt[=x] | --file <x>]* user.name|user.email
+// "config", ("rename-section", <opts>* | <opts>* "--rename-section",) <src>, "user"
+// Only `user` as the DESTINATION writes an identity; `user` as the source moves it away.
+const RENAME_SPAWN_ARGS = new RegExp(
+  `${Q}config${Q}\\s*,\\s*(?:${Q}rename-section${Q}\\s*,\\s*${SPAWN_OPTS}|${SPAWN_OPTS}${Q}--rename-section${Q}\\s*,\\s*)` +
+    `[^,\\u0000]+,\\s*${Q}user${Q}`,
+  "g",
+);
+// `git [<global opts: -C <dir>, -c <k=v>, --opt[=x]>] config`
+const SHELL_GIT_CONFIG = `\\bgit\\s+(?:(?:-C|-c)\\s+\\S+\\s+|--[\\w-]+(?:=\\S+)?\\s+)*config\\s+`;
+// Zero or more shell options: --opt[=x] | --file <x>, each followed by whitespace.
+const SHELL_OPTS = `(?:(?:${VALUE_OPT}\\s+[^\\s\\u0000]+|${OPT}[^\\s\\u0000]*)\\s+)*`;
+// git … config [set] [--opt[=x] | --file <x>]* user.name|user.email
 // `-c user.name=…` with no `config` subcommand never matches: `config` is required.
-const SHELL = new RegExp(
-  `\\bgit\\s+(?:(?:-C|-c)\\s+\\S+\\s+|--[\\w-]+(?:=\\S+)?\\s+)*config\\s+(?:set\\s+)?` +
-    `(?:(?:${VALUE_OPT}\\s+[^\\s\\u0000]+|${OPT}[^\\s\\u0000]*)\\s+)*user\\.(?:name|email)\\b`,
+const SHELL = new RegExp(`${SHELL_GIT_CONFIG}(?:set\\s+)?${SHELL_OPTS}user\\.(?:name|email)\\b`, "g");
+// git … config (rename-section <opts>* | <opts>* --rename-section) <src> user
+// The destination must be exactly `user`: whitespace, a quote or the end follows it.
+const RENAME_SHELL = new RegExp(
+  `${SHELL_GIT_CONFIG}(?:rename-section\\s+${SHELL_OPTS}|${SHELL_OPTS}--rename-section\\s+)` +
+    `[^\\s\\u0000]+\\s+user(?=\\s|${Q}|$)`,
   "g",
 );
 const COMMENT = /^\s*(?:\/\/|\/?\*)/;
@@ -65,7 +84,7 @@ function identityWriteLines(text: string): number[] {
     .map((line) => (COMMENT.test(line) ? BARRIER : line))
     .join("\n");
   const starts = new Set<number>();
-  for (const re of [SPAWN_ARGS, SHELL]) {
+  for (const re of [SPAWN_ARGS, SHELL, RENAME_SPAWN_ARGS, RENAME_SHELL]) {
     for (const m of code.matchAll(re)) starts.add(code.slice(0, m.index).split("\n").length);
   }
   return [...starts].sort((a, b) => a - b);
@@ -137,6 +156,11 @@ describe("fixture identity", () => {
       ["spawn args, --type=string before the key", `git(dir, "config", "--type=string", "user.name", "t");`],
       ["shell form, --type=string before the key", `sh("git config --type=string user.email t@t");`],
       ["shell form, -f <file>", `sh("git config -f cfg user.name t");`],
+      ["shell form, --rename-section into user", `sh("git config --rename-section old user");`],
+      ["spawn args, --rename-section into user", `git(dir, "config", "--rename-section", "old", "user");`],
+      ["shell form, config rename-section into user", `sh("git config rename-section old user");`],
+      ["shell form, --file x --rename-section into user", `sh("git config --file x --rename-section old user");`],
+      ["spawn args, --file x --rename-section into user", `git(dir, "config", "--file", "x", "--rename-section", "old", "user");`],
     ];
     for (const [label, text] of rows) expect(persistentIdentityWrite(text), label).toBe(true);
 
@@ -165,6 +189,12 @@ describe("fixture identity", () => {
       ["shell --list", `sh("git config --list user.name");`],
       ["shell -f <file> --get", `sh("git config -f cfg --get user.name");`],
       ["other config key", `git(dir, "config", "core.autocrlf", "false");`],
+      ["shell --rename-section out of user", `sh("git config --rename-section user old");`],
+      ["spawn args --rename-section out of user", `git(dir, "config", "--rename-section", "user", "old");`],
+      ["shell --rename-section a b", `sh("git config --rename-section a b");`],
+      ["spawn args --rename-section a b", `git(dir, "config", "--rename-section", "a", "b");`],
+      ["shell --remove-section user", `sh("git config --remove-section user");`],
+      ["spawn args --remove-section user", `git(dir, "config", "--remove-section", "user");`],
       ["line comment prose", `// A fixture that ran git config user.name seed wrote into the parent repo`],
       ["block comment prose", ` * the old fixture called "config", "user.email" on the hook repo`],
       ["block comment opener", `/* git config user.name was the leak */`],
