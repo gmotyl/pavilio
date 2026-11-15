@@ -40,8 +40,6 @@ describe("resolveSyncRole", () => {
     repo = mkdtempSync(join(tmpdir(), "syncrole-"));
     git(["init", "-q"]);
     git(["symbolic-ref", "HEAD", "refs/heads/main"]);
-    git(["config", "user.email", "t@test"]);
-    git(["config", "user.name", "t"]);
     commit("seed", { "README.md": "seed\n" }, 90);
   });
   afterEach(() => rmSync(repo, { recursive: true, force: true }));

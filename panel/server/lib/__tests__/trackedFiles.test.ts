@@ -22,8 +22,6 @@ describe("trackedFileNames", () => {
 
   it("names the files git tracks directly in the directory", async () => {
     git(root, ["init", "-q"]);
-    git(root, ["config", "user.email", "t@test"]);
-    git(root, ["config", "user.name", "t"]);
     const prefs = join(root, ".pavilio", "preferences");
     mkdirSync(join(prefs, "nested"), { recursive: true });
     for (const name of ["mac.json", "spock.json", "nested/deep.json"]) writeFileSync(join(prefs, name), "{}");

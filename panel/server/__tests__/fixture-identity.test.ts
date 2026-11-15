@@ -7,7 +7,7 @@ import { gitSafeEnv } from "../lib/gitEnv.js";
 
 // The guard for the git identity that test-setup.node.ts puts in the environment.
 //
-// A fixture that runs `git config user.name seed` writes into whichever repo git
+// A fixture that sets user.name with `git config` writes into whichever repo git
 // resolves, and once an inherited GIT_DIR resolved the real one. With identity
 // supplied through GIT_AUTHOR_* / GIT_COMMITTER_*, fixtures have no reason to
 // write a user.* key at all, so these tests pin that a commit in a sandbox with
