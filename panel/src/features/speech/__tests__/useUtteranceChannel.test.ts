@@ -1060,6 +1060,26 @@ describe("useUtteranceChannel", () => {
     expect(afterUnmount).not.toHaveBeenCalled();
   });
 
+  it("exposes a reconnect count that starts at 0 and counts each reconnect frame", async () => {
+    serveLatest([]);
+    const { result } = await renderChannel();
+    expect(result.current.reconnects).toBe(0);
+
+    await reconnected();
+    expect(result.current.reconnects).toBe(1);
+
+    // A frame that is not the neutral reconnect one leaves the count alone.
+    await act(async () => {
+      for (const listener of [...realtimeListeners]) {
+        listener({ type: "file-change", event: "change", path: "x.md" });
+      }
+    });
+    expect(result.current.reconnects).toBe(1);
+
+    await reconnected();
+    expect(result.current.reconnects).toBe(2);
+  });
+
   it("still hydrates once on mount", async () => {
     const fetchMock = serveLatest([utterance("cell-a", "a1")]);
 

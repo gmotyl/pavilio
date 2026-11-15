@@ -417,9 +417,11 @@ export function useSpeechHost({
    * every arrival anywhere in the grid and on every mode change: a stop held
    * only for one call would walk a down synthesizer through the rest of the
    * answer the next time any cell spoke. Cleared at the start of each
-   * warming-effect run — an arrival, a mode change or a catch-up is the next
-   * opportunity, and the one retry — and bounded per cell like the autoplay record, for the same reason:
-   * an older answer than that is out of the queue's reach.
+   * warming-effect run — an arrival, a mode change, a catch-up, a realtime
+   * reconnect (even one that surfaced nothing new) or the tab coming back into
+   * view is the next opportunity, and the one retry — and bounded per cell
+   * like the autoplay record, for the same reason: an older answer than that
+   * is out of the queue's reach.
    */
   const preloadFailedRef = useRef<Map<string, Set<string>>>(new Map());
   /**
@@ -451,6 +453,19 @@ export function useSpeechHost({
    * press to another cell. See `idleTransportTarget.ts`.
    */
   const [steppedSessionId, setSteppedSessionId] = useState<string | null>(null);
+  /**
+   * Times the tab came back into view since mount: a warming opportunity. A
+   * socket that stayed OPEN while the tab was hidden publishes no reconnect
+   * frame, so the channel's `reconnects` alone would miss the return.
+   */
+  const [visibleReturns, setVisibleReturns] = useState(0);
+  useEffect(() => {
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") setVisibleReturns((count) => count + 1);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
 
   const setPreparing = useCallback((sessionId: string, preparing: boolean): void => {
     setPreparingSessionIds((current) => {
@@ -593,6 +608,7 @@ export function useSpeechHost({
     languageFor,
     markHeard,
     queueFor,
+    reconnects,
     speechModeOf,
     stateFor,
     utteranceFor,
@@ -794,8 +810,9 @@ export function useSpeechHost({
    * 0's warm running — and it stays stopped
    * until the next warming-effect run (`preloadFailedRef`): a synthesizer that
    * is down must not be walked through a twelve-unit answer nobody has asked
-   * for yet. The run, if one starts, reports the failure. The next pass
-   * requests the units again on a fresh controller.
+   * for yet. The run, if one starts, reports the failure. The next pass — an
+   * arrival, a mode change, a catch-up, a reconnect or a tab return — requests
+   * the units again on a fresh controller.
    */
   const preloadRemainder = useCallback(
     (utterance: Utterance, units: readonly SpeechUnit[]): void => {
@@ -919,11 +936,16 @@ export function useSpeechHost({
     // scrubber's segments already show them landing, and the control's red is
     // about unit 0 alone.
     //
-    // This run IS the "next opportunity" for a preload a failed unit stopped
-    // (an arrival, a mode change, a catch-up that surfaced something). The stop
-    // only holds within one pass, so a synthesizer that is down is walked once
-    // per opportunity rather than through the whole answer, and a transient
-    // failure no longer leaves an armed cell cold until its mode is cycled.
+    // This run IS the "next opportunity" for a preload a failed unit stopped:
+    // an arrival, a mode change, a catch-up that surfaced something, a
+    // realtime reconnect even when it surfaced nothing new (`reconnects`), or
+    // the tab coming back into view (`visibleReturns` — a socket that stayed
+    // OPEN publishes no reconnect frame). The stop only holds within one pass,
+    // so a synthesizer that is down is walked once per opportunity rather than
+    // through the whole answer, and a transient failure no longer leaves an
+    // armed cell cold until its mode is cycled. The body is idempotent —
+    // `warmedRef` dedupes unit 0 and `preloadedRef` skips units requested or
+    // in flight — so the extra runs re-request only what is actually missing.
     preloadFailedRef.current.clear();
     for (const { utterance, mode } of warmableUtterances) {
       const { units } = preparedFor(utterance, languageOf(utterance));
@@ -935,7 +957,17 @@ export function useSpeechHost({
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-  }, [languageOf, preparedFor, preloadRemainder, warmFirstUnit, warmableUtterances]);
+    // `reconnects` and `visibleReturns` are read by nothing in the body: they
+    // are listed only so each opportunity re-runs it.
+  }, [
+    languageOf,
+    preparedFor,
+    preloadRemainder,
+    reconnects,
+    visibleReturns,
+    warmFirstUnit,
+    warmableUtterances,
+  ]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,

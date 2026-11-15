@@ -6,7 +6,7 @@
  */
 import { act, render, renderHook, screen } from "@testing-library/react";
 import { Activity, createElement, useState, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   drain,
   elements,
@@ -28,6 +28,30 @@ import {
 
 vi.mock("../synth", () => synthMock());
 vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
+
+/**
+ * The neutral reconnect frame is subscribed to directly rather than read off
+ * `lastMessage` — see the channel — so this stands in for that subscription,
+ * which would otherwise open a socket. Same stand-in as the navigation tests.
+ */
+const { realtimeListeners } = vi.hoisted(() => ({
+  realtimeListeners: new Set<(frame: Record<string, unknown>) => void>(),
+}));
+vi.mock("../../realtime/channel", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../realtime/channel")>("../../realtime/channel");
+  return {
+    ...actual,
+    subscribeRealtime: (listener: (frame: Record<string, unknown>) => void) => {
+      realtimeListeners.add(listener);
+      return () => {
+        realtimeListeners.delete(listener);
+      };
+    },
+  };
+});
+
+import { REALTIME_RECONNECT_FRAME } from "../../realtime/channel";
 
 import { SpeechControlBar } from "../../terminal/SpeechControlBar";
 import { prepare } from "../prepare";
@@ -670,6 +694,147 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     // none of them again.
     await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
     for (const unit of units.slice(1)) expect(synth.callsFor(unit)).toHaveLength(2);
+  });
+});
+
+/**
+ * A failed preload waits for the next warming opportunity. Arrivals, mode
+ * changes and catch-ups are not the only ones: a reconnect that surfaced
+ * nothing new, and the tab coming back into view, are too — a socket that
+ * stayed OPEN while the tab was hidden publishes no reconnect frame at all.
+ */
+describe("useSpeechHost — tab return and reconnect retry a failed preload", () => {
+  let visibility: DocumentVisibilityState = "visible";
+  let visibilitySpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  beforeEach(() => {
+    selectSynth("tiered");
+    visibility = "visible";
+    visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+  });
+  let addedSpy: ReturnType<typeof vi.spyOn> | undefined;
+  let removedSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  afterEach(() => {
+    visibilitySpy?.mockRestore();
+    visibilitySpy = undefined;
+    addedSpy?.mockRestore();
+    addedSpy = undefined;
+    removedSpy?.mockRestore();
+    removedSpy = undefined;
+  });
+
+  /** The tab's visibility changes to `state`, as the browser reports it. */
+  async function becomes(state: DocumentVisibilityState): Promise<void> {
+    visibility = state;
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await drain();
+    });
+  }
+
+  /** The socket comes back, and `/latest` (the harness default) has nothing new. */
+  async function reconnects(): Promise<void> {
+    await act(async () => {
+      for (const listener of [...realtimeListeners]) listener({ ...REALTIME_RECONNECT_FRAME });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await drain();
+    });
+  }
+
+  /** An armed cell whose answer's unit 1 failed, calling off the rest. */
+  async function armedWithFailedUnit() {
+    const markdown = response(5);
+    const units = holdAll(markdown);
+    const rendered = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    await cycle(() => rendered.result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    await act(async () => {
+      synth.fail(units[1]);
+      await drain();
+    });
+    expect(synth.callsFor(units[2])[0].signal?.aborted).toBe(true);
+    expect(timesRequested(units[1])).toBe(1);
+    return { units, ...rendered };
+  }
+
+  it("a failed preload is retried when the channel reconnects with nothing new", async () => {
+    const { units } = await armedWithFailedUnit();
+    const before = requestedTexts().length;
+
+    await reconnects();
+
+    // The failed unit once more, then every unit after it, in order.
+    expect(timesRequested(units[1])).toBe(2);
+    expect(requestedTexts().slice(before)).toEqual(units.slice(1));
+  });
+
+  it("a failed preload is retried when the tab becomes visible", async () => {
+    const { units } = await armedWithFailedUnit();
+    await becomes("hidden");
+
+    await becomes("visible");
+
+    expect(timesRequested(units[1])).toBe(2);
+    for (const unit of units.slice(2)) expect(timesRequested(unit)).toBe(2);
+  });
+
+  it("hiding the tab does not retry a failed preload", async () => {
+    const { units } = await armedWithFailedUnit();
+    const before = requestedTexts().length;
+
+    await becomes("hidden");
+
+    expect(timesRequested(units[1])).toBe(1);
+    expect(requestedTexts()).toHaveLength(before);
+  });
+
+  it("returning to the tab does not re-request units already held", async () => {
+    const markdown = response(5);
+    const units = holdAll(markdown);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    // Some units synthesized, the rest still in flight.
+    await release(units[0]);
+    await release(units[1]);
+    expect(synth.heldTexts).toEqual(units.slice(2));
+
+    await becomes("hidden");
+    await becomes("visible");
+
+    for (const unit of units) expect(timesRequested(unit)).toBe(1);
+  });
+
+  it("an unmounted host ignores visibility changes", async () => {
+    const added = vi.spyOn(document, "addEventListener");
+    const removed = vi.spyOn(document, "removeEventListener");
+    addedSpy = added;
+    removedSpy = removed;
+    const { units, unmount } = await armedWithFailedUnit();
+    const before = requestedTexts().length;
+    const handlers = added.mock.calls
+      .filter(([type]) => type === "visibilitychange")
+      .map(([, handler]) => handler);
+    expect(handlers).toHaveLength(1);
+
+    unmount();
+    // The real check: the host removes the very listener it added. The
+    // "requests nothing" assertions below cannot catch a leak on their own,
+    // since React ignores state updates after unmount.
+    expect(removed).toHaveBeenCalledWith("visibilitychange", handlers[0]);
+    await becomes("hidden");
+    await becomes("visible");
+
+    expect(timesRequested(units[1])).toBe(1);
+    expect(requestedTexts()).toHaveLength(before);
   });
 });
 
