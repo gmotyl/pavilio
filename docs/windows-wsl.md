@@ -91,6 +91,7 @@ What it does:
 A few points worth knowing:
 
 - The portproxy entry is bound to `listenaddress=0.0.0.0`, matching the form WSL uses for its preinstalled 22/80/443 forwards. Specific-IP entries can drop on Windows reboot if the adapter hasn't been assigned the IP yet by the time the IP Helper service applies persisted config (DHCP-timing race). `0.0.0.0` survives reboots reliably.
+- That `0.0.0.0` entry also holds IPv4 `127.0.0.1:3010` on Windows, so after a panel restart (`pnpm reboot`) WSL's localhost relay can no longer claim it. The panel therefore also listens on `[::1]:3010`: the relay can still claim the IPv6 loopback, and Windows resolves `localhost` to `::1` first. Open the panel as `http://localhost:3010`, not `http://127.0.0.1:3010` — the latter lands on the portproxy, which the loopback-only panel resets.
 - If you cancel the UAC prompt, the panel still runs locally and on `127.0.0.1` — only LAN reach is affected. Re-run the shortcut to retry.
 - Extra ports can go through the same UAC-once flow: set `PANEL_EXTRA_PORTS` in the untracked `scripts/start-panel-windows.local.env` (e.g. `"3000"` for a Vite dev server) and the launcher forwards those too.
 

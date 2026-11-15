@@ -87,6 +87,7 @@ vi.mock("../lib/terminal-manager.js", () => ({ listSessions: vi.fn(() => []) }))
 
 import { startPanel } from "../panel-server.js";
 import { registerPanelServer } from "../lib/panel-listener.js";
+import { closeIpv6Loopback } from "../lib/ipv6-loopback.js";
 
 let squatter: NetServer | undefined;
 let panel: HttpServer | undefined;
@@ -118,6 +119,23 @@ function boundPort(): number {
   return call![1] as number;
 }
 
+/** Whether this host can bind `[::1]` at all — the IPv6 test needs it. */
+async function ipv6LoopbackWorks(): Promise<boolean> {
+  const probe = createNetServer();
+  return new Promise((resolve) => {
+    probe.once("error", () => resolve(false));
+    probe.listen({ port: 0, host: "::1", ipv6Only: true }, () => probe.close(() => resolve(true)));
+  });
+}
+const hasIpv6Loopback = await ipv6LoopbackWorks();
+
+/** Close everything startPanel() bound, the way afterEach does. */
+async function teardownPanel(): Promise<void> {
+  await close(panel);
+  panel = undefined;
+  await closeIpv6Loopback();
+}
+
 async function close(server: NetServer | HttpServer | undefined): Promise<void> {
   if (!server) return;
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -138,9 +156,8 @@ afterEach(async () => {
   else process.env.PAVILIO_PANEL_URL = previousPanelUrl;
   // Both sockets are real, so both have to go back — a leaked listener would
   // make the next test's squatter land somewhere unpredictable.
-  await close(panel);
+  await teardownPanel();
   await close(squatter);
-  panel = undefined;
   squatter = undefined;
 });
 
@@ -215,5 +232,26 @@ describe("a port the operator asked for by name", () => {
     await startPanel(() => {});
 
     expect(boundPort()).not.toBe(taken);
+  });
+});
+
+describe("teardown", () => {
+  it.runIf(hasIpv6Loopback)("leaves no IPv6 loopback listener behind on [::1]:<port>", async () => {
+    // startPanel() also binds a companion listener on [::1] (lib/ipv6-loopback.ts).
+    // If teardown only closed the HTTP server, that listener would outlive the
+    // test and hold the port for every later test in the worker.
+    config.port = await aFreePort();
+    config.explicit = true;
+    await startPanel(() => {});
+    const port = boundPort();
+
+    await teardownPanel();
+
+    const probe = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen({ port, host: "::1", ipv6Only: true }, () => resolve());
+    });
+    await close(probe);
   });
 });
