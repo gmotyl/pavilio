@@ -67,8 +67,10 @@ stay active and migrate as active changes in step 4.
 For each archived plan under `projects/<project>/plans/archived/<stem>*`, `git mv` its
 files into `projects/<project>/plans/openspec/changes/archive/YYYY-MM-DD-<stem>/`,
 mapping filenames onto the OpenSpec change shape. `YYYY-MM-DD` is the **archive date**, the closest thing
-an old plan has to a merge date: the day its file first landed under `plans/archived/`
-(`git log --diff-filter=A --format=%as -- <file> | tail -1`). Fall back to the date in a dated stem, and
+an old plan has to a merge date: the commit date of the commit that first put its file under `plans/archived/`
+(`git log --no-renames --diff-filter=A --format=%cs -- <file> | tail -1`). `--no-renames` makes the
+usual `git mv` into the archive count as an add on the new path, and `%cs` is the commit date, not
+the author date, which a moved file keeps from its creation. Fall back to the date in a dated stem, and
 then to today, only when git has no such commit (an untracked file). The dir name carries exactly one
 date: a stem that already starts with `YYYY-MM-DD-` has its own date replaced by the archive date
 (`plans/archived/2026-05-01-foo-design.md` archived 2026-05-09 → `archive/2026-05-09-foo/`), never a
