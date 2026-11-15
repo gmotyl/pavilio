@@ -19,6 +19,10 @@ import { createServer as createNetServer, type Server as NetServer } from "net";
  * Purely additive: a host without IPv6, or a port someone else already holds
  * on `::1`, costs one warning line and the panel carries on IPv4-only. Never
  * rejects. Resolves to the listener, or `null` when it could not bind.
+ *
+ * The listener is also kept here so `closeIpv6Loopback()` can release it. Its
+ * lifetime is deliberately not tied to the HTTP server's `close` event: a LAN
+ * rebind closes and reopens that server, and loopback must survive it.
  */
 export function listenIpv6Loopback(server: Server, port: number): Promise<NetServer | null> {
   return new Promise((resolve) => {
@@ -34,7 +38,23 @@ export function listenIpv6Loopback(server: Server, port: number): Promise<NetSer
       // Deliberately not "Panel bound to …": scripts/panel reads that line back
       // out of the log to learn the port, and must keep finding the IPv4 one.
       console.log(`Panel also listening on [::1]:${port} (IPv6 loopback)`);
+      active = companion;
       resolve(companion);
     });
   });
+}
+
+let active: NetServer | null = null;
+
+/**
+ * Close the listener the last `listenIpv6Loopback()` bound, if any. Never
+ * rejects: an already-closed listener counts as closed. A process that exits
+ * releases the socket anyway — this is for in-process callers (tests) that
+ * start a panel and must hand the port back.
+ */
+export function closeIpv6Loopback(): Promise<void> {
+  const companion = active;
+  active = null;
+  if (!companion) return Promise.resolve();
+  return new Promise((resolve) => companion.close(() => resolve()));
 }

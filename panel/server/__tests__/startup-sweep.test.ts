@@ -73,6 +73,8 @@ vi.mock("../watcher.js", () => ({
 }));
 vi.mock("../lib/agent-registry.js", () => ({ pruneDeadAgents: vi.fn() }));
 vi.mock("../lib/panel-listener.js", () => ({ registerPanelServer: vi.fn() }));
+// The real one binds [::1] with `net`, which the http mock does not reach.
+vi.mock("../lib/ipv6-loopback.js", () => ({ listenIpv6Loopback: vi.fn(async () => null) }));
 vi.mock("../lib/os-users.js", () => ({ listOsUsers: vi.fn(() => []) }));
 
 // Boot must not read or seed the real workspace's preferences: capture the call.

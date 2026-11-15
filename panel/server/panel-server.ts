@@ -319,6 +319,7 @@ export async function startPanel(
   // After the IPv4 bind, never instead of it: the IPv6 loopback listener is a
   // convenience for Windows hosts (see lib/ipv6-loopback.ts) and never fails
   // startup. It stays up across LAN rebinds — loopback is loopback either way.
+  // The module keeps the handle; closeIpv6Loopback() releases it.
   await listenIpv6Loopback(server, port);
 
   setInterval(pruneDeadAgents, 30_000);
