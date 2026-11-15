@@ -253,6 +253,29 @@ describe("AnswerPane answer opacity", () => {
     expect(body().style.background).toBe(SOLID);
   });
 
+  it("a pane opened over a run already under way starts solid — the press came before it", () => {
+    setOpacity(40);
+    for (const state of ["speaking", "stalled", "paused"] as const) {
+      renderPane(answerSpeech(ANSWER, { stateFor: vi.fn(() => state) }).speech);
+      expect([state, body().style.background]).toEqual([state, SOLID]);
+      cleanup();
+    }
+    // Nothing playing: the fade, as before.
+    for (const state of ["ready", "heard"] as const) {
+      renderPane(answerSpeech(ANSWER, { stateFor: vi.fn(() => state) }).speech);
+      expect([state, body().style.background]).toEqual([state, gradient(40)]);
+      cleanup();
+    }
+  });
+
+  it("a pane opened over a run while a wave is shown still fades", () => {
+    setOpacity(40);
+    act(() => beginWaiting(SESSION, "u-1"));
+    renderPane(answerSpeech(ANSWER, { stateFor: vi.fn(() => "speaking" as const) }).speech);
+    expect(wave()).not.toBeNull();
+    expect(body().style.background).toBe(gradient(40));
+  });
+
   it("an offered Retry Enter sits in a solid row of its own", () => {
     vi.useFakeTimers();
     setOpacity(40);

@@ -426,7 +426,14 @@ export function AnswerPane({
    *   the wave is the pane saying "the agent is working";
    * - the wave clears → whatever the focus says.
    */
-  const [solidByGesture, setSolidByGesture] = useState(false);
+  // A pane opened over a run already under way — the bar's Play is usable
+  // while the pane is closed — starts solid: the press it would have answered
+  // happened before it mounted. Playing, buffering or paused alike; a shown
+  // wave still wins.
+  const [solidByGesture, setSolidByGesture] = useState(() => {
+    const state = speech.stateFor(sessionId);
+    return !waveShown && (state === "speaking" || state === "stalled" || state === "paused");
+  });
   const playPresses = usePlayPressCount(sessionId);
   // The two inputs that act on their CHANGE, not their value. Adjusted during
   // render, React's pattern for state that follows a prop.
