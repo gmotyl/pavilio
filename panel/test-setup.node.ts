@@ -15,3 +15,18 @@ import { GIT_LOCATION_VARS } from "./server/lib/gitEnv.js";
 // `process.env`, so the node project (server/, scripts/, hooks/) can load it
 // while the jsdom project layers the DOM setup on top via ./src/test-setup.ts.
 for (const name of GIT_LOCATION_VARS) delete process.env[name];
+
+// Git identity comes from the environment, not from `git config user.*`. A
+// fixture that writes user.name/user.email writes them into whichever repository
+// git resolves — and when an inherited GIT_DIR misdirected one, that was the real
+// repository, which kept `seed` / `seed@test` in its config long after the run.
+//
+// Env wins on all three counts: nothing persistent is written anywhere; it
+// reaches every git child the code under test spawns (syncRepo commits by
+// itself), so fixtures need no identity of their own; and it beats every config
+// file, so even a misdirected fixture commit lands without adding a user.* key.
+// Set unconditionally, so a developer's own identity never leaks into fixtures.
+process.env.GIT_AUTHOR_NAME = "fixture";
+process.env.GIT_AUTHOR_EMAIL = "fixture@test";
+process.env.GIT_COMMITTER_NAME = "fixture";
+process.env.GIT_COMMITTER_EMAIL = "fixture@test";
