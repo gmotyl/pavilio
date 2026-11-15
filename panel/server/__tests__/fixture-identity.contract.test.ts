@@ -28,20 +28,30 @@ const PANEL = resolve(__dirname, "../..");
 const SELF = relative(PANEL, __filename);
 
 const Q = "['\"`]";
-// Options/subcommand allowed between `config` and the key. Each is a write
-// modifier (or `set`, the modern write subcommand); `--get*` is not listed, so
-// reads stay allowed.
-const WRITE_OPT = "--(?:local|global|worktree|replace-all|add)";
-// "config", [<opts> | "--file", <x> | "set", …] "user.name|user.email"
-// `\s` spans newlines, so a call split across lines matches as one.
+// Any option may sit between `config` (or `config set`) and the key; a fixed
+// list of write modifiers missed `--system`, `--file=<x>`, `--value=<x>`, ….
+// Instead the read/removal flags are excluded: a sequence containing one of
+// them is a read or an unset, never a write. The subcommand forms `config get`,
+// `config list`, `config unset` never match, since only `set` is accepted there.
+const READ = "(?:--get(?:-all|-regexp|-urlmatch)?|-l|--list|--unset(?:-all)?|--remove-section|--rename-section)(?![\\w-])";
+// Options that take their value as the next argument (`--file <x>`).
+const VALUE_OPT = "(?:--file|-f|--blob|--type|--value|--comment)";
+// One option token, `--opt` or `--opt=value`, that is not a read/removal flag.
+const OPT = `(?!${READ})-`;
+// "config", ["set",] [<"--opt[=x]"> | <"--file", x>]* "user.name|user.email"
+// `\s` spans newlines, so a call split across lines matches as one; a value
+// never crosses a comma or a comment barrier.
 const SPAWN_ARGS = new RegExp(
-  `${Q}config${Q}\\s*,\\s*(?:${Q}(?:${WRITE_OPT}|set)${Q}\\s*,\\s*|${Q}--file${Q}\\s*,\\s*[^,\\u0000]+,\\s*)*${Q}user\\.(?:name|email)${Q}`,
+  `${Q}config${Q}\\s*,\\s*(?:${Q}set${Q}\\s*,\\s*)?` +
+    `(?:(?:${Q}${VALUE_OPT}${Q}\\s*,\\s*[^,\\u0000]+|${Q}${OPT}[^'"\`,\\n\\u0000]*${Q})\\s*,\\s*)*` +
+    `${Q}user\\.(?:name|email)${Q}`,
   "g",
 );
-// git [<global opts: -C <dir>, -c <k=v>, --opt[=x]>] config [<opts> | --file <x> | set] user.name|user.email
+// git [<global opts: -C <dir>, -c <k=v>, --opt[=x]>] config [set] [--opt[=x] | --file <x>]* user.name|user.email
 // `-c user.name=…` with no `config` subcommand never matches: `config` is required.
 const SHELL = new RegExp(
-  `\\bgit\\s+(?:(?:-C|-c)\\s+\\S+\\s+|--[\\w-]+(?:=\\S+)?\\s+)*config\\s+(?:(?:${WRITE_OPT}|set|--file[\\s=]\\S+)\\s+)*user\\.(?:name|email)\\b`,
+  `\\bgit\\s+(?:(?:-C|-c)\\s+\\S+\\s+|--[\\w-]+(?:=\\S+)?\\s+)*config\\s+(?:set\\s+)?` +
+    `(?:(?:${VALUE_OPT}\\s+[^\\s\\u0000]+|${OPT}[^\\s\\u0000]*)\\s+)*user\\.(?:name|email)\\b`,
   "g",
 );
 const COMMENT = /^\s*(?:\/\/|\/?\*)/;
@@ -118,6 +128,15 @@ describe("fixture identity", () => {
       ["shell form, -c a=b before config", `sh("git -c a=b config user.name t");`],
       ["shell form, multi-line", "execSync(`git\n  config\n  user.name t`);"],
       ["bare read without --get", `sh("git config user.name");`],
+      ["spawn args, config set --value=old", `git(dir, "config", "set", "--value=old", "user.name", "new");`],
+      ["shell form, config set --value=old", `sh("git config set --value=old user.name new");`],
+      ["spawn args, --file=<x> as one arg", `git(dir, "config", "--file=/tmp/x", "user.email", "x");`],
+      ["shell form, --file=<x>", `sh("git config --file=/tmp/x user.email x");`],
+      ["spawn args, --system", `git(dir, "config", "--system", "user.name", "t");`],
+      ["shell form, --system", `sh("git config --system user.name t");`],
+      ["spawn args, --type=string before the key", `git(dir, "config", "--type=string", "user.name", "t");`],
+      ["shell form, --type=string before the key", `sh("git config --type=string user.email t@t");`],
+      ["shell form, -f <file>", `sh("git config -f cfg user.name t");`],
     ];
     for (const [label, text] of rows) expect(persistentIdentityWrite(text), label).toBe(true);
 
@@ -134,6 +153,17 @@ describe("fixture identity", () => {
       ["spawn args multi-line --get", `git(dir,\n  "config",\n  "--get",\n  "user.name");`],
       ["shell --get", `sh("git config --get user.email");`],
       ["shell --get-regexp", `sh("git config --get-regexp '^user\\\\.'");`],
+      ["spawn args config get", `git(dir, "config", "get", "user.name");`],
+      ["shell config get", `sh("git config get user.name");`],
+      ["spawn args --unset", `git(dir, "config", "--unset", "user.name");`],
+      ["shell --unset", `sh("git config --unset user.name");`],
+      ["spawn args config unset", `git(dir, "config", "unset", "user.email");`],
+      ["shell config unset", `sh("git config unset user.email");`],
+      ["spawn args --get-all", `git(dir, "config", "--get-all", "user.name");`],
+      ["shell --get-all", `sh("git config --get-all user.name");`],
+      ["spawn args --list", `git(dir, "config", "--list", "user.name");`],
+      ["shell --list", `sh("git config --list user.name");`],
+      ["shell -f <file> --get", `sh("git config -f cfg --get user.name");`],
       ["other config key", `git(dir, "config", "core.autocrlf", "false");`],
       ["line comment prose", `// A fixture that ran git config user.name seed wrote into the parent repo`],
       ["block comment prose", ` * the old fixture called "config", "user.email" on the hook repo`],
