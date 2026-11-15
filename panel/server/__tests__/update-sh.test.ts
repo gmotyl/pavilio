@@ -304,8 +304,6 @@ beforeEach(() => {
   mkdirSync(join(upstream, "scripts"), { recursive: true });
   git(upstream, "init", "--quiet");
   git(upstream, "checkout", "-q", "-b", "main");
-  git(upstream, "config", "user.email", "update-test@example.com");
-  git(upstream, "config", "user.name", "Update Test");
   writePanelFixture(FAILING_BUILD);
   writeFileSync(join(upstream, "panel", "src", "app.ts"), "export const app = 1;\n");
   writeFileSync(join(upstream, "skills", "demo.md"), "# demo\n");

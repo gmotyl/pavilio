@@ -25,8 +25,6 @@ describe("syncRepo", () => {
   function clone(name: string) {
     const dir = join(root, name);
     git(root, "clone", "--quiet", remote, dir);
-    git(dir, "config", "user.email", `${name}@test`);
-    git(dir, "config", "user.name", name);
     return dir;
   }
 
@@ -41,8 +39,6 @@ describe("syncRepo", () => {
     // seed
     const seed = join(root, "seed");
     git(root, "clone", "--quiet", remote, seed);
-    git(seed, "config", "user.email", "seed@test");
-    git(seed, "config", "user.name", "seed");
     mkdirSync(join(seed, "projects/p/time"), { recursive: true });
     writeFileSync(join(seed, "projects/p/note.md"), "base\n");
     writeFileSync(join(seed, "projects/p/time/mac.jsonl"), "0\n");
