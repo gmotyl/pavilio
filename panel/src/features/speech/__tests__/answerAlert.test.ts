@@ -15,6 +15,8 @@ vi.mock("../../notifications/notificationClickTarget", async (importOriginal) =>
 
 const {
   alertOnAnswer,
+  arriveAtCell,
+  drawerShowsProject,
   focusedVisibleSessionIdFor,
   isLookedAt,
   raiseAnswerAlert,
@@ -158,6 +160,54 @@ describe("answer alert", () => {
   it("an answer for a session the panel does not know raises nothing", () => {
     alertOnAnswer(answer("cell-gone", "Done."), false, deps(null));
     expect(getAlertsSnapshot()).toEqual([]);
+  });
+});
+
+describe("arriveAtCell", () => {
+  type ArrivalDeps = { projectOf: (id: string) => string | undefined; navigate: (path: string) => void };
+  const arrivalDepsOfLastCall = () =>
+    (arrival.arrive.mock.calls.at(-1) as unknown as [unknown, ArrivalDeps])[1];
+
+  it("stays on the page when the drawer shows the cell's project: no route change", () => {
+    const navigate = vi.fn();
+    arriveAtCell("cell-a", "alpha", {
+      sessionOf: (id) => sessions.get(id),
+      navigate,
+      drawerShows: (project) => project === "alpha",
+    });
+    expect(arrival.arrive).toHaveBeenCalledTimes(1);
+    arrivalDepsOfLastCall().navigate("/project/alpha/iterm");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("goes to the project's terminals when the drawer does not show its project", () => {
+    const navigate = vi.fn();
+    arriveAtCell("cell-b", "beta", {
+      sessionOf: (id) => sessions.get(id),
+      navigate,
+      drawerShows: (project) => project === "alpha",
+    });
+    arrivalDepsOfLastCall().navigate("/project/beta/iterm");
+    expect(navigate).toHaveBeenCalledWith("/project/beta/iterm");
+  });
+});
+
+describe("drawerShowsProject", () => {
+  it("is true on another tab of the same project with the drawer open", () => {
+    expect(drawerShowsProject("/project/alpha/notes", true, "alpha")).toBe(true);
+  });
+
+  it("is false with the drawer closed", () => {
+    expect(drawerShowsProject("/project/alpha/notes", false, "alpha")).toBe(false);
+  });
+
+  it("is false over another project's page", () => {
+    expect(drawerShowsProject("/project/beta/notes", true, "alpha")).toBe(false);
+  });
+
+  it("is false on the terminals tab and outside any project", () => {
+    expect(drawerShowsProject("/project/alpha/iterm", true, "alpha")).toBe(false);
+    expect(drawerShowsProject("/terminals", true, "alpha")).toBe(false);
   });
 });
 

@@ -80,6 +80,12 @@ export interface AnswerAlertDeps {
   documentVisible: () => boolean;
   /** The router's navigate, for the click. */
   navigate: (path: string) => void;
+  /**
+   * Whether the terminal drawer is on screen over one of the project's pages
+   * (see `drawerShowsProject`). The click then switches the drawer's cell and
+   * stays on the page instead of jumping to the terminals tab.
+   */
+  drawerShows?: (project: string) => boolean;
 }
 
 /**
@@ -123,17 +129,36 @@ export function alertOnAnswer(
 export function arriveAtCell(
   sessionId: string,
   project: string,
-  deps: Pick<AnswerAlertDeps, "sessionOf" | "navigate">,
+  deps: Pick<AnswerAlertDeps, "sessionOf" | "navigate" | "drawerShows">,
 ): void {
+  // The drawer already shows this project's terminals over the page the user
+  // is on: focusing the cell there is enough, a jump to the terminals tab would
+  // only throw them off that page.
+  const stay = deps.drawerShows?.(project) ?? false;
   // The dismiss wait it returns times itself out, and a click is a one-off;
   // nothing here outlives it to cancel it.
   arriveFromNotification(
     { type: NOTIFICATION_CLICK_MESSAGE_TYPE, sessionId, project },
     {
       projectOf: (id) => deps.sessionOf(id)?.project,
-      navigate: deps.navigate,
+      navigate: stay ? () => {} : deps.navigate,
     },
   );
+}
+
+/**
+ * Whether the terminal drawer shows `project`'s terminals right now: the drawer
+ * is open over one of that project's pages other than its terminals tab (which
+ * is the full-page view, not the drawer).
+ */
+export function drawerShowsProject(
+  pathname: string,
+  drawerVisible: boolean,
+  project: string,
+): boolean {
+  if (!drawerVisible) return false;
+  const match = matchProjectFromPath(pathname);
+  return !!match && match.name === project && match.section !== "iterm";
 }
 
 /**
