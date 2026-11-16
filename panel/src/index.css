@@ -36,9 +36,9 @@
      took from the mockup rather than from the tokens above (see the note on
      `.speech-bar`). It is a TOKEN now because the scrubber is no longer the
      only thing drawn in it: the answer pane's waiting wave is the same
-     segments in another shape, and a literal repeated in a third place is a
-     third place to forget. Named for the segment because that is what it
-     paints — `.speech-bar-seg`, `.answer-pane-seg`, and the wave's crests.
+     segments in another shape, and a literal repeated in a second place is a
+     second place to forget. Named for the segment because that is what it
+     paints — `.speech-bar-seg` and the wave's crests.
 
      Only the segments moved to it. The rest of the speech surface's greens —
      the speak control, the activity LED, the speech mode control — are the same hue
@@ -1144,11 +1144,10 @@ input[type="checkbox"] {
   outline: none;
 }
 
-/* The scroll container. The rail is INSIDE it, as a 22px grid column, so the
-   segments stay aligned with their blocks as the text scrolls. Positioned so
-   that it is the `offsetParent` of the blocks AND of the rail: a block's
-   `offsetTop` is then both its rail coordinate and its scroll target, which is
-   what `layoutRail` and the follow effect in `AnswerPane` rely on. */
+/* The scroll container. Positioned, so that it ends the offset-parent chain a
+   block's scroll target is summed along (the follow effect in `AnswerPane`).
+   One grid column: the waiting state, the held wave and the text stack in it.
+   Play from here's ▶ sits in the text column's left padding. */
 .answer-pane-body {
   position: relative;
   /* The row's own ground, #17171d, as inline style from `AnswerPane`: solid,
@@ -1158,8 +1157,7 @@ input[type="checkbox"] {
      not look like. The seam left is the hairline on the composer's chip row,
      below the meta row, when the composer is on. */
   display: grid;
-  grid-template-columns: 22px 1fr;
-  column-gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
   /* The column's one claimant of free space. A short answer leaves empty
      ground here rather than floating the composer up into the middle of the
      cell; a long one scrolls inside this box instead of pushing the composer
@@ -1172,10 +1170,9 @@ input[type="checkbox"] {
   padding: 10px 12px 10px 6px;
 }
 
-/* The body while a reply is pending. It replaces the text AND the rail, so it
-   spans both of the body's grid columns rather than sitting in the text one and
-   leaving a 22px gutter beside a centred state. The wave and its halo sit in
-   the box this rule owes the state machine; they are below. */
+/* The body while a reply is pending. It replaces the text and spans the
+   body's whole grid row. The wave and its halo sit in the box this rule owes
+   the state machine; they are below. */
 .answer-pane-waiting {
   grid-column: 1 / -1;
   display: flex;
@@ -1220,9 +1217,9 @@ input[type="checkbox"] {
    "this is live" is already inside it, and a chrome box around the crests would
    read as a second thing rather than as the same thing, smaller.
 
-   It spans both of the body's grid columns, like the waiting state it came
-   from, and sits above the answer it is holding — the position the wave would
-   have had if it still had the body. */
+   It spans the body's grid row, like the waiting state it came from, and sits
+   above the answer it is holding — the position the wave would have had if it
+   still had the body. */
 .answer-pane-waiting-next {
   grid-column: 1 / -1;
   display: flex;
@@ -1800,147 +1797,13 @@ input[type="checkbox"] {
   accent-color: var(--accent, #7aa2f7);
 }
 
-/* The scrubber turned vertical: one segment per unit, top to bottom. A grid
-   item stretched to the text column's height — as tall as the scroll content —
-   with the segments placed absolutely inside it by `layoutRail`, each spanning
-   its unit's blocks. */
-.answer-pane-rail {
-  position: relative;
-  align-self: stretch;
-  grid-area: 1 / 1;
-}
-
-/* The rail column: the rail and the Play layer stacked in one grid cell. NOT
-   positioned, so the body stays the `offsetParent` of the rail — the origin
-   `layoutRail` measures the blocks against. */
-.answer-pane-gutter {
-  display: grid;
-  align-self: stretch;
-}
-
-/* The Play layer over the rail. Transparent to the pointer, so a segment stays
-   clickable everywhere a button is not. */
-.answer-pane-plays {
-  position: relative;
-  grid-area: 1 / 1;
-  pointer-events: none;
-}
-
-/* One unit's Play, level with the top of its segment (`alignToSegments`
-   writes `top`). Hidden until its unit is hovered or focused, or is the one
-   being read — then it is Pause. */
-.answer-pane-play {
-  position: absolute;
-  left: 0;
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--border-default);
-  border-radius: 50%;
-  background: var(--bg-elevated);
-  color: var(--speech-seg);
-  cursor: pointer;
-  pointer-events: auto;
-  opacity: 0;
-  transition: opacity 120ms ease, border-color 120ms ease;
-}
-
-.answer-pane-play svg {
-  width: 12px;
-  height: 12px;
-}
-
-.answer-pane-play:hover {
-  border-color: var(--speech-seg);
-}
-
-.answer-pane-play[data-shown],
-.answer-pane-play:focus-visible {
-  opacity: 1;
-}
-
-.answer-pane-play:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.answer-pane-play[data-playing] {
-  background: color-mix(in srgb, var(--speech-seg) 18%, var(--bg-elevated));
-  border-color: var(--speech-seg);
-}
-
-/* Touch has no hover to reveal a Play with, so every one is shown, dimmed;
-   the one being read is Pause at full strength. */
-@media (hover: none) {
-  .answer-pane-play {
-    opacity: 0.4;
-  }
-
-  .answer-pane-play[data-playing] {
-    opacity: 1;
-  }
-}
-
-.answer-pane-seg {
-  position: absolute;
-  left: 8px;
-  width: 6px;
-  /* `top` and `height` come from `layoutRail`; this is the blockless minimum. */
-  min-height: 8px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-/* The five states are the scrubber's, verbatim — one `segmentStateFor`, two
-   drawings. See the notes on `.speech-bar-seg[data-segment]`. */
-.answer-pane-seg[data-segment="played"] {
-  background: color-mix(in srgb, var(--speech-seg) 32%, transparent);
-}
-
-.answer-pane-seg[data-segment="ready"] {
-  background: rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speech-seg) 28%, transparent);
-}
-
-.answer-pane-seg[data-segment="warming"] {
-  background: var(--red-dim);
-  box-shadow: inset 0 0 0 1px var(--red);
-}
-
-.answer-pane-seg[data-segment="cold"] {
-  background-color: rgba(0, 0, 0, 0.55);
-  background-image: repeating-linear-gradient(
-    115deg,
-    rgba(255, 255, 255, 0.05) 0 3px,
-    transparent 3px 7px
-  );
-}
-
-.answer-pane-seg[data-segment="playing"] {
-  background: color-mix(in srgb, var(--speech-seg) 18%, transparent);
-  box-shadow: inset 0 0 0 1px var(--speech-seg);
-}
-
-/* The playhead: a triangle beside the playing segment, pointing at the text. */
-.answer-pane-head {
-  position: absolute;
-  left: -8px;
-  top: 50%;
-  width: 0;
-  height: 0;
-  transform: translateY(-50%);
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 5px solid #9ece6a;
-  pointer-events: none;
-}
-
 /* The right padding is the corner's: Copy as Markdown sits over the body's
-   top-right, and without it the first line runs under the icon. */
+   top-right, and without it the first line runs under the icon. The left
+   padding is Play from here's: its 22px ▶ sits 4px left of a block's text, so
+   it lands in this padding instead of over the start of the text. */
 .answer-pane-text {
   min-width: 0;
+  padding-left: 32px;
   /* Clears the copy-all chip: 16px wide at 14px from the pane's edge, so it
      reaches 30px in; the body's 12px plus this put the text 36px in. */
   padding-right: 24px;
@@ -1957,11 +1820,6 @@ input[type="checkbox"] {
   right: 14px;
   z-index: 3;
 }
-
-/* The spoken block carries `data-speaking` for tests and semantics, but draws
-   nothing of its own: the rail's playing segment and playhead beside it are
-   the mark, and a tinted block on top of them was too loud (smoke test,
-   2026-09-16). */
 
 /* ── THE BOOT LEGEND ──────────────────────────────────────────────────────────
 

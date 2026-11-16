@@ -1,6 +1,7 @@
 /**
- * Finds, for each speech unit, the rendered markdown block(s) it was spoken
- * from — by text, not by offsets.
+ * How a rendered markdown block relates to the speech unit it was spoken as —
+ * by text, not by offsets. Play from here (`firstUnitsOfBlocks`) pairs the
+ * blocks with units in page order using these rules.
  *
  * Offsets were the obvious alternative and were rejected: a unit is the end
  * product of a dozen stripping and packing passes (`stripToSpeakableText`,
@@ -16,22 +17,21 @@
  * spoken `text` says "code block" and "dizajn", the source still says `⟦code⟧`
  * and "design", and the rendered block says "design" too.
  *
- * Two constants shape the rules (see {@link matchUnitsToBlocks}):
+ * Two constants shape the rules (see {@link blockMatchStrength}):
  *
  * - `MIN_MATCH_CHARS` (12): a floor on *both* sides of every substring and
  *   window rule. On the block it keeps a one-word list item — "Tests" — from
  *   matching every unit that contains the word through `u.includes(b)`. On the
  *   unit it keeps a short unit — `## Result`, or a bare `Yes.` — from marking
  *   every block that happens to contain "result" or "yes" through
- *   `b.includes(u)`: without it, speaking the opening heading would scroll the
- *   pane to whichever paragraph echoes the word. Exact equality is exempt from
+ *   `b.includes(u)`: without it, the opening heading's ▶ would land on
+ *   whichever paragraph echoes the word. Exact equality is exempt from
  *   the floor: a short heading is usually its own unit (`prepare` does not pack
  *   a leading heading into its neighbour), and a block that *is* the unit has
  *   no cross-unit ambiguity to guard against. Accepted residue: a heading of
  *   twelve or more characters echoed as its paragraph's opener
- *   (`## Installation steps` + "Installation steps are…") marks both blocks
- *   while the heading is spoken — adjacent, overlapping segments, not a wrong
- *   scroll. Also accepted: a short heading in the middle of the body
+ *   (`## Installation steps` + "Installation steps are…") matches both
+ *   blocks; the in-order walk still gives each block its own unit. Also accepted: a short heading in the middle of the body
  *   (`## Notes`, 5 chars) is packed by `prepare` into its paragraph's unit, so
  *   its own block is under the floor and stays unmarked while the paragraph
  *   beside it is.
@@ -53,26 +53,12 @@
  *   whole. `b.includes(u)` stays for the unit anytts `packUnits` carves out of a
  *   longer block. Accepted residue: a paragraph that opens AND closes with a
  *   sentinel is not found; two paragraphs that share their first or last 24
- *   characters both mark for the unit that speaks either of them, so the rail
- *   spans both while one is spoken. That is as far as the damage goes: when
- *   several units match a block, `blockToUnit` prefers the unit whose source
- *   equals the block, then one that holds it whole, then one the block holds,
- *   and only then the first window-only match — so a click on the look-alike
- *   paragraph still lands on its own unit, and while that unit plays its own
- *   block carries the `data-unit` mark.
+ *   characters both match the unit that speaks either of them. That is as far
+ *   as the damage goes: the strength orders the candidates — the unit whose
+ *   source equals the block, then one that holds it whole, then one the block
+ *   holds, and only then a window-only match — so the look-alike paragraph
+ *   still lands on its own unit.
  */
-
-export interface UnitBlockMap {
-  /** unit index → block indexes it was packed from, ascending; [] when none */
-  unitToBlocks: readonly (readonly number[])[];
-  /**
-   * block index → the unit that owns it; null for unspoken blocks. Among
-   * several matching units the owner is the one that equals the block, else
-   * the one that holds it whole, else the one the block holds, else the first
-   * window-only match — earliest unit on a tie.
-   */
-  blockToUnit: readonly (number | null)[];
-}
 
 /**
  * Below this length neither a normalized block nor a normalized unit takes part
@@ -101,8 +87,8 @@ export function normalizeForMatch(text: string): string {
 
 /**
  * How a rendered block relates to a unit, strongest first. Every kind counts
- * as a match for `unitToBlocks`; the order decides which unit *owns* the
- * block in `blockToUnit` when several match it (see the module comment).
+ * as a match; the order decides which unit wins a block when several match it
+ * (see the module comment).
  */
 const enum MatchKind {
   /** the block is the unit */
@@ -141,40 +127,10 @@ function matchKind(block: string, unit: string): MatchKind | null {
 /**
  * How strongly a normalized rendered block matches a normalized unit source:
  * 0 (the block is the unit) to 3 (only a head/tail window is found), lower is
- * stronger; `null` when it does not match. The rules of
- * {@link matchUnitsToBlocks}, for a caller that pairs blocks with units its own
- * way — the page's ▶ (`PlayFromHere`) walks both in order.
+ * stronger; `null` when it does not match. A caller pairs blocks with units its
+ * own way — Play from here (`firstUnitsOfBlocks`) walks both in order and lets
+ * the strongest match win.
  */
 export function blockMatchStrength(block: string, unit: string): number | null {
   return matchKind(block, unit);
-}
-
-export function matchUnitsToBlocks(
-  units: readonly { source: string }[],
-  blocks: readonly string[],
-): UnitBlockMap {
-  const normalizedBlocks = blocks.map(normalizeForMatch);
-  const blockToUnit: (number | null)[] = blocks.map(() => null);
-  /** the kind that won `blockToUnit[b]` so far; a later unit takes over only with a stronger one */
-  const ownerKind: (MatchKind | null)[] = blocks.map(() => null);
-
-  const unitToBlocks = units.map((unit, unitIndex) => {
-    const normalizedUnit = normalizeForMatch(unit.source);
-    const owned: number[] = [];
-
-    normalizedBlocks.forEach((block, blockIndex) => {
-      const kind = matchKind(block, normalizedUnit);
-      if (kind === null) return;
-      owned.push(blockIndex);
-      const current = ownerKind[blockIndex];
-      if (current === null || kind < current) {
-        blockToUnit[blockIndex] = unitIndex;
-        ownerKind[blockIndex] = kind;
-      }
-    });
-
-    return owned;
-  });
-
-  return { unitToBlocks, blockToUnit };
 }
