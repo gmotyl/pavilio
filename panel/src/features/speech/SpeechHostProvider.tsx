@@ -30,6 +30,7 @@ import {
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
 import {
   alertOnAnswer,
+  drawerShowsProject,
   focusedVisibleSessionIdFor,
   isLookedAt,
   type AnswerAlertDeps,
@@ -157,9 +158,13 @@ export function SpeechHostProvider({
   }, [drawerVisible]);
   // What both speech alerts read to name a cell and to arrive at it: the
   // session list at the moment of asking, and the router's navigate.
-  const [cellPlumbing] = useState<Pick<AnswerAlertDeps, "sessionOf" | "navigate">>(() => ({
+  const [cellPlumbing] = useState<
+    Pick<AnswerAlertDeps, "sessionOf" | "navigate" | "drawerShows">
+  >(() => ({
     sessionOf: (sessionId) => portsRef.current.sessionOf(sessionId),
     navigate: (path) => routerView.current.navigate?.(path),
+    drawerShows: (project) =>
+      drawerShowsProject(routerView.current.pathname, drawerVisibleRef.current, project),
   }));
   /** The focused cell on screen right now: the project's, the drawer's, or the standalone page's. */
   const readFocusedVisible = useCallback(

@@ -44,7 +44,7 @@ export function speakingAlertTitle(project: string, label: string): string {
 }
 
 /** What the speaking alert needs from the panel: the same plumbing as the answer alert's. */
-export type SpeakingAlertDeps = Pick<AnswerAlertDeps, "sessionOf" | "navigate"> & {
+export type SpeakingAlertDeps = Pick<AnswerAlertDeps, "sessionOf" | "navigate" | "drawerShows"> & {
   /** Whether the user is looking at the cell now (see `isLookedAt`); read on every evaluation. */
   lookedAt: (sessionId: string) => boolean;
 };
