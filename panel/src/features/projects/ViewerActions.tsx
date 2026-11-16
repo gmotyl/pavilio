@@ -12,7 +12,7 @@ import {
 import { copyToClipboard } from "../../lib/clipboard";
 import { DocumentSpeechBar } from "../speech/DocumentSpeechBar";
 import { usePageSpeech } from "../speech/SpeechHostProvider";
-import { usePlayFromHereHandler, usePlayHint } from "../speech/PlayFromHere";
+import { usePlayFromHereHandler, usePlayHint } from "../speech/PagePlayFromHere";
 import { pageHasSpeech } from "../speech/pageText";
 import { openInVSCode } from "../shell/vscode";
 import type { DocSpeech } from "./docSpeech";

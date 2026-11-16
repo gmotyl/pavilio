@@ -31,11 +31,11 @@ vi.mock("../ViewerActions", async (importOriginal) => {
     default: (props: import("react").ComponentProps<typeof Real>) => (speechKey ? null : <Real {...props} />),
   };
 });
-vi.mock("../../speech/PlayFromHere", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../speech/PlayFromHere")>();
+vi.mock("../../speech/PagePlayFromHere", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../speech/PagePlayFromHere")>();
   return {
     ...actual,
-    PlayFromHere: ({ docKey, children }: { docKey?: string; children: import("react").ReactNode }) => (
+    PagePlayFromHere: ({ docKey, children }: { docKey?: string; children: import("react").ReactNode }) => (
       <div data-testid="play-from-here" data-doc-key={docKey ?? ""}>
         {children}
       </div>
