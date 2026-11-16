@@ -412,27 +412,70 @@ function splitBlockLines(paragraph: string): TextBlock[] {
   return blocks;
 }
 
+/**
+ * Abbreviations that sit before a name, a number or a noun and so never end a
+ * sentence on their own full stop, compared lowercased without the trailing
+ * dot. Ambiguous ones that also close sentences (`etc.`, `itd.`, `itp.`, `r.`,
+ * `ok.`, `No.`) are absent: the lowercase-or-digit rule in {@link continues}
+ * already keeps them inside a sentence when the text carries on.
+ */
+const ABBREVIATIONS = new Set([
+  // English
+  "mr", "mrs", "ms", "dr", "prof", "st", "vs", "fig", "cf", "e.g", "i.e",
+  // Polish
+  "ul", "np", "tzw", "m.in", "wg", "nr", "godz",
+]);
+
+/** The token right before a full-stop terminator, closing quotes allowed. */
+const LAST_TOKEN_RE = /(?:^|\s)[("'„“‘«[]*(\S+?)\.["'”’»)\]]*$/u;
+
+/** Text that carries a sentence on: a lowercase letter (any script) or a digit. */
+const CONTINUATION_RE = /^[\p{Ll}\p{N}]/u;
+
+/**
+ * Whether `sentence` — one of `firstSentence`'s cuts — is not really over
+ * because `next`, the text after it, still belongs to it: the next word starts
+ * lowercase or with a digit ("e.g. grep", "np. grep", inline code `pnpm test.`
+ * unwrapped mid-sentence, "No. 5"), or the cut fell on a known abbreviation's
+ * full stop ("Mr. Smith", "Prof. Nowak").
+ */
+function continues(sentence: string, next: string): boolean {
+  if (!next) return false;
+  if (CONTINUATION_RE.test(next)) return true;
+  const token = LAST_TOKEN_RE.exec(sentence)?.[1];
+  return token !== undefined && ABBREVIATIONS.has(token.toLowerCase());
+}
 
 /**
  * A block's spoken text cut into sentences, in order. A trailing run with no
  * terminator — a heading-like lead-in, a list item without a full stop, a
  * paragraph that just stops — is a sentence of its own. Uses `anytts/text`'s
  * `firstSentence`, so "2.5" is never a boundary and closing quotes stay with
- * the sentence they close.
+ * the sentence they close; a cut that {@link continues} is glued back onto the
+ * next one, so an abbreviation never halves a sentence.
  */
 function splitSentences(text: string): string[] {
   const sentences: string[] = [];
   let rest = text.trim();
+  let pending = "";
 
   while (rest) {
-    const sentence = firstSentence(rest);
-    if (!sentence) {
-      sentences.push(rest);
-      break;
+    const cut = firstSentence(rest);
+    if (!cut) {
+      sentences.push(pending ? `${pending} ${rest}` : rest);
+      return sentences;
     }
-    sentences.push(sentence);
-    rest = rest.slice(rest.indexOf(sentence) + sentence.length).trim();
+    // `rest` is trimmed, so `firstSentence`'s cut is exactly its prefix.
+    rest = rest.slice(cut.length).trim();
+    const sentence = pending ? `${pending} ${cut}` : cut;
+    if (continues(sentence, rest)) {
+      pending = sentence;
+    } else {
+      sentences.push(sentence);
+      pending = "";
+    }
   }
+  if (pending) sentences.push(pending);
 
   return sentences;
 }

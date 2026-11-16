@@ -937,3 +937,44 @@ describe("prepare: blocks", () => {
     for (const unit of prepared.units) expect(unit).toMatchObject({ lang: "pl", chars: unit.text.length });
   });
 });
+
+describe("sentence units", () => {
+  const texts = (markdown: string, language: "pl" | "en" = "en"): string[] =>
+    prepare(markdown, { language }).units.map((unit) => unit.text);
+
+  it("English abbreviations do not end a sentence", () => {
+    expect(texts("Use tools, e.g. grep and rg. Then stop.\n")).toEqual(["Use tools, e.g. grep and rg.", "Then stop."]);
+    expect(texts("Mr. Smith agrees, i.e. yes. Dr. Jones does not.\n")).toEqual([
+      "Mr. Smith agrees, i.e. yes.",
+      "Dr. Jones does not.",
+    ]);
+    expect(texts("See Fig. 3 and compare A vs. B. Done.\n")).toEqual(["See Fig. 3 and compare A vs. B.", "Done."]);
+  });
+
+  it("Polish abbreviations do not end a sentence", () => {
+    expect(texts("Używamy narzędzi, np. grep i rg. Potem koniec.\n", "pl")).toEqual([
+      "Używamy narzędzi, np. grep i rg.",
+      "Potem koniec.",
+    ]);
+    expect(texts("To jest tzw. szybki start, m.in. dla odpowiedzi.\n", "pl")).toEqual([
+      "To jest tzw. szybki start, m.in. dla odpowiedzi.",
+    ]);
+    expect(texts("Spotkanie ul. Długa 5, godz. 10. Prof. Nowak będzie.\n", "pl")).toEqual([
+      "Spotkanie ul. Długa 5, godz. 10.",
+      "Prof. Nowak będzie.",
+    ]);
+    // A list-closing "itd." followed by a capital still ends the sentence.
+    expect(texts("Mamy jabłka, gruszki itd. Reszta później.\n", "pl")).toEqual([
+      "Mamy jabłka, gruszki itd.",
+      "Reszta później.",
+    ]);
+  });
+
+  it("a terminator inside inline code does not end a sentence", () => {
+    expect(texts("Run `pnpm test.` now. Then commit.\n")).toEqual(["Run pnpm test. now.", "Then commit."]);
+  });
+
+  it("a heading with a full stop stays one unit", () => {
+    expect(texts("## Step 1. Install\n\nRun it.\n")).toEqual(["Step 1. Install", "Run it."]);
+  });
+});
