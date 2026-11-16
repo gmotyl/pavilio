@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { useContext, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { makeSpeech, synthMock } from "./speech.harness";
@@ -37,10 +37,7 @@ vi.mock("../../markdown/MarkdownRenderer", () => ({
 import { SpeechHostProvider } from "../SpeechHostProvider";
 import { PageSpeechRowSlot } from "../PageSpeechRowHost";
 import MarkdownViewer from "../../markdown/MarkdownViewer";
-import {
-  BreadcrumbActionsContext,
-  BreadcrumbActionsProvider,
-} from "../../shell/Breadcrumbs/BreadcrumbActionsProvider";
+import { Breadcrumbs, BreadcrumbActionsProvider } from "../../shell/Breadcrumbs";
 import { __resetWorkspaceRootForTests } from "../../projects/useWorkspaceRoot";
 
 const ROOT = "/h/git/prv/projects";
@@ -72,12 +69,36 @@ function hostRules(): string {
     .join("\n");
 }
 
-function BreadcrumbSlot() {
-  const { actions } = useContext(BreadcrumbActionsContext);
-  return <nav data-testid="breadcrumb-slot">{actions}</nav>;
+/**
+ * jsdom has no layout: the breadcrumb bar's height is whatever this says, and
+ * every `ResizeObserver` the bar opens is recorded so a test can fire it.
+ */
+const layout = vi.hoisted(() => ({
+  barHeight: 45,
+  observers: [] as Array<{ cb: ResizeObserverCallback; targets: Element[] }>,
+}));
+
+class RecordingResizeObserver {
+  private entry: { cb: ResizeObserverCallback; targets: Element[] };
+  constructor(cb: ResizeObserverCallback) {
+    this.entry = { cb, targets: [] };
+    layout.observers.push(this.entry);
+  }
+  observe(el: Element) {
+    this.entry.targets.push(el);
+  }
+  unobserve() {}
+  disconnect() {
+    this.entry.targets = [];
+  }
 }
 
-/** The shell around `/view/*`: the breadcrumb row and the page share one scroller. */
+const isBar = (el: Element) => el.getAttribute("aria-label") === "Breadcrumb";
+
+/**
+ * The shell around `/view/*`: the real breadcrumb bar and the page share one
+ * scroller, as in `Layout`.
+ */
 function Shell({ children }: { children: ReactNode }) {
   return (
     <SpeechHostProvider
@@ -92,7 +113,7 @@ function Shell({ children }: { children: ReactNode }) {
       <BreadcrumbActionsProvider>
         <PageSpeechRowSlot>
           <div data-testid="scroller" style={{ overflow: "auto", height: "300px" }}>
-            <BreadcrumbSlot />
+            <Breadcrumbs />
             {children}
           </div>
         </PageSpeechRowSlot>
@@ -103,13 +124,13 @@ function Shell({ children }: { children: ReactNode }) {
 
 function renderViewer() {
   return render(
-    <Shell>
-      <MemoryRouter initialEntries={["/view/pavilio/wiki/x.md"]}>
+    <MemoryRouter initialEntries={["/view/pavilio/wiki/x.md"]}>
+      <Shell>
         <Routes>
           <Route path="/view/*" element={<MarkdownViewer />} />
         </Routes>
-      </MemoryRouter>
-    </Shell>,
+      </Shell>
+    </MemoryRouter>,
   );
 }
 
@@ -124,8 +145,18 @@ async function unfold() {
 }
 
 let style: HTMLStyleElement;
+let rectSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
+  layout.barHeight = 45;
+  layout.observers.length = 0;
+  vi.stubGlobal("ResizeObserver", RecordingResizeObserver);
+  rectSpy = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Element) {
+      const height = isBar(this) ? layout.barHeight : 0;
+      return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON() {} } as DOMRect;
+    });
   stub.host = makeSpeech();
   __resetWorkspaceRootForTests();
   style = document.createElement("style");
@@ -156,6 +187,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  rectSpy.mockRestore();
   style.remove();
   stub.host = null;
   vi.unstubAllGlobals();
@@ -170,16 +202,32 @@ describe("sticky page speech row", () => {
     // not in the breadcrumb row the Play button sits in.
     const scroller = screen.getByTestId("scroller");
     expect(host().contains(row())).toBe(true);
-    expect(screen.getByTestId("breadcrumb-slot").contains(row())).toBe(false);
+    const bar = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(bar.contains(row())).toBe(false);
     expect(scroller.contains(host())).toBe(true);
 
-    // Sticky to the scroll area's top, below the sticky breadcrumb bar
-    // (2.25rem, the offset the project tab row uses too), painted above the
-    // page text and the ▶ layer (`.play-from-here` is z-index 1).
+    // Sticky to the scroll area's top, painted above the page text and the ▶
+    // layer (`.play-from-here` is z-index 1).
     const computed = getComputedStyle(host());
     expect(computed.position).toBe("sticky");
-    expect(computed.top).toBe("2.25rem");
     expect(Number(computed.zIndex)).toBeGreaterThan(1);
+
+    // ...and offset by the breadcrumb bar's MEASURED height, not a constant:
+    // with the viewer's buttons in it the bar is taller than its bare 2.25rem.
+    // The bar publishes its height on the scroller; the host reads it there.
+    expect(rectSpy).toHaveBeenCalled();
+    expect(layout.observers.some((o) => o.targets.includes(bar))).toBe(true);
+    expect(scroller.style.getPropertyValue("--breadcrumb-h")).toBe("45px");
+    expect(host().style.top).toBe("var(--breadcrumb-h, 0px)");
+
+    // The bar resizing (buttons wrap, a narrower window) moves the offset.
+    layout.barHeight = 33;
+    act(() => {
+      for (const o of layout.observers) {
+        if (o.targets.includes(bar)) o.cb([], o as unknown as ResizeObserver);
+      }
+    });
+    expect(scroller.style.getPropertyValue("--breadcrumb-h")).toBe("33px");
 
     // Scrolling the viewer by more than the row's height keeps it in the host.
     act(() => {

@@ -10,7 +10,7 @@ import { useDocSpeech } from "../projects/docSpeech";
 import { PagePlayFromHere } from "../speech/PagePlayFromHere";
 import { PageSpeechRowHost } from "../speech/PageSpeechRowHost";
 import { useWebSocket } from "../realtime/useWebSocket";
-import { useBreadcrumbActions } from "../shell/Breadcrumbs";
+import { BELOW_BREADCRUMBS, useBreadcrumbActions } from "../shell/Breadcrumbs";
 import ImageDropZone from "./ImageDropZone";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { encodePathSegments, viewFilePath } from "./viewRoute";
@@ -184,9 +184,10 @@ export default function MarkdownViewer() {
   return (
     <div className="p-6">
       {/* The page's speech row, unfolded from the breadcrumb toolbar, is drawn
-          here: sticky under the breadcrumb bar (2.25rem, as the project tab
-          row) and as wide as the page. */}
-      <PageSpeechRowHost top="2.25rem" />
+          here: sticky right under the breadcrumb bar — offset by the bar's
+          measured height, which this page's own buttons make taller than a
+          bare row of crumbs — and as wide as the page. */}
+      <PageSpeechRowHost top={BELOW_BREADCRUMBS} />
       <ImageDropZone targetMarkdown={filePath}>
         {isMarkdown ? (
           // Always the same wrapper, so the renderer (and its mermaid

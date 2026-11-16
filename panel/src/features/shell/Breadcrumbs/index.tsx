@@ -1,4 +1,11 @@
-import { useContext, type CSSProperties, type ReactNode } from "react";
+import {
+  useContext,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronRight, Home } from "lucide-react";
 import {
@@ -91,6 +98,40 @@ function parsePath(pathname: string): Crumb[] {
   }));
 }
 
+/**
+ * The sticky offset for chrome that sticks right under the breadcrumb bar in
+ * the same scroller: the bar's measured height, published by the bar itself as
+ * `--breadcrumb-h` on its scroll container. The bar's height is not a constant
+ * — page actions (the viewer's 28px buttons) make it taller than a bare row of
+ * crumbs — so a fixed offset would leave the stuck chrome partly under the bar
+ * or with a gap above it. With no bar (focus layout hides it) the variable is
+ * unset and the offset falls back to the scroller's top.
+ */
+export const BELOW_BREADCRUMBS = "var(--breadcrumb-h, 0px)";
+
+/**
+ * Publish `nav`'s border-box height as `--breadcrumb-h` on its parent (the
+ * scroll container it sticks in), kept current by a `ResizeObserver`, and
+ * removed when the bar unmounts.
+ */
+function usePublishedHeight(nav: RefObject<HTMLElement | null>) {
+  useLayoutEffect(() => {
+    const el = nav.current;
+    const scroller = el?.parentElement;
+    if (!el || !scroller) return;
+    const publish = () =>
+      scroller.style.setProperty("--breadcrumb-h", `${el.getBoundingClientRect().height}px`);
+    publish();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      scroller.style.removeProperty("--breadcrumb-h");
+    };
+  }, [nav]);
+}
+
 interface BreadcrumbsProps {
   /** Shell controls at the row's right end, after the page's own actions. */
   trailing?: ReactNode;
@@ -102,6 +143,8 @@ export function Breadcrumbs({ trailing }: BreadcrumbsProps = {}) {
   const crumbs = parsePath(pathname);
   const { colorFor } = useProjectColors();
   const theme = usePanelTheme();
+  const navRef = useRef<HTMLElement>(null);
+  usePublishedHeight(navRef);
 
   const homeStyle: CSSProperties = {
     color: "var(--text-muted)",
@@ -128,6 +171,7 @@ export function Breadcrumbs({ trailing }: BreadcrumbsProps = {}) {
 
   return (
     <nav
+      ref={navRef}
       className="sticky top-0 z-30 flex items-center gap-1 px-6 py-2 text-xs"
       style={{
         borderBottom: "1px solid var(--border-subtle)",
