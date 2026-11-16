@@ -34,7 +34,7 @@ import { PlayFromHere, playButtonLeft } from "../PlayFromHere";
 import { PagePlayFromHere } from "../PagePlayFromHere";
 import type { CellSpeechState, SpeechUnit } from "../types";
 import { prepare } from "../prepare";
-import { pageSpeechText } from "../pageText";
+import { pageSpeechText, preparePage } from "../pageText";
 
 const KEY = "doc:pavilio/wiki/page.md";
 
@@ -613,6 +613,29 @@ describe("PlayFromHere", () => {
     fireEvent.click(pinned());
     expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text: PAGE, startUnit: playing });
     expect(stub.host!.onPause).toHaveBeenCalledTimes(1);
+  });
+
+  it("an edited page hides the pinned button of the run still reading its old text", () => {
+    // The toolbar keeps a run going across a text-only update, so the host's
+    // unit index (and its units) still belong to the old text: mapped onto the
+    // edited page it would name an unrelated sentence, and a paused Play would
+    // start the edited page there.
+    const playing = UNITS.findIndex((u) => u.text.startsWith("The second example paragraph"));
+    const progress = Object.freeze({ unitIndex: playing, unitTime: 0, unitDuration: null });
+    stub.host = makeSpeech({
+      unitsFor: (key) => (key === KEY ? UNITS : []),
+      progressFor: (key) => (key === KEY ? progress : null),
+      stateFor: (key) => (key === KEY ? "paused" : "empty"),
+    });
+
+    const { rerender } = render(<Page />);
+    expect(screen.getByTestId("play-from-here-pinned")).toHaveAccessibleName("Play from here");
+
+    const edited = PAGE.replace("## Example", "## Example\n\nA brand new paragraph now opens the first example.");
+    expect(preparePage(edited).units[playing].text).not.toBe(UNITS[playing].text);
+    rerender(<Page text={edited} />);
+    expect(screen.queryByTestId("play-from-here-pinned")).toBeNull();
+    expect(stub.host!.speakDocument).not.toHaveBeenCalled();
   });
 
   it("play from here starts at a paragraph ending in wikilink citations", () => {

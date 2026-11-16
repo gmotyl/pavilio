@@ -67,6 +67,20 @@ function requestPlay(key: string, unit: number): void {
 const NO_UNITS: readonly SpeechUnit[] = Object.freeze([]);
 const noSubscription = () => () => {};
 
+/**
+ * Whether the run's units are the page's: the same sentences in the same
+ * order. A run with no units yet is taken as the page's. The last answer is
+ * kept, as the playhead store reads this ~4 times a second.
+ */
+let lastCompared: { run: readonly SpeechUnit[]; page: readonly SpeechUnit[]; same: boolean } | null = null;
+function sameUnits(run: readonly SpeechUnit[], page: readonly SpeechUnit[]): boolean {
+  if (run === page || run.length === 0) return true;
+  if (lastCompared?.run === run && lastCompared.page === page) return lastCompared.same;
+  const same = run.length === page.length && run.every((unit, i) => unit.text === page[i].text);
+  lastCompared = { run, page, same };
+  return same;
+}
+
 export interface PagePlayFromHereProps {
   /** The page's speech key; without one (not markdown, still loading) the page gets no ▶. */
   docKey?: string;
@@ -84,9 +98,15 @@ export function PagePlayFromHere({ docKey, text, children }: PagePlayFromHerePro
   const units = useMemo(() => (docKey ? preparePage(text).units : NO_UNITS), [docKey, text]);
   // The playhead is an external store (it moves ~4 times a second); only the
   // unit index is taken, so a playhead moving within a unit renders nothing.
-  const playingUnit = useSyncExternalStore(speech?.subscribeProgress ?? noSubscription, () =>
-    docKey && speech ? (speech.progressFor(docKey)?.unitIndex ?? null) : null,
-  );
+  // A run still reading an older text of the page (the toolbar does not
+  // restart it on a text-only update) pins nothing: its index names a unit of
+  // that text, not of the page as rendered now.
+  const playingUnit = useSyncExternalStore(speech?.subscribeProgress ?? noSubscription, () => {
+    if (!docKey || !speech) return null;
+    const unit = speech.progressFor(docKey)?.unitIndex ?? null;
+    if (unit === null) return null;
+    return sameUnits(speech.unitsFor(docKey), units) ? unit : null;
+  });
   // Read as the speech row reads it, so the pinned ▶ and the row agree.
   const paused = docKey !== undefined && speech?.stateFor(docKey) === "paused";
 
