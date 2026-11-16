@@ -6,6 +6,8 @@ import type { AnswerWaitingPort, SpeechHost } from "../useSpeechHost";
 import type { SpeechUnit } from "../types";
 import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
+import { preferences } from "../../../preferences/declarations";
+import { clearPreference, readPreference } from "../../../preferences/store";
 
 /**
  * The host is stubbed, NOT `usePanelSpeech`: the bar is required to read the
@@ -118,24 +120,55 @@ afterEach(() => {
   cache.loadPageList.mockReset();
   cache.loadPageList.mockImplementation(async () => false);
   __resetAlertsForTests();
+  clearPreference(preferences.speechPageCacheEnabled);
   resetSpeechHarness();
 });
 
 const clearButton = () => screen.queryByTestId(`speech-bar-clear-cache-${KEY}`);
 const cachedLabel = () => screen.queryByTestId(`speech-bar-cached-${KEY}`);
+const cacheToggle = () => screen.queryByTestId(`speech-bar-page-cache-${KEY}`);
+/** Rendered but disabled: the icon never leaves the row. */
+const clearDisabled = () => (clearButton() as HTMLButtonElement | null)?.disabled === true;
 
 describe("DocumentSpeechBar", () => {
-  it("renders only play/pause and the scrubber", () => {
-    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+  it("page row orders cache toggle, transport, share, clear icon", () => {
+    cache.share = { cached: 4, bytes: 212 * 1024 };
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(6) });
 
     const bar = screen.getByTestId(`document-speech-bar-${KEY}`);
-    expect(screen.getByTestId(`speech-bar-playpause-${KEY}`)).toBeTruthy();
-    expect(screen.getByTestId(`speech-bar-scrubber-${KEY}`)).toBeTruthy();
-    expect(bar.querySelectorAll("[data-testid^='speech-bar-segment-']")).toHaveLength(3);
+    const row = bar.querySelector(".speech-bar-row")!;
+    expect(row).not.toBeNull();
+    const order = [
+      cacheToggle()!,
+      screen.getByTestId(`speech-bar-playpause-${KEY}`),
+      screen.getByTestId(`speech-bar-scrubber-${KEY}`),
+      cachedLabel()!,
+      clearButton()!,
+    ];
+    // Each control follows the one before it, all inside the one row.
+    for (let i = 0; i < order.length; i++) {
+      expect(order[i]).not.toBeNull();
+      expect(row.contains(order[i])).toBe(true);
+      if (i === 0) continue;
+      expect(
+        order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    expect(bar.querySelectorAll("[data-testid^='speech-bar-segment-']")).toHaveLength(6);
+    expect(cachedLabel()!.textContent).toBe("4 of 6 cached · 212 KB");
+    // An icon, not the old text button.
+    expect(clearButton()!.textContent).toBe("");
+    expect(clearButton()!.getAttribute("title")).toBe("Clear this page's cached audio");
+    expect(clearButton()!.querySelector("svg")).not.toBeNull();
 
-    // The one button is play/pause: no mode switch, previous/next, eye button,
-    // launchers or hide toggle.
-    expect(bar.querySelectorAll("button")).toHaveLength(1);
+    // The label follows the cache as uploads land.
+    cache.share = { cached: 5, bytes: 1.25 * 1024 * 1024 };
+    act(() => cache.changed());
+    expect(cachedLabel()!.textContent).toBe("5 of 6 cached · 1.3 MB");
+
+    // Three buttons — cache toggle, play/pause, clear icon: no mode switch,
+    // previous/next, eye button, launchers or hide toggle.
+    expect(row.querySelectorAll("button")).toHaveLength(3);
     expect(screen.queryByTestId(`speech-bar-autoplay-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`speech-bar-previous-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`speech-bar-next-${KEY}`)).toBeNull();
@@ -207,46 +240,53 @@ describe("DocumentSpeechBar", () => {
     expect(play.getAttribute("aria-label")).toBe("Nothing to speak yet");
   });
 
-  it("bar shows play, scrubber, cached share, clear cache in order", () => {
-    cache.share = { cached: 4, bytes: 212 * 1024 };
-    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(6) });
+  it("cache toggle reflects and flips the preference", () => {
+    const OTHER = "doc:pavilio/wiki/other.md";
+    stub.host = makeSpeech({ stateFor: () => "ready", unitsFor: () => unitList(3) });
+    render(
+      <Host>
+        <DocumentSpeechBar docKey={KEY} />
+        <DocumentSpeechBar docKey={OTHER} />
+      </Host>,
+    );
+    const toggle = (key: string) => screen.getByTestId(`speech-bar-page-cache-${key}`);
 
-    const row = screen.getByTestId(`document-speech-bar-${KEY}`);
-    const order = [
-      screen.getByTestId(`speech-bar-playpause-${KEY}`),
-      screen.getByTestId(`speech-bar-scrubber-${KEY}`),
-      cachedLabel()!,
-      clearButton()!,
-    ];
-    // Mockup check — bar order: each control follows the one before it.
-    for (let i = 1; i < order.length; i++) {
-      expect(row.contains(order[i])).toBe(true);
-      expect(
-        order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+    // On by default: pressed, green (`data-page-cache="on"`), and the label
+    // names the state and what a click does.
+    expect(toggle(KEY).getAttribute("aria-pressed")).toBe("true");
+    expect(toggle(KEY).getAttribute("data-page-cache")).toBe("on");
+    expect(toggle(KEY).getAttribute("aria-label")).toBe("Page cache on — click to turn off");
+    expect(toggle(KEY).getAttribute("title")).toBe("Page cache on — click to turn off");
+    expect(toggle(KEY).querySelector("svg")).not.toBeNull();
+
+    fireEvent.click(toggle(KEY));
+    expect(readPreference(preferences.speechPageCacheEnabled)).toBe(false);
+    // Both mounted rows read the flip.
+    for (const key of [KEY, OTHER]) {
+      expect(toggle(key).getAttribute("aria-pressed")).toBe("false");
+      expect(toggle(key).getAttribute("data-page-cache")).toBe("off");
+      expect(toggle(key).getAttribute("aria-label")).toBe("Page cache off — click to turn on");
     }
-    expect(cachedLabel()!.textContent).toBe("4 of 6 cached · 212 KB");
-    expect(clearButton()!.textContent).toBe("Clear cache");
 
-    // The label follows the cache as uploads land.
-    cache.share = { cached: 5, bytes: 1.25 * 1024 * 1024 };
-    act(() => cache.changed());
-    expect(cachedLabel()!.textContent).toBe("5 of 6 cached · 1.3 MB");
+    fireEvent.click(toggle(OTHER));
+    expect(readPreference(preferences.speechPageCacheEnabled)).toBe(true);
+    expect(toggle(KEY).getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("clear cache is hidden when nothing is cached", () => {
+  it("clear-cache icon is disabled with nothing cached", () => {
     renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
 
-    // Mockup check — Clear cache only with cache.
-    expect(clearButton()).toBeNull();
+    // Always on the row, so the row never moves; disabled with nothing to clear.
+    expect(clearButton()).not.toBeNull();
+    expect((clearButton() as HTMLButtonElement).disabled).toBe(true);
     expect(cachedLabel()!.textContent).toBe("0 of 3 cached");
 
     cache.share = { cached: 1, bytes: 2048 };
     act(() => cache.changed());
-    expect(clearButton()).not.toBeNull();
+    expect((clearButton() as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("clear cache stops the run and clears the page", async () => {
+  it("clear-cache icon stops the run and clears the page", async () => {
     cache.share = { cached: 2, bytes: 4096 };
     renderBar({
       stateFor: () => "speaking",
@@ -327,9 +367,12 @@ describe("DocumentSpeechBar", () => {
     expect(stub.host.onStop).not.toHaveBeenCalled();
   });
 
-  it("a failed clear raises the alert", async () => {
+  it("failed clear keeps the icon enabled and alerts", async () => {
     cache.share = { cached: 2, bytes: 4096 };
     cache.clearPage.mockImplementation(async () => {
+      // The local listing is emptied whatever the server said.
+      cache.share = { cached: 0, bytes: 0 };
+      cache.changed();
       throw new Error("DELETE answered 500");
     });
     renderBar({ stateFor: () => "ready", unitsFor: () => unitList(3) });
@@ -342,9 +385,11 @@ describe("DocumentSpeechBar", () => {
         { kind: "error", title: "Couldn't clear the cache: DELETE answered 500" },
       ]),
     );
+    // 0 cached now, yet the retry stays pressable.
+    await waitFor(() => expect((clearButton() as HTMLButtonElement).disabled).toBe(false));
   });
 
-  it("a failed clear re-reads the listing so Clear cache comes back", async () => {
+  it("a failed clear re-reads the listing so the clear icon is enabled again", async () => {
     cache.share = { cached: 2, bytes: 4096 };
     cache.clearPage.mockImplementation(async () => {
       // The local listing is emptied whatever the server said.
@@ -363,11 +408,11 @@ describe("DocumentSpeechBar", () => {
     fireEvent.click(clearButton()!);
 
     await waitFor(() => expect(cache.loadPageList).toHaveBeenCalledWith(KEY));
-    await waitFor(() => expect(clearButton()).not.toBeNull());
+    await waitFor(() => expect(clearDisabled()).toBe(false));
     expect(cachedLabel()?.textContent).toContain("2 of 3 cached");
   });
 
-  it("a failed clear whose re-read also fails keeps Clear cache until a clear succeeds", async () => {
+  it("a failed clear whose re-read also fails keeps the clear icon enabled until a clear succeeds", async () => {
     cache.share = { cached: 2, bytes: 4096 };
     cache.clearPage.mockImplementationOnce(async () => {
       cache.share = { cached: 0, bytes: 0 };
@@ -388,11 +433,11 @@ describe("DocumentSpeechBar", () => {
     await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? true).toBe(false));
 
     // The audio may still be on disk: the retry stays, and the label says so.
-    expect(clearButton()).not.toBeNull();
+    expect(clearDisabled()).toBe(false);
     expect(cachedLabel()?.textContent).toContain("cache state unknown");
 
     fireEvent.click(clearButton()!);
-    await waitFor(() => expect(clearButton()).toBeNull());
+    await waitFor(() => expect(clearDisabled()).toBe(true));
     expect(cachedLabel()?.textContent).toBe("0 of 3 cached");
   });
 
@@ -415,7 +460,7 @@ describe("DocumentSpeechBar", () => {
     await waitFor(() => expect(cache.loadPageList).toHaveBeenCalledWith(KEY));
 
     await waitFor(() => expect(cachedLabel()?.textContent).toBe("0 of 3 cached"));
-    expect(clearButton()).toBeNull();
+    expect(clearDisabled()).toBe(true);
   });
 
   it("a failed clear stops reading as unknown once a listing comes back with data", async () => {
@@ -437,12 +482,12 @@ describe("DocumentSpeechBar", () => {
       cache.changed();
     });
     expect(cachedLabel()?.textContent).toContain("1 of 3 cached");
-    // …and then a listing that is truly empty hides Clear cache again.
+    // …and then a listing that is truly empty disables the clear icon again.
     act(() => {
       cache.share = { cached: 0, bytes: 0 };
       cache.changed();
     });
-    expect(clearButton()).toBeNull();
+    expect(clearDisabled()).toBe(true);
     expect(cachedLabel()?.textContent).toBe("0 of 3 cached");
   });
 
@@ -466,7 +511,7 @@ describe("DocumentSpeechBar", () => {
     });
 
     // Mockup check — segments stay clickable beside the cache controls.
-    expect(clearButton()).not.toBeNull();
+    expect(clearDisabled()).toBe(false);
     fireEvent.click(screen.getByTestId(`speech-bar-segment-${KEY}-1`));
     expect(stub.host?.onJumpToUnit).toHaveBeenCalledWith(KEY, 1);
     expect(cache.clearPage).not.toHaveBeenCalled();

@@ -793,17 +793,22 @@ input[type="checkbox"] {
    its hover fill and pointer, and a hover lifts the glyph back. `armed` takes
    the green ink alone: the cell is preloading, not speaking. `autoplay` reads
    the same as the header toggle used to: the same green, the same fill. The
-   eye, while the answer pane is open, wears that pressed state too. */
-.speech-bar-btn[data-speech-mode="off"] svg {
+   eye, while the answer pane is open, wears that pressed state too. The page
+   row's cache toggle (`data-page-cache`) borrows two of these looks: `off`
+   dims like a cell with speech off, `on` takes the armed green ink. */
+.speech-bar-btn[data-speech-mode="off"] svg,
+.speech-bar-btn[data-page-cache="off"] svg {
   opacity: 0.6;
   transition: opacity 200ms ease;
 }
 
-.speech-bar-btn[data-speech-mode="off"]:hover svg {
+.speech-bar-btn[data-speech-mode="off"]:hover svg,
+.speech-bar-btn[data-page-cache="off"]:hover svg {
   opacity: 1;
 }
 
-.speech-bar-btn[data-speech-mode="armed"] {
+.speech-bar-btn[data-speech-mode="armed"],
+.speech-bar-btn[data-page-cache="on"] {
   color: #9ece6a;
 }
 
