@@ -32,7 +32,7 @@ import ViewerActions from "../../projects/ViewerActions";
 import MarkdownRenderer from "../../markdown/MarkdownRenderer";
 import { PlayFromHere, playButtonLeft } from "../PlayFromHere";
 import { PagePlayFromHere } from "../PagePlayFromHere";
-import type { SpeechUnit } from "../types";
+import type { CellSpeechState, SpeechUnit } from "../types";
 import { prepare } from "../prepare";
 import { pageSpeechText } from "../pageText";
 
@@ -582,6 +582,37 @@ describe("PlayFromHere", () => {
     });
     expect(screen.getAllByRole("button", { name: "Play from here" })).toHaveLength(2);
     expect(block(container, "Only paragraph")).toHaveAttribute("data-speak-unit", "1");
+  });
+
+  it("page Play from here wires host progress, pause and play", () => {
+    const playing = UNITS.findIndex((u) => u.text.startsWith("The second example paragraph"));
+    expect(playing).toBeGreaterThan(0);
+    // One object for every read: the toolbar takes the whole progress as an
+    // external-store snapshot, and a fresh object per read never settles.
+    const progress = Object.freeze({ unitIndex: playing, unitTime: 0, unitDuration: null });
+    let state: CellSpeechState = "speaking";
+    stub.host = makeSpeech({
+      unitsFor: (key) => (key === KEY ? UNITS : []),
+      progressFor: (key) => (key === KEY ? progress : null),
+      stateFor: (key) => (key === KEY ? state : "empty"),
+    });
+
+    const { rerender } = render(<Page />);
+    const pinned = () => screen.getByTestId("play-from-here-pinned");
+    // The host's progress for the page's key pins the ▶; the run is reading.
+    expect(pinned()).toHaveAccessibleName("Pause");
+    fireEvent.click(pinned());
+    expect(stub.host!.onPause).toHaveBeenCalledWith(KEY);
+    expect(stub.host!.speakDocument).not.toHaveBeenCalled();
+
+    // Paused: the same ▶ reads Play and starts the page's run at the unit the
+    // voice stopped on, through the toolbar.
+    state = "paused";
+    rerender(<Page />);
+    expect(pinned()).toHaveAccessibleName("Play from here");
+    fireEvent.click(pinned());
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text: PAGE, startUnit: playing });
+    expect(stub.host!.onPause).toHaveBeenCalledTimes(1);
   });
 
   it("play from here starts at a paragraph ending in wikilink citations", () => {
