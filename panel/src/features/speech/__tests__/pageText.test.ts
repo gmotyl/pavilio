@@ -32,12 +32,12 @@ describe("pageHasSpeech", () => {
 });
 
 describe("preparePage", () => {
-  it("prepares a page block-bounded in its own vote's language, frontmatter dropped", () => {
+  it("prepares a page in its own vote's language, frontmatter dropped", () => {
     const polish = "---\ntitle: X\n---\n# Zażółć\n\nKod: `const x = 1;` i ![zdjęcie](a.png) dalej.";
     const prepared = preparePage(polish);
     expect(prepared.language).toBe("pl");
     expect(prepared.units).toEqual(
-      prepare(pageSpeechText(polish), { language: "pl", blockBounded: true }).units,
+      prepare(pageSpeechText(polish), { language: "pl" }).units,
     );
     expect(preparePage("# Hello\n\nPlain English.").language).toBe("en");
   });

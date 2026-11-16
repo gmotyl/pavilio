@@ -183,10 +183,10 @@ const SENTENCE_TERMINATOR_RE = /[.!?:;…]$/;
 
 /**
  * Text that is nothing but sentinels and whitespace — an answer with no answer
- * in it. Exported because `prepare.ts` needs the same question answered of a
- * single paragraph: a paragraph that is only a sentinel has no sentence in it
- * to use as a fast start, so it has to be recognised rather than guessed at.
- * It matches the empty string too, which is harmless at both call sites.
+ * in it. Exported so the same question can be asked of a single paragraph: a
+ * paragraph that is only a sentinel has no sentence in it, so it has to be
+ * recognised rather than guessed at. It matches the empty string too, which is
+ * harmless at every call site.
  */
 export const SENTINEL_ONLY_RE = /^(?:\s*⟦[a-z]+⟧)*\s*$/;
 

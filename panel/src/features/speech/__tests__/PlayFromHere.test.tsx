@@ -104,7 +104,7 @@ const PAGE = [
   "",
 ].join("\n");
 
-const UNITS = prepare(pageSpeechText(PAGE), { blockBounded: true }).units;
+const UNITS = prepare(pageSpeechText(PAGE)).units;
 
 /** The first unit whose source is exactly `source`, from `from` on. */
 function unitOf(source: string, from = 0): number {
@@ -463,11 +463,11 @@ describe("PlayFromHere", () => {
     }
   });
 
-  it("a Polish page starts at the unit the host prepared, not an English packing's", () => {
-    // A long Polish paragraph full of images: "obrazek" is longer than
-    // "image", so the Polish packing cuts the paragraph where the English one
-    // does not, and every block after it moves by one unit.
-    const images = Array.from({ length: 38 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+  it("a Polish page starts at the unit the host prepared, not an English preparation's", () => {
+    // A Polish sentence full of images: "obrazek" is longer than "image", so
+    // the Polish sentence crosses the unit ceiling and is cut where the English
+    // one is not, and every block after it moves by one unit.
+    const images = Array.from({ length: 46 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
     const polish = [
       "# Tytuł strony",
       "",
@@ -479,8 +479,8 @@ describe("PlayFromHere", () => {
       "",
     ].join("\n");
     // What the host prepares: the page's own vote picks Polish.
-    const hostUnits = prepare(pageSpeechText(polish), { language: "pl", blockBounded: true }).units;
-    const englishUnits = prepare(pageSpeechText(polish), { blockBounded: true }).units;
+    const hostUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
+    const englishUnits = prepare(pageSpeechText(polish)).units;
     const headingOf = (units: typeof hostUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
     expect(headingOf(hostUnits)).not.toBe(headingOf(englishUnits));
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? hostUnits : []) });
@@ -594,7 +594,7 @@ describe("PlayFromHere", () => {
       "A closing paragraph after the cited one.",
       "",
     ].join("\n");
-    const units = prepare(pageSpeechText(text), { blockBounded: true }).units;
+    const units = prepare(pageSpeechText(text)).units;
     const cited = units.findIndex((u) => u.source.startsWith("Typing lag"));
     expect(cited).toBeGreaterThan(0);
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });
@@ -621,7 +621,7 @@ describe("PlayFromHere", () => {
       "A closing paragraph after the linked one.",
       "",
     ].join("\n");
-    const units = prepare(pageSpeechText(text), { blockBounded: true }).units;
+    const units = prepare(pageSpeechText(text)).units;
     const linked = units.findIndex((u) => u.source.startsWith("Read ["));
     expect(linked).toBeGreaterThan(0);
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });

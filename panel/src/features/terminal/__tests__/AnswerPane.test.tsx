@@ -128,7 +128,7 @@ describe("rendering", () => {
     "",
   ].join("\n");
 
-  /** The smoke test's answer: a fast-start unit and a packed one share the first paragraph. */
+  /** The smoke test's answer: the first paragraph's two sentences are two units sharing one block. */
   const SMOKE = [
     "Hi. AGENTS.md loaded; no `.projects.local.md`, so no project registry yet.",
     "",
@@ -145,9 +145,8 @@ describe("rendering", () => {
   ].join("\n");
 
   /**
-   * A six-item list. `strip` emits every item as its own paragraph, so packing
-   * cuts the list into three units — items 1-2, items 3-5, item 6 — and each
-   * item is a block the pane can match, mark and jump to.
+   * A six-item list. `strip` emits every item as its own paragraph, so each
+   * item is a unit of its own and a block the pane can match, mark and jump to.
    */
   const LIST_MARKDOWN = [
     "# Release checklist",
@@ -291,13 +290,13 @@ describe("rendering", () => {
   const items = (): HTMLElement[] => Array.from(prose().querySelectorAll("li"));
 
   /**
-   * Which unit an item's text was packed into, read off the harness's OWN units.
+   * Which unit speaks an item's text, read off the harness's OWN units.
    *
-   * Why not the literal indices: how many items fit in a unit is `prepare`'s
-   * packing, not the pane's contract. Hard-coded expectations turn a change to
-   * `UNIT_MIN_CHARS` / `UNIT_MAX_CHARS` into three failures that point at the
-   * pane. This is not circular — it asks the unit's `source`, not
-   * `matchUnitsToBlocks`, which is the mapping under test.
+   * Why not the literal indices: how a text is cut into units is `prepare`'s
+   * business, not the pane's contract. Hard-coded expectations turn a change
+   * there into failures that point at the pane. This is not circular — it
+   * asks the unit's `source`, not `matchUnitsToBlocks`, which is the mapping
+   * under test.
    */
   const expectedUnitIn =
     (h: Harness) =>
@@ -477,11 +476,11 @@ describe("rendering", () => {
 
     it("one rail segment per unit in the scrubber's states", () => {
       const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
-      expect(h.units).toHaveLength(3);
+      expect(h.units).toHaveLength(5);
       warm.add(h.units[2].text);
       render(paneElement(speechOf(h)));
 
-      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(3);
+      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(5);
       h.units.forEach((unit, index) => {
         const expected = segmentStateFor({
           index,
@@ -596,13 +595,13 @@ describe("rendering", () => {
       expect(prose()).toBe(proseBefore);
       expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
 
-      // The unit boundary: the mark moves to unit 2's two paragraphs.
-      h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
+      // The unit boundary: the mark moves to unit 3, the paragraph after the
+      // fence (unit 2 is the fence's placeholder).
+      h.progress.set({ unitIndex: 3, unitTime: 0, unitDuration: null });
       const marked = speaking();
-      expect(marked.map((b) => b.tagName)).toEqual(["P", "P"]);
+      expect(marked.map((b) => b.tagName)).toEqual(["P"]);
       expect(marked[0]).toHaveTextContent(/^The second paragraph/);
-      expect(marked[1]).toHaveTextContent(/^The third paragraph/);
-      expect(segment(2).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
+      expect(segment(3).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
       // The text itself was not rebuilt.
       expect(prose()).toBe(proseBefore);
     });
@@ -664,7 +663,7 @@ describe("rendering", () => {
       expect(codeBlock).not.toHaveAttribute("data-unit");
       expect(codeBlock).not.toHaveAttribute("role");
       expect(codeBlock).not.toHaveAttribute("tabindex");
-      // Unit 2 was packed from the two paragraphs after the fence, not the fence.
+      // The fence speaks a placeholder unit that matches no block.
       expect(codeBlock).not.toHaveAttribute("data-speaking");
 
       fireEvent.click(codeBlock!);
@@ -755,7 +754,7 @@ describe("rendering", () => {
 
       const paneBefore = screen.getByTestId("answer-pane-cell-a");
       expect(h1()).toHaveTextContent("Deploy plan");
-      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(3);
+      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(5);
 
       // The host's queue takes the arrival as `current`; the run that was on
       // is over, so its progress is gone too.
@@ -787,21 +786,18 @@ describe("rendering", () => {
         const expectedUnit = expectedUnitIn(h);
         render(paneElement(speechOf(h)));
 
-        // Heading, lead-in, and three units cut out of the list. The counts are
-        // canaries: if packing changes shape entirely, they say so here.
-        expect(h.units).toHaveLength(5);
+        // Heading, lead-in, and one unit per item. The counts are canaries: if
+        // preparation changes shape entirely, they say so here.
+        expect(h.units).toHaveLength(8);
         expect(items()).toHaveLength(6);
         expect(items().map((item) => item.dataset.unit)).toEqual(
           items().map((item) => String(expectedUnit(item))),
         );
 
-        // The property the feature promises, whatever the packing constants are:
-        // the six items fall into exactly three units, in reading order, with no
-        // unit skipped between them.
+        // The property the feature promises: the six items are six units, in
+        // reading order, with no unit skipped between them.
         const marks = items().map((item) => Number(item.dataset.unit));
-        expect(marks).toEqual([...marks].sort((a, b) => a - b));
-        const distinct = [...new Set(marks)];
-        expect(distinct).toEqual([distinct[0], distinct[0] + 1, distinct[0] + 2]);
+        expect(marks).toEqual(Array.from({ length: 6 }, (_, i) => marks[0] + i));
 
         for (const item of items()) {
           expect(item).not.toHaveAttribute("role");
@@ -848,9 +844,9 @@ describe("rendering", () => {
         const expectedUnit = expectedUnitIn(h);
         render(paneElement(speechOf(h)));
 
-        // Unit 3 speaks a run of items — exactly those, and never the whole list.
+        // Unit 3 speaks one item — exactly that one, and never the whole list.
         const spoken = items().filter((item) => expectedUnit(item) === 3);
-        expect(spoken.length).toBeGreaterThan(1);
+        expect(spoken).toHaveLength(1);
         expect(speaking()).toEqual(spoken);
       });
 
@@ -889,17 +885,17 @@ describe("rendering", () => {
         h.progress.set({ unitIndex: 0, unitTime: 0, unitDuration: null });
         expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
 
-        // Unit 2 is the two paragraphs after the fence (h1, p, pre, p, p): the
-        // mark and the playhead move there, the body stays where it is.
-        h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
-        expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
-        expect(segment(2).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
+        // Unit 3 is the paragraph after the fence (h1, p, pre, p, p): the mark
+        // and the playhead move there, the body stays where it is.
+        h.progress.set({ unitIndex: 3, unitTime: 0, unitDuration: null });
+        expect(speaking().map((b) => b.tagName)).toEqual(["P"]);
+        expect(segment(3).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
         expect(scrollTo).not.toHaveBeenCalled();
       });
 
       it("does not scroll when the body is rebuilt on the way out of a wait mid-unit", () => {
         overflowing();
-        const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+        const h = harness(MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
         render(paneElement(speechOf(h)));
         // The mount itself lands on the spoken block — pinned below.
         scrollTo.mockClear();
@@ -907,11 +903,11 @@ describe("rendering", () => {
         act(() => beginWaiting("cell-a", "u-1"));
         expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeInTheDocument();
 
-        // A transport press hands the body back while unit 2 is still playing:
+        // A transport press hands the body back while unit 3 is still playing:
         // the column is rebuilt and marked again, and nothing scrolls.
         act(() => noteTransport("cell-a"));
         expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeNull();
-        expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+        expect(speaking().map((b) => b.tagName)).toEqual(["P"]);
         expect(scrollTo).not.toHaveBeenCalled();
       });
 
@@ -943,55 +939,60 @@ describe("rendering", () => {
 
       it("opening mid-run lands on the spoken block", () => {
         overflowing();
-        // Unit 2 is already playing when the eye opens the pane.
-        const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+        // Unit 3 is already playing when the eye opens the pane.
+        const h = harness(MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
         render(paneElement(speechOf(h)));
 
         expect(scrolls()).toEqual([3 * BLOCK_TOP - layout.clientHeight / 3]);
-        expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+        expect(speaking().map((b) => b.tagName)).toEqual(["P"]);
       });
 
       it("rail segments never overlap", () => {
-        // The smoke test's real answer (2026-09-16): `prepare` speaks "Hi." first
-        // with the whole opening paragraph as its source, then packs the rest of
-        // that paragraph and the two after it into unit 1 — so block 0 belongs to
-        // both units. Two segments over one block put the playhead beside the
-        // wrong place; the second must start after the first one's end.
+        // The smoke test's real answer (2026-09-16): `prepare` speaks the opening
+        // paragraph's two sentences as units 0 and 1, both with the whole
+        // paragraph as their source — so block 0 belongs to both units. Two
+        // segments over one block put the playhead beside the wrong place; the
+        // second must start after the first one's end.
         const h = harness(SMOKE, { unitIndex: 1, unitTime: 0, unitDuration: null });
-        expect(h.units).toHaveLength(2);
+        expect(h.units).toHaveLength(4);
         expect(h.units[0].text).toBe("Hi.");
         render(paneElement(speechOf(h)));
 
-        // The block itself is credited to its first unit — the jump target.
+        // The block itself is credited to its first unit — the jump target —
+        // and the two units divide it by how much of it each speaks.
         expect(blocks()[0].dataset.unit).toBe("0");
-        expect(box(0)).toEqual({ top: 0, height: BLOCK_HEIGHT });
+        expect(box(0).top).toBe(0);
+        expect(box(1).top + box(1).height).toBe(BLOCK_HEIGHT);
         // Unit 1's segment starts after unit 0's end, yet beside the shared
-        // block — not down at the second paragraph — and reaches the bottom of
-        // its last block.
+        // block — not down at the second paragraph — and ends before unit 2's.
         expect(box(1).top).toBeGreaterThanOrEqual(box(0).top + box(0).height);
         expect(box(1).top).toBeLessThan(BLOCK_TOP);
-        expect(box(1).top + box(1).height).toBe(2 * BLOCK_TOP + BLOCK_HEIGHT);
+        expect(box(1).top + box(1).height).toBeLessThanOrEqual(box(2).top);
+        expect(box(2)).toEqual({ top: BLOCK_TOP, height: BLOCK_HEIGHT });
       });
 
       it("a unit without a block scrolls nothing and keeps a minimum segment", () => {
         overflowing();
         const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
-        // A ghost between the heading and the first paragraph: spoken, never drawn.
-        h.units = [h.units[0], GHOST, h.units[1], h.units[2]];
+        // A ghost between the heading and the first paragraph: spoken, never
+        // drawn. The fence's own placeholder unit is left out, so the ghost is
+        // the only blockless unit.
+        h.units = [h.units[0], GHOST, h.units[1], h.units[3], h.units[4]];
         render(paneElement(speechOf(h)));
 
         expect(scrollTo).not.toHaveBeenCalled();
         expect(speaking()).toHaveLength(0);
-        expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(4);
+        expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(5);
 
         // The rail is laid out from the blocks: the heading's segment spans the
         // heading, the ghost gets 8px right after it, and the rest follow their
-        // blocks — unit 3 spanning its two paragraphs (blocks 3 and 4).
+        // blocks — units 3 and 4 the two paragraphs after the fence.
         expect(box(0)).toEqual({ top: 0, height: BLOCK_HEIGHT });
         expect(box(1).height).toBe(8);
         expect(box(1).top).toBeGreaterThanOrEqual(box(0).top + box(0).height);
         expect(box(2)).toEqual({ top: BLOCK_TOP, height: BLOCK_HEIGHT });
-        expect(box(3)).toEqual({ top: 3 * BLOCK_TOP, height: BLOCK_TOP + BLOCK_HEIGHT });
+        expect(box(3)).toEqual({ top: 3 * BLOCK_TOP, height: BLOCK_HEIGHT });
+        expect(box(4)).toEqual({ top: 4 * BLOCK_TOP, height: BLOCK_HEIGHT });
         // The ghost's segment still says what it is.
         expect(segment(1)).toHaveAttribute("data-segment", "playing");
 
@@ -1233,7 +1234,7 @@ describe("copy as markdown", () => {
  * output, as in `AnswerPane.test.tsx`; the host is a stub.
  */
 describe("play buttons", () => {
-  /** Heading (unit 0), a paragraph with a link (unit 1), a fence, and two paragraphs (unit 2). */
+  /** Heading (unit 0), a paragraph with a link (unit 1), a fence (unit 2), and two paragraphs (units 3, 4). */
   const MARKDOWN = [
     "# Deploy plan",
     "",
@@ -1251,9 +1252,7 @@ describe("play buttons", () => {
 
   /**
    * A fence and two long paragraphs, for an answer that opens or closes with
-   * code. Each paragraph clears `UNIT_MIN_CHARS` on its own, so neither is packed
-   * with the fence and the fence is left a unit of its own (`⟦code⟧`) that
-   * matches no block.
+   * code. The fence is a unit of its own (`⟦code⟧`) that matches no block.
    */
   const FENCE = ["```ts", "const x = 1;", "```", ""];
 
@@ -1357,7 +1356,7 @@ describe("play buttons", () => {
       renderPane(speech);
 
       const paragraph = screen.getByText(/^The second paragraph/);
-      expect(paragraph).toHaveAttribute("data-unit", "2");
+      expect(paragraph).toHaveAttribute("data-unit", "3");
       fireEvent.click(paragraph);
       fireEvent.click(prose().querySelector("h1")!);
       expect(speech.onJumpToUnit).not.toHaveBeenCalled();
@@ -1373,18 +1372,18 @@ describe("play buttons", () => {
       const { speech } = playSpeech();
       renderPane(speech);
 
-      expect(play(2).tagName).toBe("BUTTON");
-      expect(play(2)).toHaveAccessibleName("Read from here");
-      fireEvent.click(play(2));
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
+      expect(play(3).tagName).toBe("BUTTON");
+      expect(play(3)).toHaveAccessibleName("Read from here");
+      fireEvent.click(play(3));
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 3);
       fireEvent.click(play(0));
       expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 0);
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
 
-      // Beside the first line of the unit's first block: unit 1 is block 1, unit
-      // 2 starts at block 3 (block 2 is the fence).
+      // Beside the first line of the unit's block: unit 1 is block 1, unit 3 is
+      // block 3 (block 2 is the fence, whose unit 2 has no Play).
       expect(play(1).style.top).toBe(`${1 * BLOCK_TOP}px`);
-      expect(play(2).style.top).toBe(`${3 * BLOCK_TOP}px`);
+      expect(play(3).style.top).toBe(`${3 * BLOCK_TOP}px`);
 
       // The rail segment is still a jump, as it always was.
       fireEvent.click(screen.getByTestId("answer-pane-seg-cell-a-1"));
@@ -1407,10 +1406,10 @@ describe("play buttons", () => {
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
       expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
 
-      play(2).focus();
+      play(3).focus();
       await user.keyboard(" ");
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 3);
 
       // Focus reveals it, like a hover does.
       fireEvent.focusIn(button);
@@ -1442,11 +1441,11 @@ describe("play buttons", () => {
       expect(shown()).toEqual([0, 1]);
 
       fireEvent.pointerOver(screen.getByText(/^The third paragraph/));
-      expect(shown()).toEqual([0, 2]);
+      expect(shown()).toEqual([0, 4]);
 
       // Moving onto the button itself keeps it shown rather than flickering off.
-      fireEvent.pointerOver(play(2));
-      expect(shown()).toEqual([0, 2]);
+      fireEvent.pointerOver(play(4));
+      expect(shown()).toEqual([0, 4]);
 
       // The fence is no unit's: nothing but the playing unit shows.
       fireEvent.pointerOver(prose().querySelector(".code-block")!);
@@ -1461,8 +1460,8 @@ describe("play buttons", () => {
       const { speech, units } = playSpeech();
       renderPane(speech);
 
-      // One Play per unit, and none of them beside the fence.
-      expect(plays()).toHaveLength(units.length);
+      // One Play per unit but the fence's, and none of them beside the fence.
+      expect(plays()).toHaveLength(units.length - 1);
       const codeBlock = prose().querySelector<HTMLElement>(".code-block");
       expect(codeBlock).not.toBeNull();
       expect(codeBlock).not.toHaveAttribute("data-unit");
@@ -1531,7 +1530,7 @@ describe("play buttons", () => {
 
       expectLevel(first.units, [0]);
       rerenderWith(normal.speech);
-      expectLevel(normal.units, []);
+      expectLevel(normal.units, [2]);
       rerenderWith(first.speech);
       expectLevel(first.units, [0]);
     });

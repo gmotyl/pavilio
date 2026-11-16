@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 import { prepare } from "../../speech/prepare";
 import { matchUnitsToBlocks, normalizeForMatch } from "../../speech/matchUnitsToBlocks";
 
-/**
- * One paragraph past the unit ceiling (450) but under twice it, so `prepare`
- * cuts it into exactly two units on a sentence boundary.
- */
+/** One paragraph of nine sentences, so `prepare` cuts it into nine units. */
 const longParagraph = "The answer pane keeps the spoken block in view while the voice reads it aloud. "
   .repeat(9)
   .trim();
@@ -77,15 +74,13 @@ describe("matchUnitsToBlocks", () => {
     expect(map.blockToUnit[TLDR]).toBe(1);
   });
 
-  it("a paragraph split by the ceiling maps to both of its units", () => {
-    // Units 2 and 3 are the two halves; unit 4 packs everything after them.
-    // Both halves carry the whole paragraph as their source — the match works
-    // at block granularity, and a paragraph is one block.
-    expect(units).toHaveLength(5);
-    expect(units[2].source).toBe(longParagraph);
-    expect(units[3].source).toBe(longParagraph);
-    expect(map.unitToBlocks[2]).toEqual([LONG]);
-    expect(map.unitToBlocks[3]).toEqual([LONG]);
+  it("every sentence of a paragraph maps to the paragraph", () => {
+    // Units 2–10 are the paragraph's nine sentences. Each carries the whole
+    // paragraph as its source — the match works at block granularity, and a
+    // paragraph is one block.
+    const sentences = units.slice(2, 11);
+    expect(sentences.every((unit) => unit.source === longParagraph)).toBe(true);
+    for (let unit = 2; unit <= 10; unit += 1) expect(map.unitToBlocks[unit]).toEqual([LONG]);
     expect(map.blockToUnit[LONG]).toBe(2);
   });
 
@@ -99,12 +94,16 @@ describe("matchUnitsToBlocks", () => {
   });
 
   it("a three-word list item is not a false positive", () => {
-    // Its words occur verbatim in the closing paragraph, which unit 4 contains.
-    expect(units[4].source).toContain("Eye on bar");
+    // Its words occur verbatim in the closing paragraph: the closing unit must
+    // not claim the list, which has a unit of its own.
+    const item = units.findIndex((unit) => unit.source.includes("Eye on bar"));
+    expect(item).toBeGreaterThan(-1);
+    const last = units.length - 1;
+    expect(units[last].source).toBe(closing);
     expect(normalizeForMatch(blocks[LIST]).length).toBeLessThan(12);
-    expect(map.blockToUnit[LIST]).toBeNull();
-    expect(map.unitToBlocks[4]).toEqual([CLOSING]);
-    expect(map.blockToUnit[CLOSING]).toBe(4);
+    expect(map.unitToBlocks[last]).toEqual([CLOSING]);
+    expect(map.blockToUnit[CLOSING]).toBe(last);
+    expect(map.blockToUnit[LIST]).toBe(item);
   });
 
   it("Polish preparation does not break the match", () => {
@@ -132,8 +131,8 @@ describe("matchUnitsToBlocks", () => {
     // The smoke test's real answer (2026-09-16). `strip` replaces the code span
     // over the spoken limit with `⟦expr⟧`, so the second paragraph's source is
     // neither a substring of its block nor the other way round — only its
-    // head and tail survive the sentinel. Unit 0 is the fast-start "Hi." whose
-    // source is the whole first paragraph; unit 1 packs everything.
+    // head and tail survive the sentinel. Units 0 and 1 are the first
+    // paragraph's two sentences, each with the whole paragraph as source.
     const answer = [
       "Hi. AGENTS.md loaded; no `.projects.local.md`, so no project registry yet.",
       "",
@@ -147,14 +146,14 @@ describe("matchUnitsToBlocks", () => {
       "What next — resume <project>, or a specific task?",
     ];
     const prepared = prepare(answer);
-    expect(prepared.units).toHaveLength(2);
+    expect(prepared.units).toHaveLength(4);
     expect(prepared.units[0].text).toBe("Hi.");
-    expect(prepared.units[1].source).toContain("last commit ⟦expr⟧.");
-    expect(prepared.units[1].source).toContain("Branch feat/in-cell-answer-pane, clean tree, last commit");
+    expect(prepared.units[2].source).toContain("last commit ⟦expr⟧.");
+    expect(prepared.units[2].source).toContain("Branch feat/in-cell-answer-pane, clean tree, last commit");
 
     const result = matchUnitsToBlocks(prepared.units, rendered);
-    expect(result.unitToBlocks).toEqual([[0], [0, 1, 2]]);
-    expect(result.blockToUnit).toEqual([0, 1, 1]);
+    expect(result.unitToBlocks).toEqual([[0], [0], [1], [2]]);
+    expect(result.blockToUnit).toEqual([0, 2, 3]);
   });
 
   it("a short heading is its own block", () => {
@@ -171,7 +170,7 @@ describe("matchUnitsToBlocks", () => {
     expect(result.blockToUnit[1]).toBe(1);
   });
 
-  it("a short fast-start unit marks nothing else", () => {
+  it("a short opening sentence unit marks nothing else", () => {
     // `prepare` speaks the first sentence alone but keeps the whole paragraph
     // as its source, so the real unit finds its own paragraph by equality —
     // and only that one, although the next paragraph echoes "yes".

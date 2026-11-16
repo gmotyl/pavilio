@@ -272,8 +272,8 @@ export interface SpeechUnit {
   chars: number;
   /**
    * The same unit before markers and sentinels — what the answer pane matches
-   * against the rendered markdown. Packed from the same paragraphs as `text`,
-   * joined the same way.
+   * against the rendered markdown: the whole block `text` was spoken from, so
+   * every sentence of a block shares it.
    */
   source: string;
   /**
@@ -283,11 +283,11 @@ export interface SpeechUnit {
    */
   lang?: "pl" | "en";
   /**
-   * Pages only (`prepare`'s `blockBounded`): the index of the block this unit
-   * starts in — and, since no page unit spans two blocks, the only block it
-   * speaks. Counts the blocks that produce a unit, from 0, so the first unit
-   * of block `b` is the first unit with `block === b`. Absent on an answer's
-   * units. See `prepareBlocks` in `prepare.ts`.
+   * The index of the block this unit was spoken from — no unit spans two
+   * blocks. Every unit `prepare` returns carries it, a page's and an answer's
+   * alike; it is absent only on a unit built by hand. Counts the blocks that
+   * produce a unit, from 0, so the first unit of block `b` is the first unit
+   * with `block === b`. See `prepareBlocks` in `prepare.ts`.
    */
   block?: number;
 }
