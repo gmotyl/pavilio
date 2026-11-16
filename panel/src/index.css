@@ -2570,3 +2570,11 @@ input[type="checkbox"] {
   outline-offset: 1px;
 }
 
+/* The pinned ▶ while the voice reads (Pause): full strength — tinted with the
+   segment green and ringed in it — so it reads as where the voice is, not as
+   one more hover affordance. Paused, it drops back to the plain ▶. */
+.play-from-here[data-playing] {
+  background: color-mix(in srgb, var(--speech-seg) 18%, var(--bg-elevated));
+  border-color: var(--speech-seg);
+}
+
