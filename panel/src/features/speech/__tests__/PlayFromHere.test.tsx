@@ -833,6 +833,37 @@ describe("PlayFromHere on any rendered body", () => {
     onLine(pinned(), 200);
   });
 
+  it("pinned button finds a sentence after letters outside the basic plane", () => {
+    // Math bold and Deseret letters are one code point but two UTF-16 units; a
+    // sentence located after them must still map back onto the rendered text.
+    const body = [
+      "Alpha opens the first paragraph here.",
+      "",
+      "Charlie \u{1D400}\u{1D401}\u{1D402} carries \u{10400}\u{10401} it on. Delta closes the paragraph.",
+      "",
+    ].join("\n");
+    const units = prepare(body).units;
+    const delta = at("Delta", units);
+    const { container } = render(
+      <MemoryRouter>
+        <PlayFromHere
+          speechKey="session-1"
+          units={units}
+          playingUnit={delta}
+          paused={false}
+          onPlay={onPlay}
+          onPause={onPause}
+          onHint={onHint}
+        >
+          <MarkdownRenderer content={body} />
+        </PlayFromHere>
+      </MemoryRouter>,
+    );
+    expect(container.textContent).toContain("Delta closes");
+    expect(lines.calls.some((text) => text.startsWith("Delta"))).toBe(true);
+    onLine(pinned(), 110);
+  });
+
   it("hover still reveals other blocks' play buttons", () => {
     const { container } = render(<Answer playingUnit={at("Charlie")} />);
     // A code block gets no ▶ of its own: only the pinned one is shown.

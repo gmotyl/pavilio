@@ -166,14 +166,21 @@ function isOwnText(el: HTMLElement, node: Node): boolean {
   return true;
 }
 
+/** Where a squashed UTF-16 unit came from: its text node and its letter's start and end there. */
+interface SquashedAt {
+  node: Text;
+  offset: number;
+  end: number;
+}
+
 /**
- * `el`'s own text squashed (see {@link squash}), with the text node and offset
- * each kept character came from, so a match in the squashed text maps back to
- * a DOM `Range`.
+ * `el`'s own text squashed (see {@link squash}), with the text node and
+ * offsets each of its UTF-16 units came from, so a match in the squashed text
+ * (which `findSentence` gives in UTF-16 units) maps back to a DOM `Range`.
  */
-function squashedText(el: HTMLElement): { text: string; at: { node: Text; offset: number }[] } {
+function squashedText(el: HTMLElement): { text: string; at: SquashedAt[] } {
   let text = "";
-  const at: { node: Text; offset: number }[] = [];
+  const at: SquashedAt[] = [];
   const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (!isOwnText(el, node)) continue;
@@ -181,10 +188,13 @@ function squashedText(el: HTMLElement): { text: string; at: { node: Text; offset
     let offset = 0;
     for (const ch of data) {
       if (WORD_CHAR.test(ch)) {
-        for (const lower of ch.toLowerCase()) {
-          text += lower;
-          at.push({ node: node as Text, offset });
-        }
+        // One entry per UTF-16 unit of the lowercased letter: a letter outside
+        // the basic plane, or one whose lowercase is longer ("İ"), adds more
+        // than one.
+        const lower = ch.toLowerCase();
+        text += lower;
+        const end = offset + ch.length;
+        for (let k = 0; k < lower.length; k++) at.push({ node: node as Text, offset, end });
       }
       offset += ch.length;
     }
@@ -234,9 +244,12 @@ function sentenceLine(
   if (!found) return null;
   const start = at[found[0]];
   const last = at[found[1] - 1];
+  // Not expected while `at` follows `text` unit for unit; null keeps the ▶ on
+  // the block's first line rather than throwing mid-layout.
+  if (!start || !last) return null;
   const range = el.ownerDocument.createRange();
   range.setStart(start.node, start.offset);
-  range.setEnd(last.node, last.offset + 1);
+  range.setEnd(last.node, last.end);
   if (typeof range.getClientRects !== "function") return null;
   const rects = range.getClientRects();
   return rects.length > 0 ? rects[0] : null;
