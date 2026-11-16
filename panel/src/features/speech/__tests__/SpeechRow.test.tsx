@@ -61,6 +61,10 @@ describe("SpeechRow", () => {
       "trail",
     ].map((id) => screen.getByTestId(id));
     for (const el of order) expect(row!.contains(el)).toBe(true);
+    // The lead is set off from the transport by the row's own separator.
+    const afterLead = screen.getByTestId("lead").nextElementSibling;
+    expect(afterLead?.classList.contains("speech-bar-sep")).toBe(true);
+    expect(afterLead?.parentElement).toBe(row);
     for (let i = 1; i < order.length; i += 1) {
       // DOCUMENT_POSITION_FOLLOWING: the later id sits after the earlier one.
       expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
