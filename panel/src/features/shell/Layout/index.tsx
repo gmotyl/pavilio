@@ -18,6 +18,7 @@ import {
   FloatingActionProvider,
 } from "./FloatingActionProvider";
 import { ScrollContainerContext } from "./ScrollContainer";
+import { PageSpeechRowSlot } from "../../speech/PageSpeechRowHost";
 import { useFullscreenLayerActive } from "./fullscreenLayer";
 import { LAYOUT_ORDER } from "./order";
 import TerminalDrawer from "../../terminal/TerminalDrawer";
@@ -232,8 +233,13 @@ export function Layout({ children }: LayoutProps) {
             ref={scrollRef}
             className={`overflow-auto h-full${fullscreenLayer ? "" : " isolate"}`}
           >
-            {!hideBreadcrumbs && <Breadcrumbs trailing={<FocusToggle />} />}
-            {children}
+            {/* One slot over the breadcrumb bar and the routed page: a page's
+                speech row unfolds from a toolbar in either, and is drawn in
+                the sticky host its viewer mounts. */}
+            <PageSpeechRowSlot>
+              {!hideBreadcrumbs && <Breadcrumbs trailing={<FocusToggle />} />}
+              {children}
+            </PageSpeechRowSlot>
           </div>
         </ScrollContainerContext.Provider>
         <FloatingOverlay />

@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   ExternalLink,
   Copy,
@@ -12,6 +13,7 @@ import {
 import { copyToClipboard } from "../../lib/clipboard";
 import { DocumentSpeechBar } from "../speech/DocumentSpeechBar";
 import { usePageSpeech } from "../speech/SpeechHostProvider";
+import { usePageSpeechRowHost } from "../speech/PageSpeechRowHost";
 import { usePlayFromHereHandler, usePlayHint } from "../speech/PagePlayFromHere";
 import { pageHasSpeech } from "../speech/pageText";
 import { openInVSCode } from "../shell/vscode";
@@ -302,6 +304,16 @@ function SpeakingToolbar({
     </button>
   );
 
+  // The unfolded row goes to the page's sticky host when the viewer mounts one
+  // (`PageSpeechRowHost`): there it sticks to the top of the scrolled page and
+  // spans its width. Without a host it unfolds under the buttons, as before.
+  const rowHost = usePageSpeechRowHost();
+  const row = open ? (
+    <div className="viewer-speech-bar">
+      <DocumentSpeechBar docKey={speech.key} hintUnit={hintUnit} />
+    </div>
+  ) : null;
+
   // `gap: inherit` keeps the caller's spacing: the buttons used to be its row's
   // direct children, and each call site spaces them its own way.
   return (
@@ -309,11 +321,7 @@ function SpeakingToolbar({
       <div className="flex items-center" style={{ gap: "inherit" }}>
         {children(play)}
       </div>
-      {open && (
-        <div className="viewer-speech-bar">
-          <DocumentSpeechBar docKey={speech.key} hintUnit={hintUnit} />
-        </div>
-      )}
+      {row && (rowHost ? createPortal(row, rowHost) : row)}
     </div>
   );
 }

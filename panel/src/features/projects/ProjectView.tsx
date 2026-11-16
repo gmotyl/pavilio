@@ -33,6 +33,7 @@ import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectSettingsCard from "./ProjectSettingsCard";
 import { useBreadcrumbActions } from "../shell/Breadcrumbs";
+import { PageSpeechRowHost } from "../speech/PageSpeechRowHost";
 import FocusToggle, { useFocusLayout } from "../shell/FocusToggle";
 import { useSidebarState } from "../shell/useSidebarState";
 import { useLastPath } from "../shell/useLastPath";
@@ -296,14 +297,26 @@ export default function ProjectView() {
         />
       )}
 
-      <ProjectTabsBar
-        tabs={tabs}
-        searchActive={isReposSearch && search.active}
-        onToggleSearch={onToggleSearch}
-        focus={focus.active}
-        hamburgerInset={focus.active && !leftSidebar.expanded}
-        trailing={focus.active ? <FocusToggle /> : null}
-      />
+      {/* The tab row and the open page's speech row stick as one block: the
+          tab row's own sticky offset (under the breadcrumb bar, or the top in
+          focus) moves to this wrapper, so the speech row sits right under the
+          tabs (on phones, where the tab row is hidden, under the breadcrumb
+          bar) instead of being stuck behind them. The ground covers the tab
+          row's bottom margin while the speech row is open under it. */}
+      <div
+        className={`sticky ${focus.active ? "top-0" : "top-9"} z-20`}
+        style={{ background: "var(--bg-base)" }}
+      >
+        <ProjectTabsBar
+          tabs={tabs}
+          searchActive={isReposSearch && search.active}
+          onToggleSearch={onToggleSearch}
+          focus={focus.active}
+          hamburgerInset={focus.active && !leftSidebar.expanded}
+          trailing={focus.active ? <FocusToggle /> : null}
+        />
+        <PageSpeechRowHost />
+      </div>
 
       {isReposSearch && search.active && (
         <ProjectSearchBar
