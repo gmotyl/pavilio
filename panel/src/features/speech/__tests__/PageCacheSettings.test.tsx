@@ -9,7 +9,7 @@
  * open-page record a page's Play writes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, type ReactNode } from "react";
 import { makeSpeech, resetSpeechHarness, synthMock } from "./speech.harness";
@@ -32,6 +32,8 @@ vi.mock("../pageCache", async (importOriginal) => {
     ...actual,
     cacheTotals: () => cache.cacheTotals(),
     wipeCache: () => cache.wipeCache(),
+    // The page row mounted beside Settings asks for its page list; no server here.
+    loadPageList: async () => false,
   };
 });
 
@@ -45,6 +47,9 @@ vi.mock("../useSpeechKeys", () => ({ useSpeechKeys: () => {} }));
 
 import { SpeechHostProvider, usePageSpeech } from "../SpeechHostProvider";
 import { PageCacheSettings } from "../PageCacheSettings";
+import { DocumentSpeechBar } from "../DocumentSpeechBar";
+import { preferences } from "../../../preferences/declarations";
+import { clearPreference, readPreference } from "../../../preferences/store";
 
 const MOCKUP_TOTALS: PageCacheTotals = { pages: 38, units: 1204, bytes: 46.3 * 1024 * 1024 };
 const ZERO: PageCacheTotals = { pages: 0, units: 0, bytes: 0 };
@@ -106,6 +111,7 @@ describe("PageCacheSettings", () => {
     vi.restoreAllMocks();
     resetSpeechHarness();
     __resetAlertsForTests();
+    clearPreference(preferences.speechPageCacheEnabled);
     stub.host = null;
   });
 
@@ -202,5 +208,39 @@ describe("PageCacheSettings", () => {
         "Couldn't clear the cache: disk full",
       ),
     );
+  });
+
+  it("settings page cache switch reflects and flips the preference", async () => {
+    const user = userEvent.setup();
+    const KEY = "doc:pavilio:notes/page.md";
+    stub.host = makeSpeech();
+    render(
+      <Host>
+        <OpenPage docKey={KEY} />
+        <DocumentSpeechBar docKey={KEY} />
+        <PageCacheSettings />
+      </Host>,
+    );
+    await screen.findByText("38 pages · 1,204 units · 46.3 MB");
+
+    // The switch sits in the Page audio cache section, on by default.
+    const section = screen.getByTestId("page-cache-settings");
+    const settingsSwitch = within(section).getByRole("checkbox", {
+      name: "Store page audio in the cache",
+    }) as HTMLInputElement;
+    expect(settingsSwitch.checked).toBe(true);
+    const rowToggle = await screen.findByTestId(`speech-bar-page-cache-${KEY}`);
+    expect(rowToggle.getAttribute("aria-pressed")).toBe("true");
+
+    // Flipped in Settings: the preference and the mounted page row follow.
+    await user.click(settingsSwitch);
+    expect(settingsSwitch.checked).toBe(false);
+    expect(readPreference(preferences.speechPageCacheEnabled)).toBe(false);
+    await waitFor(() => expect(rowToggle.getAttribute("aria-pressed")).toBe("false"));
+
+    // Flipped on the page row: Settings reflects it.
+    await user.click(rowToggle);
+    await waitFor(() => expect(settingsSwitch.checked).toBe(true));
+    expect(readPreference(preferences.speechPageCacheEnabled)).toBe(true);
   });
 });

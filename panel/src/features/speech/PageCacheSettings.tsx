@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { alerts } from "../alerts/store";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 import { formatBytes } from "./formatBytes";
 import { cacheTotals, wipeCache, type PageCacheTotals } from "./pageCache";
 import { useStopPageRuns } from "./SpeechHostProvider";
@@ -20,8 +22,15 @@ function describeTotals(totals: PageCacheTotals): string {
 }
 
 /**
- * Settings → Speech → "Page audio cache": what the page audio cache holds on
- * the panel server, and Wipe cache… to empty it.
+ * Settings → Speech → "Page audio cache": the switch that decides whether
+ * newly synthesized page units are written to the cache
+ * (`speech.pageCacheEnabled`, the same preference as the page row's toggle),
+ * what the page audio cache holds on the panel server, and Wipe cache… to
+ * empty it.
+ *
+ * The switch is a labelled checkbox, as Settings' other on/off preferences
+ * are. It reads the preference through `usePreference`, so a flip here reaches
+ * every mounted page row, and a flip on a page row shows here.
  *
  * The totals are read once, when Settings opens; a failure reads "Cache
  * unavailable" and disables the wipe — there is no size to confirm.
@@ -35,6 +44,7 @@ function describeTotals(totals: PageCacheTotals): string {
  */
 export function PageCacheSettings() {
   const stopPageRuns = useStopPageRuns();
+  const [cacheEnabled, setCacheEnabled] = usePreference(preferences.speechPageCacheEnabled);
   const [totals, setTotals] = useState<TotalsView>(null);
   const [wiping, setWiping] = useState(false);
 
@@ -85,6 +95,20 @@ export function PageCacheSettings() {
         Audio synthesized for markdown pages is kept in <code>~/.pavilio/speech-cache/</code> and
         replayed instead of being synthesized again. Agent answers are never cached here.
       </p>
+      <label
+        htmlFor="speech-page-cache-enabled"
+        className="inline-flex items-center gap-2 text-sm cursor-pointer select-none mt-2"
+        style={{ color: "var(--text-primary)" }}
+      >
+        <input
+          id="speech-page-cache-enabled"
+          data-testid="page-cache-enabled"
+          type="checkbox"
+          checked={cacheEnabled}
+          onChange={(e) => setCacheEnabled(e.target.checked)}
+        />
+        Store page audio in the cache
+      </label>
       <div className="flex items-center gap-3 mt-2 text-sm">
         <span className="text-xs" style={{ color: "var(--text-muted)", minWidth: 56 }}>
           Stored
