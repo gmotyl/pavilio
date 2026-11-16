@@ -1,6 +1,6 @@
-import { Crosshair, Eye, Radio, SkipBack, SkipForward, Volume2 } from "lucide-react";
+import { Crosshair, Eye, Radio, Volume2 } from "lucide-react";
 import { useEffect, useSyncExternalStore } from "react";
-import { SpeechTransport } from "../speech/SpeechTransport";
+import { SpeechRow } from "../speech/SpeechRow";
 import { LauncherPills } from "./LauncherPills";
 import { noteRetryUtterance } from "./answerRetry";
 import {
@@ -168,14 +168,6 @@ export function SpeechControlBar({
   const progress = useSyncExternalStore(speech.subscribeProgress, () =>
     speech.progressFor(sessionId),
   );
-  // Sourced here rather than from `progress`: a finished run has no playhead
-  // and still has a timeline, and a scrubber that fell back to character
-  // estimates the moment the audio stopped would throw away what it learned.
-  const durations = useSyncExternalStore(speech.subscribeProgress, () =>
-    speech.unitDurationsFor(sessionId),
-  );
-  // The cache subscription the segments' states need is the transport's own —
-  // see `features/speech/SpeechTransport.tsx`.
 
   // Ten seconds from the moment this answer became ready — see the play
   // button's `data-pulse` below for why the bar is capped and the header is
@@ -364,9 +356,11 @@ export function SpeechControlBar({
   const voice = useVoiceForSession(sessionId);
 
   return (
-    <div
-      className="speech-bar"
-      data-testid={`speech-bar-${sessionId}`}
+    <SpeechRow
+      speechKey={sessionId}
+      speech={speech}
+      voice={voice}
+      testIdPrefix="speech-bar"
       // The pane's state, on the row, because the SEAM between them is the
       // row's to draw. `.speech-bar` carries a hairline against the terminal;
       // with the pane open there is no terminal under that edge — the pane's
@@ -374,18 +368,8 @@ export function SpeechControlBar({
       // stylesheet takes it out on this attribute. Told here rather than
       // derived there: the pane is a sibling mounted by `TerminalView`, so no
       // selector can reach from the row to it.
-      data-answer-open={answerOpen ? "1" : "0"}
-      // The cell header is `draggable` and the cell root focuses on click, so
-      // every gesture that could reach either has to stop here.
-      draggable={false}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-      onDragStart={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
-      <div className="speech-bar-row">
+      answerOpen={answerOpen}
+      lead={
         <button
           type="button"
           title={modeControl.label}
@@ -397,179 +381,100 @@ export function SpeechControlBar({
         >
           <modeControl.Icon size={17} />
         </button>
+      }
+      /*
+        THE STRIP IS ALWAYS HERE. It used to be the other arm of a branch:
+        `empty` rendered the launcher pills INSTEAD, on three stated reasons —
+        every transport control would be disabled, the scrubber would have no
+        segments, and the eye would have no pane to open.
 
-        {/*
-          THE STRIP IS ALWAYS HERE. It used to be the other arm of a branch:
-          `empty` rendered the launcher pills INSTEAD, on three stated
-          reasons — every transport control would be disabled, the scrubber
-          would have no segments, and the eye would have no pane to open.
+        The third one lapsed: a launcher press hands the answer pane over to a
+        "waiting for agent" wave, so before the first answer there IS a pane to
+        open — and hiding the eye left it with no way back (a reload always
+        starts the pane closed). So the eye is LIVE from mount, and the
+        transport is DISABLED until the first answer: disabled says *not yet*
+        where hiding said *never*, and the transport's `empty` label ("Nothing
+        to speak yet") already spells that out. `previous` and `next` need no
+        new rule: they ask the cursor, and an empty queue answers no.
+      */
+      stepControls={{
+        // ONE CALL each, on purpose. The hold, the wave step and the send
+        // wait's `noteTransport` all belong to `onPrevious`/`onNext` in the
+        // host, because the chord and the OS media keys raise the same
+        // callbacks and must behave the same way — a rule the row kept for
+        // itself would be a second transport.
+        onPrevious: () => speech.onPrevious(sessionId),
+        onNext: () => speech.onNext(sessionId),
+        canPrevious: hasPrevious,
+        canNext: hasNext,
+      }}
+      // `speechPulse` says whether the cell is asking (only `ready` is) — not
+      // a second rule computed here. The header speak control exists only
+      // while a cell speaks, so this button is where a ready answer announces
+      // itself; `index.css` animates it with the header's own pulse rule, for
+      // ten seconds. Then it stops: a 56px rail directly above the terminal
+      // that pulses forever reads as a nag over the work. The cap narrows
+      // where the derivation is read, never what it means.
+      pulse={speechPulse(state) === "1" && withinReadyPulse}
+      // A reply the cell is still waiting for. The mark is on from the moment
+      // the draft goes out until the reply lands, so it outlives both things
+      // that can take the pane's body away: a transport press, and the eye
+      // closing the pane. The arrival is noticed HERE (see the effects above),
+      // so a reply the user walked away from is visibly on its way for exactly
+      // as long as it is on its way.
+      pending={pending}
+      onPress={() => {
+        // The press is a transport press whatever it resolves to, and even
+        // when it resolves to nothing: the pane's body goes back to the text
+        // either way, because the user asked for the transport rather than
+        // for the wait.
+        noteTransport(sessionId);
+        // Reaching for the transport is reaching for THIS cell, so an
+        // attention LED lit for it has been answered — on the CLICK, never on
+        // a change of `state` (an autoplayed answer is the agent talking, not
+        // the user arriving). See `attentionArrival`. The transport calls this
+        // above its intent branch, so a press of PAUSE dismisses too.
+        dismissAttentionOnArrival(sessionId);
+      }}
+      /*
+        The launchers, in the rail the collapsed scrubber just handed over
+        (`data-empty` on the transport's scrubber). Placed HERE rather than
+        beside the mode switch so the row reads the same way in both states —
+        fixed controls at the two ends, the one thing that stretches in the
+        middle — and so the eye stays the last control on the line whether the
+        cell has spoken or not. One direction only: `stateFor` never returns
+        to `empty`, so the pills go on the first answer and do not come back.
+      */
+      middleExtra={silent ? <LauncherPills sessionId={sessionId} send={send} /> : null}
+      trail={
+        <>
+          <button
+            type="button"
+            // The position rides in the name — `(unitIndex ?? 0) + 1` — so a
+            // screen reader loses nothing to the eye replacing the readout.
+            // Before the first answer there is no position and the name says
+            // so instead. See the note on the component.
+            title={eyeLabel}
+            aria-label={eyeLabel}
+            aria-pressed={answerOpen}
+            data-testid={`speech-bar-eye-${sessionId}`}
+            // Open borrows the armed toggle's fill — `index.css` styles the
+            // two attributes in one rule.
+            data-open={answerOpen ? "1" : "0"}
+            className="speech-bar-btn"
+            onClick={onToggleAnswer}
+          >
+            <Eye size={17} />
+          </button>
 
-          The third one lapsed on this branch. A launcher press now hands the
-          answer pane over to a "waiting for agent" wave, so before the first
-          answer there IS a pane to open — and hiding the eye left it with no
-          way back: the press opened the pane, Escape closed it, and nothing on
-          the row could reopen it until the cell finally spoke. A reload is
-          worse rather than better, because the pane's open state is in memory
-          and a refresh always starts closed, which locked the user out of the
-          answer panel on any cell that had not spoken.
-
-          So the eye is LIVE from mount, and the first two reasons are spent as
-          what they actually are: the transport is DISABLED until the first
-          answer. Disabled says *not yet* where hiding said *never*, and the
-          `empty` row of the transport's `PLAY_PAUSE_LABEL` already spells that out —
-          "Nothing to speak yet", intent `none` — so nothing parallel had to be
-          invented for it. `previous` and `next` need no new rule at all: they
-          ask the cursor, and an empty queue answers no.
-
-          The pills are ADDED to the line rather than swapped for it. They sit
-          where the scrubber does and share the rail with it, which costs
-          nothing while the cell is silent because the scrubber has no segments
-          to draw and yields its flex share (`data-empty` on the transport's
-          scrubber).
-
-          One direction only. `stateFor` never returns to `empty` once an
-          utterance is under the cursor, so the pills go when the first answer
-          lands and do not come back — see the change's design.md on why an
-          exited agent cannot honestly bring them back.
-        */}
-        <span className="speech-bar-sep" />
-
-        <button
-          type="button"
-          title="Previous answer"
-          aria-label="Previous answer"
-          data-testid={`speech-bar-previous-${sessionId}`}
-          className="speech-bar-btn"
-          disabled={!hasPrevious}
-          onClick={() => {
-            // ONE CALL, on purpose. The hold, the wave step and the send
-            // wait's `noteTransport` all belong to `onPrevious` in the host,
-            // because the chord and the OS media keys raise the same callback
-            // and must behave the same way — a rule the row kept for itself
-            // would be a second transport. This handler's whole job is to say
-            // that the row's control was pressed.
-            speech.onPrevious(sessionId);
-          }}
-        >
-          <SkipBack size={16} />
-        </button>
-
-        <SpeechTransport
-          id={sessionId}
-          state={state}
-          units={units}
-          durations={durations}
-          progress={progress}
-          voice={voice}
-          onPlay={() => speech.onSpeak(sessionId)}
-          onPause={() => speech.onPause(sessionId)}
-          onResume={() => speech.onResume(sessionId)}
-          onJumpToUnit={(index) => speech.onJumpToUnit(sessionId, index)}
-          onSeekWithinUnit={(seconds) => speech.onSeekWithinUnit(sessionId, seconds)}
-          // `speechPulse` says whether the cell is asking (only `ready` is) —
-          // not a second rule computed here. The header speak control exists
-          // only while a cell speaks, so this button is where a ready answer
-          // announces itself; `index.css` animates it with the header's own
-          // pulse rule, for ten seconds.
-          //
-          // Then it stops. The bar is a 56px rail sitting directly above the
-          // terminal, and a pulse that size that never ends reads as a nag
-          // over the work rather than a notice about it. The cap narrows where
-          // the derivation is read, never what it means.
-          pulse={speechPulse(state) === "1" && withinReadyPulse}
-          // A reply the cell is still waiting for. The mark is on from the
-          // moment the draft goes out until the reply lands, so it outlives
-          // both of the things that can take the pane's body away: a
-          // transport press, which hands the wait back to this button, and
-          // the eye, which closes the pane outright. The second is the case
-          // the row exists to cover — the arrival is noticed HERE (see the
-          // effect above), so a reply the user walked away from is visibly
-          // on its way for exactly as long as it is on its way.
-          pending={pending}
-          onPress={() => {
-            // The press is a transport press whatever it resolves to, and
-            // even when it resolves to nothing: the pane's body goes back
-            // to the text either way, because the user asked for the
-            // transport rather than for the wait.
-            noteTransport(sessionId);
-            // Reaching for the transport is reaching for THIS cell, so an
-            // attention LED lit for it has been answered. On the CLICK, and
-            // on every other gesture that works a transport — see
-            // `attentionArrival`, which is the one rule all of them share.
-            // What it is deliberately not on is a change of `state`: an
-            // autoplayed answer arrives that way and never as a press, and
-            // a reply that starts reading itself is the agent talking
-            // rather than the user arriving, so it must leave the notice
-            // standing.
-            //
-            // The transport calls this above its intent branch, so a press
-            // of PAUSE dismisses too. This is one button whose meaning is
-            // decided by where the run is; the rule is keyed on the press.
-            dismissAttentionOnArrival(sessionId);
-          }}
-          // `next` sits between play/pause and the scrubber, so it rides in
-          // the transport's slot and the row's DOM order is what it was.
-          between={
-            <>
-            <button
-              type="button"
-              title="Next answer"
-              aria-label="Next answer"
-              data-testid={`speech-bar-next-${sessionId}`}
-              className="speech-bar-btn"
-              disabled={!hasNext}
-              onClick={() => {
-                // One call, like the backward control beside it: the release onto
-                // the wave is `onNext`'s, in the host.
-                speech.onNext(sessionId);
-              }}
-            >
-              <SkipForward size={16} />
-            </button>
-
-            <span className="speech-bar-sep" />
-            </>
-          }
-        />
-
-        {/*
-          The launchers, in the rail the collapsed scrubber just handed
-          over. Placed HERE rather than back beside the arm switch so the
-          row reads the same way in both states — fixed controls at the two
-          ends, the one thing that stretches in the middle — and so the
-          eye stays the last control on the line whether the cell has
-          spoken or not. A control that moved along the row on the first
-          answer would be a control the user has to find again.
-        */}
-        {silent ? <LauncherPills sessionId={sessionId} send={send} /> : null}
-
-        <button
-          type="button"
-          // The position rides in the name — `(unitIndex ?? 0) + 1`, exactly
-          // the readout's computation — so a screen reader loses nothing to
-          // the eye replacing it. Before the first answer there is no
-          // position and the name says so instead. See the note on the
-          // component.
-          title={eyeLabel}
-          aria-label={eyeLabel}
-          aria-pressed={answerOpen}
-          data-testid={`speech-bar-eye-${sessionId}`}
-          // Open borrows the armed toggle's fill — `index.css` styles the
-          // two attributes in one rule.
-          data-open={answerOpen ? "1" : "0"}
-          className="speech-bar-btn"
-          onClick={onToggleAnswer}
-        >
-          <Eye size={17} />
-        </button>
-
-        {queue.pending.length > 0 ? (
-          <span className="speech-bar-pill" data-testid={`speech-bar-queue-${sessionId}`}>
-            +{queue.pending.length}
-          </span>
-        ) : null}
-      </div>
-    </div>
+          {queue.pending.length > 0 ? (
+            <span className="speech-bar-pill" data-testid={`speech-bar-queue-${sessionId}`}>
+              +{queue.pending.length}
+            </span>
+          ) : null}
+        </>
+      }
+    />
   );
 }
 
