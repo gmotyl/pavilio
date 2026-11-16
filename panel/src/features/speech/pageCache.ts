@@ -50,6 +50,8 @@
  * asks `synth.ts` on its own tier and signal, which is what lets a run promote
  * a unit a preload queued, and the library dedupes the flight.
  */
+import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
 import { resetSpeechCache, synthesizeSpeech, SPEECH_AUDIO_MIME_TYPE, type SpeechSynthesisOptions } from "./synth";
 import type { SpeechCacheState } from "./synth";
 import type { SpeechUnit } from "./types";
@@ -318,7 +320,8 @@ export async function prunePage(
 
 /**
  * The unit's audio: from disk when the server holds it, otherwise synthesized
- * and uploaded in the background. A fetch failure of any kind (network, 404,
+ * and uploaded in the background — unless the page cache toggle
+ * (`speech.pageCacheEnabled`) is off, which skips the upload only. A fetch failure of any kind (network, 404,
  * 503, empty body) is a miss; an upload failure never rejects. A miss that
  * lands after the page was cleared (or the cache wiped) rejects with an
  * `AbortError` instead of synthesizing — the clear stopped that run. Like
@@ -346,7 +349,11 @@ export async function pageAudio(
 
   const bytes = await synthesizeSpeech(unit.text, options);
   // No epoch (the GET failed outright): the server would refuse the PUT, so skip it.
-  if (gen === generation(docKey) && epoch) void upload(docKey, gen, url, hash, bytes, epoch);
+  // The page cache toggle is read once the synthesis lands, so switching it
+  // off mid-run stops the writes of every unit synthesized after the switch.
+  if (gen === generation(docKey) && epoch && readPreference(preferences.speechPageCacheEnabled)) {
+    void upload(docKey, gen, url, hash, bytes, epoch);
+  }
   return bytes;
 }
 

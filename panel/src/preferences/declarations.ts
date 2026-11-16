@@ -801,6 +801,20 @@ export const preferences = {
     portable: false,
   }),
   /**
+   * Whether newly synthesized page units are written to the page audio cache
+   * (`speech/pageCache.ts`). ON by default — today's behaviour. Off stops the
+   * writes only: units already on disk are still played from it, and Clear
+   * cache is the way to drop them. Lives in the per-machine file with the other
+   * speech preferences; it names no session.
+   */
+  speechPageCacheEnabled: definePreference({
+    key: "speech.pageCacheEnabled", // was: nothing — the toggle is new
+    scope: "global",
+    default: true,
+    codec: bool,
+    portable: true,
+  }),
+  /**
    * Each project's own voices — `project → engine → voice id`; a project, or
    * an engine within it, that follows the default voice has no entry.
    * Portable, unlike `speech.modes`: the keys are project and engine names,
