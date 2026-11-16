@@ -1260,9 +1260,9 @@ input[type="checkbox"] {
   );
 }
 
-/* The wave. ONE CREST PER SEGMENT, in the scrubber's own vocabulary: the pane's
-   rail is a column of segments in `--speech-seg`, and this is those segments
-   while there is nothing yet to draw a rail for. A spinner would have been a
+/* The wave. ONE CREST PER SEGMENT, in the scrubber's own vocabulary: the
+   speech row's scrubber is a strip of segments in `--speech-seg`, and this is
+   those segments while there is nothing yet to draw a scrubber for. A spinner would have been a
    second visual language for "the speech surface is busy" on the one surface
    that already has one.
 

@@ -605,7 +605,7 @@ describe("rendering", () => {
       expect(speech.onPause).toHaveBeenCalledWith("cell-a");
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
 
-      // Paused, the same ▶ reads Play and picks the voice up where it stopped.
+      // Paused, the same ▶ reads Play and restarts the paused sentence.
       h.state = "paused";
       view.rerender(paneElement(speech));
       expect(pinned()).toHaveAccessibleName("Play from here");

@@ -170,8 +170,8 @@ describe("DocumentSpeechBar", () => {
     // previous/next, eye button, launchers or hide toggle.
     expect(row.querySelectorAll("button")).toHaveLength(3);
     expect(screen.queryByTestId(`speech-bar-autoplay-${KEY}`)).toBeNull();
-    expect(screen.queryByTestId(`speech-bar-previous-${KEY}`)).toBeNull();
-    expect(screen.queryByTestId(`speech-bar-next-${KEY}`)).toBeNull();
+    expect(screen.queryByTestId(`document-speech-bar-previous-${KEY}`)).toBeNull();
+    expect(screen.queryByTestId(`document-speech-bar-next-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`speech-bar-eye-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`speech-bar-launchers-${KEY}`)).toBeNull();
   });
@@ -298,6 +298,11 @@ describe("DocumentSpeechBar", () => {
     fireEvent.click(clearButton()!);
     expect(stub.host?.onStop).toHaveBeenCalledWith(KEY);
     expect(cache.clearPage).toHaveBeenCalledWith(KEY);
+    // Stopped before cleared: the run must not still be reading audio that is
+    // being deleted under it.
+    expect(vi.mocked(stub.host!.onStop).mock.invocationCallOrder[0]).toBeLessThan(
+      cache.clearPage.mock.invocationCallOrder[0],
+    );
     await waitFor(() => expect(clearButton()?.hasAttribute("disabled") ?? false).toBe(false));
     expect(getAlertsSnapshot()).toHaveLength(0);
   });

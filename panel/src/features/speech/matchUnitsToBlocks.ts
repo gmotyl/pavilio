@@ -25,16 +25,16 @@
  *   unit it keeps a short unit — `## Result`, or a bare `Yes.` — from marking
  *   every block that happens to contain "result" or "yes" through
  *   `b.includes(u)`: without it, the opening heading's ▶ would land on
- *   whichever paragraph echoes the word. Exact equality is exempt from
- *   the floor: a short heading is usually its own unit (`prepare` does not pack
- *   a leading heading into its neighbour), and a block that *is* the unit has
+ *   whichever paragraph echoes the word. Exact equality is exempt from the
+ *   floor: a short heading is usually its own unit (`prepare` does not pack a
+ *   leading heading into its neighbour), and a block that *is* the unit has
  *   no cross-unit ambiguity to guard against. Accepted residue: a heading of
  *   twelve or more characters echoed as its paragraph's opener
  *   (`## Installation steps` + "Installation steps are…") matches both
- *   blocks; the in-order walk still gives each block its own unit. Also accepted: a short heading in the middle of the body
- *   (`## Notes`, 5 chars) is packed by `prepare` into its paragraph's unit, so
- *   its own block is under the floor and stays unmarked while the paragraph
- *   beside it is.
+ *   blocks; the in-order walk still gives each block its own unit. Also
+ *   accepted: a short heading in the middle of the body (`## Notes`, 5
+ *   chars) is packed by `prepare` into its paragraph's unit, so its own block
+ *   is under the floor and stays unmarked while the paragraph beside it is.
  * - An empty unit (`source === ""`) claims nothing: equality is exempt from
  *   the floor, so without that guard it would hand an `<hr>` — an empty
  *   `textContent` block — to the empty unit.

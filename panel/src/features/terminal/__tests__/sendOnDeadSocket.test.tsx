@@ -55,9 +55,6 @@ import { refreshSessions } from "../sessionStore";
 import type { SessionMeta } from "../useTerminalSessions";
 import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 
-// The pane's rail peeks into the synthesis cache; nothing here is warm and
-// nothing subscribes, exactly as in the other composer suites.
-vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // No answer is put under the cursor in this file, so the markdown renderer is
 // never mounted — but the mock keeps mermaid's browser-only stack from being a

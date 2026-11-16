@@ -88,9 +88,6 @@ vi.mock("../../../preferences/store", async (importOriginal) => {
   };
 });
 
-// The synthesis cache the rail peeks into. Nothing is warm and nothing
-// subscribes: no test here draws a segment.
-vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // mermaid's rendering stack is browser-only and no answer here holds a fence.
 vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());

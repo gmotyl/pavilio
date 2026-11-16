@@ -977,4 +977,15 @@ describe("sentence units", () => {
   it("a heading with a full stop stays one unit", () => {
     expect(texts("## Step 1. Install\n\nRun it.\n")).toEqual(["Step 1. Install", "Run it."]);
   });
+
+  // Pinned on purpose: the lowercase-or-digit rule that keeps "e.g. grep" and
+  // "No. 5" whole cannot tell them from a real sentence that happens to open
+  // lowercase or with a digit. Splitting these would re-halve the
+  // abbreviations above, so the join is the accepted trade, not a bug.
+  it("a sentence starting lowercase joins the previous one (known limitation)", () => {
+    expect(texts("Then deps are fetched. npm install runs next.\n")).toEqual([
+      "Then deps are fetched. npm install runs next.",
+    ]);
+    expect(texts("Six cookies were baked. 4 were eaten.\n")).toEqual(["Six cookies were baked. 4 were eaten."]);
+  });
 });

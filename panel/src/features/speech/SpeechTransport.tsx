@@ -216,7 +216,7 @@ export function SpeechTransport({
     // Read from the cache rather than tracked, because the warming cascade
     // fills it from two places (the host's arrival warm and the player's
     // ladder) and neither reports to the bar. The playhead-vs-cache rule itself
-    // is shared with the answer pane's rail — see `segmentStateFor`.
+    // lives in `segmentStateFor`.
     const state = segmentStateFor({
       index,
       playingIndex: progress?.unitIndex ?? null,

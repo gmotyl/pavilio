@@ -17,7 +17,7 @@ export function mermaidMock() {
   };
 }
 
-/** The synthesis cache the pane's rail peeks into: nothing warm, nothing subscribes. */
+/** The synthesis cache the speech row's scrubber peeks into: nothing warm, nothing subscribes. */
 export function synthMock() {
   return {
     isSpeechSynthesized: () => false,

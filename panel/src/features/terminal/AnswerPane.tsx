@@ -522,7 +522,7 @@ export function AnswerPane({
   }, []);
 
   // A ▶ press jumps the cell's run there — also the pinned ▶ while paused,
-  // which jumps to the paused unit and so picks the voice up where it stopped.
+  // which jumps to the paused unit and so restarts the paused sentence.
   const onPlay = useCallback(
     (unit: number): void => {
       speech.onJumpToUnit(sessionId, unit);

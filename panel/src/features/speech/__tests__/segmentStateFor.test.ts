@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SpeechCacheState } from "../../speech/synth";
+import type { SpeechCacheState } from "../synth";
 import { segmentStateFor } from "../segmentState";
 
 const caches: SpeechCacheState[] = ["cold", "warming", "ready"];

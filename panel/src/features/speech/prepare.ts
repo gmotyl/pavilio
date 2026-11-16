@@ -438,6 +438,12 @@ const CONTINUATION_RE = /^[\p{Ll}\p{N}]/u;
  * lowercase or with a digit ("e.g. grep", "np. grep", inline code `pnpm test.`
  * unwrapped mid-sentence, "No. 5"), or the cut fell on a known abbreviation's
  * full stop ("Mr. Smith", "Prof. Nowak").
+ *
+ * Known limitation: the lowercase-or-digit rule cannot tell a continuation
+ * from a real sentence that opens lowercase or with a digit, so "npm install
+ * runs next." or "4 were eaten." joins the sentence before it. Accepted —
+ * one longer unit costs less than halving every "e.g." and "No." — and pinned
+ * in `prepare.test.ts`.
  */
 function continues(sentence: string, next: string): boolean {
   if (!next) return false;
