@@ -43,6 +43,12 @@ const EXTENSION: Record<AnswerRecordKind, string> = { audio: ".mp3", speaker: ".
  * stray temp files, and the temp files of writes still in flight. A write in
  * flight is always kept — its bytes so far go to `keptBytes`, but it is not a
  * unit until it commits.
+ *
+ * "In flight" means every write that started before the sweep released the
+ * lock, including one whose temp file appeared after the sweep listed the
+ * root: commits are serialized with the sweep, so such a write is counted
+ * exactly once — by its temp file, never also by its committed file. A write
+ * that starts after the sweep released the lock is not counted.
  */
 export interface AnswerSweepTotals {
   removedUnits: number;
@@ -168,6 +174,18 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
               totals.keptUnits += unit;
               totals.keptBytes += info.size;
             }
+          } catch (err) {
+            if (!isMissing(err)) warnOnce("sweep", err);
+          }
+        }
+        // Writes that started after the listing created temp files it does
+        // not hold. Their commits wait on this lock, so each temp file still
+        // exists unless its write failed or was dropped by a clear.
+        const listed = new Set(names);
+        for (const name of pending) {
+          if (listed.has(name)) continue;
+          try {
+            totals.keptBytes += (await stat(join(root, name))).size;
           } catch (err) {
             if (!isMissing(err)) warnOnce("sweep", err);
           }

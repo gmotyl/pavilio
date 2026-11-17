@@ -364,7 +364,8 @@ describe("answer audio cache", () => {
       await settle();
     };
 
-    expect(await cache.sweep()).toEqual({ removedUnits: 1, removedBytes: 1, keptUnits: 0, keptBytes: 0 });
+    // The write's temp file appeared after the listing, yet its bytes are kept bytes.
+    expect(await cache.sweep()).toEqual({ removedUnits: 1, removedBytes: 1, keptUnits: 0, keptBytes: 2 });
     expect(writing).toBeDefined();
     await writing;
 
@@ -392,6 +393,41 @@ describe("answer audio cache", () => {
     };
 
     await cache.write(KEY, new Uint8Array([2, 2, 2]));
+    // The temp file's bytes are kept bytes, but it is not a unit until it commits.
+    expect(swept).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 4 });
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2, 2]));
+  });
+
+  it("sweep counts a write whose temp appears after the listing", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write({ ...KEY, text: "kept" }, new Uint8Array([1]));
+    hooks.events = [];
+    // The sweep has listed the root; while it stats the committed file, a
+    // second write creates its temp file and queues its commit. The sweep
+    // resumes only once that temp file is on disk.
+    const tempWritten = deferred();
+    let writing: Promise<void> | undefined;
+    hooks.afterWriteFile = () => tempWritten.resolve();
+    hooks.afterStat = async () => {
+      writing = cache.write(KEY, new Uint8Array([2, 2, 2]));
+      await tempWritten.promise;
+      await settle();
+    };
+
+    const swept = await cache.sweep();
+    expect(writing).toBeDefined();
+    await writing;
+
+    // Order: the listing does not contain the temp file, which is written
+    // after it and committed only after the sweep released the lock.
+    const listing = eventIndex("readdir");
+    const tempWrite = eventIndex("writeFile", (name) => name.startsWith(".tmp-"));
+    const commit = eventIndex("rename", (name) => name.startsWith(".tmp-"));
+    expect(listing).toBeGreaterThanOrEqual(0);
+    expect(hooks.events[listing]).not.toContain(".tmp-");
+    expect(tempWrite).toBeGreaterThan(listing);
+    expect(commit).toBeGreaterThan(tempWrite);
     // The temp file's bytes are kept bytes, but it is not a unit until it commits.
     expect(swept).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 4 });
     expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2, 2]));
