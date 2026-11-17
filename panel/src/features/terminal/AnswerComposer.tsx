@@ -578,23 +578,52 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
 
   /**
    * The desktop row grows with the reply from the grip's height (its floor)
-   * up to `max(that height, 10 rows)`; past that the field scrolls. The
-   * field's chrome (padding, border, row padding) is what the declared
-   * two-row default pays beyond two lines, so content needs `scrollHeight +
-   * chrome`. A cleared field measures small again, so sending lands back on
-   * the dragged height with no special case.
+   * up to `max(that height, 10 rows)`; past that the field scrolls.
+   *
+   * The field is `flex: 1 1 auto` in a well stretched to the row, so while
+   * stretched its `scrollHeight` is at least the row-derived height — reading
+   * it then feeds the row's height back into itself and the row could only
+   * ever grow. So, like the mobile path, the field is collapsed to its
+   * natural size (`flex: none; height: auto`) for the measurement and then
+   * restored; `scrollHeight` is then content + the field's padding. The rest
+   * of the row's chrome — the field's border and the row's own padding and
+   * border — comes from computed styles, not an estimate. The row's height is
+   * written straight to the DOM (no state, no extra render per keystroke);
+   * React's `style` prop keeps the stored `height` and rewrites it only when
+   * that changes, which reruns this effect anyway. A cleared field measures
+   * small again, so sending lands back on the dragged height.
    */
-  const [grownHeight, setGrownHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
     if (isMobile) return;
     const field = fieldRef.current;
-    if (!field) return;
-    const parsedLineHeight = Number.parseFloat(getComputedStyle(field).lineHeight);
+    const row = field?.closest<HTMLElement>(".answer-pane-composer");
+    if (!field || !row) return;
+    const px = (value: string | undefined): number => {
+      const parsed = Number.parseFloat(value ?? "");
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const prevFlex = field.style.flex;
+    const prevHeight = field.style.height;
+    field.style.flex = "none";
+    field.style.height = "auto";
+    const natural = field.scrollHeight;
+    field.style.flex = prevFlex;
+    field.style.height = prevHeight;
+    const fieldStyle = getComputedStyle(field);
+    const rowStyle = getComputedStyle(row);
+    const parsedLineHeight = Number.parseFloat(fieldStyle.lineHeight);
     const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
-    const chrome = Math.max(0, preferences.answerComposerHeight.default - 2 * lineHeight);
-    const cap = Math.max(height, DESKTOP_COMPOSER_MAX_ROWS * lineHeight + chrome);
-    const wanted = Math.min(Math.max(height, field.scrollHeight + chrome), cap);
-    setGrownHeight(wanted > height ? wanted : null);
+    const fieldPadding = px(fieldStyle.paddingTop) + px(fieldStyle.paddingBottom);
+    const outer =
+      px(fieldStyle.borderTopWidth) +
+      px(fieldStyle.borderBottomWidth) +
+      px(rowStyle.paddingTop) +
+      px(rowStyle.paddingBottom) +
+      px(rowStyle.borderTopWidth) +
+      px(rowStyle.borderBottomWidth);
+    const cap = Math.max(height, DESKTOP_COMPOSER_MAX_ROWS * lineHeight + fieldPadding + outer);
+    const wanted = Math.min(Math.max(height, natural + outer), cap);
+    row.style.height = `${wanted}px`;
   }, [text, isMobile, height]);
 
   /**
@@ -1194,7 +1223,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // The row's height on desktop. On a touch viewport the stored number is
         // not applied at all: the field is one row and the viewport lays the
         // pane out.
-        style={isMobile ? undefined : { height: `${grownHeight ?? height}px` }}
+        style={isMobile ? undefined : { height: `${height}px` }}
       >
         <div className="answer-pane-composer-well" ref={wellRef}>
           <textarea
