@@ -15,6 +15,19 @@ const { TOKEN, previousToken } = vi.hoisted(() => {
   return { TOKEN: "tts-test-token", previousToken };
 });
 
+// anytts' `resolveVoice` finds an instance's voice maps only on a real
+// `createTts` instance; these fakes register their default here instead. An
+// instance with none resolves nothing, as an unconfigured engine would.
+const { fakeDefaults } = vi.hoisted(() => ({ fakeDefaults: new WeakMap<object, string>() }));
+vi.mock("anytts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("anytts")>()),
+  resolveVoice: vi.fn((tts: object, q: { engine: string; voice?: string }) => {
+    const voice = q.voice ?? fakeDefaults.get(tts);
+    if (voice === undefined) throw new RangeError(`engine is not configured: ${q.engine}`);
+    return { voice, fellBack: false };
+  }),
+}));
+
 import { authMiddleware } from "../../lib/auth";
 import { mobileAuthMiddleware } from "../../middleware/mobile-auth";
 import { createTtsHandler } from "../tts";
@@ -382,6 +395,65 @@ describe("/api/tts over the Tts holder", () => {
       expect(second.headers["x-anytts-voice"]).toBe(first.headers["x-anytts-voice"]);
       expect(second.headers["x-anytts-engine"]).toBe("omnivoice");
       expect(second.headers["x-anytts-voice"]).toBe("alloy");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("relay keys a voice-less unit by the current instance's default voice", async () => {
+    const root = mkdtempSync(join(tmpdir(), "answer-audio-"));
+    try {
+      // Each instance speaks a voice-less request in its own default, as a
+      // catalog refresh that rebuilds the holder can change it.
+      const speaker = (voice: string) => {
+        const tts = fakeTts("omnivoice");
+        fakeDefaults.set(tts, voice);
+        tts.synthesize.mockImplementation(
+          async (req: SynthesisRequest): Promise<SynthesisResult> => ({
+            bytes: new Uint8Array(AUDIO).buffer,
+            mime: "audio/mpeg",
+            engine: "omnivoice",
+            voice: req.voices?.omnivoice ?? voice,
+          }),
+        );
+        return tts;
+      };
+      const first = speaker("alloy");
+      const second = speaker("echo");
+      const { app, holder } = loadHolderApp([first, second], createAnswerAudioCache({ root }));
+      const send = (body: object) => request(app).post("/api/tts").set("Cookie", COOKIE).send(body);
+      // The relay refuses a single-engine body without a voice: a voice-less
+      // unit is a cascade naming none for its preferred member.
+      const voiceless = { ...CASCADE_BODY, text: "Default voice.", order: ["omnivoice"] };
+
+      expect((await send(voiceless)).headers["x-anytts-voice"]).toBe("alloy");
+      await vi.waitFor(() => expect(readdirUnit(root)).toEqual([".mp3", ".speaker.json"]));
+
+      // Answered from disk, and so is a request naming that default.
+      expect((await send(voiceless)).headers["x-anytts-voice"]).toBe("alloy");
+      expect((await send({ ...voiceless, voices: { omnivoice: "alloy" } })).headers["x-anytts-voice"]).toBe("alloy");
+      expect(first.synthesize).toHaveBeenCalledTimes(1);
+
+      holder.rebuild();
+      expect((await send(voiceless)).headers["x-anytts-voice"]).toBe("echo");
+      expect(second.synthesize).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("relay passes a voice-less unit through when the instance has no default for it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "answer-audio-"));
+    try {
+      const tts = fakeTts("omnivoice");
+      const { app } = loadHolderApp([tts], createAnswerAudioCache({ root }));
+      const body = { ...CASCADE_BODY, text: "No default.", order: ["omnivoice"] };
+      const send = () => request(app).post("/api/tts").set("Cookie", COOKIE).send(body);
+
+      expect((await send()).status).toBe(200);
+      expect((await send()).status).toBe(200);
+      expect(tts.synthesize).toHaveBeenCalledTimes(2);
+      expect(readdirUnit(root)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

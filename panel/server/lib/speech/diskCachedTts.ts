@@ -10,6 +10,13 @@ export interface DiskCachedTtsOptions {
    * `order` of its own. Without it, such a request is never stored.
    */
   cascadeOrder?: readonly string[];
+  /**
+   * The voice `engine` speaks with for `lang` when a request names none: the
+   * inner instance's own default (its voice map by `lang`, then `default`).
+   * A voice-less request is keyed under it; without it, or when it answers
+   * `undefined` or throws, such a request is never stored.
+   */
+  defaultVoice?: (engine: string, lang: string | undefined) => string | undefined;
 }
 
 interface Speaker {
@@ -32,11 +39,13 @@ interface Speaker {
  * relay itself always names an engine: plain Edge never reaches this Tts.
  *
  * A request naming an engine but no voice for its speaker (its own `voice`;
- * for a cascade, the preferred member's entry in `voices`) is passed straight
- * through, neither read nor stored: it gets the engine's default, which the
- * server resolves against a catalog that can change at runtime (the OpenAI
- * catalog refresh rebuilds the holder), and the key cannot tell the old
- * default from the new one.
+ * for a cascade, the preferred member's entry in `voices`) gets that engine's
+ * default, which the server resolves against a catalog that can change at
+ * runtime (the OpenAI catalog refresh rebuilds the holder). It is keyed as if
+ * it named the default `options.defaultVoice` resolves when it arrives, so a
+ * changed default is a different entry and a request naming the default
+ * shares it. One whose default cannot be resolved is passed straight through,
+ * neither read nor stored.
  *
  * A disk hit reports the engine and voice the original synthesis reported (for
  * a cascade, the member that spoke and its voice: the browser's relay client
@@ -62,8 +71,10 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
   const warned = new Set<"read" | "write">();
 
   async function synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
-    if (req.engine !== undefined && !namesVoice(req)) return tts.synthesize(req);
-    const requested = req.engine === undefined ? undefined : keyOf(req, req.engine);
+    const { engine } = req;
+    const voiced = engine === undefined ? undefined : withSpeakerVoice(req, engine);
+    if (engine !== undefined && !voiced) return tts.synthesize(req);
+    const requested = engine === undefined || !voiced ? undefined : keyOf(voiced, engine);
     if (requested) {
       const hit = await readHit(requested);
       if (hit) return hit;
@@ -101,11 +112,32 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
     });
   }
 
-  /** Whether `req` names the voice it is spoken with: its own, or for a cascade the preferred member's. */
-  function namesVoice(req: SynthesisRequest): boolean {
-    if (req.engine !== CASCADE) return req.voice !== undefined;
+  /**
+   * `req` naming the voice it is spoken with: its own, or for a cascade the
+   * preferred member's, filled in with the engine's current default where it
+   * names none. `undefined` when that default cannot be resolved (or a
+   * cascade's preferred member is unknown).
+   */
+  function withSpeakerVoice(req: SynthesisRequest, engine: string): SynthesisRequest | undefined {
+    if (engine !== CASCADE) {
+      if (req.voice !== undefined) return req;
+      const voice = defaultVoiceOf(engine, req.lang);
+      return voice === undefined ? undefined : { ...req, voice };
+    }
     const member = preferredMember(req);
-    return member !== undefined && req.voices?.[member] !== undefined;
+    if (member === undefined) return undefined;
+    if (req.voices?.[member] !== undefined) return req;
+    const voice = defaultVoiceOf(member, req.lang);
+    return voice === undefined ? undefined : { ...req, voices: { ...req.voices, [member]: voice } };
+  }
+
+  function defaultVoiceOf(engine: string, lang: string | undefined): string | undefined {
+    try {
+      return options.defaultVoice?.(engine, lang);
+    } catch {
+      // No default for this engine (not configured, or no voice for `lang`).
+      return undefined;
+    }
   }
 
   /** Writes the audio, then its speaker record; fire-and-forget. */

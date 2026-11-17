@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { EdgeEngineOptions, Tts } from "anytts";
+import { resolveVoice, type EdgeEngineOptions, type Tts } from "anytts";
 import { createRelayHandler, toNodeHandler } from "anytts/server";
 import type { AnswerAudioCache } from "../lib/speech/answerAudioCache.js";
 import { countingTts } from "../lib/speech/countingTts.js";
@@ -55,7 +55,17 @@ export function createTtsHandler(options: TtsHandlerOptions = {}): NodeHandler {
     const counted = countingTts(tts, (usage ??= createUsageStore()));
     return toNodeHandler(
       createRelayHandler({
-        tts: answerCache ? diskCachedTts(counted, answerCache, { cascadeOrder: CASCADE_ORDER }) : counted,
+        tts: answerCache
+          ? diskCachedTts(counted, answerCache, {
+              cascadeOrder: CASCADE_ORDER,
+              // This instance's default, the one it will speak a voice-less request
+              // with: a rebuild (e.g. a catalog refresh) builds a new relay, and so
+              // a new resolver. Asked of the instance itself: anytts finds an
+              // instance's voice maps by identity, not through the counting wrapper.
+              defaultVoice: (engine, lang) =>
+                resolveVoice(tts, { engine, ...(lang !== undefined ? { lang } : {}) }).voice,
+            })
+          : counted,
         maxChars: MAX_CHARS,
         // Every request is let through here: the panel's mobileAuthMiddleware
         // and authMiddleware guard the route before it reaches the relay.
