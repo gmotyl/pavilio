@@ -1,6 +1,6 @@
 import { Settings } from "lucide-react";
 import { preferences } from "../../preferences/declarations";
-import { useScopedPreference } from "../../preferences/usePreference";
+import { usePreference } from "../../preferences/usePreference";
 import { ProjectVoiceSelect } from "../speech/ProjectVoiceSelect";
 import AppearanceEditor from "./AppearanceEditor";
 
@@ -44,12 +44,12 @@ export default function ProjectSettingsCard({ project }: { project: string }) {
 }
 
 /**
- * The answer body's bottom-edge opacity for this project, 0–100 in steps of 5.
+ * The answer body's bottom-edge opacity — one global value, shown in every project's settings — 0–100 in steps of 5.
  * No preview here on purpose: every open answer pane reads the same
  * preference, so the effect is visible at once in the terminals themselves.
  */
 function AnswerOpacitySlider({ project }: { project: string }) {
-  const [opacity, setOpacity] = useScopedPreference(preferences.answerOpacityBottom, project);
+  const [opacity, setOpacity] = usePreference(preferences.answerOpacityBottom);
   const id = `project-settings-answer-opacity-${project}`;
   const readout = `${opacity}%`;
   return (

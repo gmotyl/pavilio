@@ -149,7 +149,7 @@ const FIXTURES: Record<string, Fixture> = {
   // remembered per project must still never leave this machine.
   "speech.answerComposer.height": { value: 148, scopeArg: "pavilio" },
   "speech.answerPane.height": { value: 412, scopeArg: "pavilio" },
-  "speech.answerPane.opacityBottom": { value: 40, scopeArg: "pavilio" },
+  "speech.answerPane.opacityBottom": { value: 40 },
   "speech.armedCell": { value: "sess-0b2e55d1" },
   "speech.modes": { value: { "sess-0b2e55d1": "autoplay" } },
   // Non-portable and naming no session: whether this browser can reach the

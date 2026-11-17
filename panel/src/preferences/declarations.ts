@@ -954,13 +954,14 @@ export const preferences = {
   }),
   /**
    * Opacity (0–100) of the answer body's bottom edge; the top edge is always
-   * solid. Per project and portable, unlike the pane's height: it is a matter
-   * of taste, not of this window's viewport. 100 renders the solid pane; a
+   * solid. One global value, portable, unlike the pane's height: it is a matter
+   * of taste, not of this window's viewport. Older per-project values
+   * (`key@<project>`) are simply never read. 100 renders the solid pane; a
    * stored value outside 0–100 or not a number reads as 100.
    */
   answerOpacityBottom: definePreference({
     key: "speech.answerPane.opacityBottom", // was: nothing — new with the slider
-    scope: "project",
+    scope: "global",
     default: 100,
     codec: boundedNum(0, 100),
     portable: true,

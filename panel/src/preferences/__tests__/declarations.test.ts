@@ -176,7 +176,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   // the pane clamps to the area it is in and an unresized one covers it.
   ["speech.answerPane.height", 4000, "project"],
   // Fully opaque: an untouched project renders today's solid answer pane.
-  ["speech.answerPane.opacityBottom", 100, "project"],
+  ["speech.answerPane.opacityBottom", 100, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.modes", null, "global"],
   ["speech.engine", "edge", "global"],
@@ -644,42 +644,42 @@ describe("the focus layout and the answer opacity", () => {
     expect(readPreference(preferences.focusLayout)).toBe(false);
   });
 
-  it("declares answerOpacityBottom per project, portable, defaulting to 100", () => {
+  it("answer opacity is declared global and portable", () => {
     const opacity = keyOf("speech.answerPane.opacityBottom");
     expect(opacity).toBe(preferences.answerOpacityBottom);
-    expect(opacity.scope).toBe("project");
+    expect(opacity.scope).toBe("global");
     expect(opacity.portable).toBe(true);
     expect(opacity.default).toBe(100);
 
-    writePreference(preferences.answerOpacityBottom, 40, ALPHA);
-    expect(readPreference(preferences.answerOpacityBottom, ALPHA)).toBe(40);
-    // Per project: the other one keeps the solid default.
-    expect(readPreference(preferences.answerOpacityBottom, BETA)).toBe(100);
-    // Portable: the value lands in the workspace document under its scoped key.
+    writePreference(preferences.answerOpacityBottom, 40);
+    expect(readPreference(preferences.answerOpacityBottom)).toBe(40);
+    // Portable: the value lands in the workspace document under the bare key.
     expect(globals.__PAVILIO_PREFS__).toEqual({
       version: 1,
-      [`speech.answerPane.opacityBottom@${ALPHA}`]: 40,
+      "speech.answerPane.opacityBottom": 40,
     });
   });
 
-  it("answerOpacityBottom falls back to 100 for out-of-range or malformed values", () => {
+  it("old project-scoped value is ignored", () => {
+    globals.__PAVILIO_PREFS__ = {
+      version: 1,
+      [`speech.answerPane.opacityBottom@${ALPHA}`]: 40,
+    };
+    expect(readPreference(preferences.answerOpacityBottom)).toBe(100);
+  });
+
+  it("out of range yields 100", () => {
     // Written straight into the document, the way a hand edit would land.
     for (const stored of [-1, 101, 500, "abc", "", null, true, { n: 40 }]) {
       __resetPreferenceStoreForTests();
-      globals.__PAVILIO_PREFS__ = {
-        version: 1,
-        [`speech.answerPane.opacityBottom@${ALPHA}`]: stored,
-      };
-      expect(readPreference(preferences.answerOpacityBottom, ALPHA), String(stored)).toBe(100);
+      globals.__PAVILIO_PREFS__ = { version: 1, "speech.answerPane.opacityBottom": stored };
+      expect(readPreference(preferences.answerOpacityBottom), String(stored)).toBe(100);
     }
     // The bounds themselves are values, not fallbacks.
     for (const stored of [0, 55, 100]) {
       __resetPreferenceStoreForTests();
-      globals.__PAVILIO_PREFS__ = {
-        version: 1,
-        [`speech.answerPane.opacityBottom@${ALPHA}`]: stored,
-      };
-      expect(readPreference(preferences.answerOpacityBottom, ALPHA)).toBe(stored);
+      globals.__PAVILIO_PREFS__ = { version: 1, "speech.answerPane.opacityBottom": stored };
+      expect(readPreference(preferences.answerOpacityBottom)).toBe(stored);
     }
   });
 

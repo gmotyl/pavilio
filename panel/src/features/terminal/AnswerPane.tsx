@@ -332,13 +332,10 @@ export function AnswerPane({
   // above the text while the user holds an answer and the agent still works.
   const waveShown = waiting || (held && activity === "busy");
 
-  // The body's bottom-edge opacity, remembered per project and portable — see
-  // its declaration. Below 100 the pane goes transparent behind the body and
+  // The body's bottom-edge opacity, one global portable value — see its
+  // declaration. Below 100 the pane goes transparent behind the body and
   // the body paints the fade; the meta row and the composer keep the ground.
-  const [opacityBottom] = useScopedPreference(
-    preferences.answerOpacityBottom,
-    projectOfSession(sessionId),
-  );
+  const [opacityBottom] = usePreference(preferences.answerOpacityBottom);
   /**
    * Whether the composer's field holds focus — kept on its own because it is
    * what the body falls back to when a wave clears.
