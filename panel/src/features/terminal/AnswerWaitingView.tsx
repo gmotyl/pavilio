@@ -3,8 +3,8 @@
  * the user has stepped back to re-read, the same wave moved out of the body
  * onto a control.
  *
- * It replaces the text and the rail rather than sitting over them, because what
- * it is there to prevent is the previous answer being read as the reply — and a
+ * It replaces the text rather than sitting over it, because what it is there
+ * to prevent is the previous answer being read as the reply — and a
  * translucent layer over the old answer is exactly that with extra steps.
  *
  * `role="status"` and a real sentence: the state has to be legible to a screen
@@ -14,7 +14,7 @@
  * ## Why crests rather than a spinner
  *
  * The wave is the scrubber's segments in another shape: same count-per-unit
- * idea, same `--speech-seg`, while there is nothing yet to draw a rail for. A
+ * idea, same `--speech-seg`, while there is nothing yet to draw segments for. A
  * spinner would have been a second visual language for "the speech surface is
  * busy" on the one surface that already has one. The crests' heights and their
  * stagger live in `index.css` — the shape is a stylesheet fact, so it survives

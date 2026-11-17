@@ -35,9 +35,6 @@ import { installMatchMedia, StubResizeObserver } from "../../../test-utils";
 import { onSubmitted, readySpeech, renderComposer, renderPane } from "./answerPane.harness";
 import { __resetComposerDraftsForTests } from "../composerDrafts";
 
-// The synthesis cache the rail peeks into. Nothing is warm and nothing
-// subscribes: this file draws no units at all.
-vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // One of the draft tests puts a real answer under the cursor, which mounts the
 // markdown renderer — and the renderer reaches mermaid's browser-only stack.

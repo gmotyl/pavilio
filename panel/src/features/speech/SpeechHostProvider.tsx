@@ -348,4 +348,15 @@ export function useStopPageRuns(): () => void {
   return useContext(PageSpeechContext)?.stopPageRuns ?? NO_PAGE_RUNS;
 }
 
+/**
+ * The panel's host for a page's Play-from-here layer, or null without a
+ * provider. Not a fallback host: the layer only READS the playing unit from it
+ * (a press goes through the page's toolbar, which does require the host), so
+ * with no host above it there is simply nothing playing to pin. Viewers are
+ * mounted bare in many suites.
+ */
+export function usePanelSpeechIfMounted(): GridSpeech | null {
+  return useContext(SpeechHostContext);
+}
+
 export default SpeechHostProvider;

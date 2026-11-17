@@ -42,6 +42,7 @@ const PORTABLE = [
   "speech.answerPane.opacityBottom",
   "speech.engine",
   "speech.cascadeOrder",
+  "speech.pageCacheEnabled",
   "speech.pronunciationByEngine",
   "speech.voice",
   "speech.voiceByProject",
@@ -180,6 +181,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["speech.modes", null, "global"],
   ["speech.engine", "edge", "global"],
   ["speech.route", "auto", "global"],
+  // On: synthesized page units are written to the page audio cache, as before the toggle.
+  ["speech.pageCacheEnabled", true, "global"],
   [
     "speech.cascadeOrder",
     [

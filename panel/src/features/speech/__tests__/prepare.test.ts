@@ -1,6 +1,7 @@
 import { applyPronunciation, packUnits } from "anytts/text";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { UNIT_MAX_CHARS, UNIT_MIN_CHARS, prepare, removeMarkers } from "../prepare";
+import { preparePage } from "../pageText";
+import { UNIT_MAX_CHARS, prepare, removeMarkers } from "../prepare";
 
 // Pass-through spies: the library still does the work, the tests can see the calls.
 vi.mock("anytts/text", async (importOriginal) => {
@@ -17,7 +18,7 @@ beforeEach(() => {
   vi.mocked(packUnits).mockClear();
 });
 
-/** Five short paragraphs, each well under the packing floor. */
+/** Short one-sentence paragraphs. */
 const short = (n: number): string => `Short paragraph ${n} about the panel and its speech units.`;
 
 /** One paragraph comfortably over the ceiling, made of whole sentences. */
@@ -102,34 +103,26 @@ const noSentinelResponse = [
   "",
 ].join("\n");
 
-/** The first prose paragraph, whole: the fast-start sentence and its remainder are both spoken from it. */
+/** One sentence unit: `chars` follows `text`. */
+const unit = (text: string, source: string, block: number) => ({ text, chars: text.length, source, block });
+
+/** The first prose paragraph, whole: both its sentences are spoken from it. */
 const NO_SENTINEL_FIRST_PARAGRAPH =
   "Panel mówi ostatnią odpowiedź na głos. Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko.";
 
 const NO_SENTINEL_UNITS = [
-  { text: "Co się zmieniło", chars: 15, source: "# Co się zmieniło" },
-  {
-    text: "Panel mówi ostatnią odpowiedź na głos.",
-    chars: 38,
-    source: NO_SENTINEL_FIRST_PARAGRAPH,
-  },
-  {
-    text:
-      "Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko. " +
-      "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
-      "Trzecia część Ostatni akapit urywa się przecinkiem,",
-    chars: 179,
-    // The same packing as `text`, with the mid-body heading's marker kept and
-    // the remainder standing in for its whole paragraph.
-    source:
-      `${NO_SENTINEL_FIRST_PARAGRAPH} ` +
-      "Druga część jest krótka i nie ma w niej niczego do usunięcia. " +
-      "## Trzecia część Ostatni akapit urywa się przecinkiem,",
-  },
+  unit("Co się zmieniło", "# Co się zmieniło", 0),
+  unit("Panel mówi ostatnią odpowiedź na głos.", NO_SENTINEL_FIRST_PARAGRAPH, 1),
+  unit("Dzieli ją najpierw na jednostki, żeby odtwarzanie ruszało szybko.", NO_SENTINEL_FIRST_PARAGRAPH, 1),
+  unit(
+    "Druga część jest krótka i nie ma w niej niczego do usunięcia.",
+    "Druga część jest krótka i nie ma w niej niczego do usunięcia.",
+    2,
+  ),
+  // A mid-body heading keeps its marker in `source` only.
+  unit("Trzecia część", "## Trzecia część", 3),
+  unit("Ostatni akapit urywa się przecinkiem,", "Ostatni akapit urywa się przecinkiem,", 4),
 ];
-
-/** Ordinals for the intro-colon list fixture, so its items can be built and checked from one list. */
-const NUMBERED = ["one", "two", "three", "four", "five", "six"];
 
 /** Everything the voice will say, in order — the only thing these tests judge. */
 const spoken = (markdown: string, language: "pl" | "en"): string =>
@@ -155,56 +148,30 @@ describe("prepare", () => {
     expect(units[1].text).toBe("It chunks it first so playback starts fast.");
   });
 
-  it("an intro line ending in a colon still yields a short fast-start unit", () => {
-    // The shape an agent answer takes constantly: a lead-in ending in a colon,
-    // then a tight list. Every item is a paragraph of its own now, so the
-    // lead-in stands alone as a sentence fragment — unit 0 stays short only if
-    // the fast start may finish that sentence in the paragraph behind it.
-    const item = (n: string): string => `item ${n} is long enough to matter here`;
-    const { units } = prepare(
-      ["Here are the steps:", ...NUMBERED.map((n) => `- ${item(n)}`), ""].join("\n"),
-    );
-
-    const fastStart = `Here are the steps: ${item("one")}.`;
-
-    expect(units[0].text).toBe(fastStart);
-    expect(units[0].chars).toBeLessThan(UNIT_MIN_CHARS);
-    // Both blocks are spoken in it, so both name it — see `matchUnitsToBlocks`.
-    expect(units[0].source).toBe(fastStart);
-    // The items behind the fast start are still spoken, in order and once each.
-    expect(units.map((unit) => unit.text).join(" ")).toBe(
-      [fastStart, ...NUMBERED.slice(1).map((n) => `${item(n)}.`)].join(" "),
-    );
-  });
-
-  it("a lead-in whose next sentence exceeds the ceiling falls back to packing", () => {
-    // The cross-paragraph fast start builds unit 0 before packing runs, so
-    // nothing downstream would cut it: a lead-in with no sentence of its own
-    // followed by one enormous sentence used to hand playback a 2 000-character
-    // unit 0 — the very thing the fast start exists to prevent. Over the
-    // ceiling, the rule stands down and the normal packing path cuts it.
+  it("a lead-in stays its own unit before an over-long sentence", () => {
     const huge = "word ".repeat(400) + "ends here.";
     const { units } = prepare(["Here are the steps to follow", "", huge].join("\n"));
 
     expect(units.every((unit) => unit.chars <= UNIT_MAX_CHARS)).toBe(true);
-    expect(units[0].chars).toBe(28);
+    expect(units[0].text).toBe("Here are the steps to follow");
   });
 
-  it("a list directly after an unterminated line still starts small", () => {
+  it("a list directly after an unterminated line: the line and every item are units of their own", () => {
     const { units } = prepare(
       ["Steps to follow", "- do this thing first", "- then do the other thing", ""].join("\n"),
     );
 
-    expect(units[0].text).toBe("Steps to follow do this thing first.");
-    expect(units[1].text).toBe("then do the other thing.");
+    expect(units.map((unit) => unit.text)).toEqual([
+      "Steps to follow",
+      "do this thing first.",
+      "then do the other thing.",
+    ]);
   });
 
-  it("a leading removed block does not cost the response its fast start", () => {
+  it("a leading removed block is a short unit of its own", () => {
     // A response that opens with a fence, a table or an HTML block starts with
-    // a sentinel paragraph. A sentinel carries no sentence terminator, so the
-    // first-sentence rule found nothing in it and the sentinel packed together
-    // with the whole first prose paragraph into one long unit 0 — the first
-    // synthesis, the one playback waits on, tripled in length.
+    // a sentinel paragraph: it is unit 0 on its own, and the prose behind it
+    // starts at its first sentence.
     const body =
       "The grid keeps its own ordering. It is stored per cell and never derived from the " +
       "DOM, so a reorder survives a reload and two cells never disagree about which of " +
@@ -216,9 +183,6 @@ describe("prepare", () => {
 
     expect(units[0].text).toBe("code block.");
     expect(units[1].text).toBe("The grid keeps its own ordering.");
-    expect(units[0].chars).toBeLessThan(UNIT_MIN_CHARS);
-    expect(units[1].chars).toBeLessThan(UNIT_MIN_CHARS);
-
     // Same for a leading table, and the sentinel still stands before the prose
     // it replaced rather than being hoisted past it.
     const table = prepare(["| a | b |", "| - | - |", "", body, ""].join("\n"));
@@ -227,7 +191,7 @@ describe("prepare", () => {
     expect(table.units[1].text).toBe("The grid keeps its own ordering.");
   });
 
-  it("a leading removed block still lets the TLDR behind it be hoisted", () => {
+  it("a leading removed block keeps the TLDR behind it in order", () => {
     const { units } = prepare(
       [
         "```ts",
@@ -242,16 +206,15 @@ describe("prepare", () => {
       ].join("\n"),
     );
 
-    expect(units[0].text).toBe("code block.");
-    expect(units[1].text).toMatch(/^TLDR: the fence above is noise\./);
-    expect(units[1].text).toContain("in the order the answer wrote them.");
+    expect(units.map((unit) => unit.text)).toEqual([
+      "code block.",
+      "TLDR: the fence above is noise.",
+      "The sentence after it is not, and both of them have to reach the listener in the order the answer wrote them.",
+      "Body paragraph that follows the summary.",
+    ]);
   });
 
-  it("a leading TLDR paragraph becomes its own second unit", () => {
-    // The TLDR is deliberately MORE than one sentence: a single-sentence TLDR
-    // is indistinguishable from the generic first-sentence fast start, so a
-    // fixture built on one would pass with the TLDR branch deleted. The whole
-    // paragraph must ride in unit 1 — not just its opening sentence.
+  it("a leading TLDR paragraph's sentences follow the heading", () => {
     const { units } = prepare(
       [
         "## What changed",
@@ -263,11 +226,12 @@ describe("prepare", () => {
       ].join("\n"),
     );
 
-    expect(units[0].text).toBe("What changed");
-    expect(units[1].text).toBe(
-      "TLDR: Responses are spoken. A second sentence rides along in the same TLDR paragraph.",
-    );
-    expect(units[2].text).toBe("Body paragraph follows here.");
+    expect(units.map((unit) => unit.text)).toEqual([
+      "What changed",
+      "TLDR: Responses are spoken.",
+      "A second sentence rides along in the same TLDR paragraph.",
+      "Body paragraph follows here.",
+    ]);
   });
 
   it("a TLDR paragraph that is not first is not hoisted", () => {
@@ -310,7 +274,7 @@ describe("prepare", () => {
     expect(spoken.indexOf("A later heading")).toBeLessThan(spoken.indexOf("Body after the heading."));
   });
 
-  it("packs short paragraphs to the floor and cuts long ones at the ceiling", () => {
+  it("short paragraphs stay separate units and a long one is cut into its sentences", () => {
     const { units } = prepare(packingResponse);
 
     for (const unit of units) {
@@ -318,15 +282,14 @@ describe("prepare", () => {
       expect(unit.chars).toBeLessThanOrEqual(UNIT_MAX_CHARS);
     }
 
-    // Short neighbours merge into one unit, and that unit reaches the floor.
-    const merged = units.find((unit) => unit.text.includes("Short paragraph 1"));
-    expect(merged).toBeDefined();
-    expect(merged?.text).toContain("Short paragraph 4");
-    expect(merged?.chars).toBeGreaterThanOrEqual(UNIT_MIN_CHARS);
+    // No merging: each short paragraph is exactly one unit.
+    for (const n of [1, 2, 3, 4, 5]) {
+      expect(units.filter((unit) => unit.text === short(n))).toHaveLength(1);
+    }
 
-    // The oversized paragraph is cut into more than one unit.
+    // The oversized paragraph is one unit per sentence.
     const cut = units.filter((unit) => unit.text.includes("push the paragraph past the ceiling"));
-    expect(cut.length).toBeGreaterThan(1);
+    expect(cut).toHaveLength(12);
   });
 
   it("prepares every paragraph of a long response", () => {
@@ -442,20 +405,20 @@ describe("prepare", () => {
       "pl",
       "Obrazek, obrazek, w środku, adres, link, też. Kod poniżej: blok kodu.",
     ],
-    // A paragraph start is NOT an utterance start: `packUnits` joins paragraphs
-    // with a space, so a heading (stripped to bare words, no terminator) runs
-    // into the placeholder behind it — "Wyniki blok kodu" is one noun phrase.
+    // A block is never joined to its neighbour, so a heading and the
+    // placeholder behind it are two utterances — the unit edge is the pause, and
+    // neither carries a comma for it (this helper joins units with a space).
     [
-      "a placeholder opening a paragraph still pauses after a heading (pl)",
+      "a placeholder after a heading is an utterance of its own (pl)",
       "Wstęp jest tutaj.\n\n## Wyniki\n\n```ts\nconst x = 1;\n```\n\nDalszy akapit tutaj.\n",
       "pl",
-      "Wstęp jest tutaj. Wyniki, blok kodu. Dalszy akapit tutaj.",
+      "Wstęp jest tutaj. Wyniki blok kodu. Dalszy akapit tutaj.",
     ],
     [
-      "a placeholder opening a paragraph still pauses after a heading (en)",
+      "a placeholder after a heading is an utterance of its own (en)",
       "Wstęp jest tutaj.\n\n## Wyniki\n\n```ts\nconst x = 1;\n```\n\nDalszy akapit tutaj.\n",
       "en",
-      "Wstęp jest tutaj. Wyniki, code block. Dalszy akapit tutaj.",
+      "Wstęp jest tutaj. Wyniki code block. Dalszy akapit tutaj.",
     ],
     // …and when the paragraph before carries its own punctuation, that one wins.
     ["a placeholder paragraph after a colon paragraph drops our comma", "Kod poniżej:\n\n```ts\nconst x = 1;\n```\n", "pl", "Kod poniżej: blok kodu."],
@@ -561,7 +524,7 @@ describe("prepare", () => {
     expect(spoken(markdown, lang)).toBe(expected);
   });
 
-  it("every unit carries the packed text it was spoken from", () => {
+  it("every unit carries the block it was spoken from", () => {
     const { units } = prepare(packingResponse);
 
     for (const unit of units) {
@@ -569,11 +532,9 @@ describe("prepare", () => {
       expect(unit.chars).toBe(unit.text.length);
     }
 
-    // Four short paragraphs pack into one unit; its source is the same four
-    // paragraphs, joined the same way the spoken text was.
-    const packed = [short(1), short(2), short(3), short(4)].join(" ");
-    expect(units[2].text).toBe(packed);
-    expect(units[2].source).toBe(packed);
+    // A one-sentence paragraph is its own unit and its own source.
+    expect(units[2].text).toBe(short(1));
+    expect(units[2].source).toBe(short(1));
   });
 
   it("source keeps the heading and TLDR markers the spoken text removes", () => {
@@ -584,7 +545,8 @@ describe("prepare", () => {
     expect(units[0].source).toBe("## What changed");
     expect(units[1].text).not.toContain("**");
     expect(units[1].source).toBe(tldr);
-    expect(units[2].source).toBe("Body paragraph follows here.");
+    expect(units[2].source).toBe(tldr);
+    expect(units[3].source).toBe("Body paragraph follows here.");
   });
 
   it("source keeps the sentinel the spoken text words", () => {
@@ -603,34 +565,8 @@ describe("prepare", () => {
     expect(worded?.source).not.toContain("blok kodu");
   });
 
-  it("unit source is joined from the packed paragraph range", () => {
-    const { units } = prepare(packingResponse);
-
-    expect(packUnits).toHaveBeenCalledTimes(1);
-    const [paragraphs, options] = vi.mocked(packUnits).mock.calls[0] as unknown as [
-      readonly { source: string; text: string }[],
-      { min: number; max: number },
-    ];
-    expect(options).toEqual({ min: 200, max: 450 });
-    expect(options).toEqual({ min: UNIT_MIN_CHARS, max: UNIT_MAX_CHARS });
-
-    const packed = vi.mocked(packUnits).mock.results[0].value as { from: number; to: number }[];
-    expect(packed.some(({ from, to }) => to > from)).toBe(true);
-
-    // The packed units are the tail of the prepared ones, after the opening units.
-    const body = units.slice(units.length - packed.length);
-    packed.forEach(({ from, to }, i) => {
-      const joined = paragraphs
-        .slice(from, to + 1)
-        .map((paragraph) => paragraph.source)
-        .join(" ");
-      expect(body[i].source).toBe(joined);
-    });
-  });
-
   it("pieces cut from one paragraph share the paragraph as their source", () => {
-    // The fast-start split: sentence and remainder are both spoken from the
-    // whole first paragraph.
+    // A paragraph's sentences are all spoken from the whole paragraph.
     const first = "Opening sentence here. The rest of the paragraph carries on for a while after it.";
     const split = prepare(`${first}\n\nA second paragraph closes the answer.\n`).units;
     expect(split[0].text).toBe("Opening sentence here.");
@@ -638,8 +574,8 @@ describe("prepare", () => {
     expect(split[1].text.startsWith("The rest of the paragraph")).toBe(true);
     expect(split[1].source.startsWith(first)).toBe(true);
 
-    // A ceiling cut: an oversized paragraph falls into several pieces, each
-    // carrying the paragraph whole.
+    // An oversized paragraph falls into several pieces, each carrying the
+    // paragraph whole.
     const sentence = "This sentence is long enough to matter when it is repeated many times over.";
     const oversized = Array.from({ length: 12 }, () => sentence).join(" ");
     const { units } = prepare(`**TLDR:** Short.\n\n${oversized}\n`);
@@ -648,39 +584,105 @@ describe("prepare", () => {
     for (const piece of pieces) expect(piece.source).toBe(oversized);
   });
 
-  it("packed list units carry only the items they speak as source", () => {
-    // Six items of about sixty characters: too short to stand alone, so the
-    // packer merges them up to the floor. Before items were paragraphs the
-    // whole list was one paragraph and every unit cut from it carried ALL six
-    // items as its source; the answer pane's rail then had nothing to tell
-    // units apart by. Now a unit's source is the items it speaks, joined by the
-    // same single space the packer uses on the spoken side, and nothing else.
+  it("list items are units of their own, each carrying only its item as source", () => {
     const items = Array.from(
       { length: 6 },
       (_, i) => `Item ${i + 1} explains one more thing about the rail in sixty chars`,
     );
-    for (const item of items) expect(item.length).toBeGreaterThanOrEqual(55);
 
     const { units } = prepare(`# Rail\n\n${items.map((item) => `- ${item}`).join("\n")}\n`);
-    const spokenItems = items.map((item) => `${item}.`);
-    const body = units.slice(1);
 
     expect(units[0].text).toBe("Rail");
-    expect(body.length).toBeGreaterThan(1);
-    // Every item is still spoken as a sentence of its own, in order.
-    expect(body.map((unit) => unit.text).join(" ")).toBe(spokenItems.join(" "));
+    expect(units.slice(1).map((unit) => [unit.text, unit.source, unit.block])).toEqual(
+      items.map((item, i) => [`${item}.`, `${item}.`, i + 1]),
+    );
+  });
+});
 
-    for (const unit of body) {
-      expect(unit.chars).toBeLessThanOrEqual(UNIT_MAX_CHARS);
-      const spoken = spokenItems.filter((item) => unit.text.includes(item));
-      expect(spoken.length).toBeGreaterThan(0);
-      expect(unit.source).toBe(spoken.join(" "));
-    }
+describe("sentence units", () => {
+  const texts = (markdown: string): string[] => prepare(markdown, { language: "en" }).units.map((unit) => unit.text);
 
-    // Packing did happen (some unit speaks several items and reaches the
-    // floor), and no unit carries the whole list.
-    expect(body.some((unit) => unit.chars >= UNIT_MIN_CHARS)).toBe(true);
-    expect(body.some((unit) => unit.source === spokenItems.join(" "))).toBe(false);
+  it("a heading is one unit and each following sentence is its own unit", () => {
+    const { units } = prepare(
+      ["## What changed", "", "The panel speaks. It speaks per sentence. Nothing is packed."].join("\n"),
+      { language: "en" },
+    );
+
+    expect(units.map((unit) => unit.text)).toEqual([
+      "What changed",
+      "The panel speaks.",
+      "It speaks per sentence.",
+      "Nothing is packed.",
+    ]);
+    expect(units.map((unit) => unit.block)).toEqual([0, 1, 1, 1]);
+  });
+
+  it("no unit crosses a block boundary", () => {
+    expect(texts(["First short one.", "", "Second short one."].join("\n"))).toEqual([
+      "First short one.",
+      "Second short one.",
+    ]);
+
+    // Every unit carries the index of the block it came from, on any text.
+    const { units } = prepare(
+      ["# Title", "", "Lead in:", "", "- One. Two.", "- Three.", "", "```ts", "x", "```", "", "Tail."].join("\n"),
+    );
+    expect(units.map((unit) => [unit.text, unit.block])).toEqual([
+      ["Title", 0],
+      ["Lead in:", 1],
+      ["One.", 2],
+      ["Two.", 2],
+      ["Three.", 3],
+      ["code block.", 4],
+      ["Tail.", 5],
+    ]);
+  });
+
+  it("answer list items are separate units", () => {
+    expect(texts(["- The player keeps its place.", "- The bar folds away.", "- Units are cached."].join("\n"))).toEqual([
+      "The player keeps its place.",
+      "The bar folds away.",
+      "Units are cached.",
+    ]);
+  });
+
+  it("heading then TLDR keeps the TLDR's first sentence as unit 1", () => {
+    const units = texts(
+      ["## What changed", "", "**TLDR:** Responses are spoken. A second sentence follows.", "", "Body."].join("\n"),
+    );
+
+    expect(units).toEqual(["What changed", "TLDR: Responses are spoken.", "A second sentence follows.", "Body."]);
+  });
+
+  it("an over-long sentence is cut at the ceiling", () => {
+    const long = `${"word ".repeat(199)}ends.`;
+    expect(long.length).toBeGreaterThanOrEqual(1000);
+    const { units } = prepare(`Short lead. ${long} Tail sentence.`);
+
+    expect(units[0].text).toBe("Short lead.");
+    expect(units[units.length - 1].text).toBe("Tail sentence.");
+    const cut = units.slice(1, -1);
+    expect(cut.length).toBeGreaterThan(1);
+    for (const unit of cut) expect(unit.chars).toBeLessThanOrEqual(UNIT_MAX_CHARS);
+    expect(cut.map((unit) => unit.text).join(" ")).toBe(long);
+  });
+
+  it("pages and answers prepare the same markdown to the same units", () => {
+    const markdown = [
+      "# Release notes",
+      "",
+      "**TLDR:** It ships. It works.",
+      "",
+      "Here is what changed:",
+      "",
+      "- The player keeps its place.",
+      "- The bar folds away.",
+      "",
+      "## Details",
+      "Short paragraph one. Short paragraph two.",
+    ].join("\n");
+
+    expect(preparePage(markdown).units.map((unit) => unit.text)).toEqual(texts(markdown));
   });
 });
 
@@ -728,8 +730,8 @@ describe("removeMarkers", () => {
   });
 });
 
-describe("prepare with blockBounded (pages)", () => {
-  /** An 80-character paragraph: one sentence, so the fast start leaves it whole. */
+describe("prepare: blocks", () => {
+  /** An 80-character paragraph of one sentence. */
   const eighty = (word: string): string => {
     const text = `The ${word} paragraph talks about the panel and its speech for a while`.padEnd(79, "x");
     return `${text}.`;
@@ -738,26 +740,26 @@ describe("prepare with blockBounded (pages)", () => {
   /** `sentence` said `count` times, space-joined. */
   const sentences = (sentence: string, count: number): string => Array(count).fill(sentence).join(" ");
 
-  it("block-bounded: short blocks stay separate units", () => {
+  it("blocks: short blocks stay separate units", () => {
     const first = eighty("first");
     const second = eighty("second");
     expect(first).toHaveLength(80);
     const page = ["# Title", "", first, "", second].join("\n");
 
-    const { units } = prepare(page, { blockBounded: true });
+    const { units } = prepare(page);
 
     expect(units.map((unit) => unit.text)).toEqual(["Title", first, second]);
     expect(units.map((unit) => unit.block)).toEqual([0, 1, 2]);
   });
 
-  it("block-bounded: a long block splits within the ceiling", () => {
+  it("blocks: a long block splits within the ceiling", () => {
     const long = sentences("This sentence exists to make one paragraph run past the ceiling.", 16);
     expect(long.length).toBeGreaterThanOrEqual(1000);
     const before = "A short paragraph before it.";
     const after = "A short paragraph after it.";
     const page = [before, "", long, "", after].join("\n");
 
-    const { units } = prepare(page, { blockBounded: true });
+    const { units } = prepare(page);
 
     const longUnits = units.filter((unit) => unit.block === 1);
     expect(longUnits.length).toBeGreaterThan(1);
@@ -771,12 +773,12 @@ describe("prepare with blockBounded (pages)", () => {
     expect(units[units.length - 1]).toMatchObject({ text: after, block: 2 });
   });
 
-  it("block-bounded: list items start their own units", () => {
+  it("blocks: list items start their own units", () => {
     const page = ["Here is what changed:", "", "- The player keeps its place.", "- The bar folds away.", "- Units are cached."].join(
       "\n",
     );
 
-    const { units } = prepare(page, { blockBounded: true });
+    const { units } = prepare(page);
 
     expect(units.map((unit) => [unit.text, unit.block])).toEqual([
       ["Here is what changed:", 0],
@@ -786,22 +788,23 @@ describe("prepare with blockBounded (pages)", () => {
     ]);
   });
 
-  it("block-bounded: a heading glued to its paragraph is a block of its own", () => {
+  it("blocks: a heading glued to its paragraph is a block of its own", () => {
     const page = ["Intro sentence here.", "", "## Details", "Detail sentence one. Detail sentence two."].join("\n");
 
-    const { units } = prepare(page, { blockBounded: true });
+    const { units } = prepare(page);
 
     expect(units.map((unit) => [unit.text, unit.source, unit.block])).toEqual([
       ["Intro sentence here.", "Intro sentence here.", 0],
       ["Details", "## Details", 1],
-      ["Detail sentence one. Detail sentence two.", "Detail sentence one. Detail sentence two.", 2],
+      ["Detail sentence one.", "Detail sentence one. Detail sentence two.", 2],
+      ["Detail sentence two.", "Detail sentence one. Detail sentence two.", 2],
     ]);
   });
 
-  it("block-bounded: a removed block's placeholder is a block of its own", () => {
+  it("blocks: a removed block's placeholder is a block of its own", () => {
     const page = ["Before the code.", "", "```ts", "const x = 1;", "```", "", "After the code."].join("\n");
 
-    const { units } = prepare(page, { blockBounded: true, language: "pl" });
+    const { units } = prepare(page, { language: "pl" });
 
     expect(units.map((unit) => [unit.text, unit.source, unit.block])).toEqual([
       ["Before the code.", "Before the code.", 0],
@@ -810,10 +813,10 @@ describe("prepare with blockBounded (pages)", () => {
     ]);
   });
 
-  it("block-bounded: a two-paragraph blockquote is two blocks", () => {
+  it("blocks: a two-paragraph blockquote is two blocks", () => {
     const page = ["> The first quoted paragraph.", ">", "> The second quoted paragraph."].join("\n");
 
-    const { units } = prepare(page, { blockBounded: true });
+    const { units } = prepare(page);
 
     expect(units.map((unit) => unit.block)).toEqual([0, 1]);
     expect(units[0].source).toContain("first quoted paragraph");
@@ -821,11 +824,11 @@ describe("prepare with blockBounded (pages)", () => {
     expect(units[1].source).toContain("second quoted paragraph");
   });
 
-  it("block-bounded: a setext heading followed directly by prose is two blocks", () => {
+  it("blocks: a setext heading followed directly by prose is two blocks", () => {
     for (const underline of ["=====", "-----"]) {
       const page = ["The Title", underline, "Body prose right under the title."].join("\n");
 
-      const { units } = prepare(page, { blockBounded: true });
+      const { units } = prepare(page);
 
       expect(units.map((unit) => unit.block), underline).toEqual([0, 1]);
       expect(units[0].source, underline).toContain("The Title");
@@ -834,9 +837,9 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
-  it("block-bounded: a setext heading's underline is neither spoken nor in its source", () => {
+  it("blocks: a setext heading's underline is neither spoken nor in its source", () => {
     for (const underline of ["=====", "-----"]) {
-      const { units } = prepare(["Title", underline, "Body"].join("\n"), { blockBounded: true });
+      const { units } = prepare(["Title", underline, "Body"].join("\n"));
 
       expect(units.map((unit) => [unit.source, unit.text, unit.block]), underline).toEqual([
         ["Title", "Title", 0],
@@ -845,10 +848,8 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
-  it("block-bounded: a quoted ATX heading is a block of its own, spoken without its markers", () => {
-    const { units } = prepare(["> ## Quoted Heading", "> Quoted prose under it."].join("\n"), {
-      blockBounded: true,
-    });
+  it("blocks: a quoted ATX heading is a block of its own, spoken without its markers", () => {
+    const { units } = prepare(["> ## Quoted Heading", "> Quoted prose under it."].join("\n"));
 
     expect(units.map((unit) => [unit.source, unit.text, unit.block])).toEqual([
       ["> ## Quoted Heading", "Quoted Heading", 0],
@@ -856,11 +857,9 @@ describe("prepare with blockBounded (pages)", () => {
     ]);
   });
 
-  it("block-bounded: a quoted setext heading is a block of its own, its underline dropped", () => {
+  it("blocks: a quoted setext heading is a block of its own, its underline dropped", () => {
     for (const underline of ["> =====", "> -----"]) {
-      const { units } = prepare(["> Quoted Title", underline, "> Quoted prose under it."].join("\n"), {
-        blockBounded: true,
-      });
+      const { units } = prepare(["> Quoted Title", underline, "> Quoted prose under it."].join("\n"));
 
       expect(units.map((unit) => [unit.source, unit.text, unit.block]), underline).toEqual([
         ["> Quoted Title", "Quoted Title", 0],
@@ -869,11 +868,11 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
-  it("block-bounded: a quoted underline under an unquoted line is no setext heading", () => {
+  it("blocks: a quoted underline under an unquoted line is no setext heading", () => {
     for (const underline of ["> ===", "> ---"]) {
       const page = ["Intro", underline, "> Quoted text"].join("\n");
 
-      const { units } = prepare(page, { blockBounded: true });
+      const { units } = prepare(page);
 
       // The underline sits in the quote, the line above it outside: markdown
       // renders a paragraph and a quote, never a heading "Intro". The quoted
@@ -884,9 +883,9 @@ describe("prepare with blockBounded (pages)", () => {
     }
   });
 
-  it("block-bounded: a setext underline must sit at the same quote depth as its heading", () => {
+  it("blocks: a setext underline must sit at the same quote depth as its heading", () => {
     // Same container, nested: still a heading.
-    const nested = prepare(["> > Deep Title", "> > =====", "> > Deep prose."].join("\n"), { blockBounded: true });
+    const nested = prepare(["> > Deep Title", "> > =====", "> > Deep prose."].join("\n"));
     expect(nested.units.map((unit) => [unit.source, unit.text, unit.block])).toEqual([
       ["> > Deep Title", "Deep Title", 0],
       ["> > Deep prose.", "> > Deep prose.", 1],
@@ -894,10 +893,10 @@ describe("prepare with blockBounded (pages)", () => {
 
     // One level deeper than the line above it: not an underline of that line.
     const deeper = ["> Outer line", "> > =====", "> > Inner text"].join("\n");
-    expect(prepare(deeper, { blockBounded: true }).units.map((unit) => unit.source)).toEqual([deeper]);
+    expect(prepare(deeper).units.map((unit) => unit.source)).toEqual([deeper]);
   });
 
-  it("answers keep today's packing", () => {
+  it("answers take the same sentence units as pages", () => {
     const repeated = "This sentence exists to push the paragraph past the ceiling.";
     const answer = [
       "# Release notes",
@@ -919,33 +918,74 @@ describe("prepare with blockBounded (pages)", () => {
       "",
       sentences(repeated, 9),
     ].join("\n");
-    // Captured from `prepare` before block-bounded packing existed.
-    const today = {
-      language: "pl",
-      units: [
-        { text: "Release notes", chars: 13, source: "# Release notes", lang: "pl" },
-        {
-          text: "Here is what changed: The player keeps its place.",
-          chars: 49,
-          source: "Here is what changed: The player keeps its place.",
-          lang: "pl",
-        },
-        {
-          text: "The bar folds away. Units are cached. Details Short paragraph one about the panel. Short paragraph two about the speech units. blok kodu.",
-          chars: 137,
-          source:
-            "The bar folds away. Units are cached. ## Details\nShort paragraph one about the panel. Short paragraph two about the speech units. ⟦code⟧",
-          lang: "pl",
-        },
-        { text: sentences(repeated, 7), chars: 426, source: sentences(repeated, 9), lang: "pl" },
-        { text: sentences(repeated, 2), chars: 121, source: sentences(repeated, 9), lang: "pl" },
-      ],
-    };
 
     const prepared = prepare(answer, { language: "pl" });
 
-    expect(prepared).toStrictEqual(today);
-    expect(prepare(answer, { language: "pl", blockBounded: false })).toStrictEqual(today);
-    for (const unit of prepared.units) expect(Object.keys(unit)).not.toContain("block");
+    expect(prepared.language).toBe("pl");
+    expect(prepared.units.map((unit) => [unit.text, unit.source, unit.block])).toEqual([
+      ["Release notes", "# Release notes", 0],
+      ["Here is what changed:", "Here is what changed:", 1],
+      ["The player keeps its place.", "The player keeps its place.", 2],
+      ["The bar folds away.", "The bar folds away.", 3],
+      ["Units are cached.", "Units are cached.", 4],
+      ["Details", "## Details", 5],
+      ["Short paragraph one about the panel.", "Short paragraph one about the panel.", 6],
+      ["Short paragraph two about the speech units.", "Short paragraph two about the speech units.", 7],
+      ["blok kodu.", "⟦code⟧", 8],
+      ...Array.from({ length: 9 }, () => [repeated, sentences(repeated, 9), 9]),
+    ]);
+    for (const unit of prepared.units) expect(unit).toMatchObject({ lang: "pl", chars: unit.text.length });
+  });
+});
+
+describe("sentence units", () => {
+  const texts = (markdown: string, language: "pl" | "en" = "en"): string[] =>
+    prepare(markdown, { language }).units.map((unit) => unit.text);
+
+  it("English abbreviations do not end a sentence", () => {
+    expect(texts("Use tools, e.g. grep and rg. Then stop.\n")).toEqual(["Use tools, e.g. grep and rg.", "Then stop."]);
+    expect(texts("Mr. Smith agrees, i.e. yes. Dr. Jones does not.\n")).toEqual([
+      "Mr. Smith agrees, i.e. yes.",
+      "Dr. Jones does not.",
+    ]);
+    expect(texts("See Fig. 3 and compare A vs. B. Done.\n")).toEqual(["See Fig. 3 and compare A vs. B.", "Done."]);
+  });
+
+  it("Polish abbreviations do not end a sentence", () => {
+    expect(texts("Używamy narzędzi, np. grep i rg. Potem koniec.\n", "pl")).toEqual([
+      "Używamy narzędzi, np. grep i rg.",
+      "Potem koniec.",
+    ]);
+    expect(texts("To jest tzw. szybki start, m.in. dla odpowiedzi.\n", "pl")).toEqual([
+      "To jest tzw. szybki start, m.in. dla odpowiedzi.",
+    ]);
+    expect(texts("Spotkanie ul. Długa 5, godz. 10. Prof. Nowak będzie.\n", "pl")).toEqual([
+      "Spotkanie ul. Długa 5, godz. 10.",
+      "Prof. Nowak będzie.",
+    ]);
+    // A list-closing "itd." followed by a capital still ends the sentence.
+    expect(texts("Mamy jabłka, gruszki itd. Reszta później.\n", "pl")).toEqual([
+      "Mamy jabłka, gruszki itd.",
+      "Reszta później.",
+    ]);
+  });
+
+  it("a terminator inside inline code does not end a sentence", () => {
+    expect(texts("Run `pnpm test.` now. Then commit.\n")).toEqual(["Run pnpm test. now.", "Then commit."]);
+  });
+
+  it("a heading with a full stop stays one unit", () => {
+    expect(texts("## Step 1. Install\n\nRun it.\n")).toEqual(["Step 1. Install", "Run it."]);
+  });
+
+  // Pinned on purpose: the lowercase-or-digit rule that keeps "e.g. grep" and
+  // "No. 5" whole cannot tell them from a real sentence that happens to open
+  // lowercase or with a digit. Splitting these would re-halve the
+  // abbreviations above, so the join is the accepted trade, not a bug.
+  it("a sentence starting lowercase joins the previous one (known limitation)", () => {
+    expect(texts("Then deps are fetched. npm install runs next.\n")).toEqual([
+      "Then deps are fetched. npm install runs next.",
+    ]);
+    expect(texts("Six cookies were baked. 4 were eaten.\n")).toEqual(["Six cookies were baked. 4 were eaten."]);
   });
 });

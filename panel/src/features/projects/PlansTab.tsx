@@ -30,7 +30,7 @@ import { archiveRunLine, taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useDocSpeech, type DocSpeech } from "./docSpeech";
-import { PlayFromHere } from "../speech/PlayFromHere";
+import { PagePlayFromHere } from "../speech/PagePlayFromHere";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
 import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
@@ -692,9 +692,9 @@ export default function PlansTab({ projectName, archived = false }: Props) {
             </p>
           )}
           {fileContent !== null && (
-            <PlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
+            <PagePlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
               <MarkdownRenderer content={fileContent} basePath={selectedBasePath} />
-            </PlayFromHere>
+            </PagePlayFromHere>
           )}
         </>
       }

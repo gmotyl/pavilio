@@ -1,10 +1,11 @@
+import { HardDrive, Trash2 } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { alerts } from "../alerts/store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { formatBytes } from "./formatBytes";
 import { clearPage, loadPageList, pageCachedShare, subscribePageCache } from "./pageCache";
-import { SpeechTransport } from "./SpeechTransport";
+import { SpeechRow } from "./SpeechRow";
 import { usePageSpeech, usePanelSpeech } from "./SpeechHostProvider";
 import { useOpenaiVoicesSnapshot } from "./useOpenaiVoices";
 import { voiceForDocKey } from "./voices";
@@ -16,15 +17,13 @@ const LABEL_STYLE = {
   flex: "0 0 auto",
 } as const;
 
-const CLEAR_STYLE = {
-  fontSize: 12,
-  padding: "4px 8px",
-  borderRadius: 6,
-  border: "1px solid var(--border-subtle)",
-  background: "transparent",
-  color: "var(--text-secondary)",
-  whiteSpace: "nowrap",
-  flex: "0 0 auto",
+/**
+ * The page cache toggle's label per state: it names the state AND what a click
+ * does, the way the cell's speech-mode control reads.
+ */
+const PAGE_CACHE_LABEL = {
+  on: "Page cache on — click to turn off",
+  off: "Page cache off — click to turn on",
 } as const;
 
 export interface DocumentSpeechBarProps {
@@ -35,11 +34,12 @@ export interface DocumentSpeechBarProps {
 }
 
 /**
- * The document speech bar: the shared transport for one page's key, then the
- * page audio cache's share of it — "N of M cached · size" — and Clear cache,
- * in the mockup's order. A page is not a terminal cell — it is never armed, has no queue
- * to step through and no answer pane to open — so the cell bar's mode switch,
- * previous/next, eye button, launchers and hide toggle have no counterpart here.
+ * The page's speech row: a slot-filling adapter over `SpeechRow`. Lead is the
+ * page cache toggle (`speech.pageCacheEnabled`), then play/pause + scrubber,
+ * then the page audio cache's share of the page — "N of M cached · size" — and
+ * last the clear-cache icon. A page is not a terminal cell — it is never armed,
+ * has no queue to step through and no answer pane to open — so the cell row's
+ * mode switch, previous/next, eye button and launchers have no counterpart here.
  *
  * Everything it shows is read from the panel's one host by the key, the same
  * way the cell bar reads a session: the page's run IS an utterance in the
@@ -47,26 +47,19 @@ export interface DocumentSpeechBarProps {
  * ordinary actions on that key.
  *
  * The cache controls are the page's alone: a cell's answers are never cached
- * on disk, so the cell bar (which shares only the transport) has neither.
- * Clear cache shows only while some unit is cached — or after a failed clear,
- * whose emptied listing no longer says what is on disk; the label is read
- * through `subscribePageCache`, so it moves as uploads land.
- *
- * The `.speech-bar` / `.speech-bar-row` wrapper is the cell bar's, reused for
- * the flex row the transport's stylesheet expects.
+ * on disk, so the cell row (which shares only the transport) has neither.
+ * The clear-cache icon is always on the row — a control that comes and goes
+ * moves the row — and is disabled while nothing is cached, unless a clear
+ * failed: that clear emptied the listing, which then no longer says what is on
+ * disk. The share is read through `subscribePageCache`, so it moves as uploads
+ * land. The toggle reads the preference through `usePreference`, so every
+ * mounted page row follows a flip.
  */
 export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBarProps) {
   const speech = usePanelSpeech();
   const pageSpeech = usePageSpeech();
-  const state = speech.stateFor(docKey);
   const units = speech.unitsFor(docKey);
-  // External stores, not fields — see the cell bar for why the playhead is.
-  const progress = useSyncExternalStore(speech.subscribeProgress, () =>
-    speech.progressFor(docKey),
-  );
-  const durations = useSyncExternalStore(speech.subscribeProgress, () =>
-    speech.unitDurationsFor(docKey),
-  );
+  const [cacheEnabled, setCacheEnabled] = usePreference(preferences.speechPageCacheEnabled);
 
   // The voice the page's units were synthesized in — its project's, else the
   // default — or a cached unit reads as cold: the cache keys on voice + text.
@@ -113,8 +106,8 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
       setClearFailedKey(docKey);
       const reason = err instanceof Error ? err.message : String(err);
       alerts.error(`Couldn't clear the cache: ${reason}`);
-      // A failed clear still empties the local listing, so the bar would read
-      // 0 cached and hide Clear cache while the audio may still be on disk.
+      // A failed clear still empties the local listing, so the row would read
+      // 0 cached and disable the icon while the audio may still be on disk.
       // Re-read it: whatever the server still holds brings the retry back,
       // and a listing actually read settles the state, whatever its count.
       void loadPageList(docKey)
@@ -127,24 +120,33 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
     }
   };
 
+  const cacheState = cacheEnabled ? "on" : "off";
+  const nothingToClear = cached === 0 && !clearFailed;
+
   return (
-    <div className="speech-bar" data-testid={`document-speech-bar-${docKey}`}>
-      <div className="speech-bar-row">
-        <SpeechTransport
-          id={docKey}
-          state={state}
-          units={units}
-          durations={durations}
-          progress={progress}
-          voice={voice}
-          onPlay={() => speech.onSpeak(docKey)}
-          onPause={() => speech.onPause(docKey)}
-          onResume={() => speech.onResume(docKey)}
-          onJumpToUnit={(index) => speech.onJumpToUnit(docKey, index)}
-          onSeekWithinUnit={(seconds) => speech.onSeekWithinUnit(docKey, seconds)}
-          hintUnit={hintUnit}
-        />
-        {units.length > 0 && (
+    <SpeechRow
+      speechKey={docKey}
+      speech={speech}
+      voice={voice}
+      testIdPrefix="document-speech-bar"
+      hintUnit={hintUnit}
+      lead={
+        <button
+          type="button"
+          title={PAGE_CACHE_LABEL[cacheState]}
+          aria-label={PAGE_CACHE_LABEL[cacheState]}
+          aria-pressed={cacheEnabled}
+          data-testid={`speech-bar-page-cache-${docKey}`}
+          // Styled with the cell's speech-mode looks: on is green, off dimmed.
+          data-page-cache={cacheState}
+          className="speech-bar-btn"
+          onClick={() => setCacheEnabled((enabled) => !enabled)}
+        >
+          <HardDrive size={17} />
+        </button>
+      }
+      middleExtra={
+        units.length > 0 ? (
           <span data-testid={`speech-bar-cached-${docKey}`} style={LABEL_STYLE}>
             {cached > 0
               ? `${cached} of ${units.length} cached · ${formatBytes(bytes)}`
@@ -152,21 +154,22 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
                 ? "cache state unknown"
                 : `0 of ${units.length} cached`}
           </span>
-        )}
-        {(cached > 0 || clearFailed) && (
-          <button
-            type="button"
-            data-testid={`speech-bar-clear-cache-${docKey}`}
-            title="Delete this page's cached audio"
-            disabled={clearing}
-            onClick={() => void clearCache()}
-            style={{ ...CLEAR_STYLE, opacity: clearing ? 0.6 : 1 }}
-          >
-            Clear cache
-          </button>
-        )}
-      </div>
-    </div>
+        ) : null
+      }
+      trail={
+        <button
+          type="button"
+          title="Clear this page's cached audio"
+          aria-label="Clear this page's cached audio"
+          data-testid={`speech-bar-clear-cache-${docKey}`}
+          className="speech-bar-btn"
+          disabled={clearing || nothingToClear}
+          onClick={() => void clearCache()}
+        >
+          <Trash2 size={17} />
+        </button>
+      }
+    />
   );
 }
 

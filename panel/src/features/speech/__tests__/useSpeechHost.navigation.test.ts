@@ -155,6 +155,28 @@ describe("useSpeechHost jumps", () => {
     await endCurrentUnit();
     expect(result.current.stateFor("cell-a")).toBe("heard");
   });
+
+  it("jumping while paused plays again from that unit", async () => {
+    // The answer pane's pinned ▶ reads Play while the run is paused, and a
+    // press on it jumps to the paused unit: the jump has to resume the voice,
+    // not leave it paused on a new unit.
+    const units = unitsOf(response(4));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await emitUtterance("cell-a", "u-1", response(4));
+    await settle(() => result.current.onJumpToUnit("cell-a", 1));
+    await settle(() => result.current.onPause("cell-a"));
+    expect(result.current.stateFor("cell-a")).toBe("paused");
+    const before = played.length;
+
+    await settle(() => result.current.onJumpToUnit("cell-a", 1));
+
+    expect(played.slice(before)).toEqual([`blob:${units[1]}`]);
+    expect(result.current.stateFor("cell-a")).toBe("speaking");
+    expect(result.current.progressFor("cell-a")?.unitIndex).toBe(1);
+  });
 });
 
 /**

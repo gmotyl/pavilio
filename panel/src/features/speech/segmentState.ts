@@ -1,12 +1,9 @@
 /**
- * One segment's state, for anyone drawing the run as a strip of units.
- *
- * Two surfaces draw that strip: the bar's scrubber and the answer pane's gutter
- * rail. If each derived the colour on its own they would drift — one warming
- * cascade, two readings — so the rule lives here and both call it. The bar
- * still owns the one fact the rail cannot see (a measured duration means the
- * unit has been played); everything else is decided from the playhead and the
- * cache alone, which is what this module takes.
+ * One segment's state, for anyone drawing the run as a strip of units — today
+ * the speech row's scrubber. The bar still owns the one fact this rule cannot
+ * see (a measured duration means the unit has been played); everything else
+ * is decided from the playhead and the cache alone, which is what this module
+ * takes.
  */
 import { isDocSpeechKey } from "./docKey";
 import { pageUnitState, subscribePageCache } from "./pageCache";

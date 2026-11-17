@@ -45,6 +45,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "terminal.maximized": [true, false],
   "speech.answerPane.autoOpen": [true, false],
   "speech.answerComposer.on": [true, false],
+  "speech.pageCacheEnabled": [true, false],
   "time.form.resetAutoOnSave": [true, false],
   "plans.runBanner.expanded": [true, false],
   "notifications.on": [true, false],
@@ -139,7 +140,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 60;
+const DECLARATION_COUNT = 61;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

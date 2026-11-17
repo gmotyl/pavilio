@@ -31,8 +31,8 @@ const preparedPages = new Map<string, PreparedSpeech>();
  *
  * A page is not a session: its language is its own vote, read from the same
  * text. The language is not cosmetic — it words the placeholders ("obrazek" vs
- * "image", "blok kodu" vs "code block"), which changes the lengths `prepare`
- * packs by, and with them which unit every later block starts at.
+ * "image", "blok kodu" vs "code block"), so the same page in the other language
+ * would be different unit texts, and with them different cached audio.
  *
  * Memoised on the text (a small LRU): the toolbar, the ▶ layer and the host all
  * ask for the same page on every render. The result is shared — read it, never
@@ -45,7 +45,7 @@ export function preparePageText(text: string): PreparedSpeech {
     preparedPages.set(text, cached);
     return cached;
   }
-  const prepared = prepare(text, { language: voteLanguage(text), blockBounded: true });
+  const prepared = prepare(text, { language: voteLanguage(text) });
   preparedPages.set(text, prepared);
   if (preparedPages.size > PAGE_CACHE_LIMIT) {
     const oldest = preparedPages.keys().next().value;

@@ -87,8 +87,8 @@ export class SpeechPlaybackError extends Error {
  * which unit is in the element, and how far into that one unit playback has
  * got. There is no single timeline to report a position on — a response is
  * synthesized unit by unit, and the total length is unknown until the last of
- * them has been synthesized, which is exactly the up-front cost ADR 0013's
- * fast start exists to avoid paying.
+ * them has been synthesized, which is exactly the up-front cost that speaking
+ * sentence units one at a time exists to avoid paying.
  */
 export interface SpeechProgress {
   /** Index into the units of the run, not of the utterance's text. */

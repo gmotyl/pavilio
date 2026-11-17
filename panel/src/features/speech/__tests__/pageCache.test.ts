@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpeechUnit } from "../types";
+import { preferences } from "../../../preferences/declarations";
+import { readPreference, writePreference } from "../../../preferences/store";
 
 /**
  * `pageCache.ts` sits beside the seam: `synth.ts` is mocked (never anytts) and
@@ -420,6 +422,59 @@ describe("pageAudio", () => {
 
     expect(pageUnitState(DOC, u)).toBeUndefined();
     expect(pageCachedShare(DOC, [u]).cached).toBe(0);
+  });
+});
+
+describe("page cache toggle", () => {
+  it("page cache enabled by default uploads a synthesized unit", async () => {
+    const u = unit("Default on.");
+    const hash = await sha256(u.text);
+    const fetchMock = stubFetch({
+      [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 204 }),
+    });
+
+    expect(readPreference(preferences.speechPageCacheEnabled)).toBe(true);
+    const bytes = await pageAudio(DOC, u, { voice: "v" });
+    await settle();
+
+    expect(Array.from(new Uint8Array(bytes))).toEqual([9, 9]);
+    expect(calls(fetchMock, "PUT")).toEqual([`${BASE}/${page}/${hash}`]);
+  });
+
+  it("page cache disabled synthesizes without uploading", async () => {
+    const u = unit("Toggled off.");
+    const hash = await sha256(u.text);
+    const fetchMock = stubFetch({
+      [`PUT ${BASE}/${page}/${hash}`]: () => new Response(null, { status: 204 }),
+    });
+    writePreference(preferences.speechPageCacheEnabled, false);
+    expect(readPreference(preferences.speechPageCacheEnabled)).toBe(false);
+
+    const bytes = await pageAudio(DOC, u, { voice: "v" });
+    await settle();
+
+    expect(Array.from(new Uint8Array(bytes))).toEqual([9, 9]);
+    expect(synth.synthesizeSpeech).toHaveBeenCalledWith(u.text, { voice: "v" });
+    // The disk was still asked (a cached unit is served), but nothing written.
+    expect(calls(fetchMock, "GET")).toEqual([`${BASE}/${page}/${hash}`]);
+    expect(calls(fetchMock, "PUT")).toEqual([]);
+    expect(pageUnitState(DOC, u)).toBeUndefined();
+  });
+
+  it("page cache disabled still serves a cached unit", async () => {
+    const u = unit("Already on disk.");
+    const hash = await sha256(u.text);
+    const fetchMock = stubFetch({
+      [`GET ${BASE}/${page}/${hash}`]: () =>
+        new Response(new Uint8Array([4, 5]), { headers: { "Content-Type": "audio/mpeg" } }),
+    });
+    writePreference(preferences.speechPageCacheEnabled, false);
+
+    const bytes = await pageAudio(DOC, u, { voice: "v" });
+
+    expect(Array.from(new Uint8Array(bytes))).toEqual([4, 5]);
+    expect(synth.synthesizeSpeech).not.toHaveBeenCalled();
+    expect(calls(fetchMock, "GET")).toEqual([`${BASE}/${page}/${hash}`]);
   });
 });
 

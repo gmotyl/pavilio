@@ -6,9 +6,9 @@
  *
  * 1. `stripToSpeakableText` first, so everything after it sees only what will
  *    actually be spoken.
- * 2. Then ordering: the response's opening heading becomes unit 0, a leading
- *    `**TLDR:**` becomes unit 1, and the body is packed into units. Playback
- *    awaits only unit 0, so the first two units are deliberately small.
+ * 2. Then units: every block is spoken on its own, a heading whole and
+ *    everything else one sentence per unit (see {@link prepareBlocks}). Pages
+ *    and answers take this same one path.
  *
  * `strip.ts` deliberately leaves heading `#` and emphasis `**` markers in place
  * so this module can find the heading and the TLDR. Removing them is therefore
@@ -28,13 +28,10 @@
  * switches), so a unit's `text` is the text as written.
  */
 import { firstSentence, packUnits } from "anytts/text";
-import { SENTINEL, SENTINEL_ONLY_RE, stripToSpeakableText } from "./strip";
+import { SENTINEL, stripToSpeakableText } from "./strip";
 import type { PreparedSpeech, SpeechUnit } from "./types";
 
-/** Floor a packed unit is merged up to. */
-export const UNIT_MIN_CHARS = 200;
-
-/** Ceiling a unit is cut at, on sentence boundaries. */
+/** Ceiling a single over-long sentence is cut at, on word boundaries. */
 export const UNIT_MAX_CHARS = 450;
 
 export interface PrepareOptions {
@@ -44,33 +41,23 @@ export interface PrepareOptions {
    * `lang`, where it picks the Pronunciation map.
    */
   language?: "pl" | "en";
-  /**
-   * Page packing: no unit ever spans two blocks, so a page can be started at
-   * any block. See {@link prepareBlocks}. Off (answers): units pack across
-   * paragraphs exactly as they always have, and carry no `block`.
-   */
-  blockBounded?: boolean;
 }
 
 /**
- * One paragraph in both its readings: `source` as `strip.ts` left it — markers,
- * sentinels and all — and `text` as the voice will receive it. The two travel
- * together through packing so that a unit can say where it was spoken from.
- * Every sizing and joining decision is made on `text`, because `text` is what
- * synthesis gets; `source` only follows along.
+ * One unit in both its readings: `source`, the block it came from as
+ * `strip.ts` left it — markers, sentinels and all — and `text` as the voice
+ * will receive it. Every sizing decision is made on `text`, because `text` is
+ * what synthesis gets; `source` only follows along.
  */
 interface Packed {
   source: string;
   text: string;
-  /** Block-bounded packing only: the index of the block this unit starts in. */
-  block?: number;
+  /** The index of the block this unit was spoken from. */
+  block: number;
 }
 
 /** An ATX heading line: `#` … `######`, up to three leading spaces. */
 const HEADING_LINE_RE = /^ {0,3}#{1,6}[ \t]+(.*)$/;
-
-/** A paragraph opening with `**TLDR:**` (or `**TLDR**`). */
-const TLDR_PARAGRAPH_RE = /^[ \t]*\*\*TLDR:?\*\*/i;
 
 export interface RemoveMarkersOptions {
   /**
@@ -169,11 +156,9 @@ const SENTINEL_RE = new RegExp(`⟦(${Object.keys(SENTINEL).join("|")})⟧`, "g"
  * Every rule here is a way a `, phrase,` can land badly *within one paragraph*.
  * What none of them may do is *remove the pauses*: the commas are the whole
  * reason the voice sets the placeholder apart from the sentence instead of
- * reading "obrazek" as the next word of it. The paragraph's two outer edges are
- * deliberately NOT tidied here — a paragraph edge is not an utterance edge, and
- * what the leading comma should become depends on the paragraph before it. That
- * decision belongs to {@link joinPacked} and {@link toUnits}, which are the two
- * places where the neighbour is known.
+ * reading "obrazek" as the next word of it. The leading comma of a paragraph
+ * that opens with a placeholder is deliberately NOT tidied here — that is an
+ * utterance edge, and {@link toUnits} is where it is dropped.
  *
  * Single quotes are absent from the bracket classes on purpose: `'` and `’` are
  * Polish inflection apostrophes (`pipeline'y`), not aside markers, and the
@@ -203,8 +188,8 @@ function tidyAroundPlaceholder(text: string): string {
       // "Obrazek , obrazek," — a space before a comma is heard as a stumble.
       .replace(/ +,/g, ",")
       // One closing the paragraph becomes a full stop rather than losing its
-      // pause: units are packed from paragraphs joined by a single space, so a
-      // dangling comma would let this paragraph run straight into the next one.
+      // pause: a unit that ends on a dangling comma sounds unfinished before the
+      // next one starts.
       .replace(/ *, *$/, ".")
       .trim()
   );
@@ -320,13 +305,6 @@ function toSpokenText(text: string, language: "pl" | "en"): string {
   return speakCodeShapes(spoken, language);
 }
 
-/** A paragraph paired with its spoken form, or `null` when nothing is left to say. */
-function speak(source: string, language: "pl" | "en"): Packed | null {
-  const text = toSpokenText(source, language);
-
-  return text ? { source, text } : null;
-}
-
 /** Blank-line-separated blocks, the shape `stripToSpeakableText` leaves behind. */
 function splitParagraphs(text: string): string[] {
   return text
@@ -336,159 +314,22 @@ function splitParagraphs(text: string): string[] {
 }
 
 /**
- * Joins one packed paragraph onto the unit being built.
- *
- * A paragraph that begins with a comma begins with a placeholder, and that
- * comma is its pause. Whether the pause is *needed* is decidable only here, at
- * the seam, because it depends on the paragraph before it. Paragraphs are
- * joined by a single space, so a left side carrying no punctuation of its own —
- * a mid-body heading, which `removeMarkers` strips to bare words and which
- * therefore never has a terminator — would otherwise run straight into the
- * placeholder, and "Wyniki blok kodu" is one noun phrase to a listener. A
- * heading followed by a fenced block is the most common shape an agent answer
- * has, so this is the common case, not a corner.
- *
- * When the left side does already pause, theirs wins and ours goes: that is
- * {@link tidyAroundPlaceholder}'s first rule, applied at the one place where
- * the thing it reasons about is actually visible.
- */
-function joinPacked(pending: string, paragraph: string): string {
-  if (!paragraph.startsWith(", ")) return `${pending} ${paragraph}`;
-
-  return /[,.;:!?…—–]$/.test(pending) ? `${pending} ${paragraph.slice(2)}` : `${pending}${paragraph}`;
-}
-
-/**
- * Packs spoken paragraphs into units with `anytts/text`'s `packUnits`: merge
- * consecutive ones until the unit reaches {@link UNIT_MIN_CHARS}, never merging
- * past {@link UNIT_MAX_CHARS}, and cut a paragraph that is oversized on its own.
- *
- * The floor exists because a two-word paragraph costs a whole synthesis round
- * trip for half a second of audio; the ceiling exists because a unit is also the
- * barge-in granularity, and a 40-second unit cannot be interrupted mid-thought.
- *
- * The library reports each unit's paragraph range `from..to`; `source` is the
- * join of those paragraphs' sources. A unit that spans one paragraph keeps the
- * library's text — it is either the whole paragraph or a piece cut from it, and
- * a piece carries the whole paragraph as its source, because the consumer of
- * `source` (`matchUnitsToBlocks`) works at the granularity of a rendered block.
- * A unit that merges several paragraphs is re-joined with {@link joinPacked},
- * which only ever drops characters at a placeholder seam, so the ceiling holds.
- *
- * Source paragraphs never open with a placeholder's comma — the sentinel is
- * still a sentinel there — so a single space is the same join `joinPacked`
- * performs on the spoken side.
- */
-function packBody(paragraphs: readonly Packed[]): Packed[] {
-  return packUnits(paragraphs, { min: UNIT_MIN_CHARS, max: UNIT_MAX_CHARS }).map(({ text, from, to }) => {
-    const range = paragraphs.slice(from, to + 1);
-    const source = range.map((paragraph) => paragraph.source).join(" ");
-    if (from === to) return { source, text };
-
-    return { source, text: range.map((paragraph) => paragraph.text).reduce(joinPacked) };
-  });
-}
-
-/**
- * The fast-start unit taken off the front of the body, paired with what is left
- * to pack. `null` when there is no sentence to open with at all, which leaves
- * the first unit to {@link packBody} exactly as it was before this rule existed.
- *
- * The second branch is the one that needs arguing for, because it is the only
- * place a unit is built from two paragraphs before packing. A lead-in ending in
- * a colon — "Here are the steps:" — is not a sentence but a sentence
- * *fragment*, and the sentence it opens finishes in the paragraph behind it.
- * That used to be invisible, because a tight list was one paragraph with its
- * intro; now `strip.ts` gives every item its own paragraph so a unit's `source`
- * names exactly the items it speaks. Read one paragraph at a time, the lead-in
- * has no terminator, `firstSentence` finds nothing, the rule is skipped, and
- * the intro packs together with five of its items — unit 0, the one playback
- * waits on, grows four times over. So the fast start is allowed to cross one
- * paragraph boundary, and one only: it takes the lead-in plus the first
- * sentence behind it, which is the unit this shape produced all along.
- *
- * `source` is then both blocks, because both are spoken in it — `matchUnitsToBlocks`
- * reads a unit's source as the concatenation of the paragraphs it says.
- */
-function takeFastStart(first: Packed, rest: readonly Packed[]): { unit: Packed; body: Packed[] } | null {
-  const own = firstSentence(first.text);
-
-  if (own) {
-    const remainder = first.text.slice(own.length).trim();
-
-    return {
-      unit: { source: first.source, text: own },
-      body: remainder ? [{ source: first.source, text: remainder }, ...rest] : [...rest],
-    };
-  }
-
-  const [next, ...tail] = rest;
-  const sentence = next ? firstSentence(next.text) : null;
-  if (!next || !sentence) return null;
-
-  // This unit is built before packing runs, so nothing downstream would cut it:
-  // over the ceiling, the fast start would hand playback a unit larger than any
-  // {@link packBody} would ever emit — the opposite of what it exists for. So
-  // it stands down and lets the normal packing path cut the sentence instead.
-  if (joinPacked(first.text, sentence).length > UNIT_MAX_CHARS) return null;
-
-  const remainder = next.text.slice(sentence.length).trim();
-
-  return {
-    unit: { source: `${first.source} ${next.source}`, text: joinPacked(first.text, sentence) },
-    body: remainder ? [{ source: next.source, text: remainder }, ...tail] : [...tail],
-  };
-}
-
-/**
- * Pulls the response's opening heading off the front, if it has one. Only a
- * heading that *opens* the response is a title: a heading further down is a
- * section marker inside the body, and hoisting it to unit 0 would speak the
- * response out of order. Mutates `paragraphs`, which is this function's local
- * working list.
- *
- * Returns the heading *line*, `#` included: it is a paragraph like any other
- * and goes through {@link speak}, whose `removeMarkers` is what drops the
- * hashes — so the unit's source keeps them and its text does not.
- */
-function takeHeading(paragraphs: string[]): string | null {
-  const first = paragraphs[0];
-  if (first === undefined) return null;
-
-  const [line, ...rest] = first.split("\n");
-  const heading = HEADING_LINE_RE.exec(line);
-  if (!heading) return null;
-
-  const remainder = rest.join("\n").trim();
-  if (remainder) paragraphs[0] = remainder;
-  else paragraphs.shift();
-
-  return line.trim();
-}
-
-/**
- * The other half of {@link joinPacked}, and the one place where "a placeholder
- * opening the text has nothing behind it to pause after" is actually true: a
- * unit is exactly the string handed to synthesis, so an utterance can no more
- * open with a comma than a sentence can. A paragraph, by contrast, is only ever
- * a fragment of one — which is why this rule used to fire a paragraph too early
- * and silently delete the pause a packed paragraph needed.
+ * The one place where "a placeholder opening the text has nothing behind it to
+ * pause after" is actually true: a unit is exactly the string handed to
+ * synthesis, so an utterance can no more open with a comma than a sentence can.
+ * A block that opens with a placeholder opens its first sentence with one.
  *
  * Unconditional rather than gated on a substitution having happened, because
  * the invariant is about utterances, not about placeholders — and ordinary
- * prose cannot reach here starting with a comma anyway: a paragraph would have
- * to literally begin with one, after `removeMarkers`, whitespace collapse and a
+ * prose cannot reach here starting with a comma anyway: a block would have to
+ * literally begin with one, after `removeMarkers`, whitespace collapse and a
  * trim.
  */
 function toUnits(packed: readonly Packed[], lang: "pl" | "en"): SpeechUnit[] {
   return packed.map(({ source, text: spoken, block }) => {
     const text = spoken.replace(/^ *, */, "");
 
-    // `block` is added only when packing set it, so an answer's units keep
-    // exactly the shape they always had.
-    const unit: SpeechUnit = { text, chars: text.length, source, lang };
-    if (block !== undefined) unit.block = block;
-    return unit;
+    return { text, chars: text.length, source, lang, block };
   });
 }
 
@@ -510,12 +351,12 @@ function unquote(line: string): string {
 }
 
 /**
- * One block of a page, as {@link splitBlockLines} cuts it: its `source` (what
+ * One block of a text, as {@link splitBlockLines} cuts it: its `source` (what
  * the viewer text-matches against the rendered block) and what is `spoken`,
  * which differ only for a setext heading, whose underline is structure — not
  * text the renderer shows or the voice should read.
  */
-interface PageBlock {
+interface TextBlock {
   source: string;
   spoken: string;
   heading: boolean;
@@ -536,10 +377,9 @@ interface PageBlock {
  * Headings are recognised inside a blockquote too, after its `>` prefix: a
  * quoted heading keeps the prefix in its source (the matcher ignores `>` and
  * `#`) but is spoken as its bare text.
- * Block-bounded packing only: answers pack exactly as they always have.
  */
-function splitBlockLines(paragraph: string): PageBlock[] {
-  const blocks: PageBlock[] = [];
+function splitBlockLines(paragraph: string): TextBlock[] {
+  const blocks: TextBlock[] = [];
   let run: string[] = [];
   const push = (source: string, spoken: string, heading: boolean): void => {
     if (source) blocks.push({ source, spoken, heading });
@@ -573,52 +413,123 @@ function splitBlockLines(paragraph: string): PageBlock[] {
 }
 
 /**
- * Block-bounded packing, for pages: the page is started at any block (the
- * viewer's ▶), so no unit may hold the tail of one block and the head of the
- * next. Each block — a top-level paragraph, a heading, a list item (which
- * `strip.ts` already makes a paragraph of its own) or a removed block's
- * placeholder — is packed on its own: a block over {@link UNIT_MAX_CHARS} is
- * still cut on sentences, and the {@link UNIT_MIN_CHARS} floor, which only ever
- * merges *across* paragraphs, never applies.
+ * Abbreviations that sit before a name, a number or a noun and so never end a
+ * sentence on their own full stop, compared lowercased without the trailing
+ * dot. Ambiguous ones that also close sentences (`etc.`, `itd.`, `itp.`, `r.`,
+ * `ok.`, `No.`) are absent: the lowercase-or-digit rule in {@link continues}
+ * already keeps them inside a sentence when the text carries on.
+ */
+const ABBREVIATIONS = new Set([
+  // English
+  "mr", "mrs", "ms", "dr", "prof", "st", "vs", "fig", "cf", "e.g", "i.e",
+  // Polish
+  "ul", "np", "tzw", "m.in", "wg", "nr", "godz",
+]);
+
+/** The token right before a full-stop terminator, closing quotes allowed. */
+const LAST_TOKEN_RE = /(?:^|\s)[("'„“‘«[]*(\S+?)\.["'”’»)\]]*$/u;
+
+/** Text that carries a sentence on: a lowercase letter (any script) or a digit. */
+const CONTINUATION_RE = /^[\p{Ll}\p{N}]/u;
+
+/**
+ * Whether `sentence` — one of `firstSentence`'s cuts — is not really over
+ * because `next`, the text after it, still belongs to it: the next word starts
+ * lowercase or with a digit ("e.g. grep", "np. grep", inline code `pnpm test.`
+ * unwrapped mid-sentence, "No. 5"), or the cut fell on a known abbreviation's
+ * full stop ("Mr. Smith", "Prof. Nowak").
  *
- * The answer-only orderings have nothing left to do here. The opening heading,
- * leading placeholders and a TLDR are each a block, so each is already a unit
- * of its own, in place. The fast start keeps only its in-block half — the
- * first body block's opening sentence becomes unit 0's neighbour-free start —
- * and drops the half that borrows a sentence from the next paragraph.
+ * Known limitation: the lowercase-or-digit rule cannot tell a continuation
+ * from a real sentence that opens lowercase or with a digit, so "npm install
+ * runs next." or "4 were eaten." joins the sentence before it. Accepted —
+ * one longer unit costs less than halving every "e.g." and "No." — and pinned
+ * in `prepare.test.ts`.
+ */
+function continues(sentence: string, next: string): boolean {
+  if (!next) return false;
+  if (CONTINUATION_RE.test(next)) return true;
+  const token = LAST_TOKEN_RE.exec(sentence)?.[1];
+  return token !== undefined && ABBREVIATIONS.has(token.toLowerCase());
+}
+
+/**
+ * A block's spoken text cut into sentences, in order. A trailing run with no
+ * terminator — a heading-like lead-in, a list item without a full stop, a
+ * paragraph that just stops — is a sentence of its own. Uses `anytts/text`'s
+ * `firstSentence`, so "2.5" is never a boundary and closing quotes stay with
+ * the sentence they close; a cut that {@link continues} is glued back onto the
+ * next one, so an abbreviation never halves a sentence.
+ */
+function splitSentences(text: string): string[] {
+  const sentences: string[] = [];
+  let rest = text.trim();
+  let pending = "";
+
+  while (rest) {
+    const cut = firstSentence(rest);
+    if (!cut) {
+      sentences.push(pending ? `${pending} ${rest}` : rest);
+      return sentences;
+    }
+    // `rest` is trimmed, so `firstSentence`'s cut is exactly its prefix.
+    rest = rest.slice(cut.length).trim();
+    const sentence = pending ? `${pending} ${cut}` : cut;
+    if (continues(sentence, rest)) {
+      pending = sentence;
+    } else {
+      sentences.push(sentence);
+      pending = "";
+    }
+  }
+  if (pending) sentences.push(pending);
+
+  return sentences;
+}
+
+/**
+ * Sentence units — the one preparation every spoken text goes through, a page
+ * or an answer alike. Each block (a top-level paragraph, a heading, a list item,
+ * which `strip.ts` already makes a paragraph of its own, or a removed block's
+ * placeholder) is spoken on its own:
+ * - a heading is one unit, whole;
+ * - every other block is one unit per sentence, never crossing the block's
+ *   edge;
+ * - a single sentence over {@link UNIT_MAX_CHARS} is still cut, by
+ *   `anytts/text`'s `packUnits` with no floor — which, fed one sentence at a
+ *   time, never merges and only ever cuts.
+ *
+ * The ceiling stays because a unit is also the barge-in granularity: a
+ * 40-second unit cannot be interrupted mid-thought.
+ *
+ * Ordering needs no special code: the opening heading is the first block and so
+ * unit 0, and a leading `**TLDR:**` paragraph's first sentence is unit 1. A
+ * heading further down is spoken where it stands.
+ *
+ * Every piece of a block keeps the whole block as its `source` — the consumer
+ * of `source` text-matches it against a rendered block.
  *
  * Block indices: `block` counts the blocks that produce at least one unit, in
- * page order, from 0 — a block that speaks nothing (a paragraph of bare
+ * document order, from 0 — a block that speaks nothing (a paragraph of bare
  * markers) takes no index, and a placeholder (`⟦code⟧`, `⟦table⟧`, `⟦html⟧`,
  * spoken "code block") takes one, because it is a unit. Every unit of a block
  * carries the same index and a block's units are consecutive, so the first unit
- * of block `b` is `units.findIndex((u) => u.block === b)`. The viewer finds a
- * rendered block's unit by text (`unit.source`, as `matchUnitsToBlocks` does
- * for the answer pane) and then snaps to the first unit carrying that unit's
- * `block`. A rendered code block, mermaid diagram or table never text-matches
- * a placeholder's source, so it gets no ▶; frontmatter never reaches here
- * (`pageSpeechText` strips it).
+ * of block `b` is `units.findIndex((u) => u.block === b)`. A rendered code
+ * block, mermaid diagram or table never text-matches a placeholder's source, so
+ * it gets no ▶; frontmatter never reaches here (`pageSpeechText` strips it).
  */
 function prepareBlocks(paragraphs: readonly string[], language: "pl" | "en"): Packed[] {
   const blocks = paragraphs.flatMap(splitBlockLines);
   const units: Packed[] = [];
   let index = 0;
-  let opening = true;
 
   for (const block of blocks) {
     const text = toSpokenText(block.spoken, language);
     if (!text) continue;
-    const spoken: Packed = { source: block.source, text };
 
-    // The first block that is neither a heading nor a placeholder is the body's
-    // first paragraph — the one the fast start comes from, unless it is a TLDR.
-    const leading = block.heading || SENTINEL_ONLY_RE.test(block.source);
-    const fastStart =
-      opening && !leading && !TLDR_PARAGRAPH_RE.test(block.source) ? takeFastStart(spoken, []) : null;
-    if (!leading) opening = false;
-
-    const pieces = fastStart ? [fastStart.unit, ...packBody(fastStart.body)] : packBody([spoken]);
-    for (const piece of pieces) units.push({ ...piece, block: index });
+    const sentences = block.heading ? [{ text }] : splitSentences(text).map((sentence) => ({ text: sentence }));
+    for (const piece of packUnits(sentences, { min: 0, max: UNIT_MAX_CHARS })) {
+      units.push({ source: block.source, text: piece.text, block: index });
+    }
     index += 1;
   }
 
@@ -627,62 +538,7 @@ function prepareBlocks(paragraphs: readonly string[], language: "pl" | "en"): Pa
 
 export function prepare(markdown: string, opts?: PrepareOptions): PreparedSpeech {
   const language = opts?.language ?? "en";
-
   const paragraphs = splitParagraphs(stripToSpeakableText(markdown));
-  if (opts?.blockBounded) return { units: toUnits(prepareBlocks(paragraphs, language), language), language };
 
-  const heading = takeHeading(paragraphs);
-
-  const opening: Packed[] = [];
-  if (heading) {
-    const spoken = speak(heading, language);
-    if (spoken) opening.push(spoken);
-  }
-
-  // A response that opens with a removed block opens with a sentinel paragraph.
-  // It carries no sentence terminator, so `firstSentence` finds nothing in it
-  // and the fast-start rule below is skipped entirely — the sentinel then packs
-  // together with the whole first prose paragraph, and unit 0, the one playback
-  // waits on, becomes a long synthesis instead of a short one.
-  //
-  // Taking such a paragraph as its own opening unit fixes that without
-  // reordering anything: it is already the shortest unit there can be, it stays
-  // exactly where the answer put it, and the first *prose* paragraph behind it
-  // is then free to give up its opening sentence as usual. The alternative —
-  // skipping past the sentinel to pick the fast start — would speak the answer
-  // out of order, which is the one thing this stage must never do.
-  while (paragraphs.length > 0 && SENTINEL_ONLY_RE.test(paragraphs[0])) {
-    const spoken = speak(paragraphs.shift() as string, language);
-    if (spoken) opening.push(spoken);
-  }
-
-  // Only the FIRST body paragraph can be the TLDR, because the TLDR unit is
-  // hoisted to the front — honouring a mid-body one would speak the response
-  // out of order. A `**TLDR:**` paragraph anywhere else is ordinary body. The
-  // sentinels above do not count against "first": they are omissions, not
-  // prose, so a TLDR standing behind one is still the response's summary.
-  const tldr = paragraphs.length > 0 && TLDR_PARAGRAPH_RE.test(paragraphs[0]) ? paragraphs[0] : null;
-
-  let body = (tldr === null ? paragraphs : paragraphs.slice(1))
-    .map((paragraph) => speak(paragraph, language))
-    .filter((paragraph): paragraph is Packed => paragraph !== null);
-
-  if (tldr !== null) {
-    const spoken = speak(tldr, language);
-    if (spoken) opening.push(spoken);
-  } else {
-    // No TLDR: the fast-start unit is the body's first sentence, and what is
-    // left of the paragraph it came from goes back to the head of the packing
-    // queue. Both halves keep the whole paragraph as their source — see
-    // `packBody` for why a piece is never sliced.
-    const [first, ...rest] = body;
-    const fastStart = first ? takeFastStart(first, rest) : null;
-
-    if (fastStart) {
-      opening.push(fastStart.unit);
-      body = fastStart.body;
-    }
-  }
-
-  return { units: toUnits([...opening, ...packBody(body)], language), language };
+  return { units: toUnits(prepareBlocks(paragraphs, language), language), language };
 }

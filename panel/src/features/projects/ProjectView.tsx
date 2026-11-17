@@ -32,7 +32,8 @@ import { useCommitsOpenMap } from "./useCommitsOpenMap";
 import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectSettingsCard from "./ProjectSettingsCard";
-import { useBreadcrumbActions } from "../shell/Breadcrumbs";
+import { BELOW_BREADCRUMBS, useBreadcrumbActions } from "../shell/Breadcrumbs";
+import { PageSpeechRowHost } from "../speech/PageSpeechRowHost";
 import FocusToggle, { useFocusLayout } from "../shell/FocusToggle";
 import { useSidebarState } from "../shell/useSidebarState";
 import { useLastPath } from "../shell/useLastPath";
@@ -296,14 +297,31 @@ export default function ProjectView() {
         />
       )}
 
-      <ProjectTabsBar
-        tabs={tabs}
-        searchActive={isReposSearch && search.active}
-        onToggleSearch={onToggleSearch}
-        focus={focus.active}
-        hamburgerInset={focus.active && !leftSidebar.expanded}
-        trailing={focus.active ? <FocusToggle /> : null}
-      />
+      {/* The tab row and the open page's speech row stick as one block: the
+          tab row's own sticky offset moves to this wrapper, so the speech row
+          sits right under the tabs (on phones, where the tab row is hidden,
+          under the breadcrumb bar) instead of being stuck behind them. The
+          offset is the bar's measured height: the bar is taller with its
+          buttons than without (desktop vs phone), so a constant leaves a gap
+          or an overlap; in focus the bar is gone, the height unset, and the
+          offset is 0. The wrapper always paints the page ground — idle it
+          holds only the tab row, on the same ground, so it shows only as the
+          strip over the tab row's bottom margin, which keeps scrolled text
+          from showing between the tabs and an open speech row. */}
+      <div
+        className="sticky z-20"
+        style={{ background: "var(--bg-base)", top: BELOW_BREADCRUMBS }}
+      >
+        <ProjectTabsBar
+          tabs={tabs}
+          searchActive={isReposSearch && search.active}
+          onToggleSearch={onToggleSearch}
+          focus={focus.active}
+          hamburgerInset={focus.active && !leftSidebar.expanded}
+          trailing={focus.active ? <FocusToggle /> : null}
+        />
+        <PageSpeechRowHost />
+      </div>
 
       {isReposSearch && search.active && (
         <ProjectSearchBar

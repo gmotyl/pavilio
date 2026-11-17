@@ -54,9 +54,6 @@ vi.hoisted(() => {
   (globalThis as unknown as { WebSocket: unknown }).WebSocket = QuietSocket;
 });
 
-// The synthesis cache the rail peeks into. Nothing is warm and nothing
-// subscribes: no test here draws a segment.
-vi.mock("../../speech/synth", async () => (await import("./answerPane.mocks")).synthMock());
 
 // mermaid's rendering stack is browser-only and no answer here holds a fence.
 vi.mock("../../markdown/MermaidDiagram", async () => (await import("./answerPane.mocks")).mermaidMock());
@@ -542,10 +539,6 @@ describe("the waiting animation", () => {
 
     // ...and it is a real token, defined once where the panel keeps them.
     expect(cssRule(":root")).toMatch(new RegExp(`${token}\\s*:\\s*\\S`));
-
-    // The pane's own rail is the same scrubber turned vertical, so the two
-    // drawings and the wave are one vocabulary rather than two that agree.
-    expect(cssRule('.answer-pane-seg[data-segment="playing"]')).toContain(`var(${token})`);
   });
 
   it("stops the animation but keeps a distinguishable shape under reduced motion", () => {
@@ -635,7 +628,7 @@ const unitsOf = (text: string): readonly SpeechUnit[] => {
   return units;
 };
 
-/** A unit is playing, so `data-speaking` is part of what has to come back. */
+/** A unit is playing, so the pinned ▶ is part of what has to come back. */
 const PROGRESS = Object.freeze({ unitIndex: 0, unitTime: 0, unitDuration: null });
 
 /** The same host with the voice's own units behind it. */
@@ -647,15 +640,15 @@ function spokenSpeech(queueFor: () => UtteranceQueue): GridSpeech {
   };
 }
 
-/** The answer's blocks that carry a mark — the direct children of `.prose`. */
+/** The answer's blocks that carry a Play-from-here mark. */
 const markedBlocks = (): HTMLElement[] => {
   const prose = body().querySelector(".prose");
   if (!(prose instanceof HTMLElement)) throw new Error("no .prose in the body");
-  return Array.from(prose.children).filter(
-    (child): child is HTMLElement =>
-      child instanceof HTMLElement && child.hasAttribute("data-unit"),
-  );
+  return Array.from(prose.querySelectorAll<HTMLElement>("[data-speak-unit]"));
 };
+
+/** The ▶ pinned beside the playing unit, or null. */
+const pinnedPlay = (): HTMLElement | null => screen.queryByTestId("play-from-here-pinned");
 
 describe("the marks on the answer that comes back", () => {
   it("re-marks the blocks once the reply replaces the wait", () => {
@@ -667,7 +660,7 @@ describe("the marks on the answer that comes back", () => {
     // pane that never marked anything in the first place.
     const before = markedBlocks();
     expect(before).toHaveLength(1);
-    expect(before[0]).toHaveAttribute("data-speaking", "");
+    expect(pinnedPlay()).not.toBeNull();
 
     sendReply();
     expect(waiting()).toBeInTheDocument();
@@ -678,21 +671,15 @@ describe("the marks on the answer that comes back", () => {
     expect(waiting()).toBeNull();
     expect(within(body()).getByText(NEXT_ANSWER)).toBeInTheDocument();
 
-    // The reply's block carries the whole affordance again: the unit it was
-    // spoken from, the Play beside it that reads from there, and the
-    // highlight that says it is the one being read.
+    // The reply's block carries the whole affordance again: the unit it starts
+    // the voice at, the ▶ beside it that reads from there, and the pinned ▶
+    // that says it is the one being read.
     const after = markedBlocks();
     expect(after).toHaveLength(1);
-    expect(after[0]).toHaveAttribute("data-unit", "0");
-    expect(after[0]).toHaveAttribute("data-speaking", "");
-    // The Play renders from the units whether or not anything was marked, so
-    // its presence proves nothing: its `top` is written only by the re-layout
-    // (`alignToSegments`, from the segment `layoutRail` placed), and the
-    // column that came back is a new one that starts without it.
-    const playButton = screen.getByTestId(`answer-pane-play-${SESSION}-0`);
-    const segment = screen.getByTestId(`answer-pane-seg-${SESSION}-0`);
-    expect(segment.style.top).not.toBe("");
-    expect(playButton.style.top).toBe(segment.style.top);
+    expect(after[0]).toHaveAttribute("data-speak-unit", "0");
+    const index = after[0].getAttribute("data-speak-index");
+    expect(body().querySelector(`button.play-from-here[data-speak-index="${index}"]`)).not.toBeNull();
+    expect(pinnedPlay()).not.toBeNull();
   });
 });
 

@@ -8,7 +8,8 @@ import type { AnswerWaitingPort, SpeechHost } from "../useSpeechHost";
 /**
  * The ▶ on a page's blocks, end to end inside one jsdom page: the real
  * markdown renderer, the real toolbar (`ViewerActions`, which owns the bar)
- * and `PlayFromHere` over the rendered blocks. Only the host is stubbed, as in
+ * and `PagePlayFromHere` (the page adapter over `PlayFromHere`) over the
+ * rendered blocks. Only the host is stubbed, as in
  * `ViewerActions.speech.test.tsx`: its `speakDocument` and `onJumpToUnit` are
  * the spies, its `unitsFor` hands the bar the page's prepared units.
  */
@@ -30,8 +31,10 @@ import { SpeechHostProvider } from "../SpeechHostProvider";
 import ViewerActions from "../../projects/ViewerActions";
 import MarkdownRenderer from "../../markdown/MarkdownRenderer";
 import { PlayFromHere, playButtonLeft } from "../PlayFromHere";
+import { PagePlayFromHere } from "../PagePlayFromHere";
+import type { CellSpeechState, SpeechUnit } from "../types";
 import { prepare } from "../prepare";
-import { pageSpeechText } from "../pageText";
+import { pageSpeechText, preparePage } from "../pageText";
 
 const KEY = "doc:pavilio/wiki/page.md";
 
@@ -104,7 +107,7 @@ const PAGE = [
   "",
 ].join("\n");
 
-const UNITS = prepare(pageSpeechText(PAGE), { blockBounded: true }).units;
+const UNITS = prepare(pageSpeechText(PAGE)).units;
 
 /** The first unit whose source is exactly `source`, from `from` on. */
 function unitOf(source: string, from = 0): number {
@@ -124,9 +127,9 @@ function Page({ text = PAGE, noKey = false }: { text?: string; noKey?: boolean }
           content={text}
           speech={docKey ? { key: docKey, text } : undefined}
         />
-        <PlayFromHere docKey={docKey} text={text}>
+        <PagePlayFromHere docKey={docKey} text={text}>
           <MarkdownRenderer content={text} />
-        </PlayFromHere>
+        </PagePlayFromHere>
       </Host>
     </MemoryRouter>
   );
@@ -463,11 +466,11 @@ describe("PlayFromHere", () => {
     }
   });
 
-  it("a Polish page starts at the unit the host prepared, not an English packing's", () => {
-    // A long Polish paragraph full of images: "obrazek" is longer than
-    // "image", so the Polish packing cuts the paragraph where the English one
-    // does not, and every block after it moves by one unit.
-    const images = Array.from({ length: 38 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+  it("a Polish page starts at the unit the host prepared, not an English preparation's", () => {
+    // A Polish sentence full of images: "obrazek" is longer than "image", so
+    // the Polish sentence crosses the unit ceiling and is cut where the English
+    // one is not, and every block after it moves by one unit.
+    const images = Array.from({ length: 46 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
     const polish = [
       "# Tytuł strony",
       "",
@@ -479,8 +482,8 @@ describe("PlayFromHere", () => {
       "",
     ].join("\n");
     // What the host prepares: the page's own vote picks Polish.
-    const hostUnits = prepare(pageSpeechText(polish), { language: "pl", blockBounded: true }).units;
-    const englishUnits = prepare(pageSpeechText(polish), { blockBounded: true }).units;
+    const hostUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
+    const englishUnits = prepare(pageSpeechText(polish)).units;
     const headingOf = (units: typeof hostUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
     expect(headingOf(hostUnits)).not.toBe(headingOf(englishUnits));
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? hostUnits : []) });
@@ -581,6 +584,60 @@ describe("PlayFromHere", () => {
     expect(block(container, "Only paragraph")).toHaveAttribute("data-speak-unit", "1");
   });
 
+  it("page Play from here wires host progress, pause and play", () => {
+    const playing = UNITS.findIndex((u) => u.text.startsWith("The second example paragraph"));
+    expect(playing).toBeGreaterThan(0);
+    // One object for every read: the toolbar takes the whole progress as an
+    // external-store snapshot, and a fresh object per read never settles.
+    const progress = Object.freeze({ unitIndex: playing, unitTime: 0, unitDuration: null });
+    let state: CellSpeechState = "speaking";
+    stub.host = makeSpeech({
+      unitsFor: (key) => (key === KEY ? UNITS : []),
+      progressFor: (key) => (key === KEY ? progress : null),
+      stateFor: (key) => (key === KEY ? state : "empty"),
+    });
+
+    const { rerender } = render(<Page />);
+    const pinned = () => screen.getByTestId("play-from-here-pinned");
+    // The host's progress for the page's key pins the ▶; the run is reading.
+    expect(pinned()).toHaveAccessibleName("Pause");
+    fireEvent.click(pinned());
+    expect(stub.host!.onPause).toHaveBeenCalledWith(KEY);
+    expect(stub.host!.speakDocument).not.toHaveBeenCalled();
+
+    // Paused: the same ▶ reads Play and starts the page's run at the unit the
+    // voice stopped on, through the toolbar.
+    state = "paused";
+    rerender(<Page />);
+    expect(pinned()).toHaveAccessibleName("Play from here");
+    fireEvent.click(pinned());
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({ key: KEY, text: PAGE, startUnit: playing });
+    expect(stub.host!.onPause).toHaveBeenCalledTimes(1);
+  });
+
+  it("an edited page hides the pinned button of the run still reading its old text", () => {
+    // The toolbar keeps a run going across a text-only update, so the host's
+    // unit index (and its units) still belong to the old text: mapped onto the
+    // edited page it would name an unrelated sentence, and a paused Play would
+    // start the edited page there.
+    const playing = UNITS.findIndex((u) => u.text.startsWith("The second example paragraph"));
+    const progress = Object.freeze({ unitIndex: playing, unitTime: 0, unitDuration: null });
+    stub.host = makeSpeech({
+      unitsFor: (key) => (key === KEY ? UNITS : []),
+      progressFor: (key) => (key === KEY ? progress : null),
+      stateFor: (key) => (key === KEY ? "paused" : "empty"),
+    });
+
+    const { rerender } = render(<Page />);
+    expect(screen.getByTestId("play-from-here-pinned")).toHaveAccessibleName("Play from here");
+
+    const edited = PAGE.replace("## Example", "## Example\n\nA brand new paragraph now opens the first example.");
+    expect(preparePage(edited).units[playing].text).not.toBe(UNITS[playing].text);
+    rerender(<Page text={edited} />);
+    expect(screen.queryByTestId("play-from-here-pinned")).toBeNull();
+    expect(stub.host!.speakDocument).not.toHaveBeenCalled();
+  });
+
   it("play from here starts at a paragraph ending in wikilink citations", () => {
     const text = [
       "# Wikilink page",
@@ -594,7 +651,7 @@ describe("PlayFromHere", () => {
       "A closing paragraph after the cited one.",
       "",
     ].join("\n");
-    const units = prepare(pageSpeechText(text), { blockBounded: true }).units;
+    const units = prepare(pageSpeechText(text)).units;
     const cited = units.findIndex((u) => u.source.startsWith("Typing lag"));
     expect(cited).toBeGreaterThan(0);
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });
@@ -621,7 +678,7 @@ describe("PlayFromHere", () => {
       "A closing paragraph after the linked one.",
       "",
     ].join("\n");
-    const units = prepare(pageSpeechText(text), { blockBounded: true }).units;
+    const units = prepare(pageSpeechText(text)).units;
     const linked = units.findIndex((u) => u.source.startsWith("Read ["));
     expect(linked).toBeGreaterThan(0);
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });
@@ -630,6 +687,220 @@ describe("PlayFromHere", () => {
     const para = block(container, "Read [");
     expect(para.textContent).toBe("Read [progress-2026-09-23-repos-resize-answer-pane]");
     expect(para).toHaveAttribute("data-speak-unit", String(linked));
+  });
+});
+
+describe("PlayFromHere on any rendered body", () => {
+  // The surface-agnostic layer as the answer pane will use it: units the
+  // caller prepared, the host's playing unit, and plain callbacks. No toolbar,
+  // no page store.
+  const ANSWER = [
+    "# Notes",
+    "",
+    "Alpha opens the first paragraph here.",
+    "",
+    "Bravo starts the second paragraph. Charlie carries it on to the next line. Delta closes the paragraph.",
+    "",
+    "```",
+    "const code = 1;",
+    "```",
+    "",
+    "Echo is the last paragraph.",
+    "",
+  ].join("\n");
+  const A_UNITS = prepare(ANSWER).units;
+  const at = (start: string, units: readonly SpeechUnit[] = A_UNITS) => {
+    const index = units.findIndex((u) => u.text.startsWith(start));
+    if (index < 0) throw new Error(`no unit ${start}`);
+    return index;
+  };
+
+  /**
+   * jsdom has no layout, so `Range#getClientRects` (absent in jsdom) is
+   * stubbed: a range whose text starts with one of `tops`' keys reports one
+   * line box at that top. `calls` records every range measured, so a test can
+   * prove the stub — not some fallback — placed the ▶.
+   */
+  function stubLines(tops: Record<string, number>) {
+    const calls: string[] = [];
+    const proto = Range.prototype as unknown as Record<string, unknown>;
+    const had = Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects");
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value(this: Range) {
+        const text = this.toString();
+        calls.push(text);
+        const key = Object.keys(tops).find((k) => text.startsWith(k));
+        if (key === undefined) return [];
+        const top = tops[key];
+        return [{ top, bottom: top + 22, left: 0, right: 100, width: 100, height: 22, x: 0, y: top }];
+      },
+    });
+    return {
+      calls,
+      restore() {
+        if (had) Object.defineProperty(Range.prototype, "getClientRects", had);
+        else delete proto.getClientRects;
+      },
+    };
+  }
+
+  let lines: ReturnType<typeof stubLines>;
+  beforeEach(() => {
+    lines = stubLines({ Bravo: 50, Charlie: 80, Delta: 110 });
+  });
+  afterEach(() => {
+    lines.restore();
+    vi.restoreAllMocks();
+  });
+
+  const onPlay = vi.fn();
+  const onPause = vi.fn();
+  const onHint = vi.fn();
+  beforeEach(() => {
+    onPlay.mockReset();
+    onPause.mockReset();
+    onHint.mockReset();
+  });
+
+  function Answer({
+    playingUnit,
+    paused = false,
+    units = A_UNITS,
+  }: {
+    playingUnit: number | null;
+    paused?: boolean;
+    units?: readonly SpeechUnit[];
+  }) {
+    return (
+      <MemoryRouter>
+        <PlayFromHere
+          speechKey="session-1"
+          units={units}
+          playingUnit={playingUnit}
+          paused={paused}
+          onPlay={onPlay}
+          onPause={onPause}
+          onHint={onHint}
+        >
+          <MarkdownRenderer content={ANSWER} />
+        </PlayFromHere>
+      </MemoryRouter>
+    );
+  }
+
+  const shown = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLButtonElement>("button.play-from-here[data-shown]"));
+  const pinned = () => screen.getByTestId("play-from-here-pinned");
+  const topOf = (el: HTMLElement) => parseFloat(el.style.top);
+  /** The ▶ is centred on the line box it is pinned to: its top lands within that line. */
+  const onLine = (el: HTMLElement, line: number) => {
+    expect(topOf(el)).toBeGreaterThanOrEqual(line);
+    expect(topOf(el)).toBeLessThan(line + 22);
+  };
+
+  it("pinned play button marks the playing block as Pause", () => {
+    const { container } = render(<Answer playingUnit={at("Bravo")} />);
+    const visible = shown(container);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toBe(pinned());
+    expect(visible[0]).toHaveAccessibleName("Pause");
+    expect(lines.calls.some((text) => text.startsWith("Bravo"))).toBe(true);
+    onLine(visible[0], 50);
+  });
+
+  it("pressing the pinned button pauses; paused it plays from its block", () => {
+    const charlie = at("Charlie");
+    const { rerender } = render(<Answer playingUnit={charlie} />);
+    fireEvent.click(pinned());
+    expect(onPause).toHaveBeenCalledTimes(1);
+    expect(onPlay).not.toHaveBeenCalled();
+
+    rerender(<Answer playingUnit={charlie} paused />);
+    expect(pinned()).toHaveAttribute("data-shown");
+    expect(pinned()).toHaveAccessibleName("Play from here");
+    fireEvent.click(pinned());
+    expect(onPlay).toHaveBeenCalledWith(charlie);
+    expect(onPause).toHaveBeenCalledTimes(1);
+  });
+
+  it("pinned button follows the playing sentence down a paragraph", () => {
+    const { rerender } = render(<Answer playingUnit={at("Bravo")} />);
+    onLine(pinned(), 50);
+    // Synchronously after the commit — no waiting: the ▶ moves in the same
+    // render the playing unit does.
+    rerender(<Answer playingUnit={at("Charlie")} />);
+    onLine(pinned(), 80);
+    rerender(<Answer playingUnit={at("Delta")} />);
+    onLine(pinned(), 110);
+    expect(lines.calls.some((text) => text.startsWith("Delta"))).toBe(true);
+  });
+
+  it("pinned button falls back to the block's first line when the sentence is not found", () => {
+    // The playing unit says something the rendered paragraph does not hold.
+    const units = A_UNITS.map((u) =>
+      u.text.startsWith("Charlie") ? { ...u, text: "Zulu is nowhere in this paragraph." } : u,
+    );
+    const reached: string[] = [];
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.tagName === "P" && (this.textContent ?? "").startsWith("Bravo")) {
+        reached.push("bravo-paragraph");
+        return { top: 200, bottom: 260, left: 0, right: 100, width: 100, height: 60, x: 0, y: 200, toJSON: () => ({}) };
+      }
+      return real.call(this);
+    });
+
+    render(<Answer playingUnit={at("Zulu", units)} units={units} />);
+    expect(reached.length).toBeGreaterThan(0);
+    onLine(pinned(), 200);
+  });
+
+  it("pinned button finds a sentence after letters outside the basic plane", () => {
+    // Math bold and Deseret letters are one code point but two UTF-16 units; a
+    // sentence located after them must still map back onto the rendered text.
+    const body = [
+      "Alpha opens the first paragraph here.",
+      "",
+      "Charlie \u{1D400}\u{1D401}\u{1D402} carries \u{10400}\u{10401} it on. Delta closes the paragraph.",
+      "",
+    ].join("\n");
+    const units = prepare(body).units;
+    const delta = at("Delta", units);
+    const { container } = render(
+      <MemoryRouter>
+        <PlayFromHere
+          speechKey="session-1"
+          units={units}
+          playingUnit={delta}
+          paused={false}
+          onPlay={onPlay}
+          onPause={onPause}
+          onHint={onHint}
+        >
+          <MarkdownRenderer content={body} />
+        </PlayFromHere>
+      </MemoryRouter>,
+    );
+    expect(container.textContent).toContain("Delta closes");
+    expect(lines.calls.some((text) => text.startsWith("Delta"))).toBe(true);
+    onLine(pinned(), 110);
+  });
+
+  it("hover still reveals other blocks' play buttons", () => {
+    const { container } = render(<Answer playingUnit={at("Charlie")} />);
+    // A code block gets no ▶ of its own: only the pinned one is shown.
+    fireEvent.mouseOver(container.querySelector("pre")!);
+    expect(shown(container)).toEqual([pinned()]);
+
+    const echo = Array.from(container.querySelectorAll<HTMLElement>(".prose p")).find((p) =>
+      (p.textContent ?? "").startsWith("Echo"),
+    )!;
+    fireEvent.mouseOver(echo);
+    const visible = shown(container);
+    expect(visible).toHaveLength(2);
+    expect(visible).toContain(pinned());
+    expect(onHint).toHaveBeenLastCalledWith(at("Echo"));
   });
 });
 

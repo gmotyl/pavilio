@@ -1,13 +1,12 @@
 /**
- * The answer pane: the answer rendered as markdown, its rail, its scroll, its
- * Play buttons and its Copy as Markdown.
+ * The answer pane: the answer rendered as markdown, its scroll, its Play from
+ * here buttons and its Copy as Markdown.
  *
  * One file, one `describe` per former file (`AnswerPane.test.tsx`, `.copy`,
  * `.play`); each section keeps its own fixtures and hooks, and its original
  * header sits above it. Module mocks are file-wide, so they are listed once
- * here: the synthesis cache is the stateful one the rail section drives — the
- * other sections never warm a unit, so it answers them `cold` throughout, as
- * their own stubs did — and the body's render counter only counts.
+ * here: the synthesis cache answers `cold` throughout (nothing in the pane
+ * draws from it any more), and the body's render counter only counts.
  */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -21,11 +20,8 @@ import {
   type UtteranceQueue,
 } from "../../speech/utteranceQueue";
 import { cssRule } from "../../shell/__tests__/hamburgerGeometry";
-import { segmentStateFor } from "../segmentState";
 import { AnswerPane } from "../AnswerPane";
 import { __resetAnswerWaitingForTests, beginWaiting, noteTransport } from "../answerWaiting";
-import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../../speech/voices";
-import { refreshSessions } from "../sessionStore";
 import { StubResizeObserver } from "../../../test-utils";
 import { answerSpeech, COPY_MARKDOWN, readySpeech, renderPane } from "./answerPane.harness";
 import userEvent from "@testing-library/user-event";
@@ -48,42 +44,11 @@ vi.mock("../../markdown/MarkdownRenderer", async (importOriginal) => {
   };
 });
 
-/**
- * The synthesis cache the rail peeks into, made writable — the same stand-in
- * `SpeechControlBar.test.tsx` uses, because the rail draws the scrubber's
- * states from the same cache.
- */
-const warm = vi.hoisted(() => new Set<string>());
-
-const warming = vi.hoisted(() => new Set<string>());
-
-const cacheListeners = vi.hoisted(() => new Set<() => void>());
-
-/**
- * Units in hand in ONE voice: text → the voice they were synthesized in. The
- * real cache keys on voice + text, so these read `ready` only to a peek that
- * names the same voice, and `cold` to any other.
- */
-const voiced = vi.hoisted(() => new Map<string, string>());
-
+/** Nothing is ever warm: the pane renders no cache state of its own. */
 vi.mock("../../speech/synth", () => ({
-  isSpeechSynthesized: (text: string) => warm.has(text) || warming.has(text),
-  speechCacheState: (text: string, options: { voice?: string } = {}) =>
-    voiced.has(text)
-      ? voiced.get(text) === options.voice
-        ? "ready"
-        : "cold"
-      : warm.has(text)
-        ? "ready"
-        : warming.has(text)
-          ? "warming"
-          : "cold",
-  subscribeSpeechCache: (listener: () => void) => {
-    cacheListeners.add(listener);
-    return () => {
-      cacheListeners.delete(listener);
-    };
-  },
+  isSpeechSynthesized: () => false,
+  speechCacheState: () => "cold",
+  subscribeSpeechCache: () => () => {},
 }));
 
 const copyToClipboard = vi.fn(async (_text: string) => true);
@@ -94,8 +59,8 @@ vi.mock("../../../lib/clipboard", () => ({
 
 /**
  * The answer pane — the card under the speech bar that renders the utterance
- * under the cursor as markdown, with the spoken block marked and a rail of
- * unit segments beside the text.
+ * under the cursor as markdown, with a Play-from-here ▶ beside each speakable
+ * block and one pinned beside the line the voice is reading.
  *
  * The units are real `prepare()` output and the blocks are real react-markdown
  * output, so the mapping under test is the one the product runs: a heading
@@ -104,12 +69,40 @@ vi.mock("../../../lib/clipboard", () => ({
  * store is driven by hand, which is what lets the "nothing re-renders inside a
  * unit" test notify with the same index and count.
  */
-/** Empty every collection the writable synth stub reads, so no section inherits one. */
-function clearSynthStub(): void {
-  warm.clear();
-  warming.clear();
-  voiced.clear();
-  cacheListeners.clear();
+
+/**
+ * jsdom has no layout and no `Range#getClientRects`, and the pinned ▶ is placed
+ * from the first line box of a `Range` over the playing sentence. So every
+ * range gets one line box: at its block's top (`blockTopOf`, the section's own
+ * layout) plus the number of the block's characters before the range starts —
+ * a later sentence of a paragraph sits lower, as it does on screen. Returns
+ * the restore.
+ */
+function stubRangeLines(blockTopOf: (element: Element) => number | null): () => void {
+  const proto = Range.prototype as unknown as Record<string, unknown>;
+  const had = Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects");
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value(this: Range) {
+      let block: Element | null =
+        this.startContainer instanceof Element ? this.startContainer : this.startContainer.parentElement;
+      let top: number | null = null;
+      for (; block; block = block.parentElement) {
+        top = blockTopOf(block);
+        if (top !== null) break;
+      }
+      if (!block || top === null) return [];
+      const before = document.createRange();
+      before.setStart(block, 0);
+      before.setEnd(this.startContainer, this.startOffset);
+      const line = top + before.toString().length;
+      return [{ top: line, bottom: line + 22, left: 0, right: 100, width: 100, height: 22, x: 0, y: line }];
+    },
+  });
+  return () => {
+    if (had) Object.defineProperty(Range.prototype, "getClientRects", had);
+    else delete proto.getClientRects;
+  };
 }
 
 describe("rendering", () => {
@@ -128,15 +121,6 @@ describe("rendering", () => {
     "",
   ].join("\n");
 
-  /** The smoke test's answer: a fast-start unit and a packed one share the first paragraph. */
-  const SMOKE = [
-    "Hi. AGENTS.md loaded; no `.projects.local.md`, so no project registry yet.",
-    "",
-    "Branch `feat/in-cell-answer-pane`, clean tree, last commit `c75d42d refactor(terminal): the cell reader is screen-only again`.",
-    "",
-    "What next — `resume <project>`, or a specific task?",
-  ].join("\n");
-
   const OTHER_MARKDOWN = [
     "# Other",
     "",
@@ -145,9 +129,8 @@ describe("rendering", () => {
   ].join("\n");
 
   /**
-   * A six-item list. `strip` emits every item as its own paragraph, so packing
-   * cuts the list into three units — items 1-2, items 3-5, item 6 — and each
-   * item is a block the pane can match, mark and jump to.
+   * A six-item list. `strip` emits every item as its own paragraph, so each
+   * item is a unit of its own and a block the pane can match, mark and jump to.
    */
   const LIST_MARKDOWN = [
     "# Release checklist",
@@ -183,6 +166,26 @@ describe("rendering", () => {
     "- Then watch the error rate closely for ten whole minutes after the traffic has moved across to the new pods.",
     "",
   ].join("\n");
+
+  /**
+   * Three paragraphs, the third read as two sentences: two units that share
+   * one block, so the pinned ▶ has a line inside a paragraph to walk down to.
+   */
+  const SENTENCES = [
+    "# Deploy plan",
+    "",
+    "The first paragraph says why the deploy waits for the migration.",
+    "",
+    "The second paragraph covers the rollback path after the switch.",
+    "",
+    "Charlie opens the third paragraph. Delta is its second sentence, read after the first one.",
+    "",
+  ].join("\n");
+
+  const SENTENCE_UNITS = prepare(SENTENCES).units;
+
+  /** The third paragraph's second sentence. */
+  const DELTA = SENTENCE_UNITS.findIndex((unit) => unit.text.startsWith("Delta"));
 
   const utterance = (id: string, text: string): Utterance => ({
     id,
@@ -230,6 +233,8 @@ describe("rendering", () => {
     queue: UtteranceQueue;
     units: readonly SpeechUnit[];
     progress: ReturnType<typeof makeProgressStore>;
+    /** What `stateFor` answers, read at call time so a test can change it. */
+    state: CellSpeechState;
   }
 
   const NO_DURATIONS: ReadonlyMap<number, number> = new Map<number, number>();
@@ -237,7 +242,7 @@ describe("rendering", () => {
 
   function speechOf(h: Harness): GridSpeech {
     return readySpeech({
-      stateFor: vi.fn(() => "ready" as const),
+      stateFor: vi.fn(() => h.state),
       queueFor: vi.fn(() => h.queue),
       unitsFor: vi.fn(() => h.units),
       subscribeProgress: h.progress.subscribe,
@@ -251,6 +256,7 @@ describe("rendering", () => {
       queue: arrived(emptyUtteranceQueue, utterance("u-1", markdown)),
       units: prepare(markdown).units,
       progress: makeProgressStore(progress),
+      state: "ready",
     };
   }
 
@@ -291,13 +297,13 @@ describe("rendering", () => {
   const items = (): HTMLElement[] => Array.from(prose().querySelectorAll("li"));
 
   /**
-   * Which unit an item's text was packed into, read off the harness's OWN units.
+   * Which unit speaks an item's text, read off the harness's OWN units.
    *
-   * Why not the literal indices: how many items fit in a unit is `prepare`'s
-   * packing, not the pane's contract. Hard-coded expectations turn a change to
-   * `UNIT_MIN_CHARS` / `UNIT_MAX_CHARS` into three failures that point at the
-   * pane. This is not circular — it asks the unit's `source`, not
-   * `matchUnitsToBlocks`, which is the mapping under test.
+   * Why not the literal indices: how a text is cut into units is `prepare`'s
+   * business, not the pane's contract. Hard-coded expectations turn a change
+   * there into failures that point at the pane. This is not circular — it
+   * asks the unit's `source`, not `firstUnitsOfBlocks`, which is the mapping
+   * under test.
    */
   const expectedUnitIn =
     (h: Harness) =>
@@ -317,14 +323,36 @@ describe("rendering", () => {
     return element;
   };
 
-  const speaking = (): HTMLElement[] => blocks().filter((block) => block.hasAttribute("data-speaking"));
+  /** The pinned ▶ — the playing unit's, always shown — or null when nothing here plays. */
+  const pinned = (): HTMLElement | null => screen.queryByTestId("play-from-here-pinned");
 
-  const segment = (index: number): HTMLElement =>
-    screen.getByTestId(`answer-pane-seg-cell-a-${index}`);
+  /** A block's own ▶: the button that shares its `data-speak-index`, or null. */
+  const playOf = (block: HTMLElement): HTMLElement | null => {
+    const index = block.getAttribute("data-speak-index");
+    if (index === null) return null;
+    return document.querySelector<HTMLElement>(`button.play-from-here[data-speak-index="${index}"]`);
+  };
 
-  /** A unit's Play button — see the "play buttons" section. */
-  const playButton = (index: number): HTMLElement =>
-    screen.getByTestId(`answer-pane-play-cell-a-${index}`);
+  /** Every ▶ the pane shows, the pinned one included. */
+  const shownPlays = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>("button.play-from-here[data-shown]"));
+
+  /** The rendered paragraph whose text starts with `start`. */
+  const paragraph = (start: string): HTMLElement => {
+    const found = Array.from(prose().querySelectorAll<HTMLElement>("p")).find((p) =>
+      (p.textContent ?? "").startsWith(start),
+    );
+    if (!found) throw new Error(`no paragraph ${start}`);
+    return found;
+  };
+
+  /** The ▶ is centred on the line box it is pinned to: its top lands inside that line. */
+  const onLine = (button: HTMLElement | null, line: number): void => {
+    expect(button).not.toBeNull();
+    const top = Number.parseFloat(button!.style.top);
+    expect(top).toBeGreaterThanOrEqual(line);
+    expect(top).toBeLessThan(line + 22);
+  };
 
   /**
    * jsdom has no layout, and the follow step is nothing but layout: "does the
@@ -436,18 +464,21 @@ describe("rendering", () => {
     source: "nothing on the screen was ever spoken like this",
   };
 
-  const box = (index: number): { top: number; height: number } => ({
-    top: Number.parseFloat(segment(index).style.top),
-    height: Number.parseFloat(segment(index).style.height),
-  });
+  /** The rendered block's top under the layout above, or null outside one. */
+  const blockTopOf = (element: Element): number | null => {
+    const index = blockIndexOf(element);
+    return index === null ? null : index * BLOCK_TOP;
+  };
+
+  let restoreLines: () => void = () => {};
 
   beforeEach(() => {
-    clearSynthStub();
     bodyRenders.count = 0;
     scrollTo.mockClear();
     StubResizeObserver.observed.length = 0;
     fitting();
     installLayout();
+    restoreLines = stubRangeLines(blockTopOf);
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
   });
 
@@ -457,6 +488,7 @@ describe("rendering", () => {
     cleanup();
     __resetAnswerWaitingForTests();
     restoreLayout();
+    restoreLines();
     vi.unstubAllGlobals();
   });
 
@@ -475,115 +507,47 @@ describe("rendering", () => {
       expect((await screen.findByTestId("mermaid")).textContent).toBe("flowchart TD\n  A --> B");
     });
 
-    it("one rail segment per unit in the scrubber's states", () => {
-      const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
-      expect(h.units).toHaveLength(3);
-      warm.add(h.units[2].text);
+    it("answer pane pins the play button on the playing paragraph", () => {
+      // The third paragraph's second sentence is playing: a unit that shares
+      // its block with the sentence before it.
+      expect(SENTENCE_UNITS[DELTA - 1].text).toMatch(/^Charlie/);
+      expect(SENTENCE_UNITS[DELTA].block).toBe(SENTENCE_UNITS[DELTA - 1].block);
+      const h = harness(SENTENCES, { unitIndex: DELTA, unitTime: 0, unitDuration: null });
+      h.state = "speaking";
       render(paneElement(speechOf(h)));
 
-      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(3);
-      h.units.forEach((unit, index) => {
-        const expected = segmentStateFor({
-          index,
-          playingIndex: 1,
-          cache: warm.has(unit.text) ? "ready" : "cold",
-        });
-        expect(segment(index)).toHaveAttribute("data-segment", expected);
-      });
-      expect(segment(0)).toHaveAttribute("data-segment", "played");
-      expect(segment(1)).toHaveAttribute("data-segment", "playing");
-      expect(segment(2)).toHaveAttribute("data-segment", "ready");
+      const third = paragraph("Charlie");
+      const offset = (third.textContent ?? "").indexOf("Delta");
+      expect(offset).toBeGreaterThan(0);
+      // Pause, at the line where that sentence starts inside the third
+      // paragraph — not at the paragraph's top, and not beside any other block.
+      expect(pinned()).toHaveAccessibleName("Pause");
+      onLine(pinned(), blockTopOf(third)! + offset);
+      // With nothing hovered it is the one ▶ shown.
+      expect(shownPlays()).toEqual([pinned()]);
     });
 
-    it("the pane reads cache state in the session's project voice", async () => {
-      const EMMA = "en-US-EmmaMultilingualNeural";
-      setProjectVoice("p", EMMA);
-      // The session list, loaded through the store's own fetch — which is where
-      // `voiceForSession` places the cell in its project.
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => ({
-          ok: true,
-          status: 200,
-          json: async () => [
-            { id: "cell-p", name: "cell-p", project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
-          ],
-        })),
-      );
-      try {
-        await refreshSessions();
-      } finally {
-        vi.unstubAllGlobals();
-        vi.stubGlobal("ResizeObserver", StubResizeObserver);
-      }
-      const h = harness(MARKDOWN, null);
-      voiced.set(h.units[0].text, EMMA); // the host warmed it in the project's voice
-      voiced.set(h.units[1].text, DEFAULT_SPEECH_VOICE); // a default-voice entry: not this cell's
-
-      render(
-        <MemoryRouter>
-          <AnswerPane sessionId="cell-p" speech={speechOf(h)} send={NO_SEND} />
-        </MemoryRouter>,
-      );
-
-      expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "ready");
-      expect(screen.getByTestId("answer-pane-seg-cell-p-1")).toHaveAttribute("data-segment", "cold");
-    });
-
-    it("the pane redraws its cache state when the project's voice changes", async () => {
-      const EMMA = "en-US-EmmaMultilingualNeural";
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => ({
-          ok: true,
-          status: 200,
-          json: async () => [
-            { id: "cell-p", name: "cell-p", project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
-          ],
-        })),
-      );
-      try {
-        await refreshSessions();
-      } finally {
-        vi.unstubAllGlobals();
-        vi.stubGlobal("ResizeObserver", StubResizeObserver);
-      }
-      const h = harness(MARKDOWN, null);
-      voiced.set(h.units[0].text, EMMA); // warmed in Emma, which the project does not use yet
-
-      render(
-        <MemoryRouter>
-          <AnswerPane sessionId="cell-p" speech={speechOf(h)} send={NO_SEND} />
-        </MemoryRouter>,
-      );
-      expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "cold");
-
-      // The override lands while the pane is open; nothing else re-renders it.
-      act(() => setProjectVoice("p", EMMA));
-
-      expect(screen.getByTestId("answer-pane-seg-cell-p-0")).toHaveAttribute("data-segment", "ready");
-    });
-
-    it("marks the spoken block and parks the playhead beside its segment", () => {
+    it("answer pane has no unit rail", () => {
       const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
       render(paneElement(speechOf(h)));
 
-      const marked = speaking();
-      expect(marked).toHaveLength(1);
-      expect(marked[0].tagName).toBe("P");
-      expect(marked[0]).toHaveTextContent(/^The first paragraph/);
-      expect(marked[0]).toHaveAttribute("data-unit", "1");
-
-      const head = screen.getByTestId("answer-pane-head-cell-a");
-      expect(segment(1).contains(head)).toBe(true);
-      expect(segment(0).contains(head)).toBe(false);
+      // The body is the text column and nothing beside it: no gutter, no
+      // segments, no playhead, no per-unit Play.
+      expect(Array.from(body().children).map((child) => child.className)).toEqual(["answer-pane-text"]);
+      expect(screen.queryAllByTestId(/^answer-pane-(seg|head|play)-/)).toHaveLength(0);
+      // No marking pass of the pane's own: the blocks carry the ▶ layer's marks only.
+      expect(prose().querySelector("[data-unit], [data-speaking]")).toBeNull();
+      // The ▶ layer instead: one per speakable block — the heading and three
+      // paragraphs, never the fence — and the pinned one for the playing unit.
+      expect(document.querySelectorAll("button.play-from-here[data-speak-index]")).toHaveLength(4);
+      expect(pinned()).not.toBeNull();
     });
 
-    it("the mark moves with the unit index and nothing re-renders inside a unit", () => {
+    it("the pinned button moves with the unit index and nothing re-renders inside a unit", () => {
       const h = harness(MARKDOWN, { unitIndex: 0, unitTime: 0, unitDuration: null });
       render(paneElement(speechOf(h)));
 
-      expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
+      onLine(pinned(), 0);
       const proseBefore = prose();
       const rendersBefore = bodyRenders.count;
 
@@ -594,46 +558,117 @@ describe("rendering", () => {
       h.progress.tick();
       expect(bodyRenders.count).toBe(rendersBefore);
       expect(prose()).toBe(proseBefore);
-      expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
+      onLine(pinned(), 0);
 
-      // The unit boundary: the mark moves to unit 2's two paragraphs.
-      h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
-      const marked = speaking();
-      expect(marked.map((b) => b.tagName)).toEqual(["P", "P"]);
-      expect(marked[0]).toHaveTextContent(/^The second paragraph/);
-      expect(marked[1]).toHaveTextContent(/^The third paragraph/);
-      expect(segment(2).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
+      // The unit boundary: the pin moves to unit 3, the paragraph after the
+      // fence (unit 2 is the fence's placeholder).
+      h.progress.set({ unitIndex: 3, unitTime: 0, unitDuration: null });
+      onLine(pinned(), 3 * BLOCK_TOP);
       // The text itself was not rebuilt.
       expect(prose()).toBe(proseBefore);
     });
 
-    it("another cell's run marks nothing here", () => {
+    it("another cell's run pins nothing here", () => {
       // `progressFor` answers null for every cell but the one running.
       const h = harness(MARKDOWN, null);
       render(paneElement(speechOf(h)));
 
-      expect(speaking()).toHaveLength(0);
-      expect(screen.queryByTestId("answer-pane-head-cell-a")).toBeNull();
-      // Still matched, still jumpable — only the mark is missing.
-      expect(blocks().filter((b) => b.hasAttribute("data-unit"))).toHaveLength(4);
-      for (let index = 0; index < 3; index += 1) {
-        expect(segment(index)).toHaveAttribute("data-segment", "cold");
-      }
+      expect(pinned()).toBeNull();
+      expect(shownPlays()).toHaveLength(0);
+      // Still matched, still jumpable — only the pin is missing.
+      expect(blocks().filter((b) => b.hasAttribute("data-speak-unit"))).toHaveLength(4);
     });
 
-    it("a segment click jumps to the unit and a block click does not", () => {
-      const h = harness(MARKDOWN, null);
+    it("pressing a paragraph's play button jumps the cell's run", () => {
+      const h = harness(SENTENCES);
+      const speech = speechOf(h);
+      const view = render(paneElement(speech));
+      const unitOf = (start: string): number => h.units.findIndex((unit) => unit.text.startsWith(start));
+
+      const second = paragraph("The second paragraph");
+      fireEvent.mouseOver(second);
+      fireEvent.click(playOf(second)!);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", unitOf("The second paragraph"));
+
+      // A paragraph read as two sentences starts at its first.
+      const third = paragraph("Charlie");
+      fireEvent.mouseOver(third);
+      fireEvent.click(playOf(third)!);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", unitOf("Charlie"));
+      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
+
+      // The pinned ▶ while the voice reads is Pause: it pauses the cell's run
+      // and jumps nowhere.
+      h.state = "speaking";
+      h.progress.set({ unitIndex: DELTA, unitTime: 0, unitDuration: null });
+      fireEvent.click(pinned()!);
+      expect(speech.onPause).toHaveBeenCalledWith("cell-a");
+      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
+
+      // Paused, the same ▶ reads Play and restarts the paused sentence.
+      h.state = "paused";
+      view.rerender(paneElement(speech));
+      expect(pinned()).toHaveAccessibleName("Play from here");
+      fireEvent.click(pinned()!);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", DELTA);
+      expect(speech.onPause).toHaveBeenCalledTimes(1);
+    });
+
+    it("link click and text selection do not jump", () => {
+      const linked = [
+        "# Deploy plan",
+        "",
+        "The runbook lives in [the deploy guide](https://example.com/deploy) and explains the migration order before any traffic moves.",
+        "",
+      ].join("\n");
+      const h = harness(linked, null);
       const speech = speechOf(h);
       render(paneElement(speech));
 
-      // The text is text: reading starts from a Play button, never from a block.
-      fireEvent.click(h1());
-      fireEvent.click(screen.getByText(/^The third paragraph/));
-      expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+      const link = screen.getByRole("link", { name: "the deploy guide" });
+      const para = link.closest("p")!;
+      // The paragraph is a speakable block with a ▶ of its own.
+      expect(playOf(para)).not.toBeNull();
 
-      fireEvent.click(segment(1));
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
-      expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
+      fireEvent.click(link);
+      fireEvent.keyDown(link, { key: "Enter" });
+
+      // A selection dragged across the paragraph ends in a click on it.
+      const selection = window.getSelection()!;
+      const range = document.createRange();
+      range.selectNodeContents(para);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      fireEvent.mouseDown(para);
+      fireEvent.mouseUp(para);
+      fireEvent.click(para);
+      expect(selection.toString()).toContain("The runbook lives in");
+      selection.removeAllRanges();
+
+      expect(speech.onJumpToUnit).not.toHaveBeenCalled();
+      expect(speech.onSpeak).not.toHaveBeenCalled();
+    });
+
+    it("touch tap reveals one paragraph's play button", () => {
+      const h = harness(SENTENCES, { unitIndex: DELTA, unitTime: 0, unitDuration: null });
+      h.state = "speaking";
+      const speech = speechOf(h);
+      render(paneElement(speech));
+
+      const first = paragraph("The first paragraph");
+      const second = paragraph("The second paragraph");
+      // Nothing dimmed beside every paragraph: only the playing one shows.
+      expect(shownPlays()).toEqual([pinned()]);
+
+      fireEvent.click(first);
+      expect(shownPlays()).toEqual([playOf(first), pinned()]);
+
+      // Another tap moves the reveal; the first paragraph's ▶ goes.
+      fireEvent.click(second);
+      expect(shownPlays()).toEqual([playOf(second), pinned()]);
+      expect(playOf(first)).not.toHaveAttribute("data-shown");
+      // A tap reveals; it never plays.
+      expect(speech.onJumpToUnit).not.toHaveBeenCalled();
     });
 
     it("a speakable block is neither a button nor a tab stop", () => {
@@ -642,7 +677,7 @@ describe("rendering", () => {
       render(paneElement(speech));
 
       const block = screen.getByText(/^The first paragraph/);
-      expect(block).toHaveAttribute("data-unit", "1");
+      expect(block).toHaveAttribute("data-speak-unit", "1");
       expect(block).not.toHaveAttribute("role");
       expect(block).not.toHaveAttribute("tabindex");
 
@@ -657,16 +692,18 @@ describe("rendering", () => {
       render(paneElement(speech));
 
       // The renderer wraps a fenced block in a `.code-block` div so the copy button
-      // can sit beside the `pre`, so the matchable block is that wrapper and the
-      // `pre` itself is a child of it.
+      // can sit beside the `pre`.
       const codeBlock = blocks().find((block) => block.classList.contains("code-block"));
       expect(codeBlock).toBeDefined();
-      expect(codeBlock).not.toHaveAttribute("data-unit");
+      expect(codeBlock).not.toHaveAttribute("data-speak-unit");
+      expect(codeBlock!.querySelector("[data-speak-unit]")).toBeNull();
       expect(codeBlock).not.toHaveAttribute("role");
       expect(codeBlock).not.toHaveAttribute("tabindex");
-      // Unit 2 was packed from the two paragraphs after the fence, not the fence.
-      expect(codeBlock).not.toHaveAttribute("data-speaking");
+      // The fence speaks a placeholder unit that no block holds: nothing to pin.
+      expect(pinned()).toBeNull();
 
+      fireEvent.mouseOver(codeBlock!);
+      expect(shownPlays()).toHaveLength(0);
       fireEvent.click(codeBlock!);
       fireEvent.keyDown(codeBlock!, { key: "Enter" });
       expect(speech.onJumpToUnit).not.toHaveBeenCalled();
@@ -678,12 +715,12 @@ describe("rendering", () => {
       render(paneElement(speech));
 
       const button = screen.getByLabelText("Copy code");
-      // The precondition the regression needs: the fence sits INSIDE a matched
-      // block, so the pane's delegated handler would resolve a click on this
-      // button to that block's unit if the click were allowed to bubble.
-      const block = button.closest("[data-unit]");
-      expect(block).not.toBeNull();
-      expect(block!.tagName).toBe("LI");
+      // The precondition the regression needs: the fence sits inside a list
+      // item whose text is a speakable block, so a click allowed to bubble
+      // would reach the ▶ layer's handlers.
+      const item = button.closest("li");
+      expect(item).not.toBeNull();
+      expect(item!.querySelector("[data-speak-unit]")).not.toBeNull();
 
       fireEvent.click(button);
       // Copying is not a request to be read to from here.
@@ -710,15 +747,17 @@ describe("rendering", () => {
       fireEvent.mouseDown(heading);
       fireEvent.click(heading);
       fireEvent.dragStart(heading);
-      fireEvent.mouseDown(segment(1));
-      fireEvent.click(segment(1));
+      const first = paragraph("The first paragraph");
+      fireEvent.mouseOver(first);
+      fireEvent.mouseDown(playOf(first)!);
+      fireEvent.click(playOf(first)!);
       fireEvent.mouseDown(screen.getByTestId("answer-pane-cell-a"));
 
       expect(cell.mouseDown).not.toHaveBeenCalled();
       expect(cell.click).not.toHaveBeenCalled();
       expect(cell.dragStart).not.toHaveBeenCalled();
-      // The segment click still did its own work inside the pane; the heading
-      // is text and starts nothing.
+      // The ▶ press still did its own work inside the pane; the heading is
+      // text and starts nothing.
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
       expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 1);
     });
@@ -737,7 +776,7 @@ describe("rendering", () => {
       const link = screen.getByRole("link", { name: "the deploy guide" });
       const paragraph = link.closest("p");
       // The paragraph is a matched block, and still plain text.
-      expect(paragraph).toHaveAttribute("data-unit", "1");
+      expect(paragraph).toHaveAttribute("data-speak-unit", "1");
       expect(paragraph).not.toHaveAttribute("role");
 
       link.focus();
@@ -755,7 +794,7 @@ describe("rendering", () => {
 
       const paneBefore = screen.getByTestId("answer-pane-cell-a");
       expect(h1()).toHaveTextContent("Deploy plan");
-      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(3);
+      expect(document.querySelectorAll("button.play-from-here[data-speak-index]")).toHaveLength(4);
 
       // The host's queue takes the arrival as `current`; the run that was on
       // is over, so its progress is gone too.
@@ -767,10 +806,10 @@ describe("rendering", () => {
       expect(screen.getByTestId("answer-pane-cell-a")).toBe(paneBefore);
       expect(h1()).toHaveTextContent("Other");
       expect(screen.queryByText(/^The first paragraph/)).toBeNull();
-      expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(2);
-      expect(speaking()).toHaveLength(0);
+      expect(document.querySelectorAll("button.play-from-here[data-speak-index]")).toHaveLength(2);
+      expect(pinned()).toBeNull();
       // The new text is matched afresh: heading and paragraph, both jumpable.
-      expect(blocks().filter((b) => b.hasAttribute("data-unit")).map((b) => b.tagName)).toEqual([
+      expect(blocks().filter((b) => b.hasAttribute("data-speak-unit")).map((b) => b.tagName)).toEqual([
         "H1",
         "P",
       ]);
@@ -778,8 +817,8 @@ describe("rendering", () => {
 
     /**
      * A list. The voice reads each item as its own paragraph, so the items are
-     * the blocks: a unit spans exactly the items it speaks, and the `ul` that
-     * holds them is nothing but a container.
+     * the blocks: each has its own ▶, and the `ul` that holds them is nothing
+     * but a container.
      */
     describe("lists", () => {
       it("list items carry the unit marks and the list does not", () => {
@@ -787,21 +826,18 @@ describe("rendering", () => {
         const expectedUnit = expectedUnitIn(h);
         render(paneElement(speechOf(h)));
 
-        // Heading, lead-in, and three units cut out of the list. The counts are
-        // canaries: if packing changes shape entirely, they say so here.
-        expect(h.units).toHaveLength(5);
+        // Heading, lead-in, and one unit per item. The counts are canaries: if
+        // preparation changes shape entirely, they say so here.
+        expect(h.units).toHaveLength(8);
         expect(items()).toHaveLength(6);
-        expect(items().map((item) => item.dataset.unit)).toEqual(
+        expect(items().map((item) => item.dataset.speakUnit)).toEqual(
           items().map((item) => String(expectedUnit(item))),
         );
 
-        // The property the feature promises, whatever the packing constants are:
-        // the six items fall into exactly three units, in reading order, with no
-        // unit skipped between them.
-        const marks = items().map((item) => Number(item.dataset.unit));
-        expect(marks).toEqual([...marks].sort((a, b) => a - b));
-        const distinct = [...new Set(marks)];
-        expect(distinct).toEqual([distinct[0], distinct[0] + 1, distinct[0] + 2]);
+        // The property the feature promises: the six items are six units, in
+        // reading order, with no unit skipped between them.
+        const marks = items().map((item) => Number(item.dataset.speakUnit));
+        expect(marks).toEqual(Array.from({ length: 6 }, (_, i) => marks[0] + i));
 
         for (const item of items()) {
           expect(item).not.toHaveAttribute("role");
@@ -809,10 +845,9 @@ describe("rendering", () => {
         }
 
         // The container is not a block: no mark, no role, no tab stop.
-        expect(list()).not.toHaveAttribute("data-unit");
+        expect(list()).not.toHaveAttribute("data-speak-unit");
         expect(list()).not.toHaveAttribute("role");
         expect(list()).not.toHaveAttribute("tabindex");
-        expect(list()).not.toHaveAttribute("data-speaking");
       });
 
       it("a list item's Play jumps to its unit", () => {
@@ -826,7 +861,8 @@ describe("rendering", () => {
           // The item itself is text.
           fireEvent.click(item);
           expect(speech.onJumpToUnit).not.toHaveBeenCalled();
-          fireEvent.click(playButton(expectedUnit(item)));
+          fireEvent.mouseOver(item);
+          fireEvent.click(playOf(item)!);
           expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", expectedUnit(item));
           vi.mocked(speech.onJumpToUnit).mockClear();
         }
@@ -843,40 +879,30 @@ describe("rendering", () => {
         expect(speech.onJumpToUnit).not.toHaveBeenCalled();
       });
 
-      it("the spoken items carry data-speaking", () => {
+      it("the pinned button follows the voice from item to item", () => {
         const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
         const expectedUnit = expectedUnitIn(h);
         render(paneElement(speechOf(h)));
 
-        // Unit 3 speaks a run of items — exactly those, and never the whole list.
+        // Unit 3 speaks one item — the pin sits beside exactly that one, never
+        // at the top of the whole list.
         const spoken = items().filter((item) => expectedUnit(item) === 3);
-        expect(spoken.length).toBeGreaterThan(1);
-        expect(speaking()).toEqual(spoken);
-      });
-
-      it("the previous unit's items stop speaking", () => {
-        const h = harness(LIST_MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
-        const expectedUnit = expectedUnitIn(h);
-        render(paneElement(speechOf(h)));
-        expect(speaking()).toEqual(items().filter((item) => expectedUnit(item) === 3));
+        expect(spoken).toHaveLength(1);
+        onLine(pinned(), blockTopOf(spoken[0])!);
 
         h.progress.set({ unitIndex: 4, unitTime: 0, unitDuration: null });
-        // The strip covers the whole [data-unit] subtree, not this answer's direct
-        // children: without that, the items unit 3 spoke keep the mark the voice
-        // has left behind, and by the end of the list every item read so far is
-        // still highlighted.
-        const nowSpeaking = items().filter((item) => expectedUnit(item) === 4);
-        expect(nowSpeaking.length).toBeGreaterThan(0);
-        expect(prose().querySelectorAll("[data-speaking]")).toHaveLength(nowSpeaking.length);
-        expect(speaking()).toEqual(nowSpeaking);
+        const next = items().filter((item) => expectedUnit(item) === 4);
+        expect(next).toHaveLength(1);
+        onLine(pinned(), blockTopOf(next[0])!);
+        expect(document.querySelectorAll("[data-testid='play-from-here-pinned']")).toHaveLength(1);
       });
     });
 
     /**
      * Following the voice. The pane moves at ONE moment — when it mounts while a
      * unit is playing — and only when there is somewhere to move to. A unit
-     * boundary moves the mark and the playhead, never the text: the reader's
-     * scroll position is theirs for as long as the pane stays open.
+     * boundary moves the pinned ▶, never the text: the reader's scroll
+     * position is theirs for as long as the pane stays open.
      */
     describe("following", () => {
       it("a unit change does not scroll the pane", () => {
@@ -887,19 +913,18 @@ describe("rendering", () => {
         expect(scrolls()).toEqual([]);
 
         h.progress.set({ unitIndex: 0, unitTime: 0, unitDuration: null });
-        expect(speaking().map((b) => b.tagName)).toEqual(["H1"]);
+        onLine(pinned(), 0);
 
-        // Unit 2 is the two paragraphs after the fence (h1, p, pre, p, p): the
-        // mark and the playhead move there, the body stays where it is.
-        h.progress.set({ unitIndex: 2, unitTime: 0, unitDuration: null });
-        expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
-        expect(segment(2).contains(screen.getByTestId("answer-pane-head-cell-a"))).toBe(true);
+        // Unit 3 is the paragraph after the fence (h1, p, pre, p, p): the pin
+        // moves there, the body stays where it is.
+        h.progress.set({ unitIndex: 3, unitTime: 0, unitDuration: null });
+        onLine(pinned(), 3 * BLOCK_TOP);
         expect(scrollTo).not.toHaveBeenCalled();
       });
 
       it("does not scroll when the body is rebuilt on the way out of a wait mid-unit", () => {
         overflowing();
-        const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+        const h = harness(MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
         render(paneElement(speechOf(h)));
         // The mount itself lands on the spoken block — pinned below.
         scrollTo.mockClear();
@@ -907,11 +932,11 @@ describe("rendering", () => {
         act(() => beginWaiting("cell-a", "u-1"));
         expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeInTheDocument();
 
-        // A transport press hands the body back while unit 2 is still playing:
-        // the column is rebuilt and marked again, and nothing scrolls.
+        // A transport press hands the body back while unit 3 is still playing:
+        // the column is rebuilt and its ▶s with it, and nothing scrolls.
         act(() => noteTransport("cell-a"));
         expect(screen.queryByTestId("answer-pane-waiting-cell-a")).toBeNull();
-        expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+        onLine(pinned(), 3 * BLOCK_TOP);
         expect(scrollTo).not.toHaveBeenCalled();
       });
 
@@ -943,61 +968,37 @@ describe("rendering", () => {
 
       it("opening mid-run lands on the spoken block", () => {
         overflowing();
-        // Unit 2 is already playing when the eye opens the pane.
-        const h = harness(MARKDOWN, { unitIndex: 2, unitTime: 0, unitDuration: null });
+        // Unit 3 is already playing when the eye opens the pane.
+        const h = harness(MARKDOWN, { unitIndex: 3, unitTime: 0, unitDuration: null });
         render(paneElement(speechOf(h)));
 
         expect(scrolls()).toEqual([3 * BLOCK_TOP - layout.clientHeight / 3]);
-        expect(speaking().map((b) => b.tagName)).toEqual(["P", "P"]);
+        onLine(pinned(), 3 * BLOCK_TOP);
       });
 
-      it("rail segments never overlap", () => {
-        // The smoke test's real answer (2026-09-16): `prepare` speaks "Hi." first
-        // with the whole opening paragraph as its source, then packs the rest of
-        // that paragraph and the two after it into unit 1 — so block 0 belongs to
-        // both units. Two segments over one block put the playhead beside the
-        // wrong place; the second must start after the first one's end.
-        const h = harness(SMOKE, { unitIndex: 1, unitTime: 0, unitDuration: null });
-        expect(h.units).toHaveLength(2);
-        expect(h.units[0].text).toBe("Hi.");
+      it("opening on a paragraph's later sentence lands on that paragraph", () => {
+        overflowing();
+        // The playing unit is the third paragraph's second sentence: no block
+        // starts at it, and the pane still lands on the block that holds it.
+        const h = harness(SENTENCES, { unitIndex: DELTA, unitTime: 0, unitDuration: null });
         render(paneElement(speechOf(h)));
 
-        // The block itself is credited to its first unit — the jump target.
-        expect(blocks()[0].dataset.unit).toBe("0");
-        expect(box(0)).toEqual({ top: 0, height: BLOCK_HEIGHT });
-        // Unit 1's segment starts after unit 0's end, yet beside the shared
-        // block — not down at the second paragraph — and reaches the bottom of
-        // its last block.
-        expect(box(1).top).toBeGreaterThanOrEqual(box(0).top + box(0).height);
-        expect(box(1).top).toBeLessThan(BLOCK_TOP);
-        expect(box(1).top + box(1).height).toBe(2 * BLOCK_TOP + BLOCK_HEIGHT);
+        expect(scrolls()).toEqual([3 * BLOCK_TOP - layout.clientHeight / 3]);
       });
 
-      it("a unit without a block scrolls nothing and keeps a minimum segment", () => {
+      it("a unit without a block scrolls nothing and pins nothing", () => {
         overflowing();
         const h = harness(MARKDOWN, { unitIndex: 1, unitTime: 0, unitDuration: null });
-        // A ghost between the heading and the first paragraph: spoken, never drawn.
-        h.units = [h.units[0], GHOST, h.units[1], h.units[2]];
+        // A ghost between the heading and the first paragraph: spoken, never
+        // drawn. The fence's own placeholder unit is left out, so the ghost is
+        // the only blockless unit.
+        h.units = [h.units[0], GHOST, h.units[1], h.units[3], h.units[4]];
         render(paneElement(speechOf(h)));
 
         expect(scrollTo).not.toHaveBeenCalled();
-        expect(speaking()).toHaveLength(0);
-        expect(screen.queryAllByTestId(/^answer-pane-seg-cell-a-/)).toHaveLength(4);
-
-        // The rail is laid out from the blocks: the heading's segment spans the
-        // heading, the ghost gets 8px right after it, and the rest follow their
-        // blocks — unit 3 spanning its two paragraphs (blocks 3 and 4).
-        expect(box(0)).toEqual({ top: 0, height: BLOCK_HEIGHT });
-        expect(box(1).height).toBe(8);
-        expect(box(1).top).toBeGreaterThanOrEqual(box(0).top + box(0).height);
-        expect(box(2)).toEqual({ top: BLOCK_TOP, height: BLOCK_HEIGHT });
-        expect(box(3)).toEqual({ top: 3 * BLOCK_TOP, height: BLOCK_TOP + BLOCK_HEIGHT });
-        // The ghost's segment still says what it is.
-        expect(segment(1)).toHaveAttribute("data-segment", "playing");
-
-        // Re-laid when the body's box changes — the observer watches the body,
-        // never the xterm container.
-        expect(StubResizeObserver.observed).toContain(body());
+        expect(pinned()).toBeNull();
+        // The blocks are still matched: the heading and three paragraphs.
+        expect(blocks().filter((b) => b.hasAttribute("data-speak-unit"))).toHaveLength(4);
       });
     });
 
@@ -1053,8 +1054,8 @@ describe("rendering", () => {
           probe.style.background,
         );
 
-        // Dropping the paint must not have moved the geometry the rail reads:
-        // the body is still the positioned grid whose first column is the rail.
+        // Dropping the paint must not have moved the geometry the scroll reads:
+        // the body is still the positioned grid the blocks are measured in.
         const body = cssRule(".answer-pane-body");
         expect(body).toMatch(/position:\s*relative/);
         expect(body).toMatch(/display:\s*grid/);
@@ -1173,7 +1174,6 @@ describe("rendering", () => {
  */
 describe("copy as markdown", () => {
   beforeEach(() => {
-    clearSynthStub();
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
     copyToClipboard.mockClear();
   });
@@ -1225,15 +1225,15 @@ describe("copy as markdown", () => {
  *
  * The pane used to resolve a click anywhere in a spoken block — a link
  * included — to a jump, so a link inside an answer could not be followed
- * without the voice starting to read from there too. Now each unit has a real
- * `<button>` in the rail column, laid out from the same geometry as its rail
- * segment, and the blocks carry no role, no tab stop and no handler.
+ * without the voice starting to read from there too. Now every speakable
+ * block has a real `<button>` beside its first line — the Play-from-here layer
+ * pages use — and the blocks carry no role, no tab stop and no handler.
  *
  * The units are real `prepare()` output and the blocks real react-markdown
  * output, as in `AnswerPane.test.tsx`; the host is a stub.
  */
 describe("play buttons", () => {
-  /** Heading (unit 0), a paragraph with a link (unit 1), a fence, and two paragraphs (unit 2). */
+  /** Heading (unit 0), a paragraph with a link (unit 1), a fence (unit 2), and two paragraphs (units 3, 4). */
   const MARKDOWN = [
     "# Deploy plan",
     "",
@@ -1251,9 +1251,7 @@ describe("play buttons", () => {
 
   /**
    * A fence and two long paragraphs, for an answer that opens or closes with
-   * code. Each paragraph clears `UNIT_MIN_CHARS` on its own, so neither is packed
-   * with the fence and the fence is left a unit of its own (`⟦code⟧`) that
-   * matches no block.
+   * code. The fence is a unit of its own (`⟦code⟧`) that matches no block.
    */
   const FENCE = ["```ts", "const x = 1;", "```", ""];
 
@@ -1281,60 +1279,44 @@ describe("play buttons", () => {
     return element;
   };
 
-  const play = (unit: number): HTMLElement => screen.getByTestId(`answer-pane-play-cell-a-${unit}`);
+  /** The rendered block that starts the voice at `unit`, i.e. carries it as `data-speak-unit`. */
+  const blockOf = (unit: number): HTMLElement => {
+    const block = prose().querySelector<HTMLElement>(`[data-speak-unit="${unit}"]`);
+    if (!block) throw new Error(`no block starts at unit ${unit}`);
+    return block;
+  };
 
+  /** The ▶ beside the block that starts at `unit`. */
+  const play = (unit: number): HTMLElement => {
+    const index = blockOf(unit).getAttribute("data-speak-index");
+    const button = document.querySelector<HTMLElement>(`button.play-from-here[data-speak-index="${index}"]`);
+    if (!button) throw new Error(`no play button for unit ${unit}`);
+    return button;
+  };
+
+  /** Every block's ▶ — not the pinned one. */
   const plays = (): HTMLElement[] =>
-    Array.from(document.querySelectorAll<HTMLElement>("[data-testid^='answer-pane-play-cell-a-']"));
+    Array.from(document.querySelectorAll<HTMLElement>("button.play-from-here[data-speak-index]"));
 
-  /** The units whose Play is shown, read off each button's own `data-play-unit` —
-   * not its position, which stops being its unit once a blockless unit has no button. */
+  /** The units whose block's ▶ is shown, read off the block the ▶ shares an index with. */
   const shown = (): number[] =>
     plays()
       .filter((button) => button.hasAttribute("data-shown"))
-      .map((button) => Number(button.dataset.playUnit));
+      .map((button) =>
+        Number(
+          prose()
+            .querySelector(`[data-speak-index="${button.getAttribute("data-speak-index")}"]`)!
+            .getAttribute("data-speak-unit"),
+        ),
+      );
 
-  /**
-   * The one layout the pane needs, as in `AnswerPane.test.tsx`: the k-th direct
-   * child of `.prose` sits at `k * BLOCK_TOP` and is `BLOCK_HEIGHT` tall.
-   */
-  const BLOCK_TOP = 100;
-
-  const BLOCK_HEIGHT = 80;
-
-  const saved: Record<string, PropertyDescriptor | undefined> = {};
-
-  const blockIndexOf = (element: Element): number | null => {
-    const parent = element.parentElement;
-    if (!parent?.classList.contains("prose")) return null;
-    return Array.from(parent.children).indexOf(element);
-  };
+  const pinned = (): HTMLElement | null => screen.queryByTestId("play-from-here-pinned");
 
   beforeEach(() => {
-    clearSynthStub();
-    for (const name of ["offsetTop", "offsetHeight"]) {
-      saved[name] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
-    }
-    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
-      configurable: true,
-      get(this: HTMLElement) {
-        const index = blockIndexOf(this);
-        return index === null ? 0 : index * BLOCK_TOP;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get(this: HTMLElement) {
-        return blockIndexOf(this) === null ? 0 : BLOCK_HEIGHT;
-      },
-    });
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
   });
 
   afterEach(() => {
-    for (const [name, descriptor] of Object.entries(saved)) {
-      if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
-    }
     vi.unstubAllGlobals();
   });
 
@@ -1345,7 +1327,7 @@ describe("play buttons", () => {
 
       const link = screen.getByRole("link", { name: "the deploy guide" });
       // The precondition: the link sits inside a spoken block.
-      expect(link.closest("[data-unit]")).toHaveAttribute("data-unit", "1");
+      expect(link.closest("[data-speak-unit]")).toHaveAttribute("data-speak-unit", "1");
 
       fireEvent.click(link);
       fireEvent.keyDown(link, { key: "Enter" });
@@ -1357,38 +1339,33 @@ describe("play buttons", () => {
       renderPane(speech);
 
       const paragraph = screen.getByText(/^The second paragraph/);
-      expect(paragraph).toHaveAttribute("data-unit", "2");
+      expect(paragraph).toHaveAttribute("data-speak-unit", "3");
       fireEvent.click(paragraph);
       fireEvent.click(prose().querySelector("h1")!);
       expect(speech.onJumpToUnit).not.toHaveBeenCalled();
 
       // The text is text: no block is a button or a tab stop.
-      for (const block of Array.from(prose().querySelectorAll("[data-unit]"))) {
+      for (const block of Array.from(prose().querySelectorAll("[data-speak-unit]"))) {
         expect(block).not.toHaveAttribute("role");
         expect(block).not.toHaveAttribute("tabindex");
       }
     });
 
-    it("Play beside a unit starts playback at that unit", () => {
+    it("Play beside a block starts playback at its unit", () => {
       const { speech } = playSpeech();
       renderPane(speech);
 
-      expect(play(2).tagName).toBe("BUTTON");
-      expect(play(2)).toHaveAccessibleName("Read from here");
-      fireEvent.click(play(2));
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
+      expect(play(3).tagName).toBe("BUTTON");
+      expect(play(3)).toHaveAccessibleName("Play from here");
+      // Beside the block, never inside it: no block's text moves.
+      expect(blockOf(3).contains(play(3))).toBe(false);
+      fireEvent.mouseOver(blockOf(3));
+      fireEvent.click(play(3));
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 3);
+      fireEvent.mouseOver(blockOf(0));
       fireEvent.click(play(0));
       expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 0);
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
-
-      // Beside the first line of the unit's first block: unit 1 is block 1, unit
-      // 2 starts at block 3 (block 2 is the fence).
-      expect(play(1).style.top).toBe(`${1 * BLOCK_TOP}px`);
-      expect(play(2).style.top).toBe(`${3 * BLOCK_TOP}px`);
-
-      // The rail segment is still a jump, as it always was.
-      fireEvent.click(screen.getByTestId("answer-pane-seg-cell-a-1"));
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
     });
 
     it("Play is keyboard operable", async () => {
@@ -1401,74 +1378,80 @@ describe("play buttons", () => {
       const button = play(1);
       expect(button).toHaveAttribute("type", "button");
       expect(button).not.toHaveAttribute("tabindex");
-      button.focus();
+      act(() => button.focus());
       expect(document.activeElement).toBe(button);
+      // Focus reveals it, like a hover does.
+      expect(shown()).toEqual([1]);
       await user.keyboard("{Enter}");
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(1);
       expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 1);
 
-      play(2).focus();
+      play(3).focus();
       await user.keyboard(" ");
       expect(speech.onJumpToUnit).toHaveBeenCalledTimes(2);
-      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 2);
-
-      // Focus reveals it, like a hover does.
-      fireEvent.focusIn(button);
-      expect(shown()).toEqual([1]);
+      expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", 3);
     });
 
     it("the playing unit's button is Pause", () => {
       const { speech } = playSpeech({ unitIndex: 1, unitTime: 0, unitDuration: null }, "speaking");
       renderPane(speech);
 
-      expect(play(1)).toHaveAccessibleName("Pause");
-      expect(play(1)).toHaveAttribute("data-playing");
-      expect(play(0)).toHaveAccessibleName("Read from here");
-      expect(shown()).toEqual([1]);
+      expect(pinned()).toHaveAccessibleName("Pause");
+      expect(pinned()).toHaveAttribute("data-playing");
+      expect(pinned()).toHaveAttribute("data-shown");
+      expect(play(0)).toHaveAccessibleName("Play from here");
+      expect(shown()).toEqual([]);
 
-      fireEvent.click(play(1));
+      fireEvent.click(pinned()!);
       expect(speech.onPause).toHaveBeenCalledWith("cell-a");
       expect(speech.onJumpToUnit).not.toHaveBeenCalled();
     });
 
-    it("hover reveals only the hovered unit's Play", () => {
+    it("paused, the pinned button plays from the paused unit", () => {
+      const { speech } = playSpeech({ unitIndex: 3, unitTime: 0, unitDuration: null }, "paused");
+      renderPane(speech);
+
+      // Still shown, so the reader sees where the voice stopped.
+      expect(pinned()).toHaveAttribute("data-shown");
+      expect(pinned()).not.toHaveAttribute("data-playing");
+      expect(pinned()).toHaveAccessibleName("Play from here");
+      fireEvent.click(pinned()!);
+      expect(speech.onJumpToUnit).toHaveBeenCalledWith("cell-a", 3);
+      expect(speech.onPause).not.toHaveBeenCalled();
+    });
+
+    it("hover reveals only the hovered block's Play", () => {
       const { speech } = playSpeech({ unitIndex: 0, unitTime: 0, unitDuration: null }, "speaking");
       renderPane(speech);
-      expect(shown()).toEqual([0]);
+      expect(shown()).toEqual([]);
+      expect(pinned()).toHaveAttribute("data-shown");
 
       // Over a word inside the block, not the block itself: the delegation has
       // to find the block from whatever the pointer is over.
-      fireEvent.pointerOver(screen.getByRole("link", { name: "the deploy guide" }));
-      expect(shown()).toEqual([0, 1]);
+      fireEvent.mouseOver(screen.getByRole("link", { name: "the deploy guide" }));
+      expect(shown()).toEqual([1]);
 
-      fireEvent.pointerOver(screen.getByText(/^The third paragraph/));
-      expect(shown()).toEqual([0, 2]);
+      fireEvent.mouseOver(screen.getByText(/^The third paragraph/));
+      expect(shown()).toEqual([4]);
 
       // Moving onto the button itself keeps it shown rather than flickering off.
-      fireEvent.pointerOver(play(2));
-      expect(shown()).toEqual([0, 2]);
-
-      // The fence is no unit's: nothing but the playing unit shows.
-      fireEvent.pointerOver(prose().querySelector(".code-block")!);
-      expect(shown()).toEqual([0]);
-
-      fireEvent.pointerOver(screen.getByText(/^The second paragraph/));
-      fireEvent.pointerLeave(screen.getByTestId("answer-pane-body-cell-a"));
-      expect(shown()).toEqual([0]);
+      fireEvent.mouseOver(play(4));
+      expect(shown()).toEqual([4]);
+      expect(pinned()).toHaveAttribute("data-shown");
     });
 
     it("unspoken blocks have no Play", () => {
-      const { speech, units } = playSpeech();
+      const { speech } = playSpeech();
       renderPane(speech);
 
-      // One Play per unit, and none of them beside the fence.
-      expect(plays()).toHaveLength(units.length);
+      // One Play per speakable block — the heading and three paragraphs — and
+      // none for the fence.
+      expect(plays()).toHaveLength(4);
       const codeBlock = prose().querySelector<HTMLElement>(".code-block");
       expect(codeBlock).not.toBeNull();
-      expect(codeBlock).not.toHaveAttribute("data-unit");
-      expect(codeBlock!.querySelector("[data-testid^='answer-pane-play']")).toBeNull();
-      const fenceTop = `${codeBlock!.offsetTop}px`;
-      for (const button of plays()) expect(button.style.top).not.toBe(fenceTop);
+      expect(codeBlock).not.toHaveAttribute("data-speak-unit");
+      expect(codeBlock!.querySelector("[data-speak-unit]")).toBeNull();
+      expect(codeBlock!.querySelector("button.play-from-here")).toBeNull();
     });
 
     it("a unit with no block has no Play", () => {
@@ -1482,20 +1465,15 @@ describe("play buttons", () => {
         // The precondition: the fence is a unit of its own that speaks no block.
         const fenceUnit = units.findIndex((unit) => unit.source === "⟦code⟧");
         expect(fenceUnit).toBeGreaterThanOrEqual(0);
+        expect(prose().querySelector(`[data-speak-unit="${fenceUnit}"]`)).toBeNull();
 
-        // No Play for it — not hidden, not dimmed, not a tab stop: absent.
-        expect(screen.queryByTestId(`answer-pane-play-cell-a-${fenceUnit}`)).toBeNull();
-        expect(plays()).toHaveLength(units.length - 1);
-
-        // Its rail segment is still a jump.
-        fireEvent.click(screen.getByTestId(`answer-pane-seg-cell-a-${fenceUnit}`));
-        expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", fenceUnit);
-
-        // Every other unit keeps its Play, beside its own block.
-        for (const block of Array.from(prose().querySelectorAll<HTMLElement>("[data-unit]"))) {
-          const unit = Number(block.getAttribute("data-unit"));
+        // Every speakable block keeps its Play, and each one jumps to its own
+        // block's first unit — never to the fence's.
+        expect(plays()).toHaveLength(2);
+        for (const block of Array.from(prose().querySelectorAll<HTMLElement>("[data-speak-unit]"))) {
+          const unit = Number(block.getAttribute("data-speak-unit"));
           expect(unit).not.toBe(fenceUnit);
-          expect(play(unit).style.top).toBe(`${block.offsetTop}px`);
+          fireEvent.mouseOver(block);
           fireEvent.click(play(unit));
           expect(speech.onJumpToUnit).toHaveBeenLastCalledWith("cell-a", unit);
         }
@@ -1503,13 +1481,9 @@ describe("play buttons", () => {
       }
     });
 
-    it("every Play stays level with its segment across answer swaps", () => {
-      // A fence-first answer has a placeholder where unit 0's Play would be; the
-      // next answer has a real button there — a NEW element, created one render
-      // after the marking pass, with no `top` of its own until it is aligned.
+    it("a swapped answer gets its own Play buttons", () => {
       const fenceFirst = [...FENCE, ...LONG_PARAGRAPHS].join("\n");
       const first = playSpeech(null, "ready", fenceFirst);
-      expect(first.units[0]?.source).toBe("⟦code⟧");
       const normal = playSpeech();
 
       const view = renderPane(first.speech);
@@ -1519,21 +1493,13 @@ describe("play buttons", () => {
             <AnswerPane sessionId="cell-a" speech={speech} send={() => true} />
           </MemoryRouter>,
         );
-      const expectLevel = (units: readonly SpeechUnit[], blockless: number[]): void => {
-        expect(plays()).toHaveLength(units.length - blockless.length);
-        for (const button of plays()) {
-          const unit = Number(button.dataset.playUnit);
-          const segment = screen.getByTestId(`answer-pane-seg-cell-a-${unit}`);
-          expect(segment.style.top).not.toBe("");
-          expect(button.style.top).toBe(segment.style.top);
-        }
-      };
 
-      expectLevel(first.units, [0]);
+      expect(plays()).toHaveLength(2);
       rerenderWith(normal.speech);
-      expectLevel(normal.units, []);
+      expect(plays()).toHaveLength(4);
+      expect(blockOf(3)).toHaveTextContent(/^The second paragraph/);
       rerenderWith(first.speech);
-      expectLevel(first.units, [0]);
+      expect(plays()).toHaveLength(2);
     });
   });
 });
