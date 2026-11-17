@@ -210,6 +210,72 @@ describe("PageCacheSettings", () => {
     );
   });
 
+  /** The answer-cache DELETEs `fetch` was asked for; every other request answers 404. */
+  function stubAnswerCacheFetch(answer: () => Response) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/api/speech/answer-cache") && init?.method === "DELETE") return answer();
+      return new Response(null, { status: 404 });
+    });
+  }
+
+  function answerCacheDeletes(fetchSpy: ReturnType<typeof stubAnswerCacheFetch>) {
+    return fetchSpy.mock.calls.filter(([input, init]) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return url.endsWith("/api/speech/answer-cache") && init?.method === "DELETE";
+    });
+  }
+
+  it("Clear answer audio calls the answer-cache route", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm");
+    const fetchSpy = stubAnswerCacheFetch(() => new Response(null, { status: 204 }));
+    mount();
+    await screen.findByText("38 pages · 1,204 units · 46.3 MB");
+
+    await user.click(screen.getByRole("button", { name: "Clear answer audio" }));
+
+    expect(await screen.findByText("Answer audio cleared")).toBeTruthy();
+    expect(answerCacheDeletes(fetchSpy)).toHaveLength(1);
+    // Answer audio is cheap to make again (one re-synthesis), so no confirmation.
+    expect(confirm).not.toHaveBeenCalled();
+    expect(getAlertsSnapshot()).toHaveLength(0);
+  });
+
+  it("a failed clear shows the reason", async () => {
+    const user = userEvent.setup();
+    stubAnswerCacheFetch(() =>
+      Response.json({ error: "EACCES: permission denied" }, { status: 503 }),
+    );
+    mount();
+    await screen.findByText("38 pages · 1,204 units · 46.3 MB");
+
+    await user.click(screen.getByRole("button", { name: "Clear answer audio" }));
+
+    await waitFor(() =>
+      expect(getAlertsSnapshot().map((a) => a.title)).toContain(
+        "Couldn't clear answer audio: EACCES: permission denied",
+      ),
+    );
+    expect(screen.queryByText("Answer audio cleared")).toBeNull();
+  });
+
+  it("clearing answer audio does not wipe page audio", async () => {
+    const user = userEvent.setup();
+    const onStop = vi.fn();
+    const fetchSpy = stubAnswerCacheFetch(() => new Response(null, { status: 204 }));
+    mount({ stateFor: () => "speaking", onStop }, ["doc:pavilio/wiki/page.md"]);
+    await screen.findByText("38 pages · 1,204 units · 46.3 MB");
+
+    await user.click(screen.getByRole("button", { name: "Clear answer audio" }));
+
+    await screen.findByText("Answer audio cleared");
+    expect(answerCacheDeletes(fetchSpy)).toHaveLength(1);
+    expect(cache.wipeCache).not.toHaveBeenCalled();
+    expect(onStop).not.toHaveBeenCalled();
+    expect(screen.getByText("38 pages · 1,204 units · 46.3 MB")).toBeTruthy();
+  });
+
   it("settings page cache switch reflects and flips the preference", async () => {
     const user = userEvent.setup();
     const KEY = "doc:pavilio:notes/page.md";

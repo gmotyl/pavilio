@@ -63,8 +63,7 @@ import { isDocSpeechKey } from "./docKey";
 import { speechFailureAlert } from "./failureAlert";
 import { prepare } from "./prepare";
 import { pageSpeechText, preparePageText } from "./pageText";
-import { loadPageList, pageUnitState, prunePage } from "./pageCache";
-import { isSpeechSynthesized } from "./synth";
+import { loadPageList, prunePage } from "./pageCache";
 import { unitAudio } from "./unitAudio";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
@@ -243,6 +242,34 @@ export interface SpeechHostOptions {
    * {@link AnswerWaitingPort}.
    */
   answerWaiting: AnswerWaitingPort;
+  /**
+   * The cell being looked at — focused and on screen in a visible tab — or
+   * null. Its preloads go ahead of every other cell's: those still queued are
+   * requested again on `warm`, which joins each flight and promotes the queued
+   * job (design D6). Absent: no cell is looked at.
+   */
+  lookedAtSessionId?: string | null;
+}
+
+/**
+ * A preload unit requested and not yet settled — queued with anytts or in
+ * flight. Only these can be promoted: a unit in hand needs nothing, and one the
+ * LRU evicted after it landed is Play's to fetch again, never a preload's.
+ */
+interface PendingPreload {
+  readonly sessionId: string;
+  readonly unit: SpeechUnit;
+  /**
+   * The voice and language the preload was requested with. A promotion asks
+   * with exactly these, so it lands on the same anytts key and joins the queued
+   * job even if the cell's voice has changed since.
+   */
+  readonly voice: string;
+  readonly lang: SpeechUnit["lang"];
+  /** The utterance's preload signal the unit was requested on. */
+  readonly signal: AbortSignal;
+  /** Already requested again on `warm`, so a second look joins nothing twice. */
+  promoted: boolean;
 }
 
 /**
@@ -318,6 +345,7 @@ export function useSpeechHost({
   onRunChange,
   voiceFor,
   answerWaiting,
+  lookedAtSessionId = null,
 }: SpeechHostOptions): SpeechHost {
   /**
    * `onRunChange`, mirrored: it is called from inside `speakUtterance`, whose
@@ -403,15 +431,20 @@ export function useSpeechHost({
   /**
    * Preload units already requested, as `utteranceId#index`, so a re-render
    * does not request the same unit twice. A unit whose utterance was called
-   * off is taken back out, so arming the cell again reaches it.
+   * off, or whose request failed, is taken back out, so arming the cell again
+   * or the retry reaches it. A unit that landed stays in even once the synth
+   * LRU has evicted it: it is preloaded once per page session, and Play is
+   * what fetches it again (from the server's answer audio cache within 24 h).
+   * A reload starts the record afresh.
    */
   const preloadedRef = useRef<Set<string>>(new Set());
   /**
-   * The subset of `preloadedRef` that reached the library — since anytts
-   * queues at call time, every one of them the moment it is requested. Kept as
-   * its own set because it is what the eviction check below asks about.
+   * The preload units requested and not yet settled, keyed like
+   * {@link preloadedRef} and in request order — what a look at the cell can
+   * promote (see {@link PendingPreload}). An entry leaves when its request
+   * settles, or when its utterance's preloads are called off.
    */
-  const preloadStartedRef = useRef<Set<string>>(new Set());
+  const pendingPreloadsRef = useRef<Map<string, PendingPreload>>(new Map());
   /**
    * Utterances whose preload a failed unit stopped, per session. A ref rather
    * than a local of `preloadRemainder`, because that function runs again on
@@ -708,8 +741,8 @@ export function useSpeechHost({
     for (const key of preloadedRef.current) {
       if (key.startsWith(prefix)) preloadedRef.current.delete(key);
     }
-    for (const key of preloadStartedRef.current) {
-      if (key.startsWith(prefix)) preloadStartedRef.current.delete(key);
+    for (const key of pendingPreloadsRef.current.keys()) {
+      if (key.startsWith(prefix)) pendingPreloadsRef.current.delete(key);
     }
     const { preload } = synthesis;
     synthesis.preload = null;
@@ -829,31 +862,37 @@ export function useSpeechHost({
       for (let index = 1; index < units.length; index += 1) {
         const key = `${id}#${index}`;
         const unit = units[index];
-        const { text, lang } = unit;
-        if (preloadedRef.current.has(key)) {
-          // The synth cache is an LRU: a unit requested earlier may have been
-          // evicted since, and Play would then pay for it. Requested but cold
-          // now (`isSpeechSynthesized` is `speechCacheState !== "cold"`, so in
-          // flight counts as held) -> ask again.
-          // A page's unit whose bytes the page cache holds is not evicted,
-          // whatever the synth LRU did.
-          const evicted =
-            preloadStartedRef.current.has(key) &&
-            !(isDocSpeechKey(sessionId) && pageUnitState(sessionId, unit) === "ready") &&
-            !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId), lang });
-          if (!evicted) continue;
-          preloadStartedRef.current.delete(key);
-        }
+        const { lang } = unit;
+        // Requested once is done, even if the synth LRU has evicted it since:
+        // re-preloading on every opportunity turned eviction into a synthesis
+        // carousel. Play fetches an evicted unit on the run tier.
+        if (preloadedRef.current.has(key)) continue;
         preloadedRef.current.add(key);
-        preloadStartedRef.current.add(key);
 
         const synthesis = synthesisFor(utterance);
         synthesis.preload ??= new AbortController();
         const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
         const voice = voiceForRef.current(sessionId);
-        unitAudio(sessionId, unit, { voice, lang, tier: "preload", signal }).catch(
+        const pending: PendingPreload = {
+          sessionId,
+          unit,
+          voice,
+          lang,
+          signal,
+          promoted: false,
+        };
+        pendingPreloadsRef.current.set(key, pending);
+        // Settled — landed, failed or called off — is no longer promotable.
+        // By identity, so a late settle of a called-off request leaves the
+        // fresh request's entry alone.
+        const settled = (): void => {
+          if (pendingPreloadsRef.current.get(key) === pending) pendingPreloadsRef.current.delete(key);
+        };
+        unitAudio(sessionId, unit, { voice, lang, tier: "preload", signal }).then(
+          settled,
           (error: unknown) => {
+            settled();
             // Called off: whoever aborted already forgot the unit, and a late
             // rejection must not touch a fresh controller's bookkeeping.
             if (isAbortError(error)) return;
@@ -863,7 +902,6 @@ export function useSpeechHost({
             // synthesized until that retry. Its unit-0 warm is not a preload,
             // and keeps going.
             preloadedRef.current.delete(key);
-            preloadStartedRef.current.delete(key);
             const failed = preloadFailedRef.current.get(sessionId) ?? new Set<string>();
             rememberAutoplayed(failed, id);
             preloadFailedRef.current.set(sessionId, failed);
@@ -875,6 +913,28 @@ export function useSpeechHost({
     [abortPreloads, synthesisFor],
   );
 
+  /**
+   * Puts a looked-at cell's preloads ahead of every other cell's (design D6):
+   * each of its units still queued or in flight is requested again on `warm`,
+   * on the utterance's own preload signal. anytts joins the flight and
+   * promotes the queued job — the mechanism a Play uses on `run` — so nothing
+   * is synthesized twice, and the run tier stays above it. A unit already in
+   * hand, or evicted after it landed, is not pending and is left alone; so is
+   * one promoted before. The original preload request owns failure handling,
+   * so this join's own rejection is swallowed.
+   */
+  const promotePreloads = useCallback((sessionId: string | null): void => {
+    if (sessionId === null) return;
+    for (const pending of pendingPreloadsRef.current.values()) {
+      if (pending.sessionId !== sessionId || pending.promoted || pending.signal.aborted) continue;
+      pending.promoted = true;
+      // The original request's voice and lang, never re-read: a different key
+      // would start a fresh synthesis instead of joining the queued job.
+      const { unit, voice, lang, signal } = pending;
+      unitAudio(sessionId, unit, { voice, lang, tier: "warm", signal }).catch(() => {});
+    }
+  }, []);
+
   // The release effect: an utterance's controllers are aborted the moment it
   // stops being wanted. Heard — a replay is a click away and pays for itself.
   // Out of the queue (`MAX_PENDING` / `MAX_PREVIOUS`) — nothing can reach it
@@ -883,7 +943,18 @@ export function useSpeechHost({
   // ever for an armed cell, but an off cell still warms unit 0. `heardFor` and
   // `queueFor` move with every channel update and `speechModeOf` with every
   // mode change, which is exactly when one of those can have become true.
+  // Superseded — a newer answer arrived in its cell — calls off the preloads
+  // alone too: an armed cell preloads its newest answer only, and the older
+  // one keeps its unit-0 warm and plays on demand. `warmableUtterances` moves
+  // with every arrival, which is when that can have become true. The answer
+  // the live run is speaking is exempt from that rule: a newer one queueing
+  // behind it does not make it any less heard-right-now, and its preloads are
+  // the run's lookahead.
   useEffect(() => {
+    const newestIds = new Set(
+      warmableUtterances.filter((entry) => entry.newest).map((entry) => entry.utterance.id),
+    );
+    const playingId = runRef.current?.utteranceId;
     for (const [id, { sessionId, preload }] of [...synthesesRef.current]) {
       const queue = queueFor(sessionId);
       const queued =
@@ -891,9 +962,14 @@ export function useSpeechHost({
         queue.previous.some((utterance) => utterance.id === id) ||
         queue.pending.some((utterance) => utterance.id === id);
       if (!queued || heardFor(sessionId).has(id)) abortUtterance(id);
-      else if (preload && speechModeOf(sessionId) === "off") abortPreloads(id);
+      else if (
+        preload &&
+        (speechModeOf(sessionId) === "off" || (!newestIds.has(id) && id !== playingId))
+      ) {
+        abortPreloads(id);
+      }
     }
-  }, [abortPreloads, abortUtterance, heardFor, queueFor, speechModeOf]);
+  }, [abortPreloads, abortUtterance, heardFor, queueFor, speechModeOf, warmableUtterances]);
 
   // A host that unmounts calls off everything it still has out: queued warms
   // and preloads must not go on firing syntheses for a panel nobody is looking
@@ -945,13 +1021,25 @@ export function useSpeechHost({
     // so a synthesizer that is down is walked once per opportunity rather than
     // through the whole answer, and a transient failure no longer leaves an
     // armed cell cold until its mode is cycled. The body is idempotent —
-    // `warmedRef` dedupes unit 0 and `preloadedRef` skips units requested or
-    // in flight — so the extra runs re-request only what is actually missing.
+    // `warmedRef` dedupes unit 0 and `preloadedRef` skips every unit already
+    // requested, even one the synth LRU has evicted since — so the extra runs
+    // re-request only what failed or was called off.
     preloadFailedRef.current.clear();
-    for (const { utterance, mode } of warmableUtterances) {
-      const { units } = preparedFor(utterance, languageOf(utterance));
-      warmFirstUnit(utterance, units);
-      if (mode !== "off") preloadRemainder(utterance, units);
+    for (const { utterance } of warmableUtterances) {
+      warmFirstUnit(utterance, preparedFor(utterance, languageOf(utterance)).units);
+    }
+    // Only the cell's newest answer is preloaded whole, however old it is; an
+    // older one the transport may still reach plays on demand. Newest arrival
+    // first (design D6): anytts serves a tier FIFO by enqueue order, so the
+    // order they are requested in is the order they land in. The warms above
+    // keep the list's order — their tier is ahead of every preload anyway, and
+    // the last warm of a cell is the one that owns its red. The looked-at
+    // cell's preloads are promoted past these by the effect below.
+    const preloads = warmableUtterances
+      .filter(({ mode, newest }) => mode !== "off" && newest)
+      .sort((a, b) => b.utterance.at - a.utterance.at);
+    for (const { utterance } of preloads) {
+      preloadRemainder(utterance, preparedFor(utterance, languageOf(utterance)).units);
     }
     // Warming reads nothing from the player any more: the supersession that
     // used to ride along inside this loop is its own effect below, because it
@@ -969,6 +1057,14 @@ export function useSpeechHost({
     warmFirstUnit,
     warmableUtterances,
   ]);
+
+  // The looked-at cell goes first (design D6): on a change of look, and after
+  // each warming pass — an arrival in the looked-at cell is preloaded on the
+  // `preload` tier above and promoted here, so it is not left behind other
+  // cells' queued preloads. After the warming effect, so its requests exist.
+  useEffect(() => {
+    promotePreloads(lookedAtSessionId);
+  }, [lookedAtSessionId, promotePreloads, warmableUtterances]);
 
   useEffect(() => {
     // "A paused cell does not hold the next answer hostage" — the living spec,

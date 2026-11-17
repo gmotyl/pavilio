@@ -564,7 +564,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     for (const unit of y) expect(timesRequested(unit)).toBe(1);
   });
 
-  it("a failed preload unit is retried on the next opportunity", async () => {
+  it("a failed preload unit is still retried on the next opportunity", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
@@ -580,31 +580,36 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     // Everything after it was already queued with the library, and is called off.
     expect(synth.callsFor(units[2])[0].signal?.aborted).toBe(true);
 
-    // Next opportunity: another arrival anywhere (a different cell).
+    // Next opportunity: another arrival anywhere (a different cell). The failed
+    // unit is asked for again, and every unit after it the failure called off.
     await emitUtterance("cell-b", "b-1", response(2, "Later"));
-    expect(timesRequested(units[1])).toBe(2);
-    expect(timesRequested(units[2])).toBeGreaterThanOrEqual(1);
+    for (const unit of units.slice(1)) expect(timesRequested(unit)).toBe(2);
   });
 
-  it("evicted preloaded units are requested again at the next opportunity", async () => {
-    const answerX = response(6, "Xray");
-    const answerY = response(4, "Yankee");
-    const x = unitsOf(answerX);
-    const { result } = renderHook(() =>
+  it("a remount preloads the newest answer again", async () => {
+    const markdown = response(5);
+    const units = unitsOf(markdown);
+    const first = renderHook(() =>
       useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
     );
+    await cycle(() => first.result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    for (const unit of units) expect(timesRequested(unit)).toBe(1);
 
-    await cycle(() => result.current, "cell-x");
-    await emitUtterance("cell-x", "x-1", answerX);
-    for (const unit of x) expect(timesRequested(unit)).toBe(1);
-
-    // Y's syntheses push X's entries out of the 200-entry LRU (modelled by clearing the cache).
+    // A page reload: the host goes, the in-memory synth cache with it, and the
+    // fresh host is handed the same answer again.
+    first.unmount();
     synth.clearCache();
-    await emitUtterance("cell-y", "y-1", answerY);
-    await cycle(() => result.current, "cell-y");
+    const second = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    // The cell's mode is persisted, so it comes back armed.
+    expect(second.result.current.speechModeOf("cell-a")).toBe("armed");
+    await emitUtterance("cell-a", "u-1", markdown);
 
-    // X's units 1.. must be back in the cache before Play.
-    for (const unit of x.slice(1)) expect(timesRequested(unit)).toBeGreaterThanOrEqual(2);
+    for (const unit of units.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload", "preload"]);
+    }
   });
 
   it("preloads never delay the playing run's next unit", async () => {
@@ -631,33 +636,6 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     for (const unit of p.slice(2)) {
       expect(synth.callsFor(unit).map((call) => call.tier)).toContain("run");
     }
-  });
-
-  it("an evicted unit is requested again when its cache state is cold", async () => {
-    const answerX = response(6, "Xray");
-    const x = unitsOf(answerX);
-    // x[2] stays in flight: warming, not cold, so it must not be asked again.
-    synth.hold(x[2]);
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await cycle(() => result.current, "cell-x");
-    await emitUtterance("cell-x", "x-1", answerX);
-    for (const unit of x) expect(timesRequested(unit)).toBe(1);
-    const signal = synth.callsFor(x[1])[0].signal;
-
-    // The LRU pushes every landed result out.
-    synth.clearCache();
-    await emitUtterance("cell-y", "y-1", response(2, "Yankee"));
-
-    for (const unit of [x[1], ...x.slice(3)]) {
-      expect(timesRequested(unit)).toBe(2);
-      const last = synth.callsFor(unit).at(-1);
-      expect(last?.tier).toBe("preload");
-      expect(last?.signal).toBe(signal);
-    }
-    expect(synth.callsFor(x[2])).toHaveLength(1);
   });
 
   it("an aborted preload is not a failed preload", async () => {
@@ -694,6 +672,266 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     // none of them again.
     await emitUtterance("cell-b", "b-1", response(2, "Bravo"));
     for (const unit of units.slice(1)) expect(synth.callsFor(unit)).toHaveLength(2);
+  });
+});
+
+/**
+ * The preload pool is one answer per armed cell: the newest, whatever its age.
+ * Older answers keep the unit-0 warm every cell gets and play on demand.
+ */
+describe("useSpeechHost — an armed cell preloads only its newest answer", () => {
+  beforeEach(() => selectSynth("tiered"));
+
+  it("only the newest unheard answer of an armed cell is preloaded", async () => {
+    const playing = response(3, "Alpha");
+    const older = unitsOf(response(4, "Bravo"));
+    const newer = unitsOf(response(4, "Charlie"));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await emitUtterance("cell-a", "a-0", playing);
+    await settle(() => result.current.onSpeak("cell-a"));
+    // Both queue behind the live run: two unheard answers, the newer last.
+    await emitUtterance("cell-a", "a-1", response(4, "Bravo"));
+    await emitUtterance("cell-a", "a-2", response(4, "Charlie"));
+    expect(result.current.queueFor("cell-a").pending.map((u) => u.id)).toEqual(["a-1", "a-2"]);
+
+    await cycle(() => result.current, "cell-a"); // armed, holding both
+
+    for (const unit of newer.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+    expect(synth.callsFor(older[0]).map((call) => call.tier)).toEqual(["warm"]);
+    for (const unit of older.slice(1)) expect(synth.callsFor(unit)).toEqual([]);
+  });
+
+  it("an old armed cell's newest answer is still preloaded", async () => {
+    const markdown = response(5);
+    const units = unitsOf(markdown);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    await emitUtterance("cell-a", "u-1", markdown, threeDaysAgo);
+    await cycle(() => result.current, "cell-a"); // armed
+
+    for (const unit of units.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+  });
+
+  it("a newer arrival calls off the older answer's preloads", async () => {
+    const older = holdAll(response(5, "Bravo"));
+    const newer = unitsOf(response(4, "Charlie"));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "a-1", response(5, "Bravo"));
+    const warmSignal = synth.callsFor(older[0])[0].signal;
+    const preloadSignal = synth.callsFor(older[1])[0].signal;
+    expect(preloadSignal?.aborted).toBe(false);
+
+    await emitUtterance("cell-a", "a-2", response(4, "Charlie"));
+
+    // The older answer is still in the cell's history, unheard — but no longer
+    // the one an armed cell preloads. Its unit-0 warm keeps running.
+    expect(preloadSignal?.aborted).toBe(true);
+    expect(warmSignal?.aborted).toBe(false);
+    for (const unit of newer.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+  });
+  it("a playing answer keeps its preloads when a newer one arrives", async () => {
+    const playing = unitsOf(response(6, "Bravo"));
+    // Its later units stay in flight, so their preloads are still out.
+    for (const unit of playing.slice(2)) synth.hold(unit);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "a-1", response(6, "Bravo"));
+    const preloadSignal = synth.callsFor(playing.at(-1)!)[0].signal;
+    await settle(() => result.current.onSpeak("cell-a"));
+    expect(result.current.speakingSessionId).toBe("cell-a");
+
+    await emitUtterance("cell-a", "a-2", response(4, "Charlie"));
+
+    // The newer answer waits behind the live run, and the run it waits behind
+    // still has its lookahead: superseded is about answers nobody is hearing.
+    expect(result.current.queueFor("cell-a").pending.map((u) => u.id)).toEqual(["a-2"]);
+    expect(preloadSignal?.aborted).toBe(false);
+  });
+});
+
+/**
+ * The order preloads are asked for in (design D6). anytts serves a tier FIFO
+ * by enqueue order, so the order the host requests them in IS the ranking:
+ * newest answer first. The cell being looked at goes ahead of all of them —
+ * its still-queued preloads are requested again on `warm`, which joins the
+ * flight and promotes the queued job. The run tier stays above both.
+ */
+describe("useSpeechHost — preload order: the looked-at cell, then newest first", () => {
+  beforeEach(() => selectSynth("tiered"));
+
+  /** A host whose looked-at cell the test moves with `look`. */
+  function hostLookingAt(initial: string | null = null) {
+    const rendered = renderHook(
+      ({ lookedAt }: { lookedAt: string | null }) =>
+        useSpeechHost({
+          voiceFor: voiceForSession,
+          answerWaiting: storeAnswerWaiting,
+          lookedAtSessionId: lookedAt,
+        }),
+      { initialProps: { lookedAt: initial } },
+    );
+    const look = async (lookedAt: string | null): Promise<void> => {
+      await act(async () => {
+        rendered.rerender({ lookedAt });
+        await drain();
+      });
+    };
+    return { ...rendered, look };
+  }
+
+  const tiersOf = (text: string): Array<string | undefined> =>
+    synth.callsFor(text).map((call) => call.tier);
+
+  it("preloads are enqueued newest answer first", async () => {
+    const older = unitsOf(response(4, "Alpha"));
+    const newer = unitsOf(response(4, "Bravo"));
+    const { result } = hostLookingAt();
+
+    // Map order is arrival-of-the-cell order: cell-a is listed first, but its
+    // answer is the older one.
+    await emitUtterance("cell-a", "a-1", response(4, "Alpha"), 1_000);
+    await emitUtterance("cell-b", "b-1", response(4, "Bravo"), 2_000);
+    // Both armed in one pass.
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a");
+      result.current.cycleSpeechMode("cell-b");
+    });
+
+    const preloads = synth.calls.filter((call) => call.tier === "preload").map((call) => call.text);
+    expect(preloads).toEqual([...newer.slice(1), ...older.slice(1)]);
+  });
+
+  it("focusing a cell promotes its queued preload units to warm", async () => {
+    const x = holdAll(response(5, "Xray"));
+    const y = holdAll(response(4, "Yankee"));
+    const { result, look } = hostLookingAt();
+
+    await cycle(() => result.current, "cell-x");
+    await cycle(() => result.current, "cell-y");
+    await emitUtterance("cell-x", "x-1", response(5, "Xray"));
+    await emitUtterance("cell-y", "y-1", response(4, "Yankee"));
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload"]);
+
+    await look("cell-x");
+
+    for (const unit of x.slice(1)) {
+      expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+      // A join, not a new synthesis — on the preload's own signal, so a
+      // disarm or a newer arrival still calls it off in one abort.
+      expect(timesRequested(unit)).toBe(1);
+      const [preload, warm] = synth.callsFor(unit);
+      expect(warm.signal).toBe(preload.signal);
+    }
+    // Unit 0 was already a warm; another cell's preloads are left alone.
+    expect(tiersOf(x[0])).toEqual(["warm"]);
+    for (const unit of y.slice(1)) expect(tiersOf(unit)).toEqual(["preload"]);
+
+    // Looking away and back does not join the same flights again.
+    await look("cell-y");
+    await look("cell-x");
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+  });
+
+  it("promotion does not re-request held units", async () => {
+    const x = holdAll(response(5, "Xray"));
+    const { result, look } = hostLookingAt();
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", response(5, "Xray"));
+    // Units 1 and 2 are in hand; 3 and 4 still queued.
+    await release(x[1]);
+    await release(x[2]);
+
+    await look("cell-x");
+
+    expect(tiersOf(x[1])).toEqual(["preload"]);
+    expect(tiersOf(x[2])).toEqual(["preload"]);
+    expect(tiersOf(x[3])).toEqual(["preload", "warm"]);
+    expect(tiersOf(x[4])).toEqual(["preload", "warm"]);
+
+    // Everything lands, then the LRU evicts it: evicted after it was held is
+    // not queued, so looking at the cell again requests nothing (Play does).
+    await look(null);
+    await release(x[3]);
+    await release(x[4]);
+    synth.clearCache();
+    const before = synth.calls.length;
+    await look("cell-x");
+    expect(synth.calls.length).toBe(before);
+  });
+
+  it("promotion joins the queued preload even after a voice change", async () => {
+    const x = holdAll(response(5, "Xray"));
+    let voice = "voice-before";
+    const { result, rerender } = renderHook(
+      ({ lookedAt }: { lookedAt: string | null }) =>
+        useSpeechHost({
+          voiceFor: () => voice,
+          answerWaiting: storeAnswerWaiting,
+          lookedAtSessionId: lookedAt,
+        }),
+      { initialProps: { lookedAt: null as string | null } },
+    );
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", response(5, "Xray"));
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload"]);
+
+    // The cell's voice changes while its preloads are still queued.
+    voice = "voice-after";
+    await act(async () => {
+      rerender({ lookedAt: "cell-x" });
+      await drain();
+    });
+
+    for (const unit of x.slice(1)) {
+      // Promoted on the voice the preload was queued with, so it joins that
+      // flight instead of starting a fresh synthesis.
+      expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+      expect(synth.callsFor(unit).map((call) => call.voice)).toEqual([
+        "voice-before",
+        "voice-before",
+      ]);
+      expect(timesRequested(unit)).toBe(1);
+    }
+  });
+
+  it("a playing run stays ahead of a promoted preload", async () => {
+    const x = holdAll(response(6, "Xray"));
+    const p = unitsOf(response(5, "Papa"));
+    synth.hold(p[2]);
+    const { result, look } = hostLookingAt();
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", response(6, "Xray"));
+    await emitUtterance("cell-p", "p-1", response(5, "Papa"));
+    await settle(() => result.current.onSpeak("cell-p"));
+
+    await look("cell-x");
+
+    // Promoted is `warm`, never `run`: the scheduler keeps the run on top.
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+    for (const unit of p.slice(2)) expect(tiersOf(unit)).toContain("run");
+    expect(result.current.speakingSessionId).toBe("cell-p");
   });
 });
 
@@ -792,6 +1030,27 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
 
     expect(timesRequested(units[1])).toBe(1);
     expect(requestedTexts()).toHaveLength(before);
+  });
+
+  it("an evicted preloaded unit is not requested again on any opportunity", async () => {
+    const markdown = response(5);
+    const units = unitsOf(markdown);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    for (const unit of units) expect(timesRequested(unit)).toBe(1);
+
+    // The LRU pushes every landed result out. Play is what fetches them again
+    // (from the server's answer audio cache), never a warming opportunity.
+    synth.clearCache();
+    await emitUtterance("cell-b", "b-1", response(2, "Bravo")); // arrival
+    await reconnects();
+    await becomes("hidden");
+    await becomes("visible");
+
+    for (const unit of units.slice(1)) expect(timesRequested(unit)).toBe(1);
   });
 
   it("returning to the tab does not re-request units already held", async () => {

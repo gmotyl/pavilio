@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Trash2 } from "lucide-react";
 import { alerts } from "../alerts/store";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
@@ -14,6 +14,22 @@ type TotalsView = PageCacheTotals | "unavailable" | null;
 
 function count(n: number, noun: string): string {
   return `${n.toLocaleString("en-US")} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+const ANSWER_CACHE_URL = "/api/speech/answer-cache";
+
+/**
+ * Deletes every file in the server's answer audio cache; the page audio cache
+ * is untouched. A failure rejects with the server's `error` (the 503 body
+ * names the reason), else with the status.
+ */
+async function clearAnswerAudio(): Promise<void> {
+  const res = await fetch(ANSWER_CACHE_URL, { method: "DELETE" });
+  if (res.ok) return;
+  const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+  throw new Error(
+    typeof body?.error === "string" ? body.error : `DELETE ${ANSWER_CACHE_URL} answered ${res.status}`,
+  );
 }
 
 /** "38 pages · 1,204 units · 46.3 MB" — the mockup's Stored row. */
@@ -41,12 +57,20 @@ function describeTotals(totals: PageCacheTotals): string {
  * row reads zero. A failed wipe raises "Couldn't clear the cache: <reason>"
  * (the page bar's alert) and re-reads the totals, since `wipeCache` empties
  * memory either way but the disk may still hold some of it.
+ *
+ * Beside it, "Clear answer audio" empties the answer audio cache (agent
+ * answers' units on the server) without touching page audio or stopping a
+ * page. It does not confirm, unlike Wipe: the server reports no size to name,
+ * and a cleared answer costs only one re-synthesis the next time it is
+ * spoken. Success reads "Answer audio cleared"; a failure raises "Couldn't
+ * clear answer audio: <reason>", as Wipe's does.
  */
 export function PageCacheSettings() {
   const stopPageRuns = useStopPageRuns();
   const [cacheEnabled, setCacheEnabled] = usePreference(preferences.speechPageCacheEnabled);
   const [totals, setTotals] = useState<TotalsView>(null);
   const [wiping, setWiping] = useState(false);
+  const [answerClear, setAnswerClear] = useState<"idle" | "clearing" | "done">("idle");
 
   const readTotals = async (): Promise<void> => {
     try {
@@ -81,6 +105,18 @@ export function PageCacheSettings() {
       await readTotals();
     } finally {
       setWiping(false);
+    }
+  };
+
+  const clearAnswers = async (): Promise<void> => {
+    setAnswerClear("clearing");
+    try {
+      await clearAnswerAudio();
+      setAnswerClear("done");
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      alerts.error(`Couldn't clear answer audio: ${reason}`);
+      setAnswerClear("idle");
     }
   };
 
@@ -141,6 +177,30 @@ export function PageCacheSettings() {
           <Trash2 size={12} />
           Wipe cache…
         </button>
+        <button
+          type="button"
+          data-testid="answer-cache-clear"
+          onClick={() => void clearAnswers()}
+          disabled={answerClear === "clearing"}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{
+            background: "color-mix(in srgb, var(--red) 10%, transparent)",
+            color: "var(--red)",
+            border: "1px solid color-mix(in srgb, var(--red) 25%, transparent)",
+          }}
+        >
+          <Trash2 size={12} />
+          Clear answer audio
+        </button>
+        {answerClear === "done" && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <Check size={12} />
+            Answer audio cleared
+          </span>
+        )}
       </div>
     </div>
   );

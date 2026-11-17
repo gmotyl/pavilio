@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPageCacheStore, PageCacheEpochError } from "../pageCache";
+import { ANSWER_SUBDIR, createPageCacheStore, PAGE_CACHE_DIR, PageCacheEpochError } from "../pageCache";
+import { ANSWER_CACHE_DIR } from "../answerAudioCache";
 
 // The store root is a not-yet-existing child of a temp dir, so writes have to create it.
 let tmp: string;
@@ -209,6 +210,30 @@ describe("page cache store", () => {
     expect(await store.wipe()).toEqual({ pages: 2, units: 3, bytes: 6 });
     expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
     expect(await store.totals()).toEqual({ pages: 0, units: 0, bytes: 0 });
+  });
+
+  it("page wipe leaves the answers directory", async () => {
+    // The answer audio cache lives inside the page cache root in production.
+    expect(join(PAGE_CACHE_DIR, ANSWER_SUBDIR)).toBe(ANSWER_CACHE_DIR);
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    mkdirSync(join(root, ANSWER_SUBDIR));
+    writeFileSync(join(root, ANSWER_SUBDIR, "answer.mp3"), "answer");
+
+    await store.wipe();
+
+    expect(readdirSync(root)).toEqual([ANSWER_SUBDIR]);
+    expect(readFileSync(join(root, ANSWER_SUBDIR, "answer.mp3"), "utf8")).toBe("answer");
+  });
+
+  it("page totals do not count answer audio", async () => {
+    const store = createPageCacheStore({ root });
+    await store.write(PAGE, U1, Buffer.from("1"), DOC_KEY, store.epoch(PAGE));
+    mkdirSync(join(root, ANSWER_SUBDIR));
+    writeFileSync(join(root, ANSWER_SUBDIR, "answer.mp3"), "answer audio");
+
+    expect(await store.totals()).toEqual({ pages: 1, units: 1, bytes: 1 });
+    expect(await store.wipe()).toEqual({ pages: 1, units: 1, bytes: 1 });
   });
 
   it("wipe asked for while a write is queued fences it off and leaves nothing behind", async () => {

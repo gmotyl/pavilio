@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { useEffect } from "react";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import {
   SpeechHostProvider,
   usePageSpeech,
@@ -196,6 +197,77 @@ describe("SpeechHostProvider", () => {
       expect(original).toHaveBeenCalledTimes(1);
     } finally {
       seen.host.speakDocument = original;
+    }
+  });
+
+  it("the host is told the looked-at cell: focus, route and tab visibility", () => {
+    let focused: string | null = "cell-a";
+    let onFocusChange: () => void = () => {};
+    let navigate: (path: string) => void = () => {};
+    function Navigator() {
+      navigate = useNavigate();
+      return null;
+    }
+    let visibility: DocumentVisibilityState = "visible";
+    const visibilitySpy = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibility);
+    const lookedAt = () => seen.hostArgs.at(-1)?.lookedAtSessionId;
+
+    try {
+      render(
+        <MemoryRouter initialEntries={["/terminals"]}>
+          <SpeechHostProvider
+            sessionOf={() => undefined}
+            isSessionOpen={() => true}
+            focusedCell={{
+              read: () => null,
+              readStandalone: () => focused,
+              subscribe: (onChange) => {
+                onFocusChange = onChange;
+                return () => {};
+              },
+            }}
+            drawerVisible={false}
+            onArrival={vi.fn()}
+            answerWaiting={{
+              get: () => ({ waiting: false, pending: false }),
+              hold: () => {},
+              release: () => {},
+              noteTransport: () => {},
+              isHeld: () => false,
+            }}
+            voiceFor={() => "a-voice"}
+          >
+            <Navigator />
+          </SpeechHostProvider>
+        </MemoryRouter>,
+      );
+      // The standalone page's focused cell, read once the route is known.
+      expect(lookedAt()).toBe("cell-a");
+
+      // A focus change the port reports.
+      focused = "cell-b";
+      act(() => onFocusChange());
+      expect(lookedAt()).toBe("cell-b");
+
+      // A hidden tab looks at nothing; coming back looks again.
+      visibility = "hidden";
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(lookedAt()).toBeNull();
+      visibility = "visible";
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(lookedAt()).toBe("cell-b");
+
+      // A route with no cell on screen.
+      act(() => navigate("/"));
+      expect(lookedAt()).toBeNull();
+    } finally {
+      visibilitySpy.mockRestore();
     }
   });
 

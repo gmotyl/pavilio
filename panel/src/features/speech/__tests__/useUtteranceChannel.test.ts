@@ -561,6 +561,102 @@ describe("useUtteranceChannel", () => {
   });
 
   /**
+   * `newest` is what the host preloads on: one answer per armed cell, the one
+   * that arrived last, never an older one the cursor happens to be on.
+   */
+  it("newest flag marks the most recent unheard utterance per session", async () => {
+    const { result, rerender } = await renderChannel();
+    const flags = () =>
+      result.current.warmableUtterances.map((entry) => [entry.utterance.id, entry.newest]);
+
+    // cell-a: two idle arrivals, then one step back — a1 under the cursor, a2
+    // one press away and the newest.
+    for (const id of ["a1", "a2"]) {
+      lastMessage = frame(utterance("cell-a", id));
+      await act(async () => {
+        rerender();
+      });
+    }
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+    });
+    expect(flags()).toEqual([
+      ["a1", false],
+      ["a2", true],
+    ]);
+
+    // cell-b, armed: two answers queue behind a live run. The newest waits two
+    // presses away, and is listed all the same — it is what an armed cell
+    // preloads — while the one a press lands on is not newest.
+    await act(async () => {
+      result.current.cycleSpeechMode("cell-b");
+    });
+    lastMessage = frame(utterance("cell-b", "b1"));
+    await act(async () => {
+      rerender();
+    });
+    speaking = "cell-b";
+    for (const id of ["b2", "b3"]) {
+      lastMessage = frame(utterance("cell-b", id, 2_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+    expect(result.current.queueFor("cell-b").pending.map((w) => w.id)).toEqual(["b2", "b3"]);
+    expect(flags()).toEqual([
+      ["a1", false],
+      ["a2", true],
+      ["b1", false],
+      ["b2", false],
+      ["b3", true],
+    ]);
+
+    // Marking the cursor's answer heard leaves the list — flags included — as it was.
+    const before = result.current.warmableUtterances;
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.warmableUtterances).toBe(before);
+  });
+
+  /**
+   * A cell that built a backlog while speaking and is then PAUSED reports
+   * idle, so the next answer lands in `current` — newer than the backlog
+   * still queued behind it. `newest` follows arrival time, not the tail.
+   */
+  it("newest flag follows arrival time when an idle arrival lands over a backlog", async () => {
+    const { result, rerender } = await renderChannel();
+    await act(async () => {
+      result.current.cycleSpeechMode("cell-a");
+    });
+    lastMessage = frame(utterance("cell-a", "a1", 1_000));
+    await act(async () => {
+      rerender();
+    });
+    speaking = "cell-a";
+    for (const [id, at] of [
+      ["a2", 2_000],
+      ["a3", 3_000],
+    ] as const) {
+      lastMessage = frame(utterance("cell-a", id, at));
+      await act(async () => {
+        rerender();
+      });
+    }
+    paused = "cell-a";
+    lastMessage = frame(utterance("cell-a", "a4", 4_000));
+    await act(async () => {
+      rerender();
+    });
+
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("a4");
+    expect(queue.pending.map((w) => w.id)).toEqual(["a2", "a3"]);
+    const newest = result.current.warmableUtterances.filter((entry) => entry.newest);
+    expect(newest.map((entry) => entry.utterance.id)).toEqual(["a4"]);
+  });
+
+  /**
    * The dedupe gate is wider than the cursor, and this is the test that says
    * so. An answer already WAITING behind the live run, or already stepped back
    * into history, is just as much a re-delivery as the one being spoken —
