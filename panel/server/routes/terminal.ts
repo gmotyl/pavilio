@@ -16,6 +16,7 @@ import { appendReconnectMetric } from "../lib/reconnect-log.js";
 import { getConfig } from "../config.js";
 import { listOsUsers } from "../lib/os-users.js";
 import { getDefaultUser } from "../lib/project-default-user.js";
+import { isProjectDir } from "../lib/project-dir.js";
 
 function expandPath(p: string): string {
   if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
@@ -60,8 +61,17 @@ router.patch("/sessions/:id", (req, res) => {
   // Only `name` is read. A `color` from a stale client is ignored rather than
   // rejected: PATCH is a partial update, and failing the whole request over one
   // field the model no longer has would break that client's renames too.
-  const { name } = req.body ?? {};
-  const ok = updateSession(req.params.id, { name });
+  // `project` moves the session: only discovered, live projects qualify —
+  // archived ones sit under `archived/` and fail the discovery rule.
+  const { name, project } = req.body ?? {};
+  const updates: { name?: string; project?: string } = { name };
+  if (project !== undefined) {
+    if (typeof project !== "string" || !isProjectDir(getConfig().projectsDir, project)) {
+      return res.status(400).json({ error: "Unknown or archived project" });
+    }
+    updates.project = project;
+  }
+  const ok = updateSession(req.params.id, updates);
   if (!ok) return res.status(404).json({ error: "Session not found" });
   res.json({ ok: true });
 });
