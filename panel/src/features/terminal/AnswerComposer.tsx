@@ -66,6 +66,12 @@ const MOBILE_COMPOSER_MIN_ROWS = 2;
 const MOBILE_COMPOSER_MAX_ROWS = 6;
 
 /**
+ * The desktop row grows with its content up to this many rows of the field
+ * (or the dragged height, if that is taller), then the field scrolls.
+ */
+const DESKTOP_COMPOSER_MAX_ROWS = 10;
+
+/**
  * The line height the cap falls back to when `getComputedStyle` cannot report
  * one in pixels.
  *
@@ -569,6 +575,27 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
     field.style.height = `${Math.min(field.scrollHeight, MOBILE_COMPOSER_MAX_ROWS * lineHeight)}px`;
   }, [text, isMobile]);
+
+  /**
+   * The desktop row grows with the reply from the grip's height (its floor)
+   * up to `max(that height, 10 rows)`; past that the field scrolls. The
+   * field's chrome (padding, border, row padding) is what the declared
+   * two-row default pays beyond two lines, so content needs `scrollHeight +
+   * chrome`. A cleared field measures small again, so sending lands back on
+   * the dragged height with no special case.
+   */
+  const [grownHeight, setGrownHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (isMobile) return;
+    const field = fieldRef.current;
+    if (!field) return;
+    const parsedLineHeight = Number.parseFloat(getComputedStyle(field).lineHeight);
+    const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
+    const chrome = Math.max(0, preferences.answerComposerHeight.default - 2 * lineHeight);
+    const cap = Math.max(height, DESKTOP_COMPOSER_MAX_ROWS * lineHeight + chrome);
+    const wanted = Math.min(Math.max(height, field.scrollHeight + chrome), cap);
+    setGrownHeight(wanted > height ? wanted : null);
+  }, [text, isMobile, height]);
 
   /**
    * A pick's caret, applied after React has written the new value — setting
@@ -1167,7 +1194,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
         // The row's height on desktop. On a touch viewport the stored number is
         // not applied at all: the field is one row and the viewport lays the
         // pane out.
-        style={isMobile ? undefined : { height: `${height}px` }}
+        style={isMobile ? undefined : { height: `${grownHeight ?? height}px` }}
       >
         <div className="answer-pane-composer-well" ref={wellRef}>
           <textarea
