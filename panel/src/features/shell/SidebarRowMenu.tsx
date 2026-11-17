@@ -143,10 +143,10 @@ function NamePrompt({
           />
         </label>
         <div className="flex justify-end gap-2 text-[12px]">
-          <button type="button" onClick={onCancel} style={{ color: "var(--text-tertiary)" }}>
+          <button type="button" data-testid="sidebar-row-prompt-cancel" onClick={onCancel} style={{ color: "var(--text-tertiary)" }}>
             Cancel
           </button>
-          <button type="submit" disabled={!trimmed} style={{ color: "var(--text-primary)" }}>
+          <button type="submit" data-testid="sidebar-row-prompt-submit" disabled={!trimmed} style={{ color: "var(--text-primary)" }}>
             OK
           </button>
         </div>

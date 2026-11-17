@@ -1,4 +1,4 @@
-import { parse as parseYaml } from "yaml";
+import { parseDocument } from "yaml";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
@@ -29,7 +29,9 @@ function groupLine(group: string, eol: string): string {
   let bare = false;
   if (!/[\r\n]/.test(group)) {
     try {
-      const data = parseYaml(`group: ${group}`, { uniqueKeys: false }) as Record<string, unknown> | null;
+      // parseDocument collects errors/warnings instead of logging them (no TAG_RESOLVE_FAILED noise).
+      const doc = parseDocument(`group: ${group}`, { uniqueKeys: false });
+      const data = doc.errors.length ? null : (doc.toJS() as Record<string, unknown> | null);
       bare = data?.group === group;
     } catch {
       bare = false;
