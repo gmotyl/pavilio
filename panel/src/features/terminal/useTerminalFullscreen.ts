@@ -38,6 +38,8 @@ export interface TerminalFullscreen {
   close: () => void;
   /** Ref for the surface's root: registers it as a shortcut target. */
   surfaceRef: (root: HTMLElement | null) => void;
+  /** This surface's id in the shortcut store (`focusedTerminalSurface`). */
+  surfaceId: string;
 }
 
 const CLOSED: TerminalFullscreenState = { kind: "closed" };
@@ -85,7 +87,7 @@ export function useTerminalFullscreen(): TerminalFullscreen {
   });
 
   return useMemo(
-    () => ({ state, toggleCell, toggleTerminal, close, surfaceRef }),
-    [state, toggleCell, toggleTerminal, close, surfaceRef],
+    () => ({ state, toggleCell, toggleTerminal, close, surfaceRef, surfaceId: id }),
+    [state, toggleCell, toggleTerminal, close, surfaceRef, id],
   );
 }
