@@ -1,16 +1,35 @@
 import { useEffect, useRef } from "react";
 
+export interface BulkCloseTarget {
+  sessions: { id: string; name: string; working: boolean }[];
+  /** true for "Close others", false for "Close all". */
+  others: boolean;
+}
+
 interface Props {
-  sessionName: string | null;
+  /** Single-session close (unchanged copy). */
+  session?: { id: string; name: string } | null;
+  /** Bulk close — takes precedence over `session` when set. */
+  bulk?: BulkCloseTarget | null;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (ids: string[]) => void;
 }
 
 export function ConfirmCloseTerminalModal({
-  sessionName,
+  session = null,
+  bulk = null,
   onCancel,
   onConfirm,
 }: Props) {
+  const ids = bulk
+    ? bulk.sessions.map((s) => s.id)
+    : session
+      ? [session.id]
+      : [];
+  const open = ids.length > 0;
+  // Stable key so the focus/keydown effect only re-runs on a new target.
+  const targetKey = open ? `${bulk ? "bulk" : "one"}:${ids.join(",")}` : null;
+  const idsRef = useRef(ids);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   // Parents pass inline callbacks, so their identity changes every render.
   // Route them through refs so the keydown effect can depend only on
@@ -22,10 +41,11 @@ export function ConfirmCloseTerminalModal({
   useEffect(() => {
     onCancelRef.current = onCancel;
     onConfirmRef.current = onConfirm;
+    idsRef.current = ids;
   });
 
   useEffect(() => {
-    if (!sessionName) return;
+    if (!targetKey) return;
     closeBtnRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -36,14 +56,20 @@ export function ConfirmCloseTerminalModal({
         // otherwise pressing Enter with Cancel focused would confirm.
         if (document.activeElement?.tagName === "BUTTON") return;
         e.preventDefault();
-        onConfirmRef.current();
+        onConfirmRef.current(idsRef.current);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sessionName]);
+  }, [targetKey]);
 
-  if (!sessionName) return null;
+  if (!open) return null;
+
+  const count = ids.length;
+  const working = bulk ? bulk.sessions.filter((s) => s.working).length : 0;
+  const title = bulk
+    ? `Close ${count} ${bulk.others ? "other " : ""}terminal${count === 1 ? "" : "s"}?`
+    : `Close terminal "${session?.name}"?`;
 
   return (
     <div
@@ -67,8 +93,28 @@ export function ConfirmCloseTerminalModal({
           id="confirm-close-title"
           className="text-[14px] font-semibold mb-1"
         >
-          Close terminal "{sessionName}"?
+          {title}
         </h2>
+        {bulk && (
+          <ul
+            data-testid="confirm-close-terminal-list"
+            className="text-[12.5px] mb-2 max-h-[160px] overflow-auto font-mono"
+            style={{ color: "var(--text-primary)" }}
+          >
+            {bulk.sessions.map((s) => (
+              <li key={s.id}>{s.name}</li>
+            ))}
+          </ul>
+        )}
+        {working > 0 && (
+          <p
+            data-testid="confirm-close-terminal-warning"
+            className="text-[12.5px] mb-2"
+            style={{ color: "var(--yellow, #e0af68)" }}
+          >
+            {working} have a working agent.
+          </p>
+        )}
         <p
           className="text-[12.5px] mb-4"
           style={{ color: "var(--text-secondary)" }}
@@ -94,7 +140,7 @@ export function ConfirmCloseTerminalModal({
             autoFocus
             type="button"
             data-testid="confirm-close-terminal-confirm"
-            onClick={onConfirm}
+            onClick={() => onConfirm(ids)}
             className="px-3 py-1.5 rounded-md text-[12.5px] font-semibold"
             style={{
               background: "var(--red, #f7768e)",
@@ -102,7 +148,7 @@ export function ConfirmCloseTerminalModal({
               border: "1px solid var(--red, #f7768e)",
             }}
           >
-            Close
+            {bulk ? `Close ${count}` : "Close"}
           </button>
         </div>
       </div>

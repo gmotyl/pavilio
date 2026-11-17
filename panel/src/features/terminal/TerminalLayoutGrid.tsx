@@ -182,10 +182,10 @@ export function TerminalLayoutGrid({
 
   const modal = (
     <ConfirmCloseTerminalModal
-      sessionName={pendingSession?.name ?? null}
+      session={pendingSession ? { id: pendingSession.id, name: pendingSession.name } : null}
       onCancel={() => setPendingCloseId(null)}
-      onConfirm={() => {
-        if (pendingCloseId) onExit(pendingCloseId);
+      onConfirm={(ids) => {
+        ids.forEach((id) => onExit(id));
         setPendingCloseId(null);
       }}
     />

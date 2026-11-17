@@ -483,10 +483,10 @@ export function TerminalToolbar({
       </div>
 
       <ConfirmCloseTerminalModal
-        sessionName={pendingSession?.name ?? null}
+        session={pendingSession ? { id: pendingSession.id, name: pendingSession.name } : null}
         onCancel={() => setPendingCloseId(null)}
-        onConfirm={() => {
-          if (pendingCloseId) onDelete(pendingCloseId);
+        onConfirm={(ids) => {
+          ids.forEach((id) => onDelete(id));
           setPendingCloseId(null);
         }}
       />
