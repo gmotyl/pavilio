@@ -40,10 +40,11 @@ const toMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
  * kept, in the contracted wording
  * `[answer-cache] swept: removed <n> files (<x.y> MB), kept <m> files (<z.w> MB)`.
  * "Files" are the committed audio files — one per cached answer unit
- * (`*Units`); the megabytes are every file's on disk, so speaker records and
- * the temp files of writes still in flight (always kept) ride along in the
- * bytes but not in the file counts. Never rejects, so the server can start
- * it without awaiting it.
+ * (`*Units`); the megabytes are every file's on disk at sweep time, so
+ * speaker records and orphaned temp files ride along in the bytes but not in
+ * the file counts. Writes are serialized with the sweep, so the totals are
+ * exact for the directory the sweep saw. Never rejects, so the server can
+ * start it without awaiting it.
  */
 export async function runStartupSweep(
   cache: AnswerAudioCache,
