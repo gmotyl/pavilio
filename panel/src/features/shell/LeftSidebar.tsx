@@ -18,6 +18,8 @@ import {
   Wifi,
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
+import { SidebarGroupRow } from "./SidebarGroupRow";
+import { mergeSidebarOrder } from "./sidebarOrder";
 import { useIsMobile } from "./useIsMobile";
 import { useSidebarState } from "./useSidebarState";
 import { projectHref } from "./projectHref";
@@ -150,6 +152,8 @@ type SidebarProject = {
   name: string;
   kind?: ProjectKind;
   lastActivity?: string | null;
+  /** Project group from PROJECT.md; only `project`-kind rows are grouped. */
+  group?: string | null;
 };
 
 /** A research row older than this many days is dimmed (unless a terminal runs). */
@@ -430,6 +434,31 @@ export default function LeftSidebar() {
     else if (!researchCollapsed) setResearchCollapsed(true);
   };
 
+  // The Projects tree: groups and ungrouped projects interleaved in the saved
+  // sidebar order. Discovery decides membership, so a group whose members are
+  // all archived (or starred, or research) simply has no node.
+  const [sidebarOrder] = usePreference(preferences.sidebarOrder);
+  const [groupCollapsed, setGroupCollapsed] = usePreference(
+    preferences.groupCollapsed,
+  );
+  const projectTree = useMemo(
+    () =>
+      mergeSidebarOrder(
+        sidebarOrder,
+        otherProjects.map((p) => ({
+          name: String(p.name),
+          group: p.group ?? null,
+        })),
+      ),
+    [sidebarOrder, otherProjects],
+  );
+  const toggleGroup = (name: string) => {
+    const next = { ...groupCollapsed };
+    if (next[name]) delete next[name];
+    else next[name] = true;
+    setGroupCollapsed(next);
+  };
+
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
     for (const s of sessions) {
@@ -439,6 +468,12 @@ export default function LeftSidebar() {
     }
     return m;
   }, [sessions]);
+
+  // Keyed by the string form: an unresolved (undefined) name from an older
+  // server still gets its row, under the key the merge gave it.
+  const projectsByName = new Map<string, SidebarProject>(
+    otherProjects.map((p) => [String(p.name), p]),
+  );
 
   const renderProjectRow = (project: SidebarProject) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
@@ -698,8 +733,31 @@ export default function LeftSidebar() {
           testId="sidebar-section-projects"
           onNew={() => setNewKind("project")}
         />
-        <ul className="space-y-0.5">
-          {otherProjects.map(renderProjectRow)}
+        <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
+          {projectTree.map((node) => {
+            if (node.kind === "project") {
+              const p = projectsByName.get(node.name);
+              return p ? renderProjectRow(p) : null;
+            }
+            const members = node.members
+              .map((m) => projectsByName.get(m))
+              .filter((p) => p !== undefined);
+            return (
+              <SidebarGroupRow
+                key={`g:${node.name}`}
+                name={node.name}
+                members={members.map((p) => p.name)}
+                sessionIds={members.flatMap((p) =>
+                  (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
+                )}
+                collapsed={groupCollapsed[node.name] === true}
+                onToggle={() => toggleGroup(node.name)}
+                isMobile={isMobile}
+              >
+                {members.map(renderProjectRow)}
+              </SidebarGroupRow>
+            );
+          })}
         </ul>
       </section>
       <section data-testid="sidebar-section-research">

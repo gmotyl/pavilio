@@ -162,8 +162,9 @@ describe("LeftSidebar Research section", () => {
     expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
     const doc = (globalThis as { __PAVILIO_PREFS__?: Record<string, unknown> }).__PAVILIO_PREFS__;
     expect(doc?.["shell.research.collapsed"]).toBe(true);
-    // Projects are untouched by the Research collapse.
-    expect(namesIn(section("projects"))).toEqual(["vector", "atlas"]);
+    // Projects are untouched by the Research collapse (alphabetical: no saved
+    // sidebar order, so the merge appends newcomers by name).
+    expect(namesIn(section("projects"))).toEqual(["atlas", "vector"]);
   });
 
   it("Research order: knowledge first, then lastActivity desc", () => {
