@@ -1,21 +1,8 @@
 import type { SynthesisRequest, SynthesisResult, Tts } from "anytts";
-import type { AnswerAudioCache, AnswerKey } from "./answerAudioCache.js";
+import type { AnswerAudioCache, AnswerKey, AnswerRecordKind } from "./answerAudioCache.js";
 
 /** The cascade's engine id (anytts' `CASCADE`, not exported from the package entry). */
 const CASCADE = "cascade";
-
-/** The `engine` marker of a unit's speaker record; no engine id contains `#`. */
-const SPEAKER_MARK = "#speaker";
-
-/**
- * The store key of the speaker record beside the unit stored under `key`: the
- * engine and voice the original synthesis reported, as JSON. Kept in the same
- * store (a second file under the same root), so the startup sweep and the
- * clear route cover it with the audio.
- */
-export function speakerKey(key: AnswerKey): AnswerKey {
-  return { ...key, engine: `${key.engine}${SPEAKER_MARK}` };
-}
 
 export interface DiskCachedTtsOptions {
   /**
@@ -46,8 +33,10 @@ interface Speaker {
  *
  * A disk hit reports the engine and voice the original synthesis reported (for
  * a cascade, the member that spoke and its voice: the browser's relay client
- * rejects an answer without them). They live in a speaker record beside the
- * audio ({@link speakerKey}), written after the audio; audio without a
+ * rejects an answer without them). They live in a speaker record stored under
+ * the same key as the audio (the store's `"speaker"` kind, a `.speaker.json`
+ * file beside the `.mp3`, so the sweep and the clear route cover it), written
+ * after the audio; audio without a
  * readable speaker record is a miss. A hit does not fire the request's
  * `onStart`/`onFirstByte` hooks; the relay passes none.
  *
@@ -81,7 +70,7 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
 
   /** The audio and the speaker that produced it, or `undefined` unless both are readable. */
   async function readHit(key: AnswerKey): Promise<SynthesisResult | undefined> {
-    const [bytes, record] = await Promise.all([readSafely(key), readSafely(speakerKey(key))]);
+    const [bytes, record] = await Promise.all([readSafely(key), readSafely(key, "speaker")]);
     const speaker = record && parseSpeaker(record);
     if (!bytes || !speaker) return undefined;
     return { bytes: toArrayBuffer(bytes), mime: "audio/mpeg", engine: speaker.engine, voice: speaker.voice };
@@ -110,7 +99,7 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
     try {
       cache
         .write(key, bytes)
-        .then(() => cache.write(speakerKey(key), record))
+        .then(() => cache.write(key, record, "speaker"))
         .catch((err: unknown) => logFailure("write", err));
     } catch (err) {
       // A store that throws synchronously is logged the same way.
@@ -124,9 +113,9 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
     console.warn(`[answer-audio-cache] ${op} failed, synthesis unaffected:`, err instanceof Error ? err.message : err);
   }
 
-  async function readSafely(key: AnswerKey): Promise<Uint8Array | undefined> {
+  async function readSafely(key: AnswerKey, kind: AnswerRecordKind = "audio"): Promise<Uint8Array | undefined> {
     try {
-      return await cache.read(key);
+      return await cache.read(key, kind);
     } catch (err) {
       logFailure("read", err);
       return undefined;

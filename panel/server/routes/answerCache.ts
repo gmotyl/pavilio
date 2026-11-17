@@ -24,8 +24,9 @@ export function createAnswerCacheRouter({ cache }: AnswerCacheRouterOptions): Ro
       res.status(204).end();
     } catch (error) {
       const reason = (error as Error)?.message ?? String(error);
-      console.warn("[speech] answer cache clear failed:", reason);
-      res.status(503).json({ error: `answer cache clear failed: ${reason}` });
+      console.warn("[speech] clearing answer audio failed:", reason);
+      // Just the reason: Settings prefixes it with "Couldn't clear answer audio: ".
+      res.status(503).json({ error: reason });
     }
   });
 
@@ -36,7 +37,7 @@ const toMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
 
 /**
  * Removes expired answer audio and logs one line with what was removed and
- * kept. Never rejects, so the server can start it without awaiting it.
+ * kept: answer units (audio files) and the megabytes of every file. Never rejects, so the server can start it without awaiting it.
  */
 export async function runStartupSweep(
   cache: AnswerAudioCache,
@@ -45,8 +46,8 @@ export async function runStartupSweep(
   try {
     const t = await cache.sweep();
     log(
-      `[answer-cache] swept: removed ${t.removedFiles} files (${toMb(t.removedBytes)} MB), ` +
-        `kept ${t.keptFiles} files (${toMb(t.keptBytes)} MB)`,
+      `[answer-cache] swept: removed ${t.removedUnits} units (${toMb(t.removedBytes)} MB), ` +
+        `kept ${t.keptUnits} units (${toMb(t.keptBytes)} MB)`,
     );
   } catch (error) {
     console.warn("[answer-cache] sweep failed:", (error as Error)?.message ?? error);

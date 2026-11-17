@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineStatus, SynthesisRequest, SynthesisResult, Tts } from "anytts";
 
-import type { AnswerAudioCache, AnswerKey } from "../answerAudioCache";
+import type { AnswerAudioCache, AnswerKey, AnswerRecordKind } from "../answerAudioCache";
 import { countingTts } from "../countingTts";
-import { diskCachedTts, speakerKey } from "../diskCachedTts";
+import { diskCachedTts } from "../diskCachedTts";
 import type { UsageStore } from "../usage-store";
 
 /**
@@ -38,28 +38,29 @@ function fakeTts(answeredBy = "omnivoice") {
 /** An in-memory store keyed like the real one; `opts` makes it fail. */
 function fakeCache(opts: { failRead?: boolean; failWrite?: boolean; holdWrite?: Promise<void> } = {}) {
   const files = new Map<string, Uint8Array>();
-  const id = (key: AnswerKey) => JSON.stringify([key.engine, key.voice ?? "", key.lang ?? "", key.text]);
+  const id = (key: AnswerKey, kind: AnswerRecordKind = "audio") =>
+    JSON.stringify([kind, key.engine, key.voice ?? "", key.lang ?? "", key.text]);
   const cache = {
     files,
     put(key: AnswerKey, bytes: number[]) {
       files.set(id(key), new Uint8Array(bytes));
     },
     putSpeaker(key: AnswerKey, speaker: { engine: string; voice: string }) {
-      files.set(id(speakerKey(key)), new TextEncoder().encode(JSON.stringify(speaker)));
+      files.set(id(key, "speaker"), new TextEncoder().encode(JSON.stringify(speaker)));
     },
     has(key: AnswerKey) {
       return files.has(id(key));
     },
-    read: vi.fn(async (key: AnswerKey) => {
+    read: vi.fn(async (key: AnswerKey, kind?: AnswerRecordKind) => {
       if (opts.failRead) throw new Error("disk gone");
-      return files.get(id(key));
+      return files.get(id(key, kind));
     }),
-    write: vi.fn(async (key: AnswerKey, bytes: Uint8Array) => {
+    write: vi.fn(async (key: AnswerKey, bytes: Uint8Array, kind?: AnswerRecordKind) => {
       await opts.holdWrite;
       if (opts.failWrite) throw new Error("disk full");
-      files.set(id(key), new Uint8Array(bytes));
+      files.set(id(key, kind), new Uint8Array(bytes));
     }),
-    sweep: vi.fn(async () => ({ removedFiles: 0, removedBytes: 0, keptFiles: 0, keptBytes: 0 })),
+    sweep: vi.fn(async () => ({ removedUnits: 0, removedBytes: 0, keptUnits: 0, keptBytes: 0 })),
     clear: vi.fn(async () => files.clear()),
   };
   return cache as typeof cache & AnswerAudioCache;

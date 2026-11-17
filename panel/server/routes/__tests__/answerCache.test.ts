@@ -92,7 +92,8 @@ describe("answer cache route", () => {
     const res = await request(app).delete(BASE).set("Cookie", COOKIE);
 
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/EACCES/);
+    // Just the reason: Settings adds "Couldn't clear answer audio: " in front.
+    expect(res.body.error).toBe("EACCES: permission denied");
   });
 });
 
@@ -112,6 +113,6 @@ describe("startup sweep", () => {
 
     expect(existsSync(old)).toBe(false);
     expect(log).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith("[answer-cache] swept: removed 1 files (3.0 MB), kept 2 files (1.5 MB)");
+    expect(log).toHaveBeenCalledWith("[answer-cache] swept: removed 1 units (3.0 MB), kept 2 units (1.5 MB)");
   });
 });

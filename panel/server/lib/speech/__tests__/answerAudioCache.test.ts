@@ -4,6 +4,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../answerAudioCache";
 
+// rename delegates to the real one unless a test sets `beforeRename`, which
+// runs between the temp file write and the rename (a racing clear()).
+const hooks = vi.hoisted(() => ({ beforeRename: undefined as (() => void) | undefined }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: async (from: string, to: string) => {
+      const hook = hooks.beforeRename;
+      hooks.beforeRename = undefined;
+      hook?.();
+      return actual.rename(from, to);
+    },
+  };
+});
+
 // The store root is a not-yet-existing child of a temp dir, so writes have to create it.
 let tmp: string;
 let root: string;
@@ -12,6 +28,7 @@ beforeEach(() => {
   root = join(tmp, "answers");
 });
 afterEach(() => {
+  hooks.beforeRename = undefined;
   rmSync(tmp, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -113,14 +130,67 @@ describe("answer audio cache", () => {
     ageAll(now - 25 * HOUR);
     await cache.write({ ...KEY, text: "fresh" }, new Uint8Array(5));
 
-    expect(await cache.sweep()).toEqual({ removedFiles: 2, removedBytes: 30, keptFiles: 1, keptBytes: 5 });
+    expect(await cache.sweep()).toEqual({ removedUnits: 2, removedBytes: 30, keptUnits: 1, keptBytes: 5 });
     expect(readdirSync(root)).toHaveLength(1);
     expect(await cache.read({ ...KEY, text: "fresh" })).toBeDefined();
   });
 
+  it("a speaker record sits beside its audio as .speaker.json", async () => {
+    const cache = createAnswerAudioCache({ root });
+    const record = new TextEncoder().encode('{"engine":"edge","voice":"v"}');
+    await cache.write(KEY, new Uint8Array([1, 2]));
+    await cache.write(KEY, record, "speaker");
+
+    const names = readdirSync(root).sort();
+    expect(names).toEqual([
+      expect.stringMatching(/^[0-9a-f]{64}\.mp3$/),
+      expect.stringMatching(/^[0-9a-f]{64}\.speaker\.json$/),
+    ]);
+    // Same hash: the record names the unit it belongs to.
+    expect(names[0]!.slice(0, 64)).toBe(names[1]!.slice(0, 64));
+    expect(Buffer.from((await cache.read(KEY, "speaker"))!)).toEqual(Buffer.from(record));
+    expect(Buffer.from((await cache.read(KEY))!)).toEqual(Buffer.from([1, 2]));
+    expect(await cache.read({ ...KEY, text: "other" }, "speaker")).toBeUndefined();
+  });
+
+  it("sweep counts audio files as units and every file's bytes", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write({ ...KEY, text: "old" }, new Uint8Array(10));
+    await cache.write({ ...KEY, text: "old" }, new Uint8Array(3), "speaker");
+    ageAll(now - 25 * HOUR);
+    await cache.write(KEY, new Uint8Array(5));
+    await cache.write(KEY, new Uint8Array(2), "speaker");
+
+    expect(await cache.sweep()).toEqual({ removedUnits: 1, removedBytes: 13, keptUnits: 1, keptBytes: 7 });
+    expect(readdirSync(root)).toHaveLength(2);
+  });
+
+  it("a write whose temp file a clear removed does not use up the write warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cache = createAnswerAudioCache({ root });
+    mkdirSync(root, { recursive: true });
+    // A clear() racing the write: the root vanishes between the temp write and the rename.
+    let raced = false;
+    hooks.beforeRename = () => {
+      raced = true;
+      rmSync(root, { recursive: true, force: true });
+    };
+
+    await expect(cache.write(KEY, new Uint8Array([1]))).resolves.toBeUndefined();
+    expect(raced).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+
+    // A real disk failure afterwards still warns once.
+    writeFileSync(root, "not a directory");
+    await cache.write(KEY, new Uint8Array([1]));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("write");
+  });
+
   it("sweep of a missing root reports zeros", async () => {
     const cache = createAnswerAudioCache({ root });
-    expect(await cache.sweep()).toEqual({ removedFiles: 0, removedBytes: 0, keptFiles: 0, keptBytes: 0 });
+    expect(await cache.sweep()).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 0, keptBytes: 0 });
   });
 
   it("clear deletes every answer file", async () => {

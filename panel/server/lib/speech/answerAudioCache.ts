@@ -2,10 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ANSWER_SUBDIR, PAGE_CACHE_DIR } from "./pageCache.js";
 
 /**
- * The answer audio disk store: one `<sha256(key)>.mp3` per synthesized answer
- * unit, flat under the root. A file lives for {@link ANSWER_CACHE_TTL_MS}
+ * The answer audio disk store, flat under the root: one `<sha256(key)>.mp3`
+ * per synthesized answer unit and, beside it, an optional
+ * `<sha256(key)>.speaker.json` record (see {@link AnswerRecordKind}). A file lives for {@link ANSWER_CACHE_TTL_MS}
  * from its last write (its mtime); reading never touches the mtime, so a
  * replayed answer does not stay forever. Expired files are a miss on read and
  * are removed by {@link AnswerAudioCache.sweep}.
@@ -15,7 +17,7 @@ import { join } from "node:path";
  * life of the store instead of one per request.
  */
 
-export const ANSWER_CACHE_DIR = ".pavilio/speech-cache/answers"; // under os.homedir()
+export const ANSWER_CACHE_DIR = join(PAGE_CACHE_DIR, ANSWER_SUBDIR); // under os.homedir()
 export const ANSWER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface AnswerKey {
@@ -25,18 +27,32 @@ export interface AnswerKey {
   text: string;
 }
 
+/**
+ * What a file under a key holds: the unit's audio (`.mp3`) or the JSON record
+ * of who spoke it (`.speaker.json`). Both share the key's hash, so a unit's
+ * files sit side by side and every kind is swept and cleared alike.
+ */
+export type AnswerRecordKind = "audio" | "speaker";
+
+const EXTENSION: Record<AnswerRecordKind, string> = { audio: ".mp3", speaker: ".speaker.json" };
+
+/**
+ * `*Units` count audio files only — one per cached answer unit, the number a
+ * reader of the startup log cares about; `*Bytes` count every file (speaker
+ * records and stray temp files included), the real disk footprint.
+ */
 export interface AnswerSweepTotals {
-  removedFiles: number;
+  removedUnits: number;
   removedBytes: number;
-  keptFiles: number;
+  keptUnits: number;
   keptBytes: number;
 }
 
 export interface AnswerAudioCache {
   /** `undefined` = miss: absent, expired, or a disk error. */
-  read(key: AnswerKey): Promise<Uint8Array | undefined>;
-  /** Atomic (temp file + rename); errors are swallowed. */
-  write(key: AnswerKey, bytes: Uint8Array): Promise<void>;
+  read(key: AnswerKey, kind?: AnswerRecordKind): Promise<Uint8Array | undefined>;
+  /** Atomic (temp file + rename); errors are swallowed. `kind` defaults to `"audio"`. */
+  write(key: AnswerKey, bytes: Uint8Array, kind?: AnswerRecordKind): Promise<void>;
   /** Deletes files older than the TTL and reports what was removed and kept. */
   sweep(): Promise<AnswerSweepTotals>;
   /** Deletes every file under the root. */
@@ -45,9 +61,9 @@ export interface AnswerAudioCache {
 
 type FailureKind = "read" | "write" | "sweep";
 
-function fileName(key: AnswerKey): string {
+function fileName(key: AnswerKey, kind: AnswerRecordKind): string {
   const id = JSON.stringify([key.engine, key.voice ?? "", key.lang ?? "", key.text]);
-  return `${createHash("sha256").update(id).digest("hex")}.mp3`;
+  return `${createHash("sha256").update(id).digest("hex")}${EXTENSION[kind]}`;
 }
 
 function isMissing(err: unknown): boolean {
@@ -66,8 +82,8 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
   }
 
   return {
-    async read(key) {
-      const file = join(root, fileName(key));
+    async read(key, kind = "audio") {
+      const file = join(root, fileName(key, kind));
       try {
         const info = await stat(file);
         if (now() - info.mtimeMs > ANSWER_CACHE_TTL_MS) return undefined;
@@ -78,21 +94,23 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
       }
     },
 
-    async write(key, bytes) {
-      const file = join(root, fileName(key));
+    async write(key, bytes, kind = "audio") {
+      const file = join(root, fileName(key, kind));
       const temp = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
       try {
         await mkdir(root, { recursive: true });
         await writeFile(temp, bytes);
         await rename(temp, file);
       } catch (err) {
-        warnOnce("write", err);
+        // ENOENT: a clear() removed the temp file (or the root) mid-write. That
+        // is a lost race, not a broken disk, so it keeps the one warning.
+        if (!isMissing(err)) warnOnce("write", err);
         await rm(temp, { force: true }).catch(() => {});
       }
     },
 
     async sweep() {
-      const totals: AnswerSweepTotals = { removedFiles: 0, removedBytes: 0, keptFiles: 0, keptBytes: 0 };
+      const totals: AnswerSweepTotals = { removedUnits: 0, removedBytes: 0, keptUnits: 0, keptBytes: 0 };
       let names: string[];
       try {
         names = await readdir(root);
@@ -106,12 +124,13 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
         try {
           const info = await stat(file);
           if (!info.isFile()) continue;
+          const unit = name.endsWith(EXTENSION.audio) ? 1 : 0;
           if (at - info.mtimeMs > ANSWER_CACHE_TTL_MS) {
             await unlink(file);
-            totals.removedFiles += 1;
+            totals.removedUnits += unit;
             totals.removedBytes += info.size;
           } else {
-            totals.keptFiles += 1;
+            totals.keptUnits += unit;
             totals.keptBytes += info.size;
           }
         } catch (err) {

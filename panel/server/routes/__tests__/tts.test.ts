@@ -334,8 +334,8 @@ describe("/api/tts over the Tts holder", () => {
       const first = await send();
       expect(first.status).toBe(200);
       // The write is not awaited by the response: wait for the file to land.
-      // Audio plus its speaker record.
-      await vi.waitFor(() => expect(readdirMp3(root)).toHaveLength(2));
+      // Audio plus its speaker record beside it.
+      await vi.waitFor(() => expect(readdirUnit(root)).toEqual([".mp3", ".speaker.json"]));
 
       const second = await send();
       expect(second.status).toBe(200);
@@ -368,7 +368,7 @@ describe("/api/tts over the Tts holder", () => {
 
       const first = await send();
       expect(first.status).toBe(200);
-      await vi.waitFor(() => expect(readdirMp3(root)).toHaveLength(2));
+      await vi.waitFor(() => expect(readdirUnit(root)).toEqual([".mp3", ".speaker.json"]));
 
       const second = await send();
       expect(second.status).toBe(200);
@@ -383,6 +383,10 @@ describe("/api/tts over the Tts holder", () => {
   });
 });
 
-function readdirMp3(dir: string): string[] {
-  return readdirSync(dir).filter((name) => name.endsWith(".mp3"));
+/** The extensions of the store's unit files (no temp files), sorted. */
+function readdirUnit(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((name) => /^[0-9a-f]{64}\./.test(name))
+    .map((name) => name.slice(64))
+    .sort();
 }
