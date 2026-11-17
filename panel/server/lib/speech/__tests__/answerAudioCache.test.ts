@@ -16,11 +16,18 @@ import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../
 
 // rename delegates to the real one unless a test sets `beforeRename`, which
 // runs (and is awaited) between the temp file write and the rename (a racing
-// clear()); it is handed the rename's source. stat likewise runs `afterStat`
-// once, with the stat'ed path, after the real stat resolved (a racing write).
+// clear()); it is handed the rename's source. `afterRename` runs (awaited)
+// once the real rename resolved, with its target. writeFile runs
+// `beforeWriteFile` (awaited) before the real write, while the temp file does
+// not exist yet. stat likewise runs `afterStat` once, with the stat'ed path,
+// after the real stat resolved (a racing write); it may set itself again.
+// link throws `linkError`'s code when set (a filesystem without hard links).
 const hooks = vi.hoisted(() => ({
   beforeRename: undefined as ((from: string) => void | Promise<void>) | undefined,
-  afterStat: undefined as ((path: string) => void) | undefined,
+  afterRename: undefined as ((to: string) => void | Promise<void>) | undefined,
+  beforeWriteFile: undefined as (() => void | Promise<void>) | undefined,
+  afterStat: undefined as ((path: string) => void | Promise<void>) | undefined,
+  linkError: undefined as string | undefined,
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -30,14 +37,27 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       const hook = hooks.beforeRename;
       hooks.beforeRename = undefined;
       await hook?.(from);
-      return actual.rename(from, to);
+      await actual.rename(from, to);
+      const after = hooks.afterRename;
+      hooks.afterRename = undefined;
+      await after?.(to);
+    },
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      const hook = hooks.beforeWriteFile;
+      hooks.beforeWriteFile = undefined;
+      await hook?.();
+      return actual.writeFile(...args);
     },
     stat: async (path: string) => {
       const info = await actual.stat(path);
       const hook = hooks.afterStat;
       hooks.afterStat = undefined;
-      hook?.(path);
+      await hook?.(path);
       return info;
+    },
+    link: async (existing: string, target: string) => {
+      if (hooks.linkError) throw Object.assign(new Error(`${hooks.linkError}: link`), { code: hooks.linkError });
+      return actual.link(existing, target);
     },
   };
 });
@@ -51,7 +71,10 @@ beforeEach(() => {
 });
 afterEach(() => {
   hooks.beforeRename = undefined;
+  hooks.afterRename = undefined;
+  hooks.beforeWriteFile = undefined;
   hooks.afterStat = undefined;
+  hooks.linkError = undefined;
   rmSync(tmp, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -261,5 +284,39 @@ describe("answer audio cache", () => {
     // A write after the clear is stored as usual.
     await cache.write(KEY, new Uint8Array([2]));
     expect(await cache.read(KEY)).toEqual(new Uint8Array([2]));
+  });
+
+  it("a write a clear overtook before its temp file appeared does not replace a later write", async () => {
+    const cache = createAnswerAudioCache({ root });
+    mkdirSync(root, { recursive: true });
+    // Write A pauses before its temp file exists; a clear finishes and write B
+    // commits the same key before A resumes.
+    hooks.beforeWriteFile = async () => {
+      await cache.clear();
+      await cache.write(KEY, new Uint8Array([2]));
+    };
+
+    await cache.write(KEY, new Uint8Array([1]));
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2]));
+    expect(readdirSync(root)).toHaveLength(1);
+  });
+
+  it("a write undone by a clear does not remove a later write that replaced its file", async () => {
+    const cache = createAnswerAudioCache({ root });
+    // A clear overlaps write A's rename, then write B commits the same key
+    // before A gets to drop its own file.
+    hooks.beforeRename = async (from) => {
+      const held = join(tmp, "held");
+      renameSync(from, held);
+      await cache.clear();
+      renameSync(held, from);
+    };
+    hooks.afterRename = async () => {
+      await cache.write(KEY, new Uint8Array([3]));
+    };
+
+    await cache.write(KEY, new Uint8Array([1]));
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([3]));
+    expect(readdirSync(root)).toHaveLength(1);
   });
 });

@@ -103,12 +103,24 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
       const file = join(root, fileName(key, kind));
       const temp = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
       const clearsAtStart = clears;
+      const overlappedClear = () => clearing > 0 || clears !== clearsAtStart;
       try {
         await mkdir(root, { recursive: true });
         await writeFile(temp, bytes);
+        // A clear already overlapped the write: never commit, or the rename
+        // could replace a newer write that landed after the clear.
+        if (overlappedClear()) {
+          await rm(temp, { force: true });
+          return;
+        }
+        const own = await stat(temp);
         await rename(temp, file);
-        // A clear ran during the write: drop what it may have missed.
-        if (clearing > 0 || clears !== clearsAtStart) await rm(file, { force: true });
+        // A clear ran during the rename: drop what it may have missed, but only
+        // while the path still holds this write's file, not a later write's.
+        if (overlappedClear()) {
+          const current = await stat(file).catch(() => undefined);
+          if (current && current.ino === own.ino && current.dev === own.dev) await rm(file, { force: true });
+        }
       } catch (err) {
         // ENOENT: a clear() removed the temp file (or the root) mid-write. That
         // is a lost race, not a broken disk, so it keeps the one warning.
