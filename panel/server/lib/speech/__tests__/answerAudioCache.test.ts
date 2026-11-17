@@ -1,12 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../answerAudioCache";
 
 // rename delegates to the real one unless a test sets `beforeRename`, which
-// runs between the temp file write and the rename (a racing clear()).
-const hooks = vi.hoisted(() => ({ beforeRename: undefined as (() => void) | undefined }));
+// runs (and is awaited) between the temp file write and the rename (a racing
+// clear()); it is handed the rename's source.
+const hooks = vi.hoisted(() => ({
+  beforeRename: undefined as ((from: string) => void | Promise<void>) | undefined,
+}));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
@@ -14,7 +27,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     rename: async (from: string, to: string) => {
       const hook = hooks.beforeRename;
       hooks.beforeRename = undefined;
-      hook?.();
+      await hook?.(from);
       return actual.rename(from, to);
     },
   };
@@ -203,5 +216,24 @@ describe("answer audio cache", () => {
     await cache.clear();
     expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
     expect(await cache.read(KEY)).toBeUndefined();
+  });
+
+  it("a write that lands after a clear listed the root does not survive the clear", async () => {
+    const cache = createAnswerAudioCache({ root });
+    // The clear lists the root before the write's temp file is visible (it is
+    // held outside the root while the clear runs), then the rename lands.
+    hooks.beforeRename = async (from) => {
+      const held = join(tmp, "held");
+      renameSync(from, held);
+      await cache.clear();
+      renameSync(held, from);
+    };
+
+    await cache.write(KEY, new Uint8Array([1]));
+    expect(await cache.read(KEY)).toBeUndefined();
+
+    // A write after the clear is stored as usual.
+    await cache.write(KEY, new Uint8Array([2]));
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2]));
   });
 });

@@ -55,7 +55,7 @@ export interface AnswerAudioCache {
   write(key: AnswerKey, bytes: Uint8Array, kind?: AnswerRecordKind): Promise<void>;
   /** Deletes files older than the TTL and reports what was removed and kept. */
   sweep(): Promise<AnswerSweepTotals>;
-  /** Deletes every file under the root. */
+  /** Deletes every file under the root; a write overlapping the clear is dropped too. */
   clear(): Promise<void>;
 }
 
@@ -74,6 +74,11 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
   const root = opts.root ?? join(homedir(), ANSWER_CACHE_DIR);
   const now = opts.now ?? Date.now;
   const warned = new Set<FailureKind>();
+  // A write that overlaps a clear() must not outlive it: one whose rename lands
+  // after the clear listed the root would otherwise survive a DELETE that
+  // already answered 204. `clears` counts finished clears, `clearing` running ones.
+  let clears = 0;
+  let clearing = 0;
 
   function warnOnce(kind: FailureKind, err: unknown): void {
     if (warned.has(kind)) return;
@@ -97,10 +102,13 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
     async write(key, bytes, kind = "audio") {
       const file = join(root, fileName(key, kind));
       const temp = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
+      const clearsAtStart = clears;
       try {
         await mkdir(root, { recursive: true });
         await writeFile(temp, bytes);
         await rename(temp, file);
+        // A clear ran during the write: drop what it may have missed.
+        if (clearing > 0 || clears !== clearsAtStart) await rm(file, { force: true });
       } catch (err) {
         // ENOENT: a clear() removed the temp file (or the root) mid-write. That
         // is a lost race, not a broken disk, so it keeps the one warning.
@@ -141,14 +149,20 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
     },
 
     async clear() {
-      let names: string[];
+      clearing += 1;
       try {
-        names = await readdir(root);
-      } catch (err) {
-        if (isMissing(err)) return;
-        throw err;
+        let names: string[];
+        try {
+          names = await readdir(root);
+        } catch (err) {
+          if (isMissing(err)) return;
+          throw err;
+        }
+        await Promise.all(names.map((name) => rm(join(root, name), { recursive: true, force: true })));
+      } finally {
+        clearing -= 1;
+        clears += 1;
       }
-      await Promise.all(names.map((name) => rm(join(root, name), { recursive: true, force: true })));
     },
   };
 }
