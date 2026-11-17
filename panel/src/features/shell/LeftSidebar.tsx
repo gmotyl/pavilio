@@ -553,7 +553,7 @@ export default function LeftSidebar() {
           style={{
             background: isCurrent ? "var(--bg-active)" : "transparent",
             ...(dimmed ? { opacity: 0.55 } : {}),
-            ...dropStyle(drag["data-drop"]),
+            ...dropStyle(drag["data-drop"], drag["data-dragging"] === "true"),
           }}
         >
           <button
@@ -586,6 +586,7 @@ export default function LeftSidebar() {
               is told apart by the active background and the weight alone. */}
           <NavLink
             to={projectHref(project.name, isMobile)}
+            draggable={false}
             className="flex-1 truncate text-[13px] py-0.5"
             style={{
               color: hasName

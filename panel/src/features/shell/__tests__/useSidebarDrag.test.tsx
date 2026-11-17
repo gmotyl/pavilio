@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { useSidebarDrag } from "../useSidebarDrag";
+import { dropStyle, useSidebarDrag } from "../useSidebarDrag";
 import type { SidebarOrder } from "../sidebarOrder";
 import * as alertStore from "../../alerts/store";
 
@@ -74,6 +74,11 @@ beforeEach(() => {
     top: 0, height: 20, bottom: 20, left: 0, right: 100, width: 100, x: 0, y: 0,
     toJSON: () => ({}),
   } as DOMRect);
+  under = null;
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => under,
+  });
 });
 afterEach(() => {
   cleanup();
@@ -86,11 +91,20 @@ function startDrag(id: string) {
   fireEvent.pointerDown(el, { button: 0, clientX: 0, clientY: 10, pointerId: 1 });
   fireEvent.pointerMove(window, { clientX: 0, clientY: 30, pointerId: 1 });
 }
+/** Where the pointer is: the tree resolves its target from elementFromPoint. */
+let under: Element | null = null;
+let lastY = 0;
 function hover(id: string, y: number) {
-  fireEvent.pointerMove(screen.getByTestId(id), { clientX: 0, clientY: y, pointerId: 1 });
+  under = screen.getByTestId(id);
+  lastY = y;
+  fireEvent.pointerMove(window, { clientX: 0, clientY: y, pointerId: 1 });
+}
+function leave() {
+  under = document.body;
+  fireEvent.pointerMove(window, { clientX: 500, clientY: 500, pointerId: 1 });
 }
 function drop() {
-  fireEvent.pointerUp(window, { pointerId: 1 });
+  fireEvent.pointerUp(window, { clientX: 0, clientY: lastY, pointerId: 1 });
 }
 
 describe("useSidebarDrag", () => {
@@ -147,8 +161,7 @@ describe("useSidebarDrag", () => {
       "/api/projects/anytts/group",
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ group: "InfoPoly" }) }),
     );
-    // optimistic placement inside the group
-    expect(screen.getByTestId("members-InfoPoly").contains(screen.getByTestId("row-anytts"))).toBe(true);
+    // optimistic placement is covered by the refresh-ordering test below
     const last = onOrder.mock.calls.at(-1)![0];
     expect(last.groups.InfoPoly).toEqual(["infopoly", "anytts"]);
     expect(last.top).not.toContain("p:anytts");
@@ -196,5 +209,100 @@ describe("useSidebarDrag", () => {
     expect(screen.getByTestId("row-pavilio").hasAttribute("data-drop")).toBe(false);
     drop();
     expect(onOrder).not.toHaveBeenCalled();
+  });
+
+  it("dragging by the project link blocks native link drag and captures the pointer", () => {
+    function LinkHarness() {
+      const drag = useSidebarDrag({ projects: PROJECTS, order: ORDER, setOrder: () => {}, isMobile: false });
+      return (
+        <div data-testid="row-x" {...drag.rowProps("p:anytts", null)}>
+          <a href="/p/anytts" data-testid="link">anytts</a>
+        </div>
+      );
+    }
+    render(<LinkHarness />);
+    const row = screen.getByTestId("row-x");
+    const capture = vi.fn();
+    (row as unknown as { setPointerCapture: unknown }).setPointerCapture = capture;
+    fireEvent.pointerDown(screen.getByTestId("link"), { button: 0, clientX: 0, clientY: 10, pointerId: 7 });
+    expect(capture).toHaveBeenCalledWith(7);
+    const ev = new Event("dragstart", { bubbles: true, cancelable: true });
+    screen.getByTestId("link").dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it("pointercancel clears the drag without committing", () => {
+    const onOrder = vi.fn();
+    render(<Harness onOrder={onOrder} />);
+    startDrag("row-zdrofit-sniper");
+    hover("row-omnivoice-server", 2);
+    fireEvent.pointerCancel(window, { pointerId: 1 });
+    expect(onOrder).not.toHaveBeenCalled();
+    expect(screen.getByTestId("row-omnivoice-server").hasAttribute("data-drop")).toBe(false);
+    expect(screen.getByTestId("row-zdrofit-sniper").hasAttribute("data-dragging")).toBe(false);
+  });
+
+  it("release outside the tree is a no-op", () => {
+    const onOrder = vi.fn();
+    render(<Harness onOrder={onOrder} />);
+    startDrag("row-zdrofit-sniper");
+    hover("row-omnivoice-server", 2);
+    leave();
+    expect(screen.getByTestId("row-omnivoice-server").hasAttribute("data-drop")).toBe(false);
+    drop();
+    expect(onOrder).not.toHaveBeenCalled();
+  });
+
+  it("saves the order only after the projects refresh resolves, then clears pending", async () => {
+    let resolveList!: (r: Response) => void;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/projects") return new Promise<Response>((r) => (resolveList = r));
+      return new Response(JSON.stringify({ group: "InfoPoly" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const listener = (e: Event) => {
+      (e as CustomEvent<{ waitUntil: (p: Promise<unknown>) => void }>).detail.waitUntil(
+        fetch("/api/projects"),
+      );
+    };
+    window.addEventListener("pavilio:projects-refresh", listener);
+    const onOrder = vi.fn();
+    try {
+      render(<Harness onOrder={onOrder} />);
+      startDrag("row-anytts");
+      hover("row-g-InfoPoly", 10);
+      await act(async () => drop());
+      expect(onOrder).not.toHaveBeenCalled();
+      // optimistic while refresh is in flight
+      expect(screen.getByTestId("members-InfoPoly").contains(screen.getByTestId("row-anytts"))).toBe(true);
+      await act(async () => resolveList(new Response("[]")));
+      expect(onOrder).toHaveBeenCalledTimes(1);
+      // discovery never reported the group (projects prop unchanged) → pending cleared, not stuck
+      expect(screen.getByTestId("members-InfoPoly").contains(screen.getByTestId("row-anytts"))).toBe(false);
+    } finally {
+      window.removeEventListener("pavilio:projects-refresh", listener);
+    }
+  });
+
+  it("unmount mid-drag clears timers and sets no state", () => {
+    vi.useFakeTimers();
+    const err = vi.spyOn(console, "error");
+    try {
+      const { unmount } = render(<Harness onOrder={() => {}} />);
+      startDrag("row-zdrofit-sniper");
+      hover("row-omnivoice-server", 2);
+      drop();
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(err).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dragged row is dimmed with a grabbing cursor", () => {
+    render(<Harness onOrder={() => {}} />);
+    startDrag("row-anytts");
+    expect(dropStyle(undefined, true)).toMatchObject({ opacity: 0.45, cursor: "grabbing" });
   });
 });

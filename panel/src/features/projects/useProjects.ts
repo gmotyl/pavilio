@@ -31,8 +31,14 @@ const PROJECTS_REFRESH_EVENT = "pavilio:projects-refresh";
  * waiting for the file watcher — e.g. right after the panel created or
  * restored a project and is about to navigate to it.
  */
-export function refreshProjects(): void {
-  window.dispatchEvent(new Event(PROJECTS_REFRESH_EVENT));
+export function refreshProjects(): Promise<void> {
+  const waits: Promise<unknown>[] = [];
+  window.dispatchEvent(
+    new CustomEvent(PROJECTS_REFRESH_EVENT, {
+      detail: { waitUntil: (p: Promise<unknown>) => waits.push(p) },
+    }),
+  );
+  return Promise.allSettled(waits).then(() => undefined);
 }
 
 export function useProjects() {
@@ -46,7 +52,10 @@ export function useProjects() {
 
   useEffect(() => {
     fetchProjects();
-    const onRefresh = () => void fetchProjects();
+    const onRefresh = (e: Event) => {
+      const p = fetchProjects();
+      (e as CustomEvent<{ waitUntil?: (p: Promise<unknown>) => void }>).detail?.waitUntil?.(p);
+    };
     window.addEventListener(PROJECTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(PROJECTS_REFRESH_EVENT, onRefresh);
   }, []);

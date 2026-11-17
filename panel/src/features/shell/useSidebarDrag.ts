@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
+  DragEvent,
   MouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
@@ -33,13 +34,16 @@ const THRESHOLD = 4;
 export type SidebarRowDragProps = {
   "data-drop"?: Edge;
   "data-dragging"?: "true";
+  "data-drag-key"?: string;
+  "data-drag-container"?: string;
   onPointerDown?: (e: ReactPointerEvent<HTMLElement>) => void;
-  onPointerMove?: (e: ReactPointerEvent<HTMLElement>) => void;
+  onDragStart?: (e: DragEvent<HTMLElement>) => void;
   onClickCapture?: (e: MouseEvent<HTMLElement>) => void;
 };
 
 /** Mockup check 5: accent line = position, dashed accent outline = into group. */
-export function dropStyle(edge: Edge | undefined): CSSProperties {
+export function dropStyle(edge: Edge | undefined, dragging = false): CSSProperties {
+  if (dragging) return { opacity: 0.45, cursor: "grabbing" };
   if (edge === "before") return { boxShadow: "inset 0 2px 0 var(--accent)" };
   if (edge === "after") return { boxShadow: "inset 0 -2px 0 var(--accent)" };
   if (edge === "into")
@@ -161,6 +165,16 @@ export function useSidebarDrag({
   targetRef.current = target;
   const draggingRef = useRef<Source | null>(null);
   draggingRef.current = dragging;
+  const mounted = useRef(true);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    };
+  }, []);
 
   const commit = useCallback(
     async (source: Source, t: Target) => {
@@ -179,14 +193,23 @@ export function useSidebarDrag({
           body: JSON.stringify({ group }),
         });
         if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-        refreshProjects();
-        setOrder(result.order);
       } catch (err) {
-        setPending(null);
+        if (mounted.current) setPending(null);
         alerts.error(`Could not move ${project}`, {
           detail: err instanceof Error ? err.message : String(err),
           project,
         });
+        return;
+      }
+      // Design sequence: PUT → refresh projects → save order. The override
+      // clears once the refresh settles, whatever discovery reported.
+      try {
+        await refreshProjects();
+      } finally {
+        if (mounted.current) {
+          setOrder(result.order);
+          setPending(null);
+        }
       }
     },
     [setOrder],
@@ -194,32 +217,68 @@ export function useSidebarDrag({
 
   useEffect(() => {
     if (isMobile) return;
+    /** The row under the pointer (pointer capture keeps events on the source). */
+    const resolve = (x: number, y: number): Target | null => {
+      const src = draggingRef.current;
+      const hit = src ? document.elementFromPoint?.(x, y) : null;
+      const row = hit instanceof Element ? hit.closest<HTMLElement>("[data-drag-key]") : null;
+      if (!src || !row) return null;
+      const key = row.dataset.dragKey as Key;
+      const container = row.dataset.dragContainer ?? null;
+      const r = row.getBoundingClientRect();
+      const f = r.height > 0 ? (y - r.top) / r.height : 0.5;
+      const edge: Edge =
+        key.startsWith("g:") && src.key.startsWith("p:") && f >= 0.25 && f <= 0.75
+          ? "into"
+          : f < 0.5
+            ? "before"
+            : "after";
+      return { key, container, edge };
+    };
     const onMove = (e: PointerEvent) => {
       const s = start.current;
-      if (!s || draggingRef.current) return;
-      if (Math.hypot(e.clientX - s.x, e.clientY - s.y) >= THRESHOLD) {
+      if (!s) return;
+      if (!draggingRef.current) {
+        if (Math.hypot(e.clientX - s.x, e.clientY - s.y) < THRESHOLD) return;
+        draggingRef.current = s.source;
         setDragging(s.source);
       }
-    };
-    const onUp = () => {
-      const source = draggingRef.current;
-      const t = targetRef.current;
-      start.current = null;
-      if (source) {
-        suppressClick.current = true;
-        setTimeout(() => (suppressClick.current = false), 0);
-        setDragging(null);
-        setTarget(null);
-        if (t) void commit(source, t);
+      const next = resolve(e.clientX, e.clientY);
+      const cur = targetRef.current;
+      const same =
+        next === cur ||
+        (!!next && !!cur && next.key === cur.key && next.container === cur.container && next.edge === cur.edge);
+      if (!same) {
+        targetRef.current = next;
+        setTarget(next);
       }
     };
+    const end = (e: PointerEvent, commitDrop: boolean) => {
+      const source = draggingRef.current;
+      start.current = null;
+      if (!source) return;
+      const t = commitDrop ? resolve(e.clientX, e.clientY) ?? null : null;
+      draggingRef.current = null;
+      targetRef.current = null;
+      suppressClick.current = true;
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      clickTimer.current = setTimeout(() => {
+        suppressClick.current = false;
+        clickTimer.current = null;
+      }, 0);
+      setDragging(null);
+      setTarget(null);
+      if (t) void commit(source, t);
+    };
+    const onUp = (e: PointerEvent) => end(e, true);
+    const onCancel = (e: PointerEvent) => end(e, false);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("pointercancel", onCancel);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointercancel", onCancel);
     };
   }, [isMobile, commit]);
 
@@ -233,28 +292,23 @@ export function useSidebarDrag({
       return {
         "data-drop": drop,
         "data-dragging": dragging?.key === key ? ("true" as const) : undefined,
+        "data-drag-key": key,
+        "data-drag-container": container ?? undefined,
         onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
           if (e.button !== 0) return;
           // Buttons inside the row (chevrons, stars) keep their own clicks.
           const el = e.target as HTMLElement;
           if (el.closest("button") && !el.closest("[data-drag-grip]")) return;
           start.current = { source: { key, container }, x: e.clientX, y: e.clientY };
+          try {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+          } catch {
+            /* pointer already released */
+          }
         },
-        onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
-          const src = draggingRef.current;
-          if (!src) return;
-          const r = e.currentTarget.getBoundingClientRect();
-          const f = r.height > 0 ? (e.clientY - r.top) / r.height : 0.5;
-          let edge: Edge;
-          const isGroupRow = key.startsWith("g:");
-          if (isGroupRow && src.key.startsWith("p:") && f >= 0.25 && f <= 0.75) {
-            edge = "into";
-          } else edge = f < 0.5 ? "before" : "after";
-          const next = { key, container, edge };
-          const cur = targetRef.current;
-          if (!cur || cur.key !== key || cur.container !== container || cur.edge !== edge)
-            setTarget(next);
-        },
+        // A NavLink inside the row would start the browser's native link
+        // drag (→ pointercancel); the tree drags by pointer events only.
+        onDragStart: (e: DragEvent<HTMLElement>) => e.preventDefault(),
         onClickCapture: (e: MouseEvent<HTMLElement>) => {
           if (suppressClick.current) {
             e.preventDefault();

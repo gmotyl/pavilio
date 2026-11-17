@@ -46,7 +46,7 @@ export function SidebarGroupRow({
         {...dragProps}
         onContextMenu={onContextMenu}
         className="group flex items-center gap-1 rounded-md px-1 py-0.5"
-        style={dropStyle(dragProps["data-drop"])}
+        style={dropStyle(dragProps["data-drop"], dragProps["data-dragging"] === "true")}
       >
         {!isMobile && (
           <span
