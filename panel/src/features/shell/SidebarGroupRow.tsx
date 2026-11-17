@@ -2,13 +2,14 @@ import type { ReactNode } from "react";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import { ProjectMark } from "../projects/ProjectMark";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
+import { dropStyle, type SidebarRowDragProps } from "./useSidebarDrag";
 
 /** At most this many member marks are stacked on a group row. */
 const STACK_MAX = 4;
 
 /**
  * One project group in the sidebar's Projects tree: a hover grip (desktop
- * only — the drag itself lands with the reorder work), chevron, the aggregate
+ * only; the whole row drags past a small threshold, see `useSidebarDrag`), chevron, the aggregate
  * activity slot, stacked member marks, the bold name and the member count.
  * Expanded, its member rows sit beneath it under one vertical rule; collapsed,
  * the slot carries the most urgent member state (attention > busy > idle).
@@ -20,6 +21,7 @@ export function SidebarGroupRow({
   collapsed,
   onToggle,
   isMobile,
+  dragProps = {},
   children,
 }: {
   name: string;
@@ -29,6 +31,8 @@ export function SidebarGroupRow({
   collapsed: boolean;
   onToggle: () => void;
   isMobile: boolean;
+  /** Pointer-drag handlers and `data-drop` from `useSidebarDrag`. */
+  dragProps?: SidebarRowDragProps;
   /** The member project rows, rendered by the sidebar. */
   children: ReactNode;
 }) {
@@ -36,12 +40,15 @@ export function SidebarGroupRow({
     <li data-group={name}>
       <div
         data-testid={`sidebar-group-row-${name}`}
+        {...dragProps}
         className="group flex items-center gap-1 rounded-md px-1 py-0.5"
+        style={dropStyle(dragProps["data-drop"])}
       >
         {!isMobile && (
           <span
             data-testid={`sidebar-group-grip-${name}`}
             aria-hidden="true"
+            data-drag-grip=""
             className="opacity-0 group-hover:opacity-90 transition-opacity w-2.5 flex items-center justify-center shrink-0 cursor-grab"
             style={{ color: "var(--text-muted)" }}
           >
