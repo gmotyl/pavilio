@@ -4,7 +4,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -14,20 +13,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../answerAudioCache";
 
-// rename delegates to the real one unless a test sets `beforeRename`, which
-// runs (and is awaited) between the temp file write and the rename (a racing
-// clear()); it is handed the rename's source. `afterRename` runs (awaited)
-// once the real rename resolved, with its target. writeFile runs
-// `beforeWriteFile` (awaited) before the real write, while the temp file does
-// not exist yet. stat likewise runs `afterStat` once, with the stat'ed path,
-// after the real stat resolved (a racing write); it may set itself again.
-// link throws `linkError`'s code when set (a filesystem without hard links).
+// rename runs `beforeRename` (awaited) between the temp file write and the
+// rename, handed the rename's source. writeFile runs `beforeWriteFile`
+// (awaited) before the real write, while the temp file does not exist yet.
+// stat runs `afterStat` once, with the stat'ed path, after the real stat
+// resolved. Each hook fires once and clears itself.
 const hooks = vi.hoisted(() => ({
   beforeRename: undefined as ((from: string) => void | Promise<void>) | undefined,
-  afterRename: undefined as ((to: string) => void | Promise<void>) | undefined,
   beforeWriteFile: undefined as (() => void | Promise<void>) | undefined,
   afterStat: undefined as ((path: string) => void | Promise<void>) | undefined,
-  linkError: undefined as string | undefined,
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -37,10 +31,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       const hook = hooks.beforeRename;
       hooks.beforeRename = undefined;
       await hook?.(from);
-      await actual.rename(from, to);
-      const after = hooks.afterRename;
-      hooks.afterRename = undefined;
-      await after?.(to);
+      return actual.rename(from, to);
     },
     writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
       const hook = hooks.beforeWriteFile;
@@ -55,10 +46,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       await hook?.(path);
       return info;
     },
-    link: async (existing: string, target: string) => {
-      if (hooks.linkError) throw Object.assign(new Error(`${hooks.linkError}: link`), { code: hooks.linkError });
-      return actual.link(existing, target);
-    },
   };
 });
 
@@ -71,10 +58,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   hooks.beforeRename = undefined;
-  hooks.afterRename = undefined;
   hooks.beforeWriteFile = undefined;
   hooks.afterStat = undefined;
-  hooks.linkError = undefined;
   rmSync(tmp, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -199,22 +184,6 @@ describe("answer audio cache", () => {
     expect(await cache.read({ ...KEY, text: "other" }, "speaker")).toBeUndefined();
   });
 
-  it("sweep keeps a file a write replaced after the sweep found it expired", async () => {
-    const now = Math.floor(Date.now() / 1000) * 1000;
-    const cache = createAnswerAudioCache({ root, now: () => now });
-    await cache.write(KEY, new Uint8Array([1]));
-    ageAll(now - 25 * HOUR);
-    // Between the sweep's stat and its delete, a write lands fresh audio there.
-    hooks.afterStat = (path) => {
-      writeFileSync(path, new Uint8Array([2, 2]));
-      utimesSync(path, now / 1000, now / 1000);
-    };
-
-    expect(await cache.sweep()).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 2 });
-    expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2]));
-    expect(readdirSync(root)).toHaveLength(1);
-  });
-
   it("sweep counts audio files as units and every file's bytes", async () => {
     const now = Math.floor(Date.now() / 1000) * 1000;
     const cache = createAnswerAudioCache({ root, now: () => now });
@@ -228,11 +197,11 @@ describe("answer audio cache", () => {
     expect(readdirSync(root)).toHaveLength(2);
   });
 
-  it("a write whose temp file a clear removed does not use up the write warning", async () => {
+  it("a write whose temp file vanished does not use up the write warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const cache = createAnswerAudioCache({ root });
     mkdirSync(root, { recursive: true });
-    // A clear() racing the write: the root vanishes between the temp write and the rename.
+    // The root vanishes between the temp write and the rename.
     let raced = false;
     hooks.beforeRename = () => {
       raced = true;
@@ -267,26 +236,22 @@ describe("answer audio cache", () => {
     expect(await cache.read(KEY)).toBeUndefined();
   });
 
-  it("a write that lands after a clear listed the root does not survive the clear", async () => {
+  it("a write that started before a clear never lands after it", async () => {
     const cache = createAnswerAudioCache({ root });
-    // The clear lists the root before the write's temp file is visible (it is
-    // held outside the root while the clear runs), then the rename lands.
-    hooks.beforeRename = async (from) => {
-      const held = join(tmp, "held");
-      renameSync(from, held);
+    // The clear runs to completion while the write is still producing its temp file.
+    let cleared = false;
+    hooks.beforeWriteFile = async () => {
       await cache.clear();
-      renameSync(held, from);
+      cleared = true;
     };
 
     await cache.write(KEY, new Uint8Array([1]));
+    expect(cleared).toBe(true);
     expect(await cache.read(KEY)).toBeUndefined();
-
-    // A write after the clear is stored as usual.
-    await cache.write(KEY, new Uint8Array([2]));
-    expect(await cache.read(KEY)).toEqual(new Uint8Array([2]));
+    expect(readdirSync(root)).toEqual([]);
   });
 
-  it("a write a clear overtook before its temp file appeared does not replace a later write", async () => {
+  it("a write that started before a clear does not replace a later write", async () => {
     const cache = createAnswerAudioCache({ root });
     mkdirSync(root, { recursive: true });
     // Write A pauses before its temp file exists; a clear finishes and write B
@@ -301,94 +266,58 @@ describe("answer audio cache", () => {
     expect(readdirSync(root)).toHaveLength(1);
   });
 
-  it("a write undone by a clear does not remove a later write that replaced its file", async () => {
+  it("a write that started after a clear lands", async () => {
     const cache = createAnswerAudioCache({ root });
-    // A clear overlaps write A's rename, then write B commits the same key
-    // before A gets to drop its own file.
-    hooks.beforeRename = async (from) => {
-      const held = join(tmp, "held");
-      renameSync(from, held);
-      await cache.clear();
-      renameSync(held, from);
-    };
-    hooks.afterRename = async () => {
-      await cache.write(KEY, new Uint8Array([3]));
-    };
-
     await cache.write(KEY, new Uint8Array([1]));
-    expect(await cache.read(KEY)).toEqual(new Uint8Array([3]));
+    // The clear is still queued behind a sweep when the write starts; the
+    // sweep holds the lock until the write's temp file exists, so the clear
+    // lists it and must leave it alone.
+    hooks.afterStat = async () => {
+      for (let i = 0; i < 200 && !readdirSync(root).some((name) => name.startsWith(".tmp-")); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(readdirSync(root).some((name) => name.startsWith(".tmp-"))).toBe(true);
+    };
+    const sweeping = cache.sweep();
+    const clearing = cache.clear();
+    const writing = cache.write(KEY, new Uint8Array([2]));
+    await Promise.all([sweeping, clearing, writing]);
+
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2]));
     expect(readdirSync(root)).toHaveLength(1);
   });
 
-  /**
-   * Arms the sweep race: after the sweep's first stat of the expired file a
-   * write replaces it with fresh audio (so the sweep moves fresh audio aside),
-   * and after the sweep stats the aside file `duringAside` runs, with the
-   * original path and the aside path.
-   */
-  function raceSweepAside(now: number, duringAside: (file: string, aside: string) => void | Promise<void>): void {
-    hooks.afterStat = (file) => {
-      writeFileSync(file, new Uint8Array([2, 2]));
-      utimesSync(file, now / 1000, now / 1000);
-      hooks.afterStat = (aside) => duringAside(file, aside);
-    };
-  }
-
-  it("a sweep restore never replaces a newer write", async () => {
+  it("sweep never deletes a file written during the sweep", async () => {
     const now = Math.floor(Date.now() / 1000) * 1000;
     const cache = createAnswerAudioCache({ root, now: () => now });
     await cache.write(KEY, new Uint8Array([1]));
     ageAll(now - 25 * HOUR);
-    // While the fresh audio sits aside, a newer write commits at the path.
-    raceSweepAside(now, (file) => writeFileSync(file, new Uint8Array([3, 3, 3])));
+    // Between the sweep's stat of the expired file and its delete, a write of
+    // fresh audio to the same key starts.
+    let writing: Promise<void> | undefined;
+    hooks.afterStat = () => {
+      writing = cache.write(KEY, new Uint8Array([2, 2]));
+    };
 
-    await cache.sweep();
-    expect(await cache.read(KEY)).toEqual(new Uint8Array([3, 3, 3]));
-    expect(readdirSync(root)).toHaveLength(1);
-  });
-
-  it("without hard links a sweep restore still puts the moved file back", async () => {
-    const now = Math.floor(Date.now() / 1000) * 1000;
-    const cache = createAnswerAudioCache({ root, now: () => now });
-    await cache.write(KEY, new Uint8Array([1]));
-    ageAll(now - 25 * HOUR);
-    hooks.linkError = "EPERM";
-    raceSweepAside(now, () => {});
-
-    expect(await cache.sweep()).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 2 });
+    expect(await cache.sweep()).toEqual({ removedUnits: 1, removedBytes: 1, keptUnits: 0, keptBytes: 0 });
+    await writing;
     expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2]));
     expect(readdirSync(root)).toHaveLength(1);
   });
 
-  it("without hard links a sweep restore still never replaces a newer write", async () => {
+  it("clear removes what a concurrent sweep would have kept", async () => {
     const now = Math.floor(Date.now() / 1000) * 1000;
     const cache = createAnswerAudioCache({ root, now: () => now });
     await cache.write(KEY, new Uint8Array([1]));
-    ageAll(now - 25 * HOUR);
-    hooks.linkError = "ENOTSUP";
-    raceSweepAside(now, (file) => writeFileSync(file, new Uint8Array([3, 3, 3])));
+    // A clear is requested while the sweep is judging the fresh file.
+    let clearing: Promise<void> | undefined;
+    hooks.afterStat = () => {
+      clearing = cache.clear();
+    };
 
-    await cache.sweep();
-    expect(await cache.read(KEY)).toEqual(new Uint8Array([3, 3, 3]));
-    expect(readdirSync(root)).toHaveLength(1);
-  });
-
-  it("a sweep restore does not outlive a clear that ran while the file was aside", async () => {
-    const now = Math.floor(Date.now() / 1000) * 1000;
-    const cache = createAnswerAudioCache({ root, now: () => now });
-    await cache.write(KEY, new Uint8Array([1]));
-    ageAll(now - 25 * HOUR);
-    // The clear lists the root while the aside file is not visible to it.
-    raceSweepAside(now, async (_file, aside) => {
-      const held = join(tmp, "held");
-      renameSync(aside, held);
-      await cache.clear();
-      renameSync(held, aside);
-    });
-
-    await cache.sweep();
+    expect(await cache.sweep()).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 1 });
+    await clearing;
     expect(await cache.read(KEY)).toBeUndefined();
-    expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
+    expect(readdirSync(root)).toEqual([]);
   });
 });
-

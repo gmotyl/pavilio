@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { link, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ANSWER_SUBDIR, PAGE_CACHE_DIR } from "./pageCache.js";
@@ -55,7 +55,7 @@ export interface AnswerAudioCache {
   write(key: AnswerKey, bytes: Uint8Array, kind?: AnswerRecordKind): Promise<void>;
   /** Deletes files older than the TTL and reports what was removed and kept. */
   sweep(): Promise<AnswerSweepTotals>;
-  /** Deletes every file under the root; a write overlapping the clear is dropped too. */
+  /** Deletes every file under the root; a write started before the clear never lands after it. */
   clear(): Promise<void>;
 }
 
@@ -70,49 +70,25 @@ function isMissing(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
 
-function errorCode(err: unknown): string | undefined {
-  return (err as NodeJS.ErrnoException)?.code;
-}
-
-/** Codes of a filesystem that cannot hard-link (FAT, some network mounts). */
-const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"]);
-
-/**
- * Puts a file the sweep moved aside back at `file`, never replacing a newer
- * file that a write committed there meanwhile: `link` fails with EEXIST
- * instead of overwriting, and the aside copy is then just dropped. Without
- * hard links it falls back to a rename only while the path is absent (best
- * effort: a write landing between that check and the rename is replaced).
- */
-async function restoreAside(aside: string, file: string): Promise<void> {
-  try {
-    await link(aside, file);
-  } catch (err) {
-    const code = errorCode(err);
-    if (code === "EEXIST") return void (await unlink(aside));
-    if (!code || !NO_HARD_LINKS.has(code)) throw err;
-    const taken = await stat(file).then(
-      () => true,
-      (statErr) => {
-        if (isMissing(statErr)) return false;
-        throw statErr;
-      },
-    );
-    if (taken) return void (await unlink(aside));
-    return rename(aside, file);
-  }
-  await unlink(aside);
-}
-
 export function createAnswerAudioCache(opts: { root?: string; now?: () => number } = {}): AnswerAudioCache {
   const root = opts.root ?? join(homedir(), ANSWER_CACHE_DIR);
   const now = opts.now ?? Date.now;
   const warned = new Set<FailureKind>();
-  // A write that overlaps a clear() must not outlive it: one whose rename lands
-  // after the clear listed the root would otherwise survive a DELETE that
-  // already answered 204. `clears` counts finished clears, `clearing` running ones.
-  let clears = 0;
-  let clearing = 0;
+  // Every mutation of the root (a write's commit, sweep, clear) runs through
+  // one in-process FIFO lock, so none of them interleave. The server is a
+  // single process; reads stay lock-free because commits are atomic renames.
+  let tail: Promise<unknown> = Promise.resolve();
+  function serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = tail.then(fn, fn);
+    tail = run.catch(() => {});
+    return run;
+  }
+  // Clear generation, bumped when clear() is called. A write remembers it at
+  // its start and commits only if no clear was called since.
+  let generation = 0;
+  // Temp files of writes still in flight: each is owned (renamed or removed)
+  // by its write, so sweep and clear leave them alone.
+  const pending = new Set<string>();
 
   function warnOnce(kind: FailureKind, err: unknown): void {
     if (warned.has(kind)) return;
@@ -135,84 +111,66 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
 
     async write(key, bytes, kind = "audio") {
       const file = join(root, fileName(key, kind));
-      const temp = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
-      const clearsAtStart = clears;
-      const overlappedClear = () => clearing > 0 || clears !== clearsAtStart;
+      const tempName = `.tmp-${randomBytes(6).toString("hex")}`;
+      const temp = join(root, tempName);
+      const startedAt = generation;
+      pending.add(tempName);
       try {
+        // The slow part runs outside the lock; only the commit is serialized.
         await mkdir(root, { recursive: true });
         await writeFile(temp, bytes);
-        // A clear already overlapped the write: never commit, or the rename
-        // could replace a newer write that landed after the clear.
-        if (overlappedClear()) {
-          await rm(temp, { force: true });
-          return;
-        }
-        const own = await stat(temp);
-        await rename(temp, file);
-        // A clear ran during the rename: drop what it may have missed, but only
-        // while the path still holds this write's file, not a later write's.
-        if (overlappedClear()) {
-          const current = await stat(file).catch(() => undefined);
-          if (current && current.ino === own.ino && current.dev === own.dev) await rm(file, { force: true });
-        }
+        await serialize(async () => {
+          // A clear was called after this write started: it must not land.
+          if (generation !== startedAt) return void (await rm(temp, { force: true }));
+          await rename(temp, file);
+        });
       } catch (err) {
-        // ENOENT: a clear() removed the temp file (or the root) mid-write. That
-        // is a lost race, not a broken disk, so it keeps the one warning.
+        // ENOENT: the root vanished under the write. A lost race, not a broken
+        // disk, so it keeps the one warning.
         if (!isMissing(err)) warnOnce("write", err);
         await rm(temp, { force: true }).catch(() => {});
+      } finally {
+        pending.delete(tempName);
       }
     },
 
-    async sweep() {
-      const totals: AnswerSweepTotals = { removedUnits: 0, removedBytes: 0, keptUnits: 0, keptBytes: 0 };
-      let names: string[];
-      try {
-        names = await readdir(root);
-      } catch (err) {
-        if (!isMissing(err)) warnOnce("sweep", err);
-        return totals;
-      }
-      const at = now();
-      const expired = (mtimeMs: number) => at - mtimeMs > ANSWER_CACHE_TTL_MS;
-      for (const name of names) {
-        const file = join(root, name);
+    sweep() {
+      return serialize(async () => {
+        const totals: AnswerSweepTotals = { removedUnits: 0, removedBytes: 0, keptUnits: 0, keptBytes: 0 };
+        let names: string[];
         try {
-          let info = await stat(file);
-          if (!info.isFile()) continue;
-          const unit = name.endsWith(EXTENSION.audio) ? 1 : 0;
-          if (expired(info.mtimeMs)) {
-            // A write may have replaced the file since the stat: move it aside
-            // and judge what was actually moved, so fresh audio is never deleted.
-            const aside = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
-            const clearsAtAside = clears;
-            await rename(file, aside);
-            info = await stat(aside);
-            if (expired(info.mtimeMs)) {
-              await unlink(aside);
-              totals.removedUnits += unit;
-              totals.removedBytes += info.size;
-              continue;
-            }
-            // A clear that listed the root while the file was aside missed it:
-            // putting it back would outlive that clear, so it goes instead.
-            if (clearing > 0 || clears !== clearsAtAside) {
-              await rm(aside, { force: true });
-              continue;
-            }
-            await restoreAside(aside, file);
-          }
-          totals.keptUnits += unit;
-          totals.keptBytes += info.size;
+          names = await readdir(root);
         } catch (err) {
           if (!isMissing(err)) warnOnce("sweep", err);
+          return totals;
         }
-      }
-      return totals;
+        const at = now();
+        for (const name of names) {
+          if (pending.has(name)) continue;
+          try {
+            const file = join(root, name);
+            const info = await stat(file);
+            if (!info.isFile()) continue;
+            const unit = name.endsWith(EXTENSION.audio) ? 1 : 0;
+            if (at - info.mtimeMs > ANSWER_CACHE_TTL_MS) {
+              await unlink(file);
+              totals.removedUnits += unit;
+              totals.removedBytes += info.size;
+            } else {
+              totals.keptUnits += unit;
+              totals.keptBytes += info.size;
+            }
+          } catch (err) {
+            if (!isMissing(err)) warnOnce("sweep", err);
+          }
+        }
+        return totals;
+      });
     },
 
-    async clear() {
-      clearing += 1;
-      try {
+    clear() {
+      generation += 1;
+      return serialize(async () => {
         let names: string[];
         try {
           names = await readdir(root);
@@ -220,11 +178,9 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
           if (isMissing(err)) return;
           throw err;
         }
-        await Promise.all(names.map((name) => rm(join(root, name), { recursive: true, force: true })));
-      } finally {
-        clearing -= 1;
-        clears += 1;
-      }
+        const owned = names.filter((name) => !pending.has(name));
+        await Promise.all(owned.map((name) => rm(join(root, name), { recursive: true, force: true })));
+      });
     },
   };
 }
