@@ -857,14 +857,20 @@ function writeAndCommit(edits: [string, string][], message: string): void {
   }
 }
 
-const groupName = (v: unknown): string | null | undefined =>
-  v === null ? null : typeof v === "string" ? v.trim() || null : undefined;
+// undefined = invalid: not a string/null, contains a line break, or longer than 64 chars.
+const groupName = (v: unknown): string | null | undefined => {
+  if (v === null) return null;
+  if (typeof v !== "string" || /[\r\n]/.test(v)) return undefined;
+  const t = v.trim();
+  return t.length > 64 ? undefined : t || null;
+};
 
 // Literal path; a project can never be named "groups" + "/rename" as `/:name` takes one segment.
 router.post("/groups/rename", (req, res) => {
   const from = groupName(req.body?.from);
   const to = groupName(req.body?.to);
-  if (!from || !to) return res.status(400).json({ error: "from and to must be non-empty strings" });
+  if (!from || !to)
+    return res.status(400).json({ error: "from and to must be non-empty single-line strings of at most 64 chars" });
   const { projectsDir } = getConfig();
   const members: string[] = [];
   const groups = new Set<string>();
@@ -893,7 +899,7 @@ router.post("/groups/rename", (req, res) => {
 
 router.put("/:name/group", (req, res) => {
   const group = groupName(req.body?.group);
-  if (group === undefined) return res.status(400).json({ error: "group must be a string or null" });
+  if (group === undefined) return res.status(400).json({ error: "group must be null or a single-line string of at most 64 chars" });
   const card = liveCard(req.params.name);
   if (!card) return res.status(404).json({ error: "Project not found" });
   const text = readFileSync(card, "utf-8");

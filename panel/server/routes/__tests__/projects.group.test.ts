@@ -111,4 +111,16 @@ describe("project group endpoints", () => {
     const ren = await request(app()).post("/api/projects/groups/rename").send({ from: "Nope", to: "X" });
     expect(ren.status).toBe(404);
   });
+
+  it("invalid group names are 400 and write nothing", async () => {
+    const before = count();
+    for (const group of ["a\nb", "a\rb", "x".repeat(65)]) {
+      const put = await request(app()).put("/api/projects/anytts/group").send({ group });
+      expect(put.status).toBe(400);
+      const ren = await request(app()).post("/api/projects/groups/rename").send({ from: "Old", to: group });
+      expect(ren.status).toBe(400);
+    }
+    expect(count()).toBe(before);
+    expect(git("status", "--porcelain")).toBe("");
+  });
 });
