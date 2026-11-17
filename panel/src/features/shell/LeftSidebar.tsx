@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
 import { SidebarGroupRow } from "./SidebarGroupRow";
+import { useSidebarRowMenu } from "./SidebarRowMenu";
 import { dropStyle, useSidebarDrag, type SidebarRowDragProps } from "./useSidebarDrag";
 import { useIsMobile } from "./useIsMobile";
 import { useSidebarState } from "./useSidebarState";
@@ -461,6 +462,19 @@ export default function LeftSidebar() {
     else next[name] = true;
     setGroupCollapsed(next);
   };
+  const rowMenu = useSidebarRowMenu({
+    groups: [
+      ...new Set(
+        projects
+          .map((p) => p.group)
+          .filter((g): g is string => typeof g === "string" && g !== ""),
+      ),
+    ],
+    order: sidebarOrder,
+    setOrder: setSidebarOrder,
+    collapsed: groupCollapsed,
+    setCollapsed: setGroupCollapsed,
+  });
 
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
@@ -523,6 +537,18 @@ export default function LeftSidebar() {
           data-testid={`sidebar-project-row-${project.name}`}
           data-dimmed={dimmed ? "true" : "false"}
           {...drag}
+          onContextMenu={
+            hasName
+              ? (e) =>
+                  rowMenu.onProjectContextMenu(
+                    e,
+                    project.name,
+                    typeof project.group === "string" && project.group
+                      ? project.group
+                      : null,
+                  )
+              : undefined
+          }
           className="group flex items-center gap-1 rounded-md px-1 py-0.5"
           style={{
             background: isCurrent ? "var(--bg-active)" : "transparent",
@@ -764,6 +790,11 @@ export default function LeftSidebar() {
                 onToggle={() => toggleGroup(node.name)}
                 isMobile={isMobile}
                 dragProps={dragRowProps(`g:${node.name}`, null)}
+                onContextMenu={(e) =>
+                  rowMenu.onGroupContextMenu(e, node.name, () =>
+                    toggleGroup(node.name),
+                  )
+                }
               >
                 {members.map((p) =>
                   renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
@@ -976,6 +1007,7 @@ export default function LeftSidebar() {
           restore={restore}
         />
       )}
+      {rowMenu.element}
     </div>
   );
 }

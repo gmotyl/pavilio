@@ -60,7 +60,8 @@ function moveRows(projects: { name: string; group?: string | null }[], current: 
   return rows;
 }
 
-const menuStyle = {
+/** Shared look for panel context menus (also the sidebar row menus). */
+export const menuStyle = {
   position: "fixed" as const,
   zIndex: 60,
   minWidth: 180,
@@ -70,8 +71,8 @@ const menuStyle = {
   padding: "4px 0",
   boxShadow: "0 8px 24px rgba(0,0,0,.35)",
 };
-const labelCls = "px-3 py-1 text-[10px] tracking-[0.2em] uppercase";
-const itemCls =
+export const labelCls = "px-3 py-1 text-[10px] tracking-[0.2em] uppercase";
+export const itemCls =
   "flex items-center gap-2 w-full px-3 py-1.5 text-[12px] font-mono cursor-pointer select-none";
 
 export function SessionContextMenu({ session, x, y, canCloseOthers, onDismiss, onAction, onMove }: MenuProps) {

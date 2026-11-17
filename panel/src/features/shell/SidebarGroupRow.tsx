@@ -22,6 +22,7 @@ export function SidebarGroupRow({
   onToggle,
   isMobile,
   dragProps = {},
+  onContextMenu,
   children,
 }: {
   name: string;
@@ -33,6 +34,8 @@ export function SidebarGroupRow({
   isMobile: boolean;
   /** Pointer-drag handlers and `data-drop` from `useSidebarDrag`. */
   dragProps?: SidebarRowDragProps;
+  /** Opens the group row menu (desktop). */
+  onContextMenu?: (e: React.MouseEvent) => void;
   /** The member project rows, rendered by the sidebar. */
   children: ReactNode;
 }) {
@@ -41,6 +44,7 @@ export function SidebarGroupRow({
       <div
         data-testid={`sidebar-group-row-${name}`}
         {...dragProps}
+        onContextMenu={onContextMenu}
         className="group flex items-center gap-1 rounded-md px-1 py-0.5"
         style={dropStyle(dragProps["data-drop"])}
       >
