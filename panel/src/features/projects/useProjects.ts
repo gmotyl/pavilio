@@ -19,6 +19,8 @@ export interface Project {
   kind: ProjectKind;
   lastActivity: string | null; // YYYY-MM-DD
   repos: RepoEntry[];
+  /** Project group from PROJECT.md frontmatter; absent until discovery reports it. */
+  group?: string | null;
 }
 
 /** Window event every mounted `useProjects` refetches on. */

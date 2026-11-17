@@ -33,7 +33,8 @@ export interface TerminalsSurfaceProps {
   sessions: SessionMeta[];
   focusedId: string | null;
   onFocus: (id: string | null) => void;
-  onDeleteSession: (id: string) => void;
+  /** Kill a session; resolves `false` when the DELETE failed. */
+  onDeleteSession: (id: string) => Promise<boolean | void> | void;
   onUpdateSession: (id: string, patch: { name?: string }) => void;
 
   // All-sessions (cross-project) data

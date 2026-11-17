@@ -19,6 +19,7 @@ import { CellSpeakButton } from "./CellSpeakButton";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { CellSpeechControlsToggle } from "./CellSpeechControlsToggle";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
+import { useSessionContextMenu } from "./SessionContextMenu";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import { visibleSessionId } from "./visibleSession";
 import {
@@ -51,7 +52,8 @@ interface Props {
   focusedId: string | null;
   maximized: boolean;
   onFocus: (id: string) => void;
-  onExit: (id: string) => void;
+  /** Kill a session; may resolve `false` when the DELETE failed. */
+  onExit: (id: string) => Promise<boolean | void> | void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
   onRename?: (id: string, name: string) => void;
   /** The committed tiling. Empty means "no custom shape": the default preset is used. */
@@ -180,7 +182,10 @@ export function TerminalLayoutGrid({
           getLayoutPresets(visibleIds.length)[0] ?? { label: "", slots: [] },
         ));
 
+  const sessionMenu = useSessionContextMenu({ strip: sessions, kill: onExit });
   const modal = (
+    <>
+    {sessionMenu.element}
     <ConfirmCloseTerminalModal
       session={pendingSession ? { id: pendingSession.id, name: pendingSession.name } : null}
       onCancel={() => setPendingCloseId(null)}
@@ -189,6 +194,7 @@ export function TerminalLayoutGrid({
         setPendingCloseId(null);
       }}
     />
+    </>
   );
 
   if (count === 0) {
@@ -228,6 +234,7 @@ export function TerminalLayoutGrid({
         onFocus={onFocus}
         onExit={onExit}
         onRequestExit={setPendingCloseId}
+        onHeaderContextMenu={(e) => sessionMenu.onContextMenu(e, session)}
         onReady={onReady}
         onRename={onRename}
         onDragStart={() => overlayRef.current?.begin(session.id)}
@@ -371,6 +378,7 @@ interface CellProps {
   onFocus: (id: string) => void;
   onExit: (id: string) => void;
   onRequestExit: (id: string) => void;
+  onHeaderContextMenu: (e: React.MouseEvent) => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
@@ -393,6 +401,7 @@ function TerminalCell({
   onFocus,
   onExit,
   onRequestExit,
+  onHeaderContextMenu,
   onReady,
   onRename,
   onDragStart,
@@ -546,6 +555,7 @@ function TerminalCell({
         // row resolves to a sliver in a real browser.
         style={{ background: headerBg, cursor: "grab", height: 30, padding: "0 8px" }}
         title="Drag to place this terminal"
+        onContextMenu={onHeaderContextMenu}
         draggable
         onDragStart={(e) => {
           // jsdom's DragEvent constructor is missing, so tests dispatch drag events
