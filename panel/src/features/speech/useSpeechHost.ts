@@ -868,11 +868,15 @@ export function useSpeechHost({
   // Superseded — a newer answer arrived in its cell — calls off the preloads
   // alone too: an armed cell preloads its newest answer only, and the older
   // one keeps its unit-0 warm and plays on demand. `warmableUtterances` moves
-  // with every arrival, which is when that can have become true.
+  // with every arrival, which is when that can have become true. The answer
+  // the live run is speaking is exempt from that rule: a newer one queueing
+  // behind it does not make it any less heard-right-now, and its preloads are
+  // the run's lookahead.
   useEffect(() => {
     const newestIds = new Set(
       warmableUtterances.filter((entry) => entry.newest).map((entry) => entry.utterance.id),
     );
+    const playingId = runRef.current?.utteranceId;
     for (const [id, { sessionId, preload }] of [...synthesesRef.current]) {
       const queue = queueFor(sessionId);
       const queued =
@@ -880,7 +884,10 @@ export function useSpeechHost({
         queue.previous.some((utterance) => utterance.id === id) ||
         queue.pending.some((utterance) => utterance.id === id);
       if (!queued || heardFor(sessionId).has(id)) abortUtterance(id);
-      else if (preload && (speechModeOf(sessionId) === "off" || !newestIds.has(id))) {
+      else if (
+        preload &&
+        (speechModeOf(sessionId) === "off" || (!newestIds.has(id) && id !== playingId))
+      ) {
         abortPreloads(id);
       }
     }

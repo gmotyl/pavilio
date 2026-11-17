@@ -745,6 +745,27 @@ describe("useSpeechHost — an armed cell preloads only its newest answer", () =
       expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
     }
   });
+  it("a playing answer keeps its preloads when a newer one arrives", async () => {
+    const playing = unitsOf(response(6, "Bravo"));
+    // Its later units stay in flight, so their preloads are still out.
+    for (const unit of playing.slice(2)) synth.hold(unit);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "a-1", response(6, "Bravo"));
+    const preloadSignal = synth.callsFor(playing.at(-1)!)[0].signal;
+    await settle(() => result.current.onSpeak("cell-a"));
+    expect(result.current.speakingSessionId).toBe("cell-a");
+
+    await emitUtterance("cell-a", "a-2", response(4, "Charlie"));
+
+    // The newer answer waits behind the live run, and the run it waits behind
+    // still has its lookahead: superseded is about answers nobody is hearing.
+    expect(result.current.queueFor("cell-a").pending.map((u) => u.id)).toEqual(["a-2"]);
+    expect(preloadSignal?.aborted).toBe(false);
+  });
 });
 
 /**
