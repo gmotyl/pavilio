@@ -107,6 +107,20 @@ function drop() {
   fireEvent.pointerUp(window, { clientX: 0, clientY: lastY, pointerId: 1 });
 }
 
+/** Spy on Element.prototype.setPointerCapture (absent in jsdom), restorable. */
+function spyCapture() {
+  const proto = Element.prototype as unknown as Record<string, unknown>;
+  const had = Object.prototype.hasOwnProperty.call(proto, "setPointerCapture");
+  const original = proto.setPointerCapture;
+  const fn = vi.fn() as ReturnType<typeof vi.fn> & { restore: () => void };
+  proto.setPointerCapture = fn;
+  fn.restore = () => {
+    if (had) proto.setPointerCapture = original;
+    else delete proto.setPointerCapture;
+  };
+  return fn;
+}
+
 describe("useSidebarDrag", () => {
   it("drag shows a drop line and into-group outline", () => {
     render(<Harness onOrder={() => {}} />);
@@ -225,7 +239,10 @@ describe("useSidebarDrag", () => {
     const capture = vi.fn();
     (row as unknown as { setPointerCapture: unknown }).setPointerCapture = capture;
     fireEvent.pointerDown(screen.getByTestId("link"), { button: 0, clientX: 0, clientY: 10, pointerId: 7 });
+    expect(capture).not.toHaveBeenCalled();
+    fireEvent.pointerMove(window, { clientX: 0, clientY: 30, pointerId: 7 });
     expect(capture).toHaveBeenCalledWith(7);
+    fireEvent.pointerCancel(window, { pointerId: 7 });
     const ev = new Event("dragstart", { bubbles: true, cancelable: true });
     screen.getByTestId("link").dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(true);
@@ -304,5 +321,67 @@ describe("useSidebarDrag", () => {
     render(<Harness onOrder={() => {}} />);
     startDrag("row-anytts");
     expect(dropStyle(undefined, true)).toMatchObject({ opacity: 0.45, cursor: "grabbing" });
+  });
+
+  it("a plain click does not capture the pointer and the link click still fires", () => {
+    const capture = spyCapture();
+    const onClick = vi.fn((e: { preventDefault: () => void }) => e.preventDefault());
+    function LinkHarness() {
+      const drag = useSidebarDrag({ projects: PROJECTS, order: ORDER, setOrder: () => {}, isMobile: false });
+      return (
+        <div {...drag.rowProps("p:anytts", null)}>
+          <a href="/p/anytts" data-testid="link" onClick={onClick}>anytts</a>
+        </div>
+      );
+    }
+    try {
+      render(<LinkHarness />);
+      const link = screen.getByTestId("link");
+      fireEvent.pointerDown(link, { button: 0, clientX: 0, clientY: 10, pointerId: 3 });
+      fireEvent.pointerUp(window, { clientX: 0, clientY: 10, pointerId: 3 });
+      fireEvent.click(link);
+      expect(capture).not.toHaveBeenCalled();
+      expect(onClick).toHaveBeenCalledTimes(1);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("drag past the threshold captures the pointer on the row", () => {
+    const capture = spyCapture();
+    try {
+      render(<Harness onOrder={() => {}} />);
+      startDrag("row-anytts");
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(capture).toHaveBeenCalledWith(1);
+      expect(capture.mock.contexts[0]).toBe(screen.getByTestId("row-anytts"));
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("hovering the dragged row itself shows no drop marker", () => {
+    render(<Harness onOrder={() => {}} />);
+    startDrag("row-anytts");
+    hover("row-pavilio", 2);
+    hover("row-anytts", 2);
+    expect(screen.getByTestId("row-anytts").hasAttribute("data-drop")).toBe(false);
+    expect(screen.getByTestId("row-pavilio").hasAttribute("data-drop")).toBe(false);
+  });
+
+  it("unmount after a successful PUT still saves the order", async () => {
+    const onOrder = vi.fn();
+    let resolvePut: (r: Response) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { resolvePut = r; })));
+    const { unmount } = render(<Harness onOrder={onOrder} />);
+    startDrag("row-anytts");
+    hover("row-g-InfoPoly", 10);
+    drop();
+    unmount();
+    await act(async () => {
+      resolvePut(new Response("{}", { status: 200 }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(onOrder).toHaveBeenCalledTimes(1);
   });
 });

@@ -157,7 +157,13 @@ export function useSidebarDrag({
 
   const [dragging, setDragging] = useState<Source | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
-  const start = useRef<{ source: Source; x: number; y: number } | null>(null);
+  const start = useRef<{
+    source: Source;
+    x: number;
+    y: number;
+    el: HTMLElement;
+    pointerId: number;
+  } | null>(null);
   const suppressClick = useRef(false);
   const treeRef = useRef(tree);
   treeRef.current = tree;
@@ -202,14 +208,15 @@ export function useSidebarDrag({
         return;
       }
       // Design sequence: PUT → refresh projects → save order. The override
-      // clears once the refresh settles, whatever discovery reported.
+      // clears once the refresh settles, whatever discovery reported. The
+      // order is saved even after an unmount: the group already moved on the
+      // server, and setOrder is a preference write (store + PATCH), which
+      // outlives this component; its local setState is a no-op once unmounted.
       try {
         await refreshProjects();
       } finally {
-        if (mounted.current) {
-          setOrder(result.order);
-          setPending(null);
-        }
+        setOrder(result.order);
+        if (mounted.current) setPending(null);
       }
     },
     [setOrder],
@@ -225,6 +232,8 @@ export function useSidebarDrag({
       if (!src || !row) return null;
       const key = row.dataset.dragKey as Key;
       const container = row.dataset.dragContainer ?? null;
+      // The dragged row itself is no drop target.
+      if (key === src.key && container === src.container) return null;
       const r = row.getBoundingClientRect();
       const f = r.height > 0 ? (y - r.top) / r.height : 0.5;
       const edge: Edge =
@@ -242,6 +251,13 @@ export function useSidebarDrag({
         if (Math.hypot(e.clientX - s.x, e.clientY - s.y) < THRESHOLD) return;
         draggingRef.current = s.source;
         setDragging(s.source);
+        // Capture only now: capturing at pointerdown would retarget a plain
+        // click from the project link to the row, and the link would not navigate.
+        try {
+          s.el.setPointerCapture?.(s.pointerId);
+        } catch {
+          /* pointer already released */
+        }
       }
       const next = resolve(e.clientX, e.clientY);
       const cur = targetRef.current;
@@ -299,12 +315,13 @@ export function useSidebarDrag({
           // Buttons inside the row (chevrons, stars) keep their own clicks.
           const el = e.target as HTMLElement;
           if (el.closest("button") && !el.closest("[data-drag-grip]")) return;
-          start.current = { source: { key, container }, x: e.clientX, y: e.clientY };
-          try {
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-          } catch {
-            /* pointer already released */
-          }
+          start.current = {
+            source: { key, container },
+            x: e.clientX,
+            y: e.clientY,
+            el: e.currentTarget,
+            pointerId: e.pointerId,
+          };
         },
         // A NavLink inside the row would start the browser's native link
         // drag (→ pointercancel); the tree drags by pointer events only.
