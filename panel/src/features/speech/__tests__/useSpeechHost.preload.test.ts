@@ -879,6 +879,42 @@ describe("useSpeechHost — preload order: the looked-at cell, then newest first
     expect(synth.calls.length).toBe(before);
   });
 
+  it("promotion joins the queued preload even after a voice change", async () => {
+    const x = holdAll(response(5, "Xray"));
+    let voice = "voice-before";
+    const { result, rerender } = renderHook(
+      ({ lookedAt }: { lookedAt: string | null }) =>
+        useSpeechHost({
+          voiceFor: () => voice,
+          answerWaiting: storeAnswerWaiting,
+          lookedAtSessionId: lookedAt,
+        }),
+      { initialProps: { lookedAt: null as string | null } },
+    );
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", response(5, "Xray"));
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload"]);
+
+    // The cell's voice changes while its preloads are still queued.
+    voice = "voice-after";
+    await act(async () => {
+      rerender({ lookedAt: "cell-x" });
+      await drain();
+    });
+
+    for (const unit of x.slice(1)) {
+      // Promoted on the voice the preload was queued with, so it joins that
+      // flight instead of starting a fresh synthesis.
+      expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+      expect(synth.callsFor(unit).map((call) => call.voice)).toEqual([
+        "voice-before",
+        "voice-before",
+      ]);
+      expect(timesRequested(unit)).toBe(1);
+    }
+  });
+
   it("a playing run stays ahead of a promoted preload", async () => {
     const x = holdAll(response(6, "Xray"));
     const p = unitsOf(response(5, "Papa"));

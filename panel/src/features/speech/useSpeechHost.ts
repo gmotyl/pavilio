@@ -259,6 +259,13 @@ export interface SpeechHostOptions {
 interface PendingPreload {
   readonly sessionId: string;
   readonly unit: SpeechUnit;
+  /**
+   * The voice and language the preload was requested with. A promotion asks
+   * with exactly these, so it lands on the same anytts key and joins the queued
+   * job even if the cell's voice has changed since.
+   */
+  readonly voice: string;
+  readonly lang: SpeechUnit["lang"];
   /** The utterance's preload signal the unit was requested on. */
   readonly signal: AbortSignal;
   /** Already requested again on `warm`, so a second look joins nothing twice. */
@@ -867,7 +874,14 @@ export function useSpeechHost({
         const { signal } = synthesis.preload;
         // The session's voice, for the same reasons the warm uses it.
         const voice = voiceForRef.current(sessionId);
-        const pending: PendingPreload = { sessionId, unit, signal, promoted: false };
+        const pending: PendingPreload = {
+          sessionId,
+          unit,
+          voice,
+          lang,
+          signal,
+          promoted: false,
+        };
         pendingPreloadsRef.current.set(key, pending);
         // Settled — landed, failed or called off — is no longer promotable.
         // By identity, so a late settle of a called-off request leaves the
@@ -914,13 +928,10 @@ export function useSpeechHost({
     for (const pending of pendingPreloadsRef.current.values()) {
       if (pending.sessionId !== sessionId || pending.promoted || pending.signal.aborted) continue;
       pending.promoted = true;
-      const { unit, signal } = pending;
-      unitAudio(sessionId, unit, {
-        voice: voiceForRef.current(sessionId),
-        lang: unit.lang,
-        tier: "warm",
-        signal,
-      }).catch(() => {});
+      // The original request's voice and lang, never re-read: a different key
+      // would start a fresh synthesis instead of joining the queued job.
+      const { unit, voice, lang, signal } = pending;
+      unitAudio(sessionId, unit, { voice, lang, tier: "warm", signal }).catch(() => {});
     }
   }, []);
 
