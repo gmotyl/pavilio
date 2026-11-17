@@ -319,4 +319,76 @@ describe("answer audio cache", () => {
     expect(await cache.read(KEY)).toEqual(new Uint8Array([3]));
     expect(readdirSync(root)).toHaveLength(1);
   });
+
+  /**
+   * Arms the sweep race: after the sweep's first stat of the expired file a
+   * write replaces it with fresh audio (so the sweep moves fresh audio aside),
+   * and after the sweep stats the aside file `duringAside` runs, with the
+   * original path and the aside path.
+   */
+  function raceSweepAside(now: number, duringAside: (file: string, aside: string) => void | Promise<void>): void {
+    hooks.afterStat = (file) => {
+      writeFileSync(file, new Uint8Array([2, 2]));
+      utimesSync(file, now / 1000, now / 1000);
+      hooks.afterStat = (aside) => duringAside(file, aside);
+    };
+  }
+
+  it("a sweep restore never replaces a newer write", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write(KEY, new Uint8Array([1]));
+    ageAll(now - 25 * HOUR);
+    // While the fresh audio sits aside, a newer write commits at the path.
+    raceSweepAside(now, (file) => writeFileSync(file, new Uint8Array([3, 3, 3])));
+
+    await cache.sweep();
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([3, 3, 3]));
+    expect(readdirSync(root)).toHaveLength(1);
+  });
+
+  it("without hard links a sweep restore still puts the moved file back", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write(KEY, new Uint8Array([1]));
+    ageAll(now - 25 * HOUR);
+    hooks.linkError = "EPERM";
+    raceSweepAside(now, () => {});
+
+    expect(await cache.sweep()).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 2 });
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2]));
+    expect(readdirSync(root)).toHaveLength(1);
+  });
+
+  it("without hard links a sweep restore still never replaces a newer write", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write(KEY, new Uint8Array([1]));
+    ageAll(now - 25 * HOUR);
+    hooks.linkError = "ENOTSUP";
+    raceSweepAside(now, (file) => writeFileSync(file, new Uint8Array([3, 3, 3])));
+
+    await cache.sweep();
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([3, 3, 3]));
+    expect(readdirSync(root)).toHaveLength(1);
+  });
+
+  it("a sweep restore does not outlive a clear that ran while the file was aside", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write(KEY, new Uint8Array([1]));
+    ageAll(now - 25 * HOUR);
+    // The clear lists the root while the aside file is not visible to it.
+    raceSweepAside(now, async (_file, aside) => {
+      const held = join(tmp, "held");
+      renameSync(aside, held);
+      await cache.clear();
+      renameSync(held, aside);
+    });
+
+    await cache.sweep();
+    expect(await cache.read(KEY)).toBeUndefined();
+    expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
+  });
 });
+

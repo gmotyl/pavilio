@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ANSWER_SUBDIR, PAGE_CACHE_DIR } from "./pageCache.js";
@@ -68,6 +68,40 @@ function fileName(key: AnswerKey, kind: AnswerRecordKind): string {
 
 function isMissing(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
+function errorCode(err: unknown): string | undefined {
+  return (err as NodeJS.ErrnoException)?.code;
+}
+
+/** Codes of a filesystem that cannot hard-link (FAT, some network mounts). */
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"]);
+
+/**
+ * Puts a file the sweep moved aside back at `file`, never replacing a newer
+ * file that a write committed there meanwhile: `link` fails with EEXIST
+ * instead of overwriting, and the aside copy is then just dropped. Without
+ * hard links it falls back to a rename only while the path is absent (best
+ * effort: a write landing between that check and the rename is replaced).
+ */
+async function restoreAside(aside: string, file: string): Promise<void> {
+  try {
+    await link(aside, file);
+  } catch (err) {
+    const code = errorCode(err);
+    if (code === "EEXIST") return void (await unlink(aside));
+    if (!code || !NO_HARD_LINKS.has(code)) throw err;
+    const taken = await stat(file).then(
+      () => true,
+      (statErr) => {
+        if (isMissing(statErr)) return false;
+        throw statErr;
+      },
+    );
+    if (taken) return void (await unlink(aside));
+    return rename(aside, file);
+  }
+  await unlink(aside);
 }
 
 export function createAnswerAudioCache(opts: { root?: string; now?: () => number } = {}): AnswerAudioCache {
@@ -150,6 +184,7 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
             // A write may have replaced the file since the stat: move it aside
             // and judge what was actually moved, so fresh audio is never deleted.
             const aside = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
+            const clearsAtAside = clears;
             await rename(file, aside);
             info = await stat(aside);
             if (expired(info.mtimeMs)) {
@@ -158,7 +193,13 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
               totals.removedBytes += info.size;
               continue;
             }
-            await rename(aside, file);
+            // A clear that listed the root while the file was aside missed it:
+            // putting it back would outlive that clear, so it goes instead.
+            if (clearing > 0 || clears !== clearsAtAside) {
+              await rm(aside, { force: true });
+              continue;
+            }
+            await restoreAside(aside, file);
           }
           totals.keptUnits += unit;
           totals.keptBytes += info.size;
