@@ -31,6 +31,7 @@ import { useFileViewer } from "./useFileViewer";
 import { useCommitsOpenMap } from "./useCommitsOpenMap";
 import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
+import ProjectGroupStrip from "./ProjectGroupStrip";
 import ProjectSettingsCard from "./ProjectSettingsCard";
 import { BELOW_BREADCRUMBS, useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { PageSpeechRowHost } from "../speech/PageSpeechRowHost";
@@ -558,6 +559,7 @@ export default function ProjectView() {
               the name changes, so without the key the expanded state — and the
               settings card's half-typed custom colour — would carry over to the
               next project instead of starting fresh. */}
+          {name && <ProjectGroupStrip project={name} />}
           <CollapsibleProjectMd
             key={name}
             content={content}
