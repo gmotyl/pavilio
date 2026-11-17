@@ -245,7 +245,7 @@ describe("PageCacheSettings", () => {
   it("a failed clear shows the reason", async () => {
     const user = userEvent.setup();
     stubAnswerCacheFetch(() =>
-      Response.json({ error: "answer cache clear failed: EACCES" }, { status: 503 }),
+      Response.json({ error: "EACCES: permission denied" }, { status: 503 }),
     );
     mount();
     await screen.findByText("38 pages · 1,204 units · 46.3 MB");
@@ -254,7 +254,7 @@ describe("PageCacheSettings", () => {
 
     await waitFor(() =>
       expect(getAlertsSnapshot().map((a) => a.title)).toContain(
-        "Couldn't clear answer audio: answer cache clear failed: EACCES",
+        "Couldn't clear answer audio: EACCES: permission denied",
       ),
     );
     expect(screen.queryByText("Answer audio cleared")).toBeNull();

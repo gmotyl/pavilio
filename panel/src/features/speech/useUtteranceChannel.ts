@@ -263,7 +263,11 @@ function newestOf(queue: UtteranceQueue): Utterance | null {
  * Two is what the bound buys and what it costs: a queued answer still has its
  * first unit in hand before the transport reaches it, and the ones further back
  * are warmed as they move up — this list changes whenever the queue advances,
- * and the host's warming effect is keyed on it.
+ * and the host's warming effect is keyed on it. An armed cell may list a third:
+ * `warmableUtterances` appends the cell's newest answer when it is neither of
+ * these two (queued two deep behind a live run, or the cursor two steps back),
+ * because that is the one answer an armed cell preloads whole. So the bound is
+ * two per cell, three per armed cell — never the cell's whole backlog.
  *
  * `previous` is not in it either: it was warmed when it was current, and a
  * replay plays it out of the synthesis cache.
@@ -373,9 +377,10 @@ export interface Channel {
   languageFor(sessionId: string): "pl" | "en";
   /**
    * What the host warms, across every session, armed or not: per cell the
-   * utterance under the cursor and the one the transport would reach next, and
-   * no more than those two — see {@link warmableOf} for why the rest of a cell's
-   * queue is not in it.
+   * utterance under the cursor and the one the transport would reach next, plus
+   * an armed cell's newest answer when it is neither (each entry flagged
+   * `newest` accordingly), and no more — see {@link warmableOf} for why the rest
+   * of a cell's queue is not in it.
    *
    * It is also how the host learns that something ARRIVED: `utteranceFor`
    * answers only about a session the caller already knows to ask about, and
