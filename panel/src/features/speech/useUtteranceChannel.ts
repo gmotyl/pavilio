@@ -11,6 +11,7 @@ import {
 import type { CellSpeechState, SpeechMode, Utterance } from "./types";
 import {
   emptyUtteranceQueue,
+  newestUtteranceId,
   utteranceQueueReducer,
   utteranceUnderCursor,
   type UtteranceQueue,
@@ -234,11 +235,15 @@ export interface WarmableUtterance {
 }
 
 /**
- * The cell's most recently arrived utterance: the last one waiting, else the
- * transport's own, else the newest step of history.
+ * The cell's most recently arrived utterance: the later of the last one
+ * waiting and the transport's own (by {@link newestUtteranceId}: an idle
+ * arrival over a paused backlog lands in `current`, newer than the tail), else
+ * the newest step of history.
  */
 function newestOf(queue: UtteranceQueue): Utterance | null {
-  return queue.pending.at(-1) ?? queue.current ?? queue.previous[0] ?? null;
+  const id = newestUtteranceId(queue);
+  if (id === null) return queue.previous[0] ?? null;
+  return queue.current?.id === id ? queue.current : (queue.pending.at(-1) ?? null);
 }
 
 /**

@@ -620,6 +620,43 @@ describe("useUtteranceChannel", () => {
   });
 
   /**
+   * A cell that built a backlog while speaking and is then PAUSED reports
+   * idle, so the next answer lands in `current` — newer than the backlog
+   * still queued behind it. `newest` follows arrival time, not the tail.
+   */
+  it("newest flag follows arrival time when an idle arrival lands over a backlog", async () => {
+    const { result, rerender } = await renderChannel();
+    await act(async () => {
+      result.current.cycleSpeechMode("cell-a");
+    });
+    lastMessage = frame(utterance("cell-a", "a1", 1_000));
+    await act(async () => {
+      rerender();
+    });
+    speaking = "cell-a";
+    for (const [id, at] of [
+      ["a2", 2_000],
+      ["a3", 3_000],
+    ] as const) {
+      lastMessage = frame(utterance("cell-a", id, at));
+      await act(async () => {
+        rerender();
+      });
+    }
+    paused = "cell-a";
+    lastMessage = frame(utterance("cell-a", "a4", 4_000));
+    await act(async () => {
+      rerender();
+    });
+
+    const queue = result.current.queueFor("cell-a");
+    expect(queue.current?.id).toBe("a4");
+    expect(queue.pending.map((w) => w.id)).toEqual(["a2", "a3"]);
+    const newest = result.current.warmableUtterances.filter((entry) => entry.newest);
+    expect(newest.map((entry) => entry.utterance.id)).toEqual(["a4"]);
+  });
+
+  /**
    * The dedupe gate is wider than the cursor, and this is the test that says
    * so. An answer already WAITING behind the live run, or already stepped back
    * into history, is just as much a re-delivery as the one being spoken —
