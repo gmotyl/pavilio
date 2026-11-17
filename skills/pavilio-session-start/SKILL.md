@@ -44,7 +44,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    Each `== <slug>` block prints either the frontmatter fields or one marker, which picks the backfill branch below: fields without `title:`/`summary:`, `[no frontmatter]` or `[unclosed frontmatter]` → backfill the proposal; `[no proposal] [design.md]` → design-only backfill; `[no proposal]` → neither file.
 
    Do not open `tasks.md`, specs or `design.md`, and nothing below the frontmatter — except in the one-time backfill (below) for a change that has no Change summary yet.
-4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Only the fast-entry variant skips this.
+4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. When the project has group siblings (step 2), show the group-siblings list right after the summary. Only the fast-entry variant skips this.
 5. **Branch on the active changes found:**
 
    **None** → After the summary, ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.
