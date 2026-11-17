@@ -49,6 +49,8 @@ import { createSpeechVoicesRouter } from "./routes/speechVoices.js";
 import { createSpeechUsageRouter } from "./routes/speechUsage.js";
 import { createUsageStore } from "./lib/speech/usage-store.js";
 import { createPageCacheRouter } from "./routes/pageCache.js";
+import { createAnswerCacheRouter, runStartupSweep } from "./routes/answerCache.js";
+import { createAnswerAudioCache } from "./lib/speech/answerAudioCache.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
 import skillsRouter from "./routes/skills.js";
@@ -228,7 +230,17 @@ export async function startPanel(
   // One usage store for the whole server: its record chain only serializes callers
   // that share the instance, so every writer must use this one.
   const usageStore = createUsageStore();
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ holder: ttsHolder, usage: usageStore }));
+  // One answer audio disk cache (~/.pavilio/speech-cache/answers) shared by the
+  // relay and the clear route. Expired files are swept now, in the background:
+  // the sweep never rejects and listen() does not wait for it.
+  const answerCache = createAnswerAudioCache();
+  void runStartupSweep(answerCache);
+  app.all(
+    "/api/tts",
+    mobileAuthMiddleware,
+    authMiddleware,
+    createTtsHandler({ holder: ttsHolder, usage: usageStore, answerCache }),
+  );
 
   app.use(express.json());
   app.use(mobileAuthMiddleware);
@@ -267,6 +279,8 @@ export async function startPanel(
   app.use("/api/speech", createSpeechUsageRouter({ store: usageStore }));
   // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
   app.use("/api/speech/page-cache", createPageCacheRouter());
+  // Answer audio under ~/.pavilio/speech-cache/answers, which the page cache's wipe leaves alone.
+  app.use("/api/speech/answer-cache", createAnswerCacheRouter({ cache: answerCache }));
   app.use("/api", scriptsRouter);
   mountTimeRoutes(app, { projectsDir: getConfig().projectsDir, hostname: machineId() });
 

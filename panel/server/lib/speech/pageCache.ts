@@ -18,6 +18,12 @@ import { join } from "node:path";
  */
 
 export const PAGE_CACHE_DIR = ".pavilio/speech-cache"; // under os.homedir()
+/**
+ * The answer audio cache's directory inside the page cache root (see
+ * `answerAudioCache.ts`). It is not a page: totals and listings never count it
+ * (they only walk 64-hex page folders) and a wipe leaves it in place.
+ */
+export const ANSWER_SUBDIR = "answers";
 export const HASH_RE = /^[0-9a-f]{64}$/;
 
 export interface PageCacheTotals {
@@ -282,6 +288,7 @@ export function createPageCacheStore(opts: { root?: string } = {}): PageCacheSto
       const run = before.then(async () => {
         const freed = await totals();
         for (const name of await entries(root)) {
+          if (name === ANSWER_SUBDIR) continue;
           await rm(join(root, name), { recursive: true, force: true });
         }
         return freed;
