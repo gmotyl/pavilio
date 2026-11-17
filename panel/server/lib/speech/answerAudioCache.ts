@@ -37,9 +37,12 @@ export type AnswerRecordKind = "audio" | "speaker";
 const EXTENSION: Record<AnswerRecordKind, string> = { audio: ".mp3", speaker: ".speaker.json" };
 
 /**
- * `*Units` count audio files only — one per cached answer unit, the number a
- * reader of the startup log cares about; `*Bytes` count every file (speaker
- * records and stray temp files included), the real disk footprint.
+ * `*Units` count committed audio files only — one per cached answer unit, the
+ * number a reader of the startup log cares about. `*Bytes` count every file
+ * under the root at sweep time, the real disk footprint: speaker records,
+ * stray temp files, and the temp files of writes still in flight. A write in
+ * flight is always kept — its bytes so far go to `keptBytes`, but it is not a
+ * unit until it commits.
  */
 export interface AnswerSweepTotals {
   removedUnits: number;
@@ -53,7 +56,7 @@ export interface AnswerAudioCache {
   read(key: AnswerKey, kind?: AnswerRecordKind): Promise<Uint8Array | undefined>;
   /** Atomic (temp file + rename); errors are swallowed. `kind` defaults to `"audio"`. */
   write(key: AnswerKey, bytes: Uint8Array, kind?: AnswerRecordKind): Promise<void>;
-  /** Deletes files older than the TTL and reports what was removed and kept. */
+  /** Deletes files older than the TTL and reports what was removed and kept (see {@link AnswerSweepTotals}). */
   sweep(): Promise<AnswerSweepTotals>;
   /** Deletes every file under the root; a write started before the clear never lands after it. */
   clear(): Promise<void>;
@@ -146,11 +149,16 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
         }
         const at = now();
         for (const name of names) {
-          if (pending.has(name)) continue;
           try {
             const file = join(root, name);
             const info = await stat(file);
             if (!info.isFile()) continue;
+            // A write in flight owns its temp file: never removed here, but
+            // its bytes are on disk, so they count as kept.
+            if (pending.has(name)) {
+              totals.keptBytes += info.size;
+              continue;
+            }
             const unit = name.endsWith(EXTENSION.audio) ? 1 : 0;
             if (at - info.mtimeMs > ANSWER_CACHE_TTL_MS) {
               await unlink(file);

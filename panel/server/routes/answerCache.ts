@@ -39,10 +39,11 @@ const toMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
  * Removes expired answer audio and logs one line with what was removed and
  * kept, in the contracted wording
  * `[answer-cache] swept: removed <n> files (<x.y> MB), kept <m> files (<z.w> MB)`.
- * "Files" are the audio files — one per cached answer unit (`*Units`); the
- * megabytes are every file's, so speaker records ride along in the bytes but
- * not in the file counts. Never rejects, so the server can start it without
- * awaiting it.
+ * "Files" are the committed audio files — one per cached answer unit
+ * (`*Units`); the megabytes are every file's on disk, so speaker records and
+ * the temp files of writes still in flight (always kept) ride along in the
+ * bytes but not in the file counts. Never rejects, so the server can start
+ * it without awaiting it.
  */
 export async function runStartupSweep(
   cache: AnswerAudioCache,

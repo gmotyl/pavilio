@@ -15,12 +15,14 @@ import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../
 
 // rename runs `beforeRename` (awaited) between the temp file write and the
 // rename, handed the rename's source. writeFile runs `beforeWriteFile`
-// (awaited) before the real write, while the temp file does not exist yet.
-// stat runs `afterStat` once, with the stat'ed path, after the real stat
+// (awaited) before the real write, while the temp file does not exist yet, and
+// `afterWriteFile` (awaited) after it, while the temp file is complete but its
+// commit is not queued yet. stat runs `afterStat` once, with the stat'ed path, after the real stat
 // resolved. Each hook fires once and clears itself.
 const hooks = vi.hoisted(() => ({
   beforeRename: undefined as ((from: string) => void | Promise<void>) | undefined,
   beforeWriteFile: undefined as (() => void | Promise<void>) | undefined,
+  afterWriteFile: undefined as (() => void | Promise<void>) | undefined,
   afterStat: undefined as ((path: string) => void | Promise<void>) | undefined,
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -34,10 +36,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       return actual.rename(from, to);
     },
     writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
-      const hook = hooks.beforeWriteFile;
+      const before = hooks.beforeWriteFile;
       hooks.beforeWriteFile = undefined;
-      await hook?.();
-      return actual.writeFile(...args);
+      await before?.();
+      await actual.writeFile(...args);
+      const after = hooks.afterWriteFile;
+      hooks.afterWriteFile = undefined;
+      await after?.();
     },
     stat: async (path: string) => {
       const info = await actual.stat(path);
@@ -59,6 +64,7 @@ beforeEach(() => {
 afterEach(() => {
   hooks.beforeRename = undefined;
   hooks.beforeWriteFile = undefined;
+  hooks.afterWriteFile = undefined;
   hooks.afterStat = undefined;
   rmSync(tmp, { recursive: true, force: true });
   vi.restoreAllMocks();
@@ -303,6 +309,23 @@ describe("answer audio cache", () => {
     await writing;
     expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2]));
     expect(readdirSync(root)).toHaveLength(1);
+  });
+
+  it("sweep counts a write in flight as kept bytes", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write({ ...KEY, text: "kept" }, new Uint8Array([1]));
+    // The sweep runs to completion while a second write's temp file is on
+    // disk and its commit is not queued yet.
+    let swept: Awaited<ReturnType<typeof cache.sweep>> | undefined;
+    hooks.afterWriteFile = async () => {
+      swept = await cache.sweep();
+    };
+
+    await cache.write(KEY, new Uint8Array([2, 2, 2]));
+    // The temp file's bytes are kept bytes, but it is not a unit until it commits.
+    expect(swept).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 4 });
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2, 2]));
   });
 
   it("clear removes what a concurrent sweep would have kept", async () => {
