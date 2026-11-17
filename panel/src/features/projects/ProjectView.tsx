@@ -555,11 +555,11 @@ export default function ProjectView() {
               ))}
             </div>
           )}
+          {name && <ProjectGroupStrip project={name} />}
           {/* Keyed by project: `/project/:name` reuses this ProjectView when only
               the name changes, so without the key the expanded state — and the
               settings card's half-typed custom colour — would carry over to the
               next project instead of starting fresh. */}
-          {name && <ProjectGroupStrip project={name} />}
           <CollapsibleProjectMd
             key={name}
             content={content}
