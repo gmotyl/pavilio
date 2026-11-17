@@ -363,7 +363,12 @@ describe("/api/tts over the Tts holder", () => {
         }),
       );
       const { app } = loadHolderApp([tts], createAnswerAudioCache({ root }));
-      const body = { ...CASCADE_BODY, text: "Cascade again.", order: ["omnivoice", "edge"] };
+      const body = {
+        ...CASCADE_BODY,
+        text: "Cascade again.",
+        voices: { omnivoice: "alloy" },
+        order: ["omnivoice", "edge"],
+      };
       const send = () => request(app).post("/api/tts").set("Cookie", COOKIE).send(body);
 
       const first = await send();

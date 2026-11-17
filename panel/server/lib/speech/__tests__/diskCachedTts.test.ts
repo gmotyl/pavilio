@@ -23,7 +23,7 @@ function fakeTts(answeredBy = "omnivoice") {
         bytes: new Uint8Array(SPOKEN).buffer,
         mime: "audio/mpeg",
         engine: answeredBy,
-        voice: req.voice ?? "default",
+        voice: req.voice ?? req.voices?.[answeredBy] ?? "default",
       }),
     ),
     prefetch: vi.fn(),
@@ -196,7 +196,13 @@ describe("diskCachedTts", () => {
     const inner = fakeTts("omnivoice");
     const cache = fakeCache();
     const tts = diskCachedTts(inner as unknown as Tts, cache);
-    const cascade: SynthesisRequest = { engine: "cascade", text: "Hi.", lang: "en", order: ["omnivoice", "edge"] };
+    const cascade: SynthesisRequest = {
+      engine: "cascade",
+      text: "Hi.",
+      lang: "en",
+      voices: { omnivoice: "alloy" },
+      order: ["omnivoice", "edge"],
+    };
 
     const miss = await tts.synthesize(cascade);
     await settle();
@@ -206,7 +212,7 @@ describe("diskCachedTts", () => {
     expect(hit.engine).toBe(miss.engine);
     expect(hit.voice).toBe(miss.voice);
     expect(hit.engine).toBe("omnivoice");
-    expect(hit.voice).not.toBe("");
+    expect(hit.voice).toBe("alloy");
   });
 
   it("a disk hit without its speaker record is a miss", async () => {
@@ -226,7 +232,12 @@ describe("diskCachedTts", () => {
     const inner = fakeTts("omnivoice");
     const cache = fakeCache();
     const tts = diskCachedTts(inner as unknown as Tts, cache);
-    const cascade: SynthesisRequest = { engine: "cascade", text: "Hi.", order: ["kokoro", "omnivoice"] };
+    const cascade: SynthesisRequest = {
+      engine: "cascade",
+      text: "Hi.",
+      voices: { kokoro: "af_heart", omnivoice: "alloy" },
+      order: ["kokoro", "omnivoice"],
+    };
 
     await tts.synthesize(cascade);
     await settle();
@@ -234,7 +245,7 @@ describe("diskCachedTts", () => {
 
     // No order on the request: the configured default order decides.
     const defaulted = diskCachedTts(inner as unknown as Tts, cache, { cascadeOrder: ["kokoro", "omnivoice"] });
-    await defaulted.synthesize({ engine: "cascade", text: "Hi." });
+    await defaulted.synthesize({ engine: "cascade", text: "Hi.", voices: cascade.voices });
     await settle();
     expect(cache.write).not.toHaveBeenCalled();
 
@@ -243,5 +254,36 @@ describe("diskCachedTts", () => {
     await tts.synthesize(cascade);
     await settle();
     expect(cache.write).toHaveBeenCalled();
+  });
+  /**
+   * A request that names no voice for the engine that speaks it gets the
+   * engine's default, which the server resolves against a live catalog that
+   * can change at runtime (a refresh rebuilds the holder). The key could not
+   * tell the old default from the new one, so such a request is never cached.
+   */
+  it("a request naming no voice for its speaker is neither read nor stored", async () => {
+    let fallback = "alloy";
+    const inner = fakeTts("omnivoice");
+    inner.synthesize.mockImplementation(async (req: SynthesisRequest) => ({
+      bytes: new Uint8Array(SPOKEN).buffer,
+      mime: "audio/mpeg",
+      engine: "omnivoice",
+      voice: req.voice ?? req.voices?.omnivoice ?? fallback,
+    }));
+    const cache = fakeCache();
+    const tts = diskCachedTts(inner as unknown as Tts, cache);
+    const single: SynthesisRequest = { engine: "omnivoice", text: "Hi.", lang: "en" };
+    const cascade: SynthesisRequest = { engine: "cascade", text: "Hi.", lang: "en", order: ["omnivoice"] };
+
+    await tts.synthesize(single);
+    await tts.synthesize(cascade);
+    await settle();
+    expect(cache.write).not.toHaveBeenCalled();
+
+    fallback = "echo";
+    expect((await tts.synthesize(single)).voice).toBe("echo");
+    expect((await tts.synthesize(cascade)).voice).toBe("echo");
+    expect(inner.synthesize).toHaveBeenCalledTimes(4);
+    expect(cache.read).not.toHaveBeenCalled();
   });
 });

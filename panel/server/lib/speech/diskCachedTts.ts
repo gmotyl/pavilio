@@ -31,6 +31,13 @@ interface Speaker {
  * voice the result reports, where a later request naming them finds it. The
  * relay itself always names an engine: plain Edge never reaches this Tts.
  *
+ * A request naming an engine but no voice for its speaker (its own `voice`;
+ * for a cascade, the preferred member's entry in `voices`) is passed straight
+ * through, neither read nor stored: it gets the engine's default, which the
+ * server resolves against a catalog that can change at runtime (the OpenAI
+ * catalog refresh rebuilds the holder), and the key cannot tell the old
+ * default from the new one.
+ *
  * A disk hit reports the engine and voice the original synthesis reported (for
  * a cascade, the member that spoke and its voice: the browser's relay client
  * rejects an answer without them). They live in a speaker record stored under
@@ -55,6 +62,7 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
   const warned = new Set<"read" | "write">();
 
   async function synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
+    if (req.engine !== undefined && !namesVoice(req)) return tts.synthesize(req);
     const requested = req.engine === undefined ? undefined : keyOf(req, req.engine);
     if (requested) {
       const hit = await readHit(requested);
@@ -91,6 +99,13 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCa
         return false;
       }
     });
+  }
+
+  /** Whether `req` names the voice it is spoken with: its own, or for a cascade the preferred member's. */
+  function namesVoice(req: SynthesisRequest): boolean {
+    if (req.engine !== CASCADE) return req.voice !== undefined;
+    const member = preferredMember(req);
+    return member !== undefined && req.voices?.[member] !== undefined;
   }
 
   /** Writes the audio, then its speaker record; fire-and-forget. */
