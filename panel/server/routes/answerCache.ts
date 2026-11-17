@@ -37,7 +37,12 @@ const toMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
 
 /**
  * Removes expired answer audio and logs one line with what was removed and
- * kept: answer units (audio files) and the megabytes of every file. Never rejects, so the server can start it without awaiting it.
+ * kept, in the contracted wording
+ * `[answer-cache] swept: removed <n> files (<x.y> MB), kept <m> files (<z.w> MB)`.
+ * "Files" are the audio files — one per cached answer unit (`*Units`); the
+ * megabytes are every file's, so speaker records ride along in the bytes but
+ * not in the file counts. Never rejects, so the server can start it without
+ * awaiting it.
  */
 export async function runStartupSweep(
   cache: AnswerAudioCache,
@@ -46,8 +51,8 @@ export async function runStartupSweep(
   try {
     const t = await cache.sweep();
     log(
-      `[answer-cache] swept: removed ${t.removedUnits} units (${toMb(t.removedBytes)} MB), ` +
-        `kept ${t.keptUnits} units (${toMb(t.keptBytes)} MB)`,
+      `[answer-cache] swept: removed ${t.removedUnits} files (${toMb(t.removedBytes)} MB), ` +
+        `kept ${t.keptUnits} files (${toMb(t.keptBytes)} MB)`,
     );
   } catch (error) {
     console.warn("[answer-cache] sweep failed:", (error as Error)?.message ?? error);
