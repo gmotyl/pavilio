@@ -127,20 +127,29 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
         return totals;
       }
       const at = now();
+      const expired = (mtimeMs: number) => at - mtimeMs > ANSWER_CACHE_TTL_MS;
       for (const name of names) {
         const file = join(root, name);
         try {
-          const info = await stat(file);
+          let info = await stat(file);
           if (!info.isFile()) continue;
           const unit = name.endsWith(EXTENSION.audio) ? 1 : 0;
-          if (at - info.mtimeMs > ANSWER_CACHE_TTL_MS) {
-            await unlink(file);
-            totals.removedUnits += unit;
-            totals.removedBytes += info.size;
-          } else {
-            totals.keptUnits += unit;
-            totals.keptBytes += info.size;
+          if (expired(info.mtimeMs)) {
+            // A write may have replaced the file since the stat: move it aside
+            // and judge what was actually moved, so fresh audio is never deleted.
+            const aside = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
+            await rename(file, aside);
+            info = await stat(aside);
+            if (expired(info.mtimeMs)) {
+              await unlink(aside);
+              totals.removedUnits += unit;
+              totals.removedBytes += info.size;
+              continue;
+            }
+            await rename(aside, file);
           }
+          totals.keptUnits += unit;
+          totals.keptBytes += info.size;
         } catch (err) {
           if (!isMissing(err)) warnOnce("sweep", err);
         }

@@ -16,9 +16,11 @@ import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../
 
 // rename delegates to the real one unless a test sets `beforeRename`, which
 // runs (and is awaited) between the temp file write and the rename (a racing
-// clear()); it is handed the rename's source.
+// clear()); it is handed the rename's source. stat likewise runs `afterStat`
+// once, with the stat'ed path, after the real stat resolved (a racing write).
 const hooks = vi.hoisted(() => ({
   beforeRename: undefined as ((from: string) => void | Promise<void>) | undefined,
+  afterStat: undefined as ((path: string) => void) | undefined,
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -29,6 +31,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       hooks.beforeRename = undefined;
       await hook?.(from);
       return actual.rename(from, to);
+    },
+    stat: async (path: string) => {
+      const info = await actual.stat(path);
+      const hook = hooks.afterStat;
+      hooks.afterStat = undefined;
+      hook?.(path);
+      return info;
     },
   };
 });
@@ -42,6 +51,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   hooks.beforeRename = undefined;
+  hooks.afterStat = undefined;
   rmSync(tmp, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -164,6 +174,22 @@ describe("answer audio cache", () => {
     expect(Buffer.from((await cache.read(KEY, "speaker"))!)).toEqual(Buffer.from(record));
     expect(Buffer.from((await cache.read(KEY))!)).toEqual(Buffer.from([1, 2]));
     expect(await cache.read({ ...KEY, text: "other" }, "speaker")).toBeUndefined();
+  });
+
+  it("sweep keeps a file a write replaced after the sweep found it expired", async () => {
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const cache = createAnswerAudioCache({ root, now: () => now });
+    await cache.write(KEY, new Uint8Array([1]));
+    ageAll(now - 25 * HOUR);
+    // Between the sweep's stat and its delete, a write lands fresh audio there.
+    hooks.afterStat = (path) => {
+      writeFileSync(path, new Uint8Array([2, 2]));
+      utimesSync(path, now / 1000, now / 1000);
+    };
+
+    expect(await cache.sweep()).toEqual({ removedUnits: 0, removedBytes: 0, keptUnits: 1, keptBytes: 2 });
+    expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2]));
+    expect(readdirSync(root)).toHaveLength(1);
   });
 
   it("sweep counts audio files as units and every file's bytes", async () => {
