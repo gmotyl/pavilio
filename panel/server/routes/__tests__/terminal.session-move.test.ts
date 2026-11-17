@@ -69,6 +69,12 @@ describe("PATCH /api/terminal/sessions/:id — session move", () => {
     expect(store.sessions[0].project).toBe("motyl");
   });
 
+  it.each(["../motyl", "archived/oldie"])("project path %s is rejected", async (project) => {
+    const res = await request(app()).patch("/api/terminal/sessions/s1").send({ project });
+    expect(res.status).toBe(400);
+    expect(store.sessions[0].project).toBe("motyl");
+  });
+
   it("unknown session id is 404", async () => {
     const res = await request(app()).patch("/api/terminal/sessions/zz").send({ project: "woozle" });
     expect(res.status).toBe(404);
