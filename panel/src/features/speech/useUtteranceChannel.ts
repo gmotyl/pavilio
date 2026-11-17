@@ -224,6 +224,21 @@ function queueHolds(queue: UtteranceQueue, id: string): boolean {
 export interface WarmableUtterance {
   utterance: Utterance;
   mode: SpeechMode;
+  /**
+   * The cell's most recently arrived answer. The one answer an armed cell
+   * preloads whole: older ones keep their unit-0 warm and play on demand.
+   * Whether it is heard is the host's question (it never preloads a heard
+   * answer), so a `markHeard` leaves the flag — and the list — untouched.
+   */
+  newest: boolean;
+}
+
+/**
+ * The cell's most recently arrived utterance: the last one waiting, else the
+ * transport's own, else the newest step of history.
+ */
+function newestOf(queue: UtteranceQueue): Utterance | null {
+  return queue.pending.at(-1) ?? queue.current ?? queue.previous[0] ?? null;
 }
 
 /**
@@ -811,7 +826,14 @@ export function useUtteranceChannel({
       // warm ahead of a click.
       if (record.local) return [];
       const mode = speechModes[sessionId] ?? "off";
-      return warmableOf(record.queue).map((utterance) => ({ utterance, mode }));
+      const newest = newestOf(record.queue);
+      const warmable = warmableOf(record.queue);
+      // An armed cell preloads its newest answer even when the transport is
+      // more than one press from it (queued two deep behind a live run, or
+      // the cursor two steps back), so it is listed there too — one entry
+      // more per armed cell, and only its unit 0 is a warm.
+      if (mode !== "off" && newest !== null && !warmable.includes(newest)) warmable.push(newest);
+      return warmable.map((utterance) => ({ utterance, mode, newest: utterance === newest }));
     });
 
     // `sessions` is a fresh Map on every change, including a `markHeard` that
@@ -825,7 +847,9 @@ export function useUtteranceChannel({
       previous.length === next.length &&
       previous.every(
         (entry, index) =>
-          entry.utterance === next[index].utterance && entry.mode === next[index].mode,
+          entry.utterance === next[index].utterance &&
+          entry.mode === next[index].mode &&
+          entry.newest === next[index].newest,
       )
     ) {
       return previous;

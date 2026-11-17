@@ -561,6 +561,65 @@ describe("useUtteranceChannel", () => {
   });
 
   /**
+   * `newest` is what the host preloads on: one answer per armed cell, the one
+   * that arrived last, never an older one the cursor happens to be on.
+   */
+  it("newest flag marks the most recent unheard utterance per session", async () => {
+    const { result, rerender } = await renderChannel();
+    const flags = () =>
+      result.current.warmableUtterances.map((entry) => [entry.utterance.id, entry.newest]);
+
+    // cell-a: two idle arrivals, then one step back — a1 under the cursor, a2
+    // one press away and the newest.
+    for (const id of ["a1", "a2"]) {
+      lastMessage = frame(utterance("cell-a", id));
+      await act(async () => {
+        rerender();
+      });
+    }
+    await act(async () => {
+      result.current.dispatchQueue("cell-a", { type: "previous" });
+    });
+    expect(flags()).toEqual([
+      ["a1", false],
+      ["a2", true],
+    ]);
+
+    // cell-b, armed: two answers queue behind a live run. The newest waits two
+    // presses away, and is listed all the same — it is what an armed cell
+    // preloads — while the one a press lands on is not newest.
+    await act(async () => {
+      result.current.cycleSpeechMode("cell-b");
+    });
+    lastMessage = frame(utterance("cell-b", "b1"));
+    await act(async () => {
+      rerender();
+    });
+    speaking = "cell-b";
+    for (const id of ["b2", "b3"]) {
+      lastMessage = frame(utterance("cell-b", id, 2_000));
+      await act(async () => {
+        rerender();
+      });
+    }
+    expect(result.current.queueFor("cell-b").pending.map((w) => w.id)).toEqual(["b2", "b3"]);
+    expect(flags()).toEqual([
+      ["a1", false],
+      ["a2", true],
+      ["b1", false],
+      ["b2", false],
+      ["b3", true],
+    ]);
+
+    // Marking the cursor's answer heard leaves the list — flags included — as it was.
+    const before = result.current.warmableUtterances;
+    await act(async () => {
+      result.current.markHeard("cell-a");
+    });
+    expect(result.current.warmableUtterances).toBe(before);
+  });
+
+  /**
    * The dedupe gate is wider than the cursor, and this is the test that says
    * so. An answer already WAITING behind the live run, or already stepped back
    * into history, is just as much a re-delivery as the one being spoken —

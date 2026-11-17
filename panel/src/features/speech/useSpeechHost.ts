@@ -883,7 +883,14 @@ export function useSpeechHost({
   // ever for an armed cell, but an off cell still warms unit 0. `heardFor` and
   // `queueFor` move with every channel update and `speechModeOf` with every
   // mode change, which is exactly when one of those can have become true.
+  // Superseded — a newer answer arrived in its cell — calls off the preloads
+  // alone too: an armed cell preloads its newest answer only, and the older
+  // one keeps its unit-0 warm and plays on demand. `warmableUtterances` moves
+  // with every arrival, which is when that can have become true.
   useEffect(() => {
+    const newestIds = new Set(
+      warmableUtterances.filter((entry) => entry.newest).map((entry) => entry.utterance.id),
+    );
     for (const [id, { sessionId, preload }] of [...synthesesRef.current]) {
       const queue = queueFor(sessionId);
       const queued =
@@ -891,9 +898,11 @@ export function useSpeechHost({
         queue.previous.some((utterance) => utterance.id === id) ||
         queue.pending.some((utterance) => utterance.id === id);
       if (!queued || heardFor(sessionId).has(id)) abortUtterance(id);
-      else if (preload && speechModeOf(sessionId) === "off") abortPreloads(id);
+      else if (preload && (speechModeOf(sessionId) === "off" || !newestIds.has(id))) {
+        abortPreloads(id);
+      }
     }
-  }, [abortPreloads, abortUtterance, heardFor, queueFor, speechModeOf]);
+  }, [abortPreloads, abortUtterance, heardFor, queueFor, speechModeOf, warmableUtterances]);
 
   // A host that unmounts calls off everything it still has out: queued warms
   // and preloads must not go on firing syntheses for a panel nobody is looking
@@ -948,10 +957,12 @@ export function useSpeechHost({
     // `warmedRef` dedupes unit 0 and `preloadedRef` skips units requested or
     // in flight — so the extra runs re-request only what is actually missing.
     preloadFailedRef.current.clear();
-    for (const { utterance, mode } of warmableUtterances) {
+    for (const { utterance, mode, newest } of warmableUtterances) {
       const { units } = preparedFor(utterance, languageOf(utterance));
       warmFirstUnit(utterance, units);
-      if (mode !== "off") preloadRemainder(utterance, units);
+      // Only the cell's newest answer is preloaded whole, however old it is;
+      // an older one the transport may still reach plays on demand.
+      if (mode !== "off" && newest) preloadRemainder(utterance, units);
     }
     // Warming reads nothing from the player any more: the supersession that
     // used to ride along inside this loop is its own effect below, because it

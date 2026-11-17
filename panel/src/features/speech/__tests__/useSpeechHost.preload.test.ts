@@ -698,6 +698,78 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
 });
 
 /**
+ * The preload pool is one answer per armed cell: the newest, whatever its age.
+ * Older answers keep the unit-0 warm every cell gets and play on demand.
+ */
+describe("useSpeechHost — an armed cell preloads only its newest answer", () => {
+  beforeEach(() => selectSynth("tiered"));
+
+  it("only the newest unheard answer of an armed cell is preloaded", async () => {
+    const playing = response(3, "Alpha");
+    const older = unitsOf(response(4, "Bravo"));
+    const newer = unitsOf(response(4, "Charlie"));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await emitUtterance("cell-a", "a-0", playing);
+    await settle(() => result.current.onSpeak("cell-a"));
+    // Both queue behind the live run: two unheard answers, the newer last.
+    await emitUtterance("cell-a", "a-1", response(4, "Bravo"));
+    await emitUtterance("cell-a", "a-2", response(4, "Charlie"));
+    expect(result.current.queueFor("cell-a").pending.map((u) => u.id)).toEqual(["a-1", "a-2"]);
+
+    await cycle(() => result.current, "cell-a"); // armed, holding both
+
+    for (const unit of newer.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+    expect(synth.callsFor(older[0]).map((call) => call.tier)).toEqual(["warm"]);
+    for (const unit of older.slice(1)) expect(synth.callsFor(unit)).toEqual([]);
+  });
+
+  it("an old armed cell's newest answer is still preloaded", async () => {
+    const markdown = response(5);
+    const units = unitsOf(markdown);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    await emitUtterance("cell-a", "u-1", markdown, threeDaysAgo);
+    await cycle(() => result.current, "cell-a"); // armed
+
+    for (const unit of units.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+  });
+
+  it("a newer arrival calls off the older answer's preloads", async () => {
+    const older = holdAll(response(5, "Bravo"));
+    const newer = unitsOf(response(4, "Charlie"));
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "a-1", response(5, "Bravo"));
+    const warmSignal = synth.callsFor(older[0])[0].signal;
+    const preloadSignal = synth.callsFor(older[1])[0].signal;
+    expect(preloadSignal?.aborted).toBe(false);
+
+    await emitUtterance("cell-a", "a-2", response(4, "Charlie"));
+
+    // The older answer is still in the cell's history, unheard — but no longer
+    // the one an armed cell preloads. Its unit-0 warm keeps running.
+    expect(preloadSignal?.aborted).toBe(true);
+    expect(warmSignal?.aborted).toBe(false);
+    for (const unit of newer.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload"]);
+    }
+  });
+});
+
+/**
  * A failed preload waits for the next warming opportunity. Arrivals, mode
  * changes and catch-ups are not the only ones: a reconnect that surfaced
  * nothing new, and the tab coming back into view, are too — a socket that
