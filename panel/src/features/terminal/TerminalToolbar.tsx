@@ -3,7 +3,7 @@ import {
   Plus,
   Maximize,
   Maximize2,
-  Minimize2,
+  Minimize,
   LayoutGrid,
   X,
   ChevronDown,
@@ -444,13 +444,13 @@ export function TerminalToolbar({
             onClick={onToggleFullscreen}
             aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen terminal"}
             aria-pressed={fullscreen}
-            className="flex items-center px-2.5 transition-colors"
+            className={`flex items-center px-2.5 transition-colors${fullscreen ? " is-active" : ""}`}
             style={{ color: "var(--text-secondary)" }}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "")}
             title={fullscreen ? "Exit fullscreen" : "Fullscreen: tab strip and grid over the whole panel"}
           >
-            {fullscreen ? <Minimize2 size={13} /> : <Maximize size={13} />}
+            {fullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
           </button>
         )}
         <button
@@ -459,15 +459,14 @@ export function TerminalToolbar({
           onClick={onToggleMaximize}
           disabled={visible.length === 0}
           aria-label={maximized ? "Grid" : "Maximise"}
-          className="flex items-center px-2.5 transition-colors disabled:opacity-40"
+          aria-pressed={maximized}
+          className={`flex items-center px-2.5 transition-colors disabled:opacity-40${maximized ? " is-active" : ""}`}
           style={{ color: "var(--text-secondary)" }}
           onMouseEnter={(e) => {
             if (visible.length > 0)
               e.currentTarget.style.background = "var(--bg-hover)";
           }}
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
+          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
           title={
             maximized
               ? "Back to grid (Esc or Cmd+Shift+Enter)"

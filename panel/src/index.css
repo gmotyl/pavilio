@@ -2578,3 +2578,10 @@ input[type="checkbox"] {
   border-color: var(--speech-seg);
 }
 
+
+/* Window toggles (fullscreen, maximise) that are on: a tinted background so
+   the state reads without relying on the icon alone. */
+.is-active {
+  background: color-mix(in srgb, var(--accent, #6b9eff) 18%, transparent);
+  color: var(--text-primary) !important;
+}
