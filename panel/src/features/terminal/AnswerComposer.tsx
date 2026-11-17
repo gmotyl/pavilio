@@ -584,7 +584,7 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
    * stretched its `scrollHeight` is at least the row-derived height — reading
    * it then feeds the row's height back into itself and the row could only
    * ever grow. So, like the mobile path, the field is collapsed to its
-   * natural size (`flex: none; height: auto`) for the measurement and then
+   * collapsed size (`flex: none; height: 0px`) for the measurement and then
    * restored; `scrollHeight` is then content + the field's padding. The rest
    * of the row's chrome — the field's border and the row's own padding and
    * border — comes from computed styles, not an estimate. The row's height is
@@ -604,11 +604,15 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     };
     const prevFlex = field.style.flex;
     const prevHeight = field.style.height;
+    const prevScrollTop = field.scrollTop;
+    // Collapsed to 0px, not `auto`: `auto` keeps the `rows={2}` box, a few px
+    // taller than the declared default, which would lift an empty row above it.
     field.style.flex = "none";
-    field.style.height = "auto";
+    field.style.height = "0px";
     const natural = field.scrollHeight;
     field.style.flex = prevFlex;
     field.style.height = prevHeight;
+    field.scrollTop = prevScrollTop;
     const fieldStyle = getComputedStyle(field);
     const rowStyle = getComputedStyle(row);
     const parsedLineHeight = Number.parseFloat(fieldStyle.lineHeight);

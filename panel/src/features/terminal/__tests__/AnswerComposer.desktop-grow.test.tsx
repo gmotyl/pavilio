@@ -8,7 +8,7 @@
  * is stretched to its row reports a `scrollHeight` of at least its rendered
  * (row-derived) height, so a measurement that reads the field while it is
  * stretched would feed the row's height back into itself and never shrink.
- * Only with `height: auto` / `flex: none` (its natural size) does it report
+ * Only collapsed (`height: 0px`) does it report
  * just its content plus padding.
  * Assertions are relational: the row's height against the stored height and
  * against each other, not against a stylesheet literal.
@@ -78,7 +78,11 @@ beforeEach(async () => {
     get(this: HTMLTextAreaElement) {
       if (!isField(this)) return 0;
       const natural = scrollHeightPx + 2 * FIELD_PAD;
-      if (this.style.height === "auto" || this.style.flex === "none") return natural;
+      // Collapsed to zero: content plus padding, nothing else.
+      if (this.style.height === "0px") return natural;
+      // `height: auto` keeps the `rows={2}` box, which in a browser comes out a
+      // few px taller than the declared default — never smaller than two rows.
+      if (this.style.height === "auto") return Math.max(scrollHeightPx, 2 * LH + 3) + 2 * FIELD_PAD;
       // Stretched to the row: the rendered client height is the row's height
       // minus the row padding and the field's border.
       const rowEl = this.closest(".answer-pane-composer") as HTMLElement | null;
@@ -188,6 +192,31 @@ describe("desktop composer growth", () => {
     expect(send.mock.calls[0]?.[0]).toBe("a reply grown tall");
     expect(field().value).toBe("");
     expect(rowHeight()).toBe(three);
+  });
+
+  it("an empty field after send lands exactly on the default", () => {
+    installMatchMedia();
+    const send = vi.fn((_data: string) => true);
+    mount(send);
+    const base = preferences.answerComposerHeight.default;
+    expect(rowHeight()).toBe(base);
+    type("hello", 2);
+    expect(rowHeight()).toBe(base);
+    scrollHeightPx = 2 * LH;
+    fireEvent.keyDown(field(), { key: "Enter" });
+    expect(field().value).toBe("");
+    expect(rowHeight()).toBe(base);
+  });
+
+  it("a dragged height below the natural two-row height stays", () => {
+    installMatchMedia();
+    const low = 2 * LH + CHROME - 12; // one grip step under the default
+    writePreference(preferences.answerComposerHeight, low, PROJECT);
+    scrollHeightPx = LH; // an empty field's content: one line
+    mount();
+    expect(rowHeight()).toBe(low);
+    type("short", 1);
+    expect(rowHeight()).toBe(low);
   });
 
   it("mobile growth unchanged", () => {
