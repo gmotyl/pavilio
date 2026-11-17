@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
-import type { EdgeEngineOptions, SynthesisRequest, SynthesisResult, Tts } from "anytts";
+import { resolveVoice, type EdgeEngineOptions, type SynthesisRequest, type SynthesisResult, type Tts } from "anytts";
 
 // `lib/auth.ts` reads PANEL_TOKEN once, at module load, so the token has to be
 // in the environment before that module is imported (vi.hoisted runs first).
@@ -16,13 +16,15 @@ const { TOKEN, previousToken } = vi.hoisted(() => {
 });
 
 // anytts' `resolveVoice` finds an instance's voice maps only on a real
-// `createTts` instance; these fakes register their default here instead. An
-// instance with none resolves nothing, as an unconfigured engine would.
-const { fakeDefaults } = vi.hoisted(() => ({ fakeDefaults: new WeakMap<object, string>() }));
+// `createTts` instance; these fakes register their defaults here instead,
+// keyed by `<engine>:<lang>` per instance, so resolving the wrong engine or
+// language yields another voice (or none). An instance with no default for
+// the pair resolves nothing, as an unconfigured engine would.
+const { fakeDefaults } = vi.hoisted(() => ({ fakeDefaults: new WeakMap<object, Record<string, string>>() }));
 vi.mock("anytts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("anytts")>()),
-  resolveVoice: vi.fn((tts: object, q: { engine: string; voice?: string }) => {
-    const voice = q.voice ?? fakeDefaults.get(tts);
+  resolveVoice: vi.fn((tts: object, q: { engine: string; voice?: string; lang?: string }) => {
+    const voice = q.voice ?? fakeDefaults.get(tts)?.[`${q.engine}:${q.lang ?? ""}`];
     if (voice === undefined) throw new RangeError(`engine is not configured: ${q.engine}`);
     return { voice, fellBack: false };
   }),
@@ -407,7 +409,7 @@ describe("/api/tts over the Tts holder", () => {
       // catalog refresh that rebuilds the holder can change it.
       const speaker = (voice: string) => {
         const tts = fakeTts("omnivoice");
-        fakeDefaults.set(tts, voice);
+        fakeDefaults.set(tts, { "omnivoice:en": voice });
         tts.synthesize.mockImplementation(
           async (req: SynthesisRequest): Promise<SynthesisResult> => ({
             bytes: new Uint8Array(AUDIO).buffer,
@@ -437,6 +439,50 @@ describe("/api/tts over the Tts holder", () => {
       holder.rebuild();
       expect((await send(voiceless)).headers["x-anytts-voice"]).toBe("echo");
       expect(second.synthesize).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("relay keys a voice-less cascade unit by its preferred member's default in the request's language", async () => {
+    const root = mkdtempSync(join(tmpdir(), "answer-audio-"));
+    try {
+      // Every member has a default, per language: only the preferred member's,
+      // in the request's language, is the voice the unit is spoken with.
+      const tts = fakeTts("kokoro");
+      fakeDefaults.set(tts, { "kokoro:en": "af_heart", "kokoro:pl": "pf_dora", "omnivoice:en": "alloy" });
+      tts.synthesize.mockImplementation(
+        async (req: SynthesisRequest): Promise<SynthesisResult> => ({
+          bytes: new Uint8Array(AUDIO).buffer,
+          mime: "audio/mpeg",
+          engine: "kokoro",
+          voice: req.voices?.kokoro ?? (req.lang === "pl" ? "pf_dora" : "af_heart"),
+        }),
+      );
+      const resolve = vi.mocked(resolveVoice);
+      resolve.mockClear();
+      const { app } = loadHolderApp([tts], createAnswerAudioCache({ root }));
+      const send = (body: object) => request(app).post("/api/tts").set("Cookie", COOKIE).send(body);
+      const english = { ...CASCADE_BODY, text: "Preferred member.", order: ["kokoro", "omnivoice"] };
+      const polish = { ...english, lang: "pl" };
+
+      expect((await send(english)).headers["x-anytts-voice"]).toBe("af_heart");
+      await vi.waitFor(() => expect(readdirUnit(root)).toEqual([".mp3", ".speaker.json"]));
+      // Resolved for the preferred member and the request's language only.
+      expect(resolve.mock.calls).toContainEqual([tts, { engine: "kokoro", lang: "en" }]);
+      expect(resolve.mock.calls.every(([, q]) => q.engine === "kokoro")).toBe(true);
+
+      // Another language is another unit, keyed by that language's default.
+      expect((await send(polish)).headers["x-anytts-voice"]).toBe("pf_dora");
+      expect(tts.synthesize).toHaveBeenCalledTimes(2);
+      expect(resolve.mock.calls).toContainEqual([tts, { engine: "kokoro", lang: "pl" }]);
+      await vi.waitFor(() => expect(readdirUnit(root)).toHaveLength(4));
+
+      // Both are answered from disk, and so is a request naming the default.
+      expect((await send(english)).headers["x-anytts-voice"]).toBe("af_heart");
+      expect((await send(polish)).headers["x-anytts-voice"]).toBe("pf_dora");
+      expect((await send({ ...english, voices: { kokoro: "af_heart" } })).headers["x-anytts-voice"]).toBe("af_heart");
+      expect(tts.synthesize).toHaveBeenCalledTimes(2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
