@@ -17,19 +17,29 @@ import { ANSWER_CACHE_TTL_MS, createAnswerAudioCache, type AnswerKey } from "../
 // rename, handed the rename's source. writeFile runs `beforeWriteFile`
 // (awaited) before the real write, while the temp file does not exist yet, and
 // `afterWriteFile` (awaited) after it, while the temp file is complete but its
-// commit is not queued yet. stat runs `afterStat` once, with the stat'ed path, after the real stat
-// resolved. Each hook fires once and clears itself.
+// commit is not queued yet. stat runs `afterStat` once, with the stat'ed path,
+// after the real stat resolved. Each hook fires once and clears itself.
+//
+// `events` records, in call order, the fs calls whose interleaving the lock
+// tests assert on: `readdir <names>` (after it resolved), `stat <name>` (after
+// it resolved), `writeFile <name>` (after the data is on disk), `unlink <name>`
+// and `rename <from>` (when called). Names are basenames. Tests assert on it
+// outside the hooks: a throw inside a hook would be swallowed by the store's
+// own error handling.
 const hooks = vi.hoisted(() => ({
   beforeRename: undefined as ((from: string) => void | Promise<void>) | undefined,
   beforeWriteFile: undefined as (() => void | Promise<void>) | undefined,
   afterWriteFile: undefined as (() => void | Promise<void>) | undefined,
   afterStat: undefined as ((path: string) => void | Promise<void>) | undefined,
+  events: [] as string[],
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const base = (path: unknown) => String(path).split(/[\\/]/).pop();
   return {
     ...actual,
     rename: async (from: string, to: string) => {
+      hooks.events.push(`rename ${base(from)}`);
       const hook = hooks.beforeRename;
       hooks.beforeRename = undefined;
       await hook?.(from);
@@ -40,19 +50,45 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       hooks.beforeWriteFile = undefined;
       await before?.();
       await actual.writeFile(...args);
+      hooks.events.push(`writeFile ${base(args[0])}`);
       const after = hooks.afterWriteFile;
       hooks.afterWriteFile = undefined;
       await after?.();
     },
     stat: async (path: string) => {
       const info = await actual.stat(path);
+      hooks.events.push(`stat ${base(path)}`);
       const hook = hooks.afterStat;
       hooks.afterStat = undefined;
       await hook?.(path);
       return info;
     },
+    readdir: async (path: string) => {
+      const names = await actual.readdir(path);
+      hooks.events.push(`readdir ${[...names].sort().join(",")}`);
+      return names;
+    },
+    unlink: async (path: string) => {
+      hooks.events.push(`unlink ${base(path)}`);
+      return actual.unlink(path);
+    },
   };
 });
+
+/** A promise plus its resolver, for barriers between a test and a hook. */
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+/** Lets every queued promise continuation run (a macrotask turn drains them all). */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+/** Index of the first event that starts with `prefix` and satisfies `test`; -1 if none. */
+function eventIndex(prefix: string, test: (rest: string) => boolean = () => true): number {
+  return hooks.events.findIndex((e) => e.startsWith(`${prefix} `) && test(e.slice(prefix.length + 1)));
+}
 
 // The store root is a not-yet-existing child of a temp dir, so writes have to create it.
 let tmp: string;
@@ -60,6 +96,7 @@ let root: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "panel-answer-cache-"));
   root = join(tmp, "answers");
+  hooks.events = [];
 });
 afterEach(() => {
   hooks.beforeRename = undefined;
@@ -275,22 +312,37 @@ describe("answer audio cache", () => {
   it("a write that started after a clear lands", async () => {
     const cache = createAnswerAudioCache({ root });
     await cache.write(KEY, new Uint8Array([1]));
-    // The clear is still queued behind a sweep when the write starts; the
-    // sweep holds the lock until the write's temp file exists, so the clear
-    // lists it and must leave it alone.
+    const audio = readdirSync(root)[0];
+    hooks.events = [];
+    // The sweep holds the lock (paused on its stat of the committed file)
+    // until the write's temp file is on disk; the clear is queued behind the
+    // sweep and the write's commit behind the clear, so the clear lists the
+    // temp file and must leave it alone.
+    const tempWritten = deferred();
+    let tempOnDiskDuringSweep = false;
+    hooks.afterWriteFile = () => tempWritten.resolve();
     hooks.afterStat = async () => {
-      for (let i = 0; i < 200 && !readdirSync(root).some((name) => name.startsWith(".tmp-")); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      expect(readdirSync(root).some((name) => name.startsWith(".tmp-"))).toBe(true);
+      await tempWritten.promise;
+      tempOnDiskDuringSweep = readdirSync(root).some((name) => name.startsWith(".tmp-"));
     };
     const sweeping = cache.sweep();
     const clearing = cache.clear();
     const writing = cache.write(KEY, new Uint8Array([2]));
     await Promise.all([sweeping, clearing, writing]);
 
+    expect(tempOnDiskDuringSweep).toBe(true);
+    // Order: sweep lists only the audio, the temp file is written, the clear
+    // lists audio + temp file, and only then the temp file is renamed.
+    const sweepList = eventIndex("readdir", (names) => names === audio);
+    const tempWrite = eventIndex("writeFile", (name) => name.startsWith(".tmp-"));
+    const clearList = eventIndex("readdir", (names) => names.includes(audio) && names.includes(".tmp-"));
+    const commit = eventIndex("rename", (name) => name.startsWith(".tmp-"));
+    expect(sweepList).toBeGreaterThanOrEqual(0);
+    expect(tempWrite).toBeGreaterThan(sweepList);
+    expect(clearList).toBeGreaterThan(tempWrite);
+    expect(commit).toBeGreaterThan(clearList);
     expect(await cache.read(KEY)).toEqual(new Uint8Array([2]));
-    expect(readdirSync(root)).toHaveLength(1);
+    expect(readdirSync(root)).toEqual([audio]);
   });
 
   it("sweep never deletes a file written during the sweep", async () => {
@@ -298,17 +350,34 @@ describe("answer audio cache", () => {
     const cache = createAnswerAudioCache({ root, now: () => now });
     await cache.write(KEY, new Uint8Array([1]));
     ageAll(now - 25 * HOUR);
+    const audio = readdirSync(root)[0];
+    hooks.events = [];
     // Between the sweep's stat of the expired file and its delete, a write of
-    // fresh audio to the same key starts.
+    // fresh audio to the same key writes its temp file and queues its commit;
+    // the sweep resumes only once the write's continuation has run.
+    const tempWritten = deferred();
     let writing: Promise<void> | undefined;
-    hooks.afterStat = () => {
+    hooks.afterWriteFile = () => tempWritten.resolve();
+    hooks.afterStat = async () => {
       writing = cache.write(KEY, new Uint8Array([2, 2]));
+      await tempWritten.promise;
+      await settle();
     };
 
     expect(await cache.sweep()).toEqual({ removedUnits: 1, removedBytes: 1, keptUnits: 0, keptBytes: 0 });
+    expect(writing).toBeDefined();
     await writing;
+
+    // Order: the temp file is written while the sweep holds the lock, the
+    // sweep deletes the expired file, and only then the commit renames.
+    const tempWrite = eventIndex("writeFile", (name) => name.startsWith(".tmp-"));
+    const expiredDelete = eventIndex("unlink", (name) => name === audio);
+    const commit = eventIndex("rename", (name) => name.startsWith(".tmp-"));
+    expect(tempWrite).toBeGreaterThanOrEqual(0);
+    expect(expiredDelete).toBeGreaterThan(tempWrite);
+    expect(commit).toBeGreaterThan(expiredDelete);
     expect(await cache.read(KEY)).toEqual(new Uint8Array([2, 2]));
-    expect(readdirSync(root)).toHaveLength(1);
+    expect(readdirSync(root)).toEqual([audio]);
   });
 
   it("sweep counts a write in flight as kept bytes", async () => {
