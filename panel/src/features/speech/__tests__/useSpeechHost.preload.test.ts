@@ -564,7 +564,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     for (const unit of y) expect(timesRequested(unit)).toBe(1);
   });
 
-  it("a failed preload unit is retried on the next opportunity", async () => {
+  it("a failed preload unit is still retried on the next opportunity", async () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
@@ -580,31 +580,36 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     // Everything after it was already queued with the library, and is called off.
     expect(synth.callsFor(units[2])[0].signal?.aborted).toBe(true);
 
-    // Next opportunity: another arrival anywhere (a different cell).
+    // Next opportunity: another arrival anywhere (a different cell). The failed
+    // unit is asked for again, and every unit after it the failure called off.
     await emitUtterance("cell-b", "b-1", response(2, "Later"));
-    expect(timesRequested(units[1])).toBe(2);
-    expect(timesRequested(units[2])).toBeGreaterThanOrEqual(1);
+    for (const unit of units.slice(1)) expect(timesRequested(unit)).toBe(2);
   });
 
-  it("evicted preloaded units are requested again at the next opportunity", async () => {
-    const answerX = response(6, "Xray");
-    const answerY = response(4, "Yankee");
-    const x = unitsOf(answerX);
-    const { result } = renderHook(() =>
+  it("a remount preloads the newest answer again", async () => {
+    const markdown = response(5);
+    const units = unitsOf(markdown);
+    const first = renderHook(() =>
       useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
     );
+    await cycle(() => first.result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    for (const unit of units) expect(timesRequested(unit)).toBe(1);
 
-    await cycle(() => result.current, "cell-x");
-    await emitUtterance("cell-x", "x-1", answerX);
-    for (const unit of x) expect(timesRequested(unit)).toBe(1);
-
-    // Y's syntheses push X's entries out of the 200-entry LRU (modelled by clearing the cache).
+    // A page reload: the host goes, the in-memory synth cache with it, and the
+    // fresh host is handed the same answer again.
+    first.unmount();
     synth.clearCache();
-    await emitUtterance("cell-y", "y-1", answerY);
-    await cycle(() => result.current, "cell-y");
+    const second = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    // The cell's mode is persisted, so it comes back armed.
+    expect(second.result.current.speechModeOf("cell-a")).toBe("armed");
+    await emitUtterance("cell-a", "u-1", markdown);
 
-    // X's units 1.. must be back in the cache before Play.
-    for (const unit of x.slice(1)) expect(timesRequested(unit)).toBeGreaterThanOrEqual(2);
+    for (const unit of units.slice(1)) {
+      expect(synth.callsFor(unit).map((call) => call.tier)).toEqual(["preload", "preload"]);
+    }
   });
 
   it("preloads never delay the playing run's next unit", async () => {
@@ -631,33 +636,6 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     for (const unit of p.slice(2)) {
       expect(synth.callsFor(unit).map((call) => call.tier)).toContain("run");
     }
-  });
-
-  it("an evicted unit is requested again when its cache state is cold", async () => {
-    const answerX = response(6, "Xray");
-    const x = unitsOf(answerX);
-    // x[2] stays in flight: warming, not cold, so it must not be asked again.
-    synth.hold(x[2]);
-    const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
-    );
-
-    await cycle(() => result.current, "cell-x");
-    await emitUtterance("cell-x", "x-1", answerX);
-    for (const unit of x) expect(timesRequested(unit)).toBe(1);
-    const signal = synth.callsFor(x[1])[0].signal;
-
-    // The LRU pushes every landed result out.
-    synth.clearCache();
-    await emitUtterance("cell-y", "y-1", response(2, "Yankee"));
-
-    for (const unit of [x[1], ...x.slice(3)]) {
-      expect(timesRequested(unit)).toBe(2);
-      const last = synth.callsFor(unit).at(-1);
-      expect(last?.tier).toBe("preload");
-      expect(last?.signal).toBe(signal);
-    }
-    expect(synth.callsFor(x[2])).toHaveLength(1);
   });
 
   it("an aborted preload is not a failed preload", async () => {
@@ -864,6 +842,27 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
 
     expect(timesRequested(units[1])).toBe(1);
     expect(requestedTexts()).toHaveLength(before);
+  });
+
+  it("an evicted preloaded unit is not requested again on any opportunity", async () => {
+    const markdown = response(5);
+    const units = unitsOf(markdown);
+    const { result } = renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+    );
+    await cycle(() => result.current, "cell-a"); // armed
+    await emitUtterance("cell-a", "u-1", markdown);
+    for (const unit of units) expect(timesRequested(unit)).toBe(1);
+
+    // The LRU pushes every landed result out. Play is what fetches them again
+    // (from the server's answer audio cache), never a warming opportunity.
+    synth.clearCache();
+    await emitUtterance("cell-b", "b-1", response(2, "Bravo")); // arrival
+    await reconnects();
+    await becomes("hidden");
+    await becomes("visible");
+
+    for (const unit of units.slice(1)) expect(timesRequested(unit)).toBe(1);
   });
 
   it("returning to the tab does not re-request units already held", async () => {

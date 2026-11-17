@@ -63,8 +63,7 @@ import { isDocSpeechKey } from "./docKey";
 import { speechFailureAlert } from "./failureAlert";
 import { prepare } from "./prepare";
 import { pageSpeechText, preparePageText } from "./pageText";
-import { loadPageList, pageUnitState, prunePage } from "./pageCache";
-import { isSpeechSynthesized } from "./synth";
+import { loadPageList, prunePage } from "./pageCache";
 import { unitAudio } from "./unitAudio";
 import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types";
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
@@ -403,15 +402,13 @@ export function useSpeechHost({
   /**
    * Preload units already requested, as `utteranceId#index`, so a re-render
    * does not request the same unit twice. A unit whose utterance was called
-   * off is taken back out, so arming the cell again reaches it.
+   * off, or whose request failed, is taken back out, so arming the cell again
+   * or the retry reaches it. A unit that landed stays in even once the synth
+   * LRU has evicted it: it is preloaded once per page session, and Play is
+   * what fetches it again (from the server's answer audio cache within 24 h).
+   * A reload starts the record afresh.
    */
   const preloadedRef = useRef<Set<string>>(new Set());
-  /**
-   * The subset of `preloadedRef` that reached the library — since anytts
-   * queues at call time, every one of them the moment it is requested. Kept as
-   * its own set because it is what the eviction check below asks about.
-   */
-  const preloadStartedRef = useRef<Set<string>>(new Set());
   /**
    * Utterances whose preload a failed unit stopped, per session. A ref rather
    * than a local of `preloadRemainder`, because that function runs again on
@@ -708,9 +705,6 @@ export function useSpeechHost({
     for (const key of preloadedRef.current) {
       if (key.startsWith(prefix)) preloadedRef.current.delete(key);
     }
-    for (const key of preloadStartedRef.current) {
-      if (key.startsWith(prefix)) preloadStartedRef.current.delete(key);
-    }
     const { preload } = synthesis;
     synthesis.preload = null;
     if (!synthesis.warm) synthesesRef.current.delete(utteranceId);
@@ -829,23 +823,12 @@ export function useSpeechHost({
       for (let index = 1; index < units.length; index += 1) {
         const key = `${id}#${index}`;
         const unit = units[index];
-        const { text, lang } = unit;
-        if (preloadedRef.current.has(key)) {
-          // The synth cache is an LRU: a unit requested earlier may have been
-          // evicted since, and Play would then pay for it. Requested but cold
-          // now (`isSpeechSynthesized` is `speechCacheState !== "cold"`, so in
-          // flight counts as held) -> ask again.
-          // A page's unit whose bytes the page cache holds is not evicted,
-          // whatever the synth LRU did.
-          const evicted =
-            preloadStartedRef.current.has(key) &&
-            !(isDocSpeechKey(sessionId) && pageUnitState(sessionId, unit) === "ready") &&
-            !isSpeechSynthesized(text, { voice: voiceForRef.current(sessionId), lang });
-          if (!evicted) continue;
-          preloadStartedRef.current.delete(key);
-        }
+        const { lang } = unit;
+        // Requested once is done, even if the synth LRU has evicted it since:
+        // re-preloading on every opportunity turned eviction into a synthesis
+        // carousel. Play fetches an evicted unit on the run tier.
+        if (preloadedRef.current.has(key)) continue;
         preloadedRef.current.add(key);
-        preloadStartedRef.current.add(key);
 
         const synthesis = synthesisFor(utterance);
         synthesis.preload ??= new AbortController();
@@ -863,7 +846,6 @@ export function useSpeechHost({
             // synthesized until that retry. Its unit-0 warm is not a preload,
             // and keeps going.
             preloadedRef.current.delete(key);
-            preloadStartedRef.current.delete(key);
             const failed = preloadFailedRef.current.get(sessionId) ?? new Set<string>();
             rememberAutoplayed(failed, id);
             preloadFailedRef.current.set(sessionId, failed);
@@ -954,8 +936,9 @@ export function useSpeechHost({
     // so a synthesizer that is down is walked once per opportunity rather than
     // through the whole answer, and a transient failure no longer leaves an
     // armed cell cold until its mode is cycled. The body is idempotent —
-    // `warmedRef` dedupes unit 0 and `preloadedRef` skips units requested or
-    // in flight — so the extra runs re-request only what is actually missing.
+    // `warmedRef` dedupes unit 0 and `preloadedRef` skips every unit already
+    // requested, even one the synth LRU has evicted since — so the extra runs
+    // re-request only what failed or was called off.
     preloadFailedRef.current.clear();
     for (const { utterance, mode, newest } of warmableUtterances) {
       const { units } = preparedFor(utterance, languageOf(utterance));
