@@ -93,4 +93,18 @@ describe("sidebarOrder", () => {
       Other: false,
     });
   });
+
+  it("rename into an existing group merges members and keeps one top entry", () => {
+    const order = {
+      top: ["g:Old", "p:a", "g:New"],
+      groups: { Old: ["x", "y"], New: ["y", "z"] },
+    };
+    expect(renameGroupInOrder(order, "Old", "New")).toEqual({
+      top: ["g:New", "p:a"],
+      groups: { New: ["y", "z", "x"] },
+    });
+    expect(
+      renameGroupCollapsed({ Old: true, New: false }, "Old", "New"),
+    ).toEqual({ New: false });
+  });
 });
