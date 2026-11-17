@@ -334,7 +334,8 @@ describe("/api/tts over the Tts holder", () => {
       const first = await send();
       expect(first.status).toBe(200);
       // The write is not awaited by the response: wait for the file to land.
-      await vi.waitFor(() => expect(readdirMp3(root)).toHaveLength(1));
+      // Audio plus its speaker record.
+      await vi.waitFor(() => expect(readdirMp3(root)).toHaveLength(2));
 
       const second = await send();
       expect(second.status).toBe(200);
@@ -343,6 +344,39 @@ describe("/api/tts over the Tts holder", () => {
       expect([...(second.body as Buffer)]).toEqual(AUDIO);
       expect(tts.synthesize).toHaveBeenCalledTimes(1);
       expect(usage.record.mock.calls).toEqual([["omnivoice", 12]]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("relay answers a repeated cascade unit from disk naming the member that spoke", async () => {
+    const root = mkdtempSync(join(tmpdir(), "answer-audio-"));
+    try {
+      // The cascade's answer names its member and that member's voice.
+      const tts = fakeTts("omnivoice");
+      tts.synthesize.mockImplementation(
+        async (): Promise<SynthesisResult> => ({
+          bytes: new Uint8Array(AUDIO).buffer,
+          mime: "audio/mpeg",
+          engine: "omnivoice",
+          voice: "alloy",
+        }),
+      );
+      const { app } = loadHolderApp([tts], createAnswerAudioCache({ root }));
+      const body = { ...CASCADE_BODY, text: "Cascade again.", order: ["omnivoice", "edge"] };
+      const send = () => request(app).post("/api/tts").set("Cookie", COOKIE).send(body);
+
+      const first = await send();
+      expect(first.status).toBe(200);
+      await vi.waitFor(() => expect(readdirMp3(root)).toHaveLength(2));
+
+      const second = await send();
+      expect(second.status).toBe(200);
+      expect(tts.synthesize).toHaveBeenCalledTimes(1);
+      expect(second.headers["x-anytts-engine"]).toBe(first.headers["x-anytts-engine"]);
+      expect(second.headers["x-anytts-voice"]).toBe(first.headers["x-anytts-voice"]);
+      expect(second.headers["x-anytts-engine"]).toBe("omnivoice");
+      expect(second.headers["x-anytts-voice"]).toBe("alloy");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

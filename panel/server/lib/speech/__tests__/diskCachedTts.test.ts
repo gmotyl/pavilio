@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SynthesisRequest, SynthesisResult, Tts } from "anytts";
+import type { EngineStatus, SynthesisRequest, SynthesisResult, Tts } from "anytts";
 
 import type { AnswerAudioCache, AnswerKey } from "../answerAudioCache";
 import { countingTts } from "../countingTts";
-import { diskCachedTts } from "../diskCachedTts";
+import { diskCachedTts, speakerKey } from "../diskCachedTts";
 import type { UsageStore } from "../usage-store";
 
 /**
@@ -31,7 +31,7 @@ function fakeTts(answeredBy = "omnivoice") {
     state: vi.fn((): "cold" | "pending" | "ready" => "cold"),
     subscribe: vi.fn(() => () => {}),
     restartStalled: vi.fn(() => true),
-    engineStatus: vi.fn((_id: string) => ({ state: "ready" as const })),
+    engineStatus: vi.fn((_id: string): EngineStatus => ({ state: "ready" })),
   };
 }
 
@@ -43,6 +43,9 @@ function fakeCache(opts: { failRead?: boolean; failWrite?: boolean; holdWrite?: 
     files,
     put(key: AnswerKey, bytes: number[]) {
       files.set(id(key), new Uint8Array(bytes));
+    },
+    putSpeaker(key: AnswerKey, speaker: { engine: string; voice: string }) {
+      files.set(id(speakerKey(key)), new TextEncoder().encode(JSON.stringify(speaker)));
     },
     has(key: AnswerKey) {
       return files.has(id(key));
@@ -86,6 +89,7 @@ describe("diskCachedTts", () => {
     const inner = fakeTts();
     const cache = fakeCache();
     cache.put(KEY, STORED);
+    cache.putSpeaker(KEY, { engine: "omnivoice", voice: "alloy" });
     const tts = diskCachedTts(inner as unknown as Tts, cache);
 
     const result = await tts.synthesize(REQ);
@@ -122,7 +126,8 @@ describe("diskCachedTts", () => {
     const bare: SynthesisRequest = { text: "Bare.", voice: "alloy" };
     await tts.synthesize(bare);
     await settle();
-    expect(cache.write.mock.calls[1]![0]).toEqual({ engine: "omnivoice", text: "Bare.", voice: "alloy" });
+    // (calls 0 and 1 are the first unit's audio and speaker record)
+    expect(cache.write.mock.calls[2]![0]).toEqual({ engine: "omnivoice", text: "Bare.", voice: "alloy" });
     // ...and can then be found by a request naming that engine.
     inner.synthesize.mockClear();
     await tts.synthesize({ ...bare, engine: "omnivoice" });
@@ -180,6 +185,62 @@ describe("diskCachedTts", () => {
     expect([...new Uint8Array(result.bytes)]).toEqual(SPOKEN);
     expect(inner.synthesize).toHaveBeenCalledTimes(1);
     expect(cache.write).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalled();
+    // One warning per failure kind (read, write), not one per call.
+    await tts.synthesize(REQ);
+    await settle();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("a cascade disk hit reports the answering member's engine and voice", async () => {
+    const inner = fakeTts("omnivoice");
+    const cache = fakeCache();
+    const tts = diskCachedTts(inner as unknown as Tts, cache);
+    const cascade: SynthesisRequest = { engine: "cascade", text: "Hi.", lang: "en", order: ["omnivoice", "edge"] };
+
+    const miss = await tts.synthesize(cascade);
+    await settle();
+    const hit = await tts.synthesize(cascade);
+
+    expect(inner.synthesize).toHaveBeenCalledTimes(1);
+    expect(hit.engine).toBe(miss.engine);
+    expect(hit.voice).toBe(miss.voice);
+    expect(hit.engine).toBe("omnivoice");
+    expect(hit.voice).not.toBe("");
+  });
+
+  it("a disk hit without its speaker record is a miss", async () => {
+    const inner = fakeTts();
+    const cache = fakeCache();
+    cache.put(KEY, STORED);
+    const tts = diskCachedTts(inner as unknown as Tts, cache);
+
+    const result = await tts.synthesize(REQ);
+
+    expect(inner.synthesize).toHaveBeenCalledTimes(1);
+    expect([...new Uint8Array(result.bytes)]).toEqual(SPOKEN);
+    expect(result.engine).toBe("omnivoice");
+  });
+
+  it("a cascade answered by a fallback member is not stored", async () => {
+    const inner = fakeTts("omnivoice");
+    const cache = fakeCache();
+    const tts = diskCachedTts(inner as unknown as Tts, cache);
+    const cascade: SynthesisRequest = { engine: "cascade", text: "Hi.", order: ["kokoro", "omnivoice"] };
+
+    await tts.synthesize(cascade);
+    await settle();
+    expect(cache.write).not.toHaveBeenCalled();
+
+    // No order on the request: the configured default order decides.
+    const defaulted = diskCachedTts(inner as unknown as Tts, cache, { cascadeOrder: ["kokoro", "omnivoice"] });
+    await defaulted.synthesize({ engine: "cascade", text: "Hi." });
+    await settle();
+    expect(cache.write).not.toHaveBeenCalled();
+
+    // A member without a key is never tried, so the next one is the preferred one.
+    inner.engineStatus.mockImplementation((id: string) => ({ state: id === "kokoro" ? "no-key" : "ready" }));
+    await tts.synthesize(cascade);
+    await settle();
+    expect(cache.write).toHaveBeenCalled();
   });
 });

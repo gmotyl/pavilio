@@ -1,6 +1,35 @@
 import type { SynthesisRequest, SynthesisResult, Tts } from "anytts";
 import type { AnswerAudioCache, AnswerKey } from "./answerAudioCache.js";
 
+/** The cascade's engine id (anytts' `CASCADE`, not exported from the package entry). */
+const CASCADE = "cascade";
+
+/** The `engine` marker of a unit's speaker record; no engine id contains `#`. */
+const SPEAKER_MARK = "#speaker";
+
+/**
+ * The store key of the speaker record beside the unit stored under `key`: the
+ * engine and voice the original synthesis reported, as JSON. Kept in the same
+ * store (a second file under the same root), so the startup sweep and the
+ * clear route cover it with the audio.
+ */
+export function speakerKey(key: AnswerKey): AnswerKey {
+  return { ...key, engine: `${key.engine}${SPEAKER_MARK}` };
+}
+
+export interface DiskCachedTtsOptions {
+  /**
+   * The cascade's configured member order, for a cascade request that sends no
+   * `order` of its own. Without it, such a request is never stored.
+   */
+  cascadeOrder?: readonly string[];
+}
+
+interface Speaker {
+  engine: string;
+  voice: string;
+}
+
 /**
  * Wraps the relay's Tts so a unit already in the answer audio cache is
  * answered from disk without reaching the engine (and without passing through
@@ -15,28 +44,84 @@ import type { AnswerAudioCache, AnswerKey } from "./answerAudioCache.js";
  * voice the result reports, where a later request naming them finds it. The
  * relay itself always names an engine: plain Edge never reaches this Tts.
  *
- * A disk hit reports the requested engine and voice (for a cascade, `cascade`
- * and an empty voice: which member spoke is not stored). It does not fire the
- * request's `onStart`/`onFirstByte` hooks; the relay passes none.
+ * A disk hit reports the engine and voice the original synthesis reported (for
+ * a cascade, the member that spoke and its voice: the browser's relay client
+ * rejects an answer without them). They live in a speaker record beside the
+ * audio ({@link speakerKey}), written after the audio; audio without a
+ * readable speaker record is a miss. A hit does not fire the request's
+ * `onStart`/`onFirstByte` hooks; the relay passes none.
  *
- * The store is best-effort: a read or write that throws is logged and treated
- * as a miss / no-op, never failing the synthesis.
+ * Only a cascade answered by its preferred member is stored: the first member
+ * of the request's `order` (else `options.cascadeOrder`) that is a configured
+ * engine with a key. A fallback answer is a degraded voice, which must not
+ * outlive the preferred member's recovery by the cache's TTL.
+ *
+ * The store is best-effort: a read or write that throws is treated as a miss /
+ * no-op, never failing the synthesis, and logged once per kind for the life
+ * of the wrapper.
  *
  * Every other `Tts` method delegates to `tts`, as in {@link countingTts}.
  */
-export function diskCachedTts(tts: Tts, cache: AnswerAudioCache): Tts {
+export function diskCachedTts(tts: Tts, cache: AnswerAudioCache, options: DiskCachedTtsOptions = {}): Tts {
+  const warned = new Set<"read" | "write">();
+
   async function synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
     const requested = req.engine === undefined ? undefined : keyOf(req, req.engine);
     if (requested) {
-      const stored = await readSafely(requested);
-      if (stored) {
-        return { bytes: toArrayBuffer(stored), mime: "audio/mpeg", engine: requested.engine, voice: req.voice ?? "" };
-      }
+      const hit = await readHit(requested);
+      if (hit) return hit;
     }
     const result = await tts.synthesize(req);
-    const key = requested ?? { ...keyOf(req, result.engine), voice: req.voice ?? result.voice };
-    writeSafely(key, new Uint8Array(result.bytes));
+    if (req.engine !== CASCADE || result.engine === preferredMember(req)) {
+      const key = requested ?? { ...keyOf(req, result.engine), voice: req.voice ?? result.voice };
+      store(key, new Uint8Array(result.bytes), { engine: result.engine, voice: result.voice });
+    }
     return result;
+  }
+
+  /** The audio and the speaker that produced it, or `undefined` unless both are readable. */
+  async function readHit(key: AnswerKey): Promise<SynthesisResult | undefined> {
+    const [bytes, record] = await Promise.all([readSafely(key), readSafely(speakerKey(key))]);
+    const speaker = record && parseSpeaker(record);
+    if (!bytes || !speaker) return undefined;
+    return { bytes: toArrayBuffer(bytes), mime: "audio/mpeg", engine: speaker.engine, voice: speaker.voice };
+  }
+
+  /**
+   * The cascade member the request prefers: the first in its order that the
+   * inner instance has configured with a key. `undefined` when no order is known.
+   */
+  function preferredMember(req: SynthesisRequest): string | undefined {
+    const order = req.order ?? options.cascadeOrder ?? [];
+    return order.find((id) => {
+      if (id === CASCADE) return false;
+      try {
+        return tts.engineStatus(id).state !== "no-key";
+      } catch {
+        // RangeError: not a configured engine, so the walk drops it.
+        return false;
+      }
+    });
+  }
+
+  /** Writes the audio, then its speaker record; fire-and-forget. */
+  function store(key: AnswerKey, bytes: Uint8Array, speaker: Speaker): void {
+    const record = new TextEncoder().encode(JSON.stringify(speaker));
+    try {
+      cache
+        .write(key, bytes)
+        .then(() => cache.write(speakerKey(key), record))
+        .catch((err: unknown) => logFailure("write", err));
+    } catch (err) {
+      // A store that throws synchronously is logged the same way.
+      logFailure("write", err);
+    }
+  }
+
+  function logFailure(op: "read" | "write", err: unknown): void {
+    if (warned.has(op)) return;
+    warned.add(op);
+    console.warn(`[answer-audio-cache] ${op} failed, synthesis unaffected:`, err instanceof Error ? err.message : err);
   }
 
   async function readSafely(key: AnswerKey): Promise<Uint8Array | undefined> {
@@ -45,15 +130,6 @@ export function diskCachedTts(tts: Tts, cache: AnswerAudioCache): Tts {
     } catch (err) {
       logFailure("read", err);
       return undefined;
-    }
-  }
-
-  function writeSafely(key: AnswerKey, bytes: Uint8Array): void {
-    try {
-      cache.write(key, bytes).catch((err: unknown) => logFailure("write", err));
-    } catch (err) {
-      // A store that throws synchronously is logged the same way.
-      logFailure("write", err);
     }
   }
 
@@ -91,6 +167,15 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-function logFailure(op: "read" | "write", err: unknown): void {
-  console.warn(`[answer-audio-cache] ${op} failed, synthesis unaffected:`, err instanceof Error ? err.message : err);
+/** The speaker record's fields, or `undefined` when it is not one (never empty). */
+function parseSpeaker(bytes: Uint8Array): Speaker | undefined {
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as Partial<Speaker> | null;
+    if (typeof value?.engine === "string" && value.engine && typeof value.voice === "string" && value.voice) {
+      return { engine: value.engine, voice: value.voice };
+    }
+  } catch {
+    // Unreadable: treated as missing.
+  }
+  return undefined;
 }

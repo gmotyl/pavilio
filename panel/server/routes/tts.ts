@@ -4,7 +4,7 @@ import { createRelayHandler, toNodeHandler } from "anytts/server";
 import type { AnswerAudioCache } from "../lib/speech/answerAudioCache.js";
 import { countingTts } from "../lib/speech/countingTts.js";
 import { diskCachedTts } from "../lib/speech/diskCachedTts.js";
-import { createTtsHolder, type TtsHolder } from "../lib/speech/ttsHolder.js";
+import { CASCADE_ORDER, createTtsHolder, type TtsHolder } from "../lib/speech/ttsHolder.js";
 import { createUsageStore, type UsageStore } from "../lib/speech/usage-store.js";
 
 /** Longest `text` the relay synthesizes; longer requests get 413. */
@@ -55,7 +55,7 @@ export function createTtsHandler(options: TtsHandlerOptions = {}): NodeHandler {
     const counted = countingTts(tts, (usage ??= createUsageStore()));
     return toNodeHandler(
       createRelayHandler({
-        tts: answerCache ? diskCachedTts(counted, answerCache) : counted,
+        tts: answerCache ? diskCachedTts(counted, answerCache, { cascadeOrder: CASCADE_ORDER }) : counted,
         maxChars: MAX_CHARS,
         // Every request is let through here: the panel's mobileAuthMiddleware
         // and authMiddleware guard the route before it reaches the relay.
