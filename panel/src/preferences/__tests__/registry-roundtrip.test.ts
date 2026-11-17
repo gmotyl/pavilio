@@ -90,6 +90,11 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     { sortKey: "name", sortDir: "asc" },
   ],
   "projects.favorites": [[], ["pavilio"], ["true", "240", ""]],
+  "shell.sidebarOrder": [
+    { top: [], groups: {} },
+    { top: ["g:InfoPoly", "p:pavilio"], groups: { InfoPoly: ["anytts", "vector"] } },
+  ],
+  "shell.groupCollapsed": [{}, { InfoPoly: true, Other: false }],
   "time.report": [
     { period: "this-week", format: "text", detail: "detailed" },
     { period: "today", format: "markdown", detail: "summary" },
@@ -140,7 +145,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 61;
+const DECLARATION_COUNT = 63;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

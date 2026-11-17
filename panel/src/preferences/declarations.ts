@@ -24,16 +24,27 @@
  * would close a cycle the moment those features start reading the registry.
  */
 import { bool, json, listOf, num, oneOf, optionalStr, str } from "./codecs";
-import { PROJECT_COLOR_HEX_RE, parseProjectMark } from "../features/projects/projectIdentity";
-import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
+import {
+  PROJECT_COLOR_HEX_RE,
+  parseProjectMark,
+} from "../features/projects/projectIdentity";
+import {
+  definePreference,
+  type PreferenceCodec,
+  type PreferenceDef,
+} from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
+import type { SidebarOrder } from "../features/shell/sidebarOrder";
 import type { RepoSearchScope } from "../features/projects/useRepoSearch";
 import type { GitViewMode } from "../features/git/useGitViewMode";
 import type { DrawerSide } from "../features/terminal/useTerminalDrawer";
 import type { TileLayout } from "../features/terminal/tileLayout";
 import type { Period } from "../features/time/periodRange";
-import type { ReportDetail, ReportFormat } from "../features/time/reportFormatters";
+import type {
+  ReportDetail,
+  ReportFormat,
+} from "../features/time/reportFormatters";
 import type { SpeechMode } from "../features/speech/types";
 
 /** The file list's one sort, shared across every tab and project. */
@@ -77,7 +88,8 @@ function boundedNum(min: number, max: number): PreferenceCodec<number> {
   return {
     parse(raw) {
       const value = num.parse(raw);
-      if (value < min || value > max) throw new Error(`out of range ${min}–${max}: ${raw}`);
+      if (value < min || value > max)
+        throw new Error(`out of range ${min}–${max}: ${raw}`);
       return value;
     },
     serialize: num.serialize,
@@ -95,7 +107,9 @@ function isFilled(value: unknown): value is string {
 /** The string-valued entries of `value`, built by `fromEntries` so a `__proto__` key stays an entry. */
 function stringEntries(value: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
   );
 }
 
@@ -108,6 +122,38 @@ function stringEntries(value: Record<string, unknown>): Record<string, string> {
  * registry cannot import anytts — so a stale id arrives intact and is dropped
  * there.
  */
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+/** Not an object → throw (default); malformed entries are dropped, the rest kept. */
+const sidebarOrderCodec: PreferenceCodec<SidebarOrder> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a sidebar order: ${raw}`);
+    const groups = isRecord(parsed.groups) ? parsed.groups : {};
+    return {
+      top: strings(parsed.top),
+      groups: Object.fromEntries(
+        Object.entries(groups)
+          .filter(([, m]) => Array.isArray(m))
+          .map(([g, m]) => [g, strings(m)]),
+      ),
+    };
+  },
+  serialize: (value) => JSON.stringify(value),
+};
+
+const groupCollapsedCodec: PreferenceCodec<Record<string, boolean>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a collapse map: ${raw}`);
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, v]) => typeof v === "boolean"),
+    ) as Record<string, boolean>;
+  },
+  serialize: (value) => JSON.stringify(value),
+};
+
 const engineVoices: PreferenceCodec<EngineVoices> = {
   parse(raw) {
     let parsed: unknown;
@@ -148,7 +194,8 @@ const projectEngineVoices: PreferenceCodec<Record<string, EngineVoices>> = {
 
 /** A stored cascade entry, or `null`: a non-blank engine id and a boolean `on`. */
 function toCascadeEntry(value: unknown): CascadeEntry | null {
-  if (!isRecord(value) || !isFilled(value.id) || typeof value.on !== "boolean") return null;
+  if (!isRecord(value) || !isFilled(value.id) || typeof value.on !== "boolean")
+    return null;
   return { id: value.id, on: value.on };
 }
 
@@ -176,7 +223,8 @@ const enginePronunciation: PreferenceCodec<Record<string, boolean>> = {
  * "use this name's default" — and `""` is kept, since it means something.
  */
 function toTerminalLauncher(value: unknown): TerminalLauncher | null {
-  if (!isRecord(value) || !isFilled(value.name) || !isFilled(value.command)) return null;
+  if (!isRecord(value) || !isFilled(value.name) || !isFilled(value.command))
+    return null;
   const entry: TerminalLauncher = { name: value.name, command: value.command };
   if (typeof value.promptFlag === "string") entry.promptFlag = value.promptFlag;
   if (typeof value.runLoop === "string") entry.runLoop = value.runLoop;
@@ -202,7 +250,12 @@ function toTerminalLauncher(value: unknown): TerminalLauncher | null {
 export const DEFAULT_TERMINAL_LAUNCHERS: TerminalLauncher[] = [
   { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
   { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
-  { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
+  {
+    name: "opencode",
+    command: "opencode",
+    promptFlag: "--prompt",
+    runLoop: "{prompt}",
+  },
 ];
 
 /** One quick-reply chip in the answer composer: what it reads, and what it sends. */
@@ -221,7 +274,8 @@ export const COMPOSER_SHORTCUT_LABEL_MAX = 24;
 
 /** A stored shortcut rebuilt from its two fields, or `null`: both must be non-blank strings. */
 function toComposerShortcut(value: unknown): ComposerShortcut | null {
-  if (!isRecord(value) || !isFilled(value.label) || !isFilled(value.text)) return null;
+  if (!isRecord(value) || !isFilled(value.label) || !isFilled(value.text))
+    return null;
   return { label: value.label, text: value.text };
 }
 
@@ -518,6 +572,26 @@ export const preferences = {
     scope: "global",
     default: [],
     codec: json<string[]>(),
+    portable: true,
+  }),
+  /**
+   * The sidebar's drag order: top-level `g:<group>` / `p:<project>` entries and
+   * each group's member order. Merged with discovery at render time
+   * (`features/shell/sidebarOrder.ts`), so stale entries are harmless.
+   */
+  sidebarOrder: definePreference<SidebarOrder>({
+    key: "shell.sidebarOrder", // was: nothing — new with project groups
+    scope: "global",
+    default: { top: [], groups: {} },
+    codec: sidebarOrderCodec,
+    portable: true,
+  }),
+  /** Collapsed sidebar groups by name; absent means expanded. */
+  groupCollapsed: definePreference<Record<string, boolean>>({
+    key: "shell.groupCollapsed", // was: nothing — new with project groups
+    scope: "global",
+    default: {},
+    codec: groupCollapsedCodec,
     portable: true,
   }),
   repoSearchScope: definePreference<RepoSearchScope>({
