@@ -769,6 +769,137 @@ describe("useSpeechHost — an armed cell preloads only its newest answer", () =
 });
 
 /**
+ * The order preloads are asked for in (design D6). anytts serves a tier FIFO
+ * by enqueue order, so the order the host requests them in IS the ranking:
+ * newest answer first. The cell being looked at goes ahead of all of them —
+ * its still-queued preloads are requested again on `warm`, which joins the
+ * flight and promotes the queued job. The run tier stays above both.
+ */
+describe("useSpeechHost — preload order: the looked-at cell, then newest first", () => {
+  beforeEach(() => selectSynth("tiered"));
+
+  /** A host whose looked-at cell the test moves with `look`. */
+  function hostLookingAt(initial: string | null = null) {
+    const rendered = renderHook(
+      ({ lookedAt }: { lookedAt: string | null }) =>
+        useSpeechHost({
+          voiceFor: voiceForSession,
+          answerWaiting: storeAnswerWaiting,
+          lookedAtSessionId: lookedAt,
+        }),
+      { initialProps: { lookedAt: initial } },
+    );
+    const look = async (lookedAt: string | null): Promise<void> => {
+      await act(async () => {
+        rendered.rerender({ lookedAt });
+        await drain();
+      });
+    };
+    return { ...rendered, look };
+  }
+
+  const tiersOf = (text: string): Array<string | undefined> =>
+    synth.callsFor(text).map((call) => call.tier);
+
+  it("preloads are enqueued newest answer first", async () => {
+    const older = unitsOf(response(4, "Alpha"));
+    const newer = unitsOf(response(4, "Bravo"));
+    const { result } = hostLookingAt();
+
+    // Map order is arrival-of-the-cell order: cell-a is listed first, but its
+    // answer is the older one.
+    await emitUtterance("cell-a", "a-1", response(4, "Alpha"), 1_000);
+    await emitUtterance("cell-b", "b-1", response(4, "Bravo"), 2_000);
+    // Both armed in one pass.
+    await settle(() => {
+      result.current.cycleSpeechMode("cell-a");
+      result.current.cycleSpeechMode("cell-b");
+    });
+
+    const preloads = synth.calls.filter((call) => call.tier === "preload").map((call) => call.text);
+    expect(preloads).toEqual([...newer.slice(1), ...older.slice(1)]);
+  });
+
+  it("focusing a cell promotes its queued preload units to warm", async () => {
+    const x = holdAll(response(5, "Xray"));
+    const y = holdAll(response(4, "Yankee"));
+    const { result, look } = hostLookingAt();
+
+    await cycle(() => result.current, "cell-x");
+    await cycle(() => result.current, "cell-y");
+    await emitUtterance("cell-x", "x-1", response(5, "Xray"));
+    await emitUtterance("cell-y", "y-1", response(4, "Yankee"));
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload"]);
+
+    await look("cell-x");
+
+    for (const unit of x.slice(1)) {
+      expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+      // A join, not a new synthesis — on the preload's own signal, so a
+      // disarm or a newer arrival still calls it off in one abort.
+      expect(timesRequested(unit)).toBe(1);
+      const [preload, warm] = synth.callsFor(unit);
+      expect(warm.signal).toBe(preload.signal);
+    }
+    // Unit 0 was already a warm; another cell's preloads are left alone.
+    expect(tiersOf(x[0])).toEqual(["warm"]);
+    for (const unit of y.slice(1)) expect(tiersOf(unit)).toEqual(["preload"]);
+
+    // Looking away and back does not join the same flights again.
+    await look("cell-y");
+    await look("cell-x");
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+  });
+
+  it("promotion does not re-request held units", async () => {
+    const x = holdAll(response(5, "Xray"));
+    const { result, look } = hostLookingAt();
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", response(5, "Xray"));
+    // Units 1 and 2 are in hand; 3 and 4 still queued.
+    await release(x[1]);
+    await release(x[2]);
+
+    await look("cell-x");
+
+    expect(tiersOf(x[1])).toEqual(["preload"]);
+    expect(tiersOf(x[2])).toEqual(["preload"]);
+    expect(tiersOf(x[3])).toEqual(["preload", "warm"]);
+    expect(tiersOf(x[4])).toEqual(["preload", "warm"]);
+
+    // Everything lands, then the LRU evicts it: evicted after it was held is
+    // not queued, so looking at the cell again requests nothing (Play does).
+    await look(null);
+    await release(x[3]);
+    await release(x[4]);
+    synth.clearCache();
+    const before = synth.calls.length;
+    await look("cell-x");
+    expect(synth.calls.length).toBe(before);
+  });
+
+  it("a playing run stays ahead of a promoted preload", async () => {
+    const x = holdAll(response(6, "Xray"));
+    const p = unitsOf(response(5, "Papa"));
+    synth.hold(p[2]);
+    const { result, look } = hostLookingAt();
+
+    await cycle(() => result.current, "cell-x");
+    await emitUtterance("cell-x", "x-1", response(6, "Xray"));
+    await emitUtterance("cell-p", "p-1", response(5, "Papa"));
+    await settle(() => result.current.onSpeak("cell-p"));
+
+    await look("cell-x");
+
+    // Promoted is `warm`, never `run`: the scheduler keeps the run on top.
+    for (const unit of x.slice(1)) expect(tiersOf(unit)).toEqual(["preload", "warm"]);
+    for (const unit of p.slice(2)) expect(tiersOf(unit)).toContain("run");
+    expect(result.current.speakingSessionId).toBe("cell-p");
+  });
+});
+
+/**
  * A failed preload waits for the next warming opportunity. Arrivals, mode
  * changes and catch-ups are not the only ones: a reconnect that surfaced
  * nothing new, and the tab coming back into view, are too — a socket that

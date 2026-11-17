@@ -198,23 +198,32 @@ export function SpeechHostProvider({
     }),
   );
   useEffect(() => () => speakingAlert.dispose(), [speakingAlert]);
+  // The cell being looked at, for the host's preload order (design D6): the
+  // focused cell on screen while the tab is visible — the same rule the
+  // speaking alert reads — and null for a hidden tab. State, because the host
+  // reacts to its change by promoting that cell's queued preloads.
+  const [lookedAtSessionId, setLookedAtSessionId] = useState<string | null>(null);
   // The looked-at rule is re-evaluated whenever what is on screen can change:
   // the route (RouterBridge), the drawer, a focus change anywhere, the
   // standalone page's focus, and the tab going hidden/visible.
   const recheckSpeakingAlert = speakingAlert.recheck;
+  const recheckLookedAt = useCallback(() => {
+    recheckSpeakingAlert();
+    setLookedAtSessionId(document.visibilityState === "visible" ? readFocusedVisible() : null);
+  }, [readFocusedVisible, recheckSpeakingAlert]);
   useEffect(() => {
     // After drawerVisibleRef's own effect has run (effects run in order).
-    recheckSpeakingAlert();
-  }, [drawerVisible, recheckSpeakingAlert]);
+    recheckLookedAt();
+  }, [drawerVisible, recheckLookedAt]);
   const subscribeFocus = focusedCell.subscribe;
   useEffect(() => {
-    const unsubscribe = subscribeFocus(recheckSpeakingAlert);
-    document.addEventListener("visibilitychange", recheckSpeakingAlert);
+    const unsubscribe = subscribeFocus(recheckLookedAt);
+    document.addEventListener("visibilitychange", recheckLookedAt);
     return () => {
       unsubscribe();
-      document.removeEventListener("visibilitychange", recheckSpeakingAlert);
+      document.removeEventListener("visibilitychange", recheckLookedAt);
     };
-  }, [subscribeFocus, recheckSpeakingAlert]);
+  }, [subscribeFocus, recheckLookedAt]);
 
   // The pages being spoken right now, by key. A page's key is open from its
   // Play until its stop — which is what the idle transport asks, and the
@@ -234,6 +243,7 @@ export function SpeechHostProvider({
     onRunChange: speakingAlert.onRunChange,
     voiceFor,
     answerWaiting,
+    lookedAtSessionId,
   });
 
   // Here for the same reason the host is: `navigator.mediaSession` is one state
@@ -293,7 +303,7 @@ export function SpeechHostProvider({
   return (
     <SpeechHostContext.Provider value={speech}>
       <PageSpeechContext.Provider value={pageSpeech}>
-        {inRouter && <RouterBridge view={routerView} onRouteChange={recheckSpeakingAlert} />}
+        {inRouter && <RouterBridge view={routerView} onRouteChange={recheckLookedAt} />}
         {children}
       </PageSpeechContext.Provider>
     </SpeechHostContext.Provider>
