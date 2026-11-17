@@ -1,7 +1,8 @@
 import { describe, it, expect, afterAll, vi } from "vitest";
 import express, { type Express } from "express";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
 import type { EdgeEngineOptions, SynthesisRequest, SynthesisResult, Tts } from "anytts";
@@ -19,6 +20,7 @@ import { mobileAuthMiddleware } from "../../middleware/mobile-auth";
 import { createTtsHandler } from "../tts";
 import { createTtsHolder, type TtsHolder } from "../../lib/speech/ttsHolder";
 import type { UsageStore } from "../../lib/speech/usage-store";
+import { createAnswerAudioCache, type AnswerAudioCache } from "../../lib/speech/answerAudioCache";
 
 afterAll(() => {
   if (previousToken === undefined) delete process.env.PANEL_TOKEN;
@@ -216,7 +218,10 @@ function fakeTts(name: string, pending?: Promise<void>): Tts & { synthesize: Ret
 }
 
 /** The production mount over a holder whose instances come from `instances`, in order. */
-function loadHolderApp(instances: Tts[]): {
+function loadHolderApp(
+  instances: Tts[],
+  answerCache?: AnswerAudioCache,
+): {
   app: Express;
   holder: TtsHolder;
   opened: () => number;
@@ -227,7 +232,7 @@ function loadHolderApp(instances: Tts[]): {
   const holder = createTtsHolder({ createTts: () => queue.shift()!, resolveKey: () => ({ source: "none" }) });
   const usage = fakeUsage();
   const app = express();
-  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder, usage }));
+  app.all("/api/tts", mobileAuthMiddleware, authMiddleware, createTtsHandler({ transport, holder, usage, answerCache }));
   app.use(express.json());
   return { app, holder, opened, usage };
 }
@@ -306,4 +311,44 @@ describe("/api/tts over the Tts holder", () => {
     expect(unauthenticated.status).toBe(401);
     expect(tts.synthesize).not.toHaveBeenCalled();
   });
+
+  it("relay POST /api/tts answers a repeated unit from disk", async () => {
+    // A tmp-root store, so the test never writes the real ~/.pavilio.
+    const root = mkdtempSync(join(tmpdir(), "answer-audio-"));
+    try {
+      const tts = fakeTts("omnivoice");
+      const { app, usage } = loadHolderApp([tts], createAnswerAudioCache({ root }));
+      const body = { engine: "omnivoice", text: "Hello again.", voice: "alloy", lang: "en" };
+      const send = () =>
+        request(app)
+          .post("/api/tts")
+          .set("Cookie", COOKIE)
+          .send(body)
+          .buffer(true)
+          .parse((r, done) => {
+            const chunks: Buffer[] = [];
+            r.on("data", (c: Buffer) => chunks.push(c));
+            r.on("end", () => done(null, Buffer.concat(chunks)));
+          });
+
+      const first = await send();
+      expect(first.status).toBe(200);
+      // The write is not awaited by the response: wait for the file to land.
+      await vi.waitFor(() => expect(readdirMp3(root)).toHaveLength(1));
+
+      const second = await send();
+      expect(second.status).toBe(200);
+      expect(second.headers["content-type"]).toBe("audio/mpeg");
+      expect(second.headers["x-anytts-engine"]).toBe("omnivoice");
+      expect([...(second.body as Buffer)]).toEqual(AUDIO);
+      expect(tts.synthesize).toHaveBeenCalledTimes(1);
+      expect(usage.record.mock.calls).toEqual([["omnivoice", 12]]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
+
+function readdirMp3(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.endsWith(".mp3"));
+}

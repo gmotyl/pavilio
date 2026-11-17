@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { EdgeEngineOptions, Tts } from "anytts";
 import { createRelayHandler, toNodeHandler } from "anytts/server";
+import type { AnswerAudioCache } from "../lib/speech/answerAudioCache.js";
 import { countingTts } from "../lib/speech/countingTts.js";
+import { diskCachedTts } from "../lib/speech/diskCachedTts.js";
 import { createTtsHolder, type TtsHolder } from "../lib/speech/ttsHolder.js";
 import { createUsageStore, type UsageStore } from "../lib/speech/usage-store.js";
 
@@ -20,6 +22,13 @@ export interface TtsHandlerOptions {
    * the workspace usage directory, created on the first request.
    */
   usage?: UsageStore;
+  /**
+   * The answer audio disk store the relay reads before synthesizing and writes
+   * after a miss (see {@link diskCachedTts}). Default: none — no disk caching,
+   * so a handler built without one (every route test) never touches the real
+   * home directory; the panel server passes its one store.
+   */
+  answerCache?: AnswerAudioCache;
 }
 
 /**
@@ -33,17 +42,20 @@ export interface TtsHandlerOptions {
  * running keeps the relay (and instance) it started with.
  *
  * Keyed-engine and cascade syntheses are counted in `usage` (see
- * {@link countingTts}); plain Edge requests are counted by the browser.
+ * {@link countingTts}); plain Edge requests are counted by the browser. With
+ * an `answerCache`, a unit already on disk is answered from it ahead of the
+ * counter, so a disk hit is neither synthesized nor counted.
  */
 export function createTtsHandler(options: TtsHandlerOptions = {}): NodeHandler {
-  const { transport } = options;
+  const { transport, answerCache } = options;
   const holder = options.holder ?? createTtsHolder({ transport });
   let usage = options.usage;
 
-  const relayFor = (tts: Tts): NodeHandler =>
-    toNodeHandler(
+  const relayFor = (tts: Tts): NodeHandler => {
+    const counted = countingTts(tts, (usage ??= createUsageStore()));
+    return toNodeHandler(
       createRelayHandler({
-        tts: countingTts(tts, (usage ??= createUsageStore())),
+        tts: answerCache ? diskCachedTts(counted, answerCache) : counted,
         maxChars: MAX_CHARS,
         // Every request is let through here: the panel's mobileAuthMiddleware
         // and authMiddleware guard the route before it reaches the relay.
@@ -51,6 +63,7 @@ export function createTtsHandler(options: TtsHandlerOptions = {}): NodeHandler {
         ...(transport ? { edge: { transport } } : {}),
       }),
     );
+  };
 
   let built: { tts: Tts; handler: NodeHandler } | undefined;
   return (req, res) => {
