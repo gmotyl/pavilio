@@ -1,16 +1,23 @@
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { ProjectMark } from "../projects/ProjectMark";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
 import { dropStyle, type SidebarRowDragProps } from "./useSidebarDrag";
 
-/** At most this many member marks are stacked on a group row. */
-const STACK_MAX = 4;
+/** The card-deck edges drawn behind the group icon (two cards, up and right). */
+const SURFACE = "var(--bg-surface, var(--bg-base))";
+const DECK_SHADOW = [
+  `3px -2px 0 -1px ${SURFACE}`,
+  "3px -2px 0 0 var(--border-subtle)",
+  `5px -4px 0 -2px ${SURFACE}`,
+  "5px -4px 0 -1px var(--border-subtle)",
+].join(", ");
 
 /**
- * One project group in the sidebar's Projects tree: a hover grip (desktop
- * only; the whole row drags past a small threshold, see `useSidebarDrag`), chevron, the aggregate
- * activity slot, stacked member marks, the bold name and the member count.
+ * One project group in the sidebar's Projects tree: chevron (an indicator
+ * only; the whole row toggles and drags past a small threshold, see
+ * `useSidebarDrag`), the aggregate activity slot, one deck icon (the first
+ * member's mark), the bold name and the member count.
  * Expanded, its member rows sit beneath it under one vertical rule; collapsed,
  * the slot carries the most urgent member state (attention > busy > idle).
  */
@@ -39,56 +46,54 @@ export function SidebarGroupRow({
   /** The member project rows, rendered by the sidebar. */
   children: ReactNode;
 }) {
+  const tileSize = isMobile ? 24 : 22;
   return (
     <li data-group={name}>
       <div
         data-testid={`sidebar-group-row-${name}`}
         {...dragProps}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? `Expand ${name}` : `Collapse ${name}`}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            if (e.key === " ") e.preventDefault();
+            onToggle();
+          }
+        }}
         onContextMenu={onContextMenu}
-        className="group flex items-center gap-1 rounded-md px-1 py-0.5"
-        style={dropStyle(dragProps["data-drop"], dragProps["data-dragging"] === "true")}
+        className="group flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-[var(--bg-hover)]"
+        style={{
+          cursor: "pointer",
+          ...dropStyle(dragProps["data-drop"], dragProps["data-dragging"] === "true"),
+        }}
       >
-        {!isMobile && (
-          <span
-            data-testid={`sidebar-group-grip-${name}`}
-            aria-hidden="true"
-            data-drag-grip=""
-            className="opacity-0 group-hover:opacity-90 transition-opacity w-2.5 flex items-center justify-center shrink-0 cursor-grab"
-            style={{ color: "var(--text-muted)" }}
-          >
-            <GripVertical size={11} />
-          </span>
-        )}
-        <button
-          type="button"
+        <span
           data-testid={`sidebar-group-toggle-${name}`}
-          onClick={onToggle}
-          className="w-4 h-4 flex items-center justify-center shrink-0 rounded hover:bg-[var(--bg-hover)]"
+          aria-hidden="true"
+          className="w-4 h-4 flex items-center justify-center shrink-0"
           style={{ color: "var(--text-tertiary)" }}
-          title={collapsed ? "Expand group" : "Collapse group"}
-          aria-label={collapsed ? `Expand ${name}` : `Collapse ${name}`}
-          aria-expanded={!collapsed}
         >
           {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-        </button>
+        </span>
         <span data-testid={`sidebar-group-slot-${name}`} className="contents">
           <ProjectActivityLed sessionIds={collapsed ? sessionIds : []} />
         </span>
         <span
-          data-testid={`sidebar-group-marks-${name}`}
+          data-testid={`sidebar-group-icon-${name}`}
+          data-deck="true"
           className="flex shrink-0"
         >
-          {members.slice(0, STACK_MAX).map((m, i) => (
+          {members[0] !== undefined && (
             <ProjectMark
-              key={m}
-              project={m}
-              size={16}
-              style={{
-                marginLeft: i === 0 ? 0 : -5,
-                boxShadow: "0 0 0 2px var(--bg-surface, var(--bg-base))",
-              }}
+              project={members[0]}
+              size={tileSize}
+              style={{ boxShadow: DECK_SHADOW }}
             />
-          ))}
+          )}
         </span>
         <strong
           data-testid={`sidebar-group-name-${name}`}

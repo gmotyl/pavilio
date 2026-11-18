@@ -122,18 +122,119 @@ afterEach(() => {
 });
 
 describe("SidebarGroupRow", () => {
-  it("group row shows grip chevron slot marks name count", () => {
+  it("group row has no grip and no stacked marks", () => {
     setup();
     const row = groupRow("Motyl OSS");
-    expect(within(row).getByTestId("sidebar-group-grip-Motyl OSS")).toBeTruthy();
+    expect(within(row).queryByTestId("sidebar-group-grip-Motyl OSS")).toBeNull();
+    expect(within(row).queryByTestId("sidebar-group-marks-Motyl OSS")).toBeNull();
     expect(within(row).getByTestId("sidebar-group-toggle-Motyl OSS")).toBeTruthy();
     expect(within(row).getByTestId("sidebar-group-slot-Motyl OSS")).toBeTruthy();
-    const marks = within(row).getByTestId("sidebar-group-marks-Motyl OSS");
-    expect(within(marks).getAllByTestId("project-mark")).toHaveLength(2);
+    expect(within(row).getAllByTestId("project-mark")).toHaveLength(1);
     const name = within(row).getByTestId("sidebar-group-name-Motyl OSS");
     expect(name.textContent).toBe("Motyl OSS");
     expect(name.tagName).toBe("STRONG");
     expect(within(row).getByTestId("sidebar-group-count-Motyl OSS").textContent).toBe("2");
+  });
+
+  const iconColor = (g: string) =>
+    within(within(groupRow(g)).getByTestId(`sidebar-group-icon-${g}`))
+      .getByTestId("project-mark")
+      .getAttribute("data-color");
+  const memberColor = (g: string, project: string) =>
+    within(within(screen.getByTestId(`sidebar-group-members-${g}`)).getByTestId(
+      `sidebar-project-row-${project}`,
+    )).getAllByTestId("project-mark")[0]!.getAttribute("data-color");
+
+  it("group icon is the first member's mark with the deck marker", () => {
+    writePreference(preferences.sidebarOrder, {
+      top: ["g:Motyl OSS"],
+      groups: { "Motyl OSS": ["anytts", "motyl"] },
+    });
+    setup();
+    const icon = within(groupRow("Motyl OSS")).getByTestId("sidebar-group-icon-Motyl OSS");
+    expect(icon.getAttribute("data-deck")).toBe("true");
+    const mark = within(icon).getByTestId("project-mark");
+    expect(mark.style.boxShadow).toContain("3px -2px 0 -1px");
+    expect(mark.style.boxShadow).toContain("5px -4px 0 -2px");
+    expect(mark.style.width).toBe("22px");
+    expect(iconColor("Motyl OSS")).toBe(memberColor("Motyl OSS", "anytts"));
+  });
+
+  it("group icon follows member order", () => {
+    writePreference(preferences.sidebarOrder, {
+      top: ["g:Motyl OSS"],
+      groups: { "Motyl OSS": ["motyl", "anytts"] },
+    });
+    setup();
+    expect(iconColor("Motyl OSS")).toBe(memberColor("Motyl OSS", "motyl"));
+    expect(memberColor("Motyl OSS", "motyl")).not.toBe(memberColor("Motyl OSS", "anytts"));
+  });
+
+  it("clicking the group name toggles the group", () => {
+    setup();
+    fireEvent.click(screen.getByTestId("sidebar-group-name-Motyl OSS"));
+    expect(screen.queryByTestId("sidebar-group-members-Motyl OSS")).toBeNull();
+    expect(readPreference(preferences.groupCollapsed)).toEqual({ "Motyl OSS": true });
+  });
+
+  it("clicking the member count toggles the group", () => {
+    setup();
+    fireEvent.click(screen.getByTestId("sidebar-group-count-Motyl OSS"));
+    expect(screen.queryByTestId("sidebar-group-members-Motyl OSS")).toBeNull();
+    expect(readPreference(preferences.groupCollapsed)).toEqual({ "Motyl OSS": true });
+  });
+
+  it("Enter and Space on the focused row toggle the group", () => {
+    setup();
+    const row = groupRow("Motyl OSS");
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(screen.queryByTestId("sidebar-group-members-Motyl OSS")).toBeNull();
+    fireEvent.keyDown(groupRow("Motyl OSS"), { key: " " });
+    expect(screen.getByTestId("sidebar-group-members-Motyl OSS")).toBeTruthy();
+  });
+
+  it("aria-expanded and chevron follow collapsed", () => {
+    setup();
+    const chevron = () => screen.getByTestId("sidebar-group-toggle-Motyl OSS");
+    expect(groupRow("Motyl OSS").getAttribute("aria-expanded")).toBe("true");
+    expect(groupRow("Motyl OSS").getAttribute("aria-label")).toBe("Collapse Motyl OSS");
+    expect(chevron().getAttribute("aria-hidden")).toBe("true");
+    expect(chevron().tagName).toBe("SPAN");
+    expect(chevron().querySelector(".lucide-chevron-down")).toBeTruthy();
+    fireEvent.click(groupRow("Motyl OSS"));
+    expect(groupRow("Motyl OSS").getAttribute("aria-expanded")).toBe("false");
+    expect(groupRow("Motyl OSS").getAttribute("aria-label")).toBe("Expand Motyl OSS");
+    expect(chevron().querySelector(".lucide-chevron-right")).toBeTruthy();
+  });
+
+  it("group row has a pointer cursor", () => {
+    setup();
+    const row = groupRow("Motyl OSS");
+    expect(row.style.cursor).toBe("pointer");
+    expect(row.className).toContain("hover:bg-[var(--bg-hover)]");
+  });
+
+  it("right-click opens the menu without toggling", () => {
+    setup();
+    fireEvent.contextMenu(groupRow("Motyl OSS"));
+    expect(screen.getByTestId("sidebar-group-members-Motyl OSS")).toBeTruthy();
+    expect(readPreference(preferences.groupCollapsed)["Motyl OSS"]).toBeFalsy();
+  });
+
+  it("group name aligns with a project name", () => {
+    setup();
+    const group = groupRow("Motyl OSS");
+    const project = screen.getByTestId("sidebar-project-row-pavilio");
+    const lead = (row: HTMLElement) => {
+      const chevron = row.querySelector<HTMLElement>("[class*='w-4']")!;
+      const mark = within(row).getAllByTestId("project-mark")[0]!;
+      return { chevron: chevron.className.match(/\bw-4\b/)![0], mark: mark.style.width };
+    };
+    expect(lead(group)).toEqual(lead(project));
+    expect(group.className).toContain("px-1");
+    expect(project.className).toContain("px-1");
   });
 
   it("members are indented under the group rule", () => {
