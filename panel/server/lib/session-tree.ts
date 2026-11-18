@@ -38,7 +38,11 @@ export function descendants(rootPid: number, table: ProcessTable): Set<number> {
 /** Snapshot the host process table; empty on failure (warns once per process). */
 export function readProcessTable(): ProcessTable {
   try {
-    const out = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" });
+    const out = execFileSync("ps", ["-A", "-o", "pid=,ppid="], {
+      encoding: "utf8",
+      // The 1 MiB default throws on a big host and would yield an empty table.
+      maxBuffer: 64 * 1024 * 1024,
+    });
     return parsePsTable(out);
   } catch (err) {
     if (!warned) {

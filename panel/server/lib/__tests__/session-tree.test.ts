@@ -29,6 +29,14 @@ describe("session-tree", () => {
     expect(descendants(1, table)).toEqual(new Set([1, 2]));
   });
 
+  it("readProcessTable lifts the default 1 MiB output cap", () => {
+    exec.fn.mockReset();
+    exec.fn.mockReturnValue("2 1\n");
+    readProcessTable();
+    const opts = exec.fn.mock.calls[0][2] as { maxBuffer?: number };
+    expect(opts.maxBuffer).toBeGreaterThanOrEqual(64 * 1024 * 1024);
+  });
+
   it("readProcessTable returns an empty table when ps fails", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     exec.fn.mockImplementation(() => {
