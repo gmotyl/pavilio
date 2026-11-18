@@ -77,13 +77,6 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
         /* already gone */
       }
     }
-    if (rootPid !== undefined) {
-      try {
-        process.kill(rootPid, "SIGKILL")
-      } catch {
-        /* already gone */
-      }
-    }
     if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
     else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
     if (previousShell === undefined) delete process.env.SHELL
