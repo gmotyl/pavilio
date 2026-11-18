@@ -154,8 +154,14 @@ describe("SidebarGroupRow", () => {
     const icon = within(groupRow("Motyl OSS")).getByTestId("sidebar-group-icon-Motyl OSS");
     expect(icon.getAttribute("data-deck")).toBe("true");
     const mark = within(icon).getByTestId("project-mark");
-    expect(mark.style.boxShadow).toContain("3px -2px 0 -1px");
-    expect(mark.style.boxShadow).toContain("5px -4px 0 -2px");
+    expect(mark.style.boxShadow).toBe(
+      [
+        "3px -2px 0 -1px var(--bg-surface, var(--bg-base))",
+        "3px -2px 0 0 var(--border-subtle)",
+        "5px -4px 0 -2px var(--bg-surface, var(--bg-base))",
+        "5px -4px 0 -1px var(--border-subtle)",
+      ].join(", "),
+    );
     expect(mark.style.width).toBe("22px");
     expect(iconColor("Motyl OSS")).toBe(memberColor("Motyl OSS", "anytts"));
   });
@@ -218,23 +224,64 @@ describe("SidebarGroupRow", () => {
 
   it("right-click opens the menu without toggling", () => {
     setup();
-    fireEvent.contextMenu(groupRow("Motyl OSS"));
+    // fireEvent returns false when a handler called preventDefault (the menu opened).
+    const notPrevented = fireEvent.contextMenu(groupRow("Motyl OSS"));
+    expect(notPrevented).toBe(false);
     expect(screen.getByTestId("sidebar-group-members-Motyl OSS")).toBeTruthy();
     expect(readPreference(preferences.groupCollapsed)["Motyl OSS"]).toBeFalsy();
   });
 
-  it("group name aligns with a project name", () => {
+  /**
+   * jsdom has no layout, so getBoundingClientRect is all zeros here. The name's
+   * left offset is the sum of the leading flex items' widths and gaps, so compare
+   * those items directly: chevron box, activity slot, mark box, in order.
+   * `display: contents` wrappers and the deck's icon wrapper add no box.
+   */
+  const leading = (row: HTMLElement) => {
+    const items: HTMLElement[] = [];
+    const walk = (el: Element) => {
+      for (const c of Array.from(el.children) as HTMLElement[]) {
+        if (c.className.includes("flex-1")) return true; // the name: stop
+        if (c.className.includes("contents") || c.hasAttribute("data-deck")) {
+          if (walk(c)) return true;
+        } else items.push(c);
+      }
+      return false;
+    };
+    walk(row);
+    return items.map((el) => {
+      const tid = el.getAttribute("data-testid") ?? "";
+      const kind = tid.startsWith("project-mark")
+        ? "mark"
+        : tid === "project-activity-slot"
+          ? "slot"
+          : "chevron";
+      if (kind === "mark") return { kind, width: el.style.width, height: el.style.height };
+      return { kind, cls: el.className.split(/\s+/).filter((c) => /^(w|h)-\d|shrink-0$/.test(c)).sort() };
+    });
+  };
+
+  it.each([
+    ["desktop", false, "22px"],
+    ["mobile", true, "24px"],
+  ])("group name aligns with a project name on %s", (_label, mobile, tile) => {
+    installMatchMedia({ mobile });
     setup();
     const group = groupRow("Motyl OSS");
     const project = screen.getByTestId("sidebar-project-row-pavilio");
-    const lead = (row: HTMLElement) => {
-      const chevron = row.querySelector<HTMLElement>("[class*='w-4']")!;
-      const mark = within(row).getAllByTestId("project-mark")[0]!;
-      return { chevron: chevron.className.match(/\bw-4\b/)![0], mark: mark.style.width };
-    };
-    expect(lead(group)).toEqual(lead(project));
-    expect(group.className).toContain("px-1");
-    expect(project.className).toContain("px-1");
+    const g = leading(group);
+    expect(g.map((i) => i.kind)).toEqual(["chevron", "slot", "mark"]);
+    expect(g).toEqual(leading(project));
+    expect(g[2]).toMatchObject({ width: tile, height: tile });
+    // Same row padding and gap, so identical leading boxes mean identical offsets.
+    for (const cls of ["px-1", "gap-1", "py-0.5"]) {
+      expect(group.className).toContain(cls);
+      expect(project.className).toContain(cls);
+    }
+    // The deck wrapper must not shift the mark.
+    const wrapper = within(group).getByTestId("sidebar-group-icon-Motyl OSS");
+    expect(wrapper.style.margin).toBe("");
+    expect(wrapper.style.padding).toBe("");
   });
 
   it("members are indented under the group rule", () => {
