@@ -7,6 +7,7 @@ import {
   lstatSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from "fs";
 import { join, resolve, basename, relative, dirname, isAbsolute, sep } from "path";
 import {
@@ -26,6 +27,9 @@ import { buildWikiTree } from "../lib/wiki/tree.js";
 import { scaffoldProject } from "../lib/projects/scaffold.js";
 import { isValidProjectSlug, slugifyProjectTitle } from "../lib/projects/slug.js";
 import { localISODate } from "../lib/dateLocal.js";
+import { readGroup, rewriteGroup } from "../lib/projects/group.js";
+import { splitFrontmatter } from "../lib/projects/frontmatter.js";
+import { commitPaths } from "../lib/projects/commitPaths.js";
 
 export type { WikiTree, WikiPageInfo, WikiPageGroup } from "../lib/wiki/tree.js";
 
@@ -823,6 +827,91 @@ router.get("/:name/wiki", (req, res) => {
     return res.status(404).json({ error: "Project has no wiki" });
   }
   res.json(buildWikiTree(root, req.params.name));
+});
+
+/** PROJECT.md of a live (non-archived) discovered project, or null. */
+function liveCard(name: string): string | null {
+  if (!discoverProjects().some((p) => p.name === name)) return null;
+  const card = join(getConfig().projectsDir, name, "PROJECT.md");
+  return existsSync(card) ? card : null;
+}
+
+/**
+ * Write each `[file, newText]`, then commit exactly those files. On any failure every
+ * file is restored to its original text and the error is rethrown.
+ */
+function writeAndCommit(edits: [string, string][], message: string): void {
+  const originals = edits.map(([f]) => [f, readFileSync(f, "utf-8")] as const);
+  try {
+    for (const [f, text] of edits) writeFileSync(f, text);
+    commitPaths(getConfig().projectsDir, edits.map(([f]) => f), message);
+  } catch (err) {
+    for (const [f, text] of originals) {
+      try {
+        writeFileSync(f, text);
+      } catch {
+        // best effort; the original error is what the caller reports
+      }
+    }
+    throw err;
+  }
+}
+
+// undefined = invalid: not a string/null, contains a line break, or longer than 64 chars.
+const groupName = (v: unknown): string | null | undefined => {
+  if (v === null) return null;
+  if (typeof v !== "string" || /[\r\n]/.test(v)) return undefined;
+  const t = v.trim();
+  return t.length > 64 ? undefined : t || null;
+};
+
+// Literal path; a project can never be named "groups" + "/rename" as `/:name` takes one segment.
+router.post("/groups/rename", (req, res) => {
+  const from = groupName(req.body?.from);
+  const to = groupName(req.body?.to);
+  if (!from || !to)
+    return res.status(400).json({ error: "from and to must be non-empty single-line strings of at most 64 chars" });
+  const { projectsDir } = getConfig();
+  const members: string[] = [];
+  const groups = new Set<string>();
+  for (const p of discoverProjects()) {
+    const card = join(projectsDir, p.name, "PROJECT.md");
+    if (!existsSync(card)) continue;
+    const g = readGroup(splitFrontmatter(readFileSync(card, "utf-8")).data);
+    if (!g) continue;
+    groups.add(g);
+    if (g === from) members.push(p.name);
+  }
+  if (members.length === 0) return res.status(404).json({ error: "Group not found" });
+  if (to !== from && groups.has(to)) return res.status(409).json({ error: `Group ${to} already exists` });
+  if (to === from) return res.json({ renamed: [] });
+  const edits = members.map((name): [string, string] => {
+    const card = join(projectsDir, name, "PROJECT.md");
+    return [card, rewriteGroup(readFileSync(card, "utf-8"), to)];
+  });
+  try {
+    writeAndCommit(edits, `panel: rename group ${from} → ${to}`);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
+  res.json({ renamed: members });
+});
+
+router.put("/:name/group", (req, res) => {
+  const group = groupName(req.body?.group);
+  if (group === undefined) return res.status(400).json({ error: "group must be null or a single-line string of at most 64 chars" });
+  const card = liveCard(req.params.name);
+  if (!card) return res.status(404).json({ error: "Project not found" });
+  const text = readFileSync(card, "utf-8");
+  const next = rewriteGroup(text, group);
+  if (next !== text) {
+    try {
+      writeAndCommit([[card, next]], `panel: group ${req.params.name} → ${group ?? "none"}`);
+    } catch (err) {
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  }
+  res.json({ group });
 });
 
 router.get("/", (_req, res) => {

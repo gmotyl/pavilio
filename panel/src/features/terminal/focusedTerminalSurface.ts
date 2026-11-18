@@ -89,6 +89,11 @@ export function unregisterTerminalSurface(id: string): void {
   surfaces.delete(id);
 }
 
+/** The surface's registered root, or null. */
+export function surfaceRootOf(id: string): HTMLElement | null {
+  return surfaces.get(id)?.root ?? null;
+}
+
 /** The surface's focused cell, or null when none of its cells has had focus. */
 export function focusedCellOf(id: string): string | null {
   return surfaces.get(id)?.focusedCell ?? null;

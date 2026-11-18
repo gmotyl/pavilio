@@ -28,6 +28,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
 
 1. Load the most recent progress file from `<root>/projects/[project]/progress/`
 2. Read `PROJECT.md` — the resume card: overview, repos + working rules, gotchas (always; capped at 60 lines for exactly this read). `STATUS.md` is **not** read at start; it holds meeting-driven state for [[pavilio-question]] / [[pavilio-manager]]. Read it only when the session turns out to be meeting prep or a status question.
+   - **Group siblings** — when PROJECT.md's frontmatter declares `group:`, scan the frontmatter of every other non-archived `projects/<p>/PROJECT.md` (skip `projects/archived/`) for the same `group:` and list each sibling: name, first sentence of its `## Overview`, and `[[<p>:PROJECT]]`. Read nothing else from sibling projects. No `group:` → no list.
 3. Derive **active work** by listing the un-archived change directories under the project's configured OpenSpec sources — a change dir under `openspec/changes/` that is **not** under `changes/archive/` (see [[pavilio-openspec-storage]]). There is no active-plan pointer file to read. For each one, read **only the frontmatter** of its `proposal.md` — the Change summary (`title`, `summary`) — all of them in **one shell pass** (bash and zsh alike; CRLF-safe, at most 20 lines per file), e.g.:
 
    ```bash
@@ -43,7 +44,7 @@ If the resolved folder is missing, say so and re-resolve via `.projects.local.md
    Each `== <slug>` block prints either the frontmatter fields or one marker, which picks the backfill branch below: fields without `title:`/`summary:`, `[no frontmatter]` or `[unclosed frontmatter]` → backfill the proposal; `[no proposal] [design.md]` → design-only backfill; `[no proposal]` → neither file.
 
    Do not open `tasks.md`, specs or `design.md`, and nothing below the frontmatter — except in the one-time backfill (below) for a change that has no Change summary yet.
-4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. Only the fast-entry variant skips this.
+4. **Always display the last-session summary first** — regardless of how many active changes exist: describe in 1-3 sentences what we worked on yesterday/today (from the latest progress file), then state the recommended next step in a separate sentence. When the project has group siblings (step 2), show the group-siblings list right after the summary. Only the fast-entry variant skips this.
 5. **Branch on the active changes found:**
 
    **None** → After the summary, ask: "What do you want to work on today?" Wait for reply, then **classify the intent** (see below) and take the matching lane — build work enters the workflow at **step 1: Design**; a question, meeting prep, or anything else with no diff at the end does not.

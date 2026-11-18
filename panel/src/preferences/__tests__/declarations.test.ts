@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALL_PREFERENCES, preferences } from "../declarations";
-import { __resetPreferenceStoreForTests, readPreference, writePreference } from "../store";
+import {
+  __resetPreferenceStoreForTests,
+  readPreference,
+  writePreference,
+} from "../store";
 
 /**
  * The portability table from `design.md`, transcribed by hand. It is
@@ -30,6 +34,7 @@ const PORTABLE = [
   "repos.tree.paneWidth",
   "research.spikesRoot",
   "search.includeArchived",
+  "shell.groupCollapsed",
   "shell.leftSidebar.expanded",
   "shell.leftSidebar.width",
   "shell.project.expanded",
@@ -37,6 +42,7 @@ const PORTABLE = [
   "shell.rightSidebar.expanded",
   "shell.rightSidebar.section.expanded",
   "shell.rightSidebar.width",
+  "shell.sidebarOrder",
   "speech.answerComposer.on",
   "speech.answerPane.autoOpen",
   "speech.answerPane.opacityBottom",
@@ -167,6 +173,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["shell.rightSidebar.expanded", true, "global"],
   ["shell.rightSidebar.section.expanded", true, "project"],
   ["shell.rightSidebar.width", 264, "global"],
+  ["shell.sidebarOrder", { top: [], groups: {} }, "global"],
+  ["shell.groupCollapsed", {}, "global"],
   // Per project, both of them: how much of a cell you hand to the answer is a
   // fact about the work, not a habit the whole panel shares.
   ["speech.answerComposer.height", 62, "project"],
@@ -176,7 +184,7 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   // the pane clamps to the area it is in and an unresized one covers it.
   ["speech.answerPane.height", 4000, "project"],
   // Fully opaque: an untouched project renders today's solid answer pane.
-  ["speech.answerPane.opacityBottom", 100, "project"],
+  ["speech.answerPane.opacityBottom", 100, "global"],
   ["speech.armedCell", null, "global"],
   ["speech.modes", null, "global"],
   ["speech.engine", "edge", "global"],
@@ -209,7 +217,12 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
     [
       { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
       { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
-      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
+      {
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "--prompt",
+        runLoop: "{prompt}",
+      },
     ],
     "global",
   ],
@@ -217,7 +230,11 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["terminal.minimised", [], "project"],
   ["terminal.order", [], "project"],
   ["time.form.resetAutoOnSave", false, "project"],
-  ["time.report", { period: "this-week", format: "text", detail: "detailed" }, "project"],
+  [
+    "time.report",
+    { period: "this-week", format: "text", detail: "detailed" },
+    "project",
+  ],
   // On unless the user opts out: design.md's Cost section names `false` as the escape hatch.
   ["wiki.sessionStartIngest", true, "global"],
   ["wiki.writerModel", "haiku", "global"],
@@ -291,8 +308,28 @@ describe("the declaration table", () => {
     }
   });
 
+  it("sidebar order and group collapse are portable", () => {
+    expect(preferences.sidebarOrder.key).toBe("shell.sidebarOrder");
+    expect(preferences.sidebarOrder.portable).toBe(true);
+    expect(preferences.groupCollapsed.key).toBe("shell.groupCollapsed");
+    expect(preferences.groupCollapsed.portable).toBe(true);
+    const order = preferences.sidebarOrder.codec;
+    expect(() => order.parse("[]")).toThrow();
+    expect(
+      order.parse('{"top":["g:A",5],"groups":{"A":["x",null],"B":3}}'),
+    ).toEqual({
+      top: ["g:A"],
+      groups: { A: ["x"] },
+    });
+    const collapsed = preferences.groupCollapsed.codec;
+    expect(() => collapsed.parse("[]")).toThrow();
+    expect(collapsed.parse('{"A":true,"B":"no"}')).toEqual({ A: true });
+  });
+
   it("the portable set matches the design's portability table", () => {
-    const portable = ALL_PREFERENCES.filter((d) => d.portable).map((d) => d.key);
+    const portable = ALL_PREFERENCES.filter((d) => d.portable).map(
+      (d) => d.key,
+    );
     const local = ALL_PREFERENCES.filter((d) => !d.portable).map((d) => d.key);
 
     // Everything the table names is declared...
@@ -316,7 +353,9 @@ describe("the declaration table", () => {
     }
     // The read-only alert's dismissal lasts one tab session by design: a new
     // tab while the file is still read-only must say so again.
-    expect(keyOf("preferences.readOnlyAlert.dismissed").browserStore).toBe("session");
+    expect(keyOf("preferences.readOnlyAlert.dismissed").browserStore).toBe(
+      "session",
+    );
 
     // The tier stays narrow: nothing else opts in, and every opt-in is
     // machine-local (a portable value has no browser store to choose).
@@ -386,7 +425,12 @@ describe("the launcher list and the answer composer", () => {
     expect(readPreference(preferences.terminalLaunchers)).toEqual([
       { name: "claude", command: "claude", runLoop: "/goal {prompt}" },
       { name: "codex", command: "codex", runLoop: "/goal {prompt}" },
-      { name: "opencode", command: "opencode", promptFlag: "--prompt", runLoop: "{prompt}" },
+      {
+        name: "opencode",
+        command: "opencode",
+        promptFlag: "--prompt",
+        runLoop: "{prompt}",
+      },
     ]);
   });
 
@@ -421,7 +465,9 @@ describe("the launcher list and the answer composer", () => {
     // On this machine, and nowhere else — the workspace file is untouched.
     // The stored key carries the project it was measured in, because the
     // declaration is `project`-scoped.
-    expect(localStorage.getItem(`speech.answerComposer.height@${ALPHA}`)).toBe("120");
+    expect(localStorage.getItem(`speech.answerComposer.height@${ALPHA}`)).toBe(
+      "120",
+    );
     expect(globals.__PAVILIO_PREFS__).toEqual({ version: 1 });
   });
 });
@@ -460,7 +506,9 @@ describe("the answer surface's heights are kept per project", () => {
     // The project is in the KEY, which is the mechanism that keeps them apart
     // — asserted so that a scope quietly reverted to `global` fails here with
     // the reason rather than only as a puzzling shared height.
-    expect(localStorage.getItem(`speech.answerComposer.height@${ALPHA}`)).toBe("148");
+    expect(localStorage.getItem(`speech.answerComposer.height@${ALPHA}`)).toBe(
+      "148",
+    );
     expect(localStorage.getItem("speech.answerComposer.height")).toBeNull();
   });
 
@@ -471,7 +519,9 @@ describe("the answer surface's heights are kept per project", () => {
     // 4000 is the declared "full", written out rather than read back off the
     // declaration: comparing the registry against itself would assert nothing.
     expect(readPreference(preferences.answerPaneHeight, BETA)).toBe(4000);
-    expect(localStorage.getItem(`speech.answerPane.height@${ALPHA}`)).toBe("412");
+    expect(localStorage.getItem(`speech.answerPane.height@${ALPHA}`)).toBe(
+      "412",
+    );
     expect(localStorage.getItem("speech.answerPane.height")).toBeNull();
   });
 
@@ -644,42 +694,51 @@ describe("the focus layout and the answer opacity", () => {
     expect(readPreference(preferences.focusLayout)).toBe(false);
   });
 
-  it("declares answerOpacityBottom per project, portable, defaulting to 100", () => {
+  it("answer opacity is declared global and portable", () => {
     const opacity = keyOf("speech.answerPane.opacityBottom");
     expect(opacity).toBe(preferences.answerOpacityBottom);
-    expect(opacity.scope).toBe("project");
+    expect(opacity.scope).toBe("global");
     expect(opacity.portable).toBe(true);
     expect(opacity.default).toBe(100);
 
-    writePreference(preferences.answerOpacityBottom, 40, ALPHA);
-    expect(readPreference(preferences.answerOpacityBottom, ALPHA)).toBe(40);
-    // Per project: the other one keeps the solid default.
-    expect(readPreference(preferences.answerOpacityBottom, BETA)).toBe(100);
-    // Portable: the value lands in the workspace document under its scoped key.
+    writePreference(preferences.answerOpacityBottom, 40);
+    expect(readPreference(preferences.answerOpacityBottom)).toBe(40);
+    // Portable: the value lands in the workspace document under the bare key.
     expect(globals.__PAVILIO_PREFS__).toEqual({
       version: 1,
-      [`speech.answerPane.opacityBottom@${ALPHA}`]: 40,
+      "speech.answerPane.opacityBottom": 40,
     });
   });
 
-  it("answerOpacityBottom falls back to 100 for out-of-range or malformed values", () => {
+  it("old project-scoped value is ignored", () => {
+    globals.__PAVILIO_PREFS__ = {
+      version: 1,
+      [`speech.answerPane.opacityBottom@${ALPHA}`]: 40,
+    };
+    expect(readPreference(preferences.answerOpacityBottom)).toBe(100);
+  });
+
+  it("out of range yields 100", () => {
     // Written straight into the document, the way a hand edit would land.
     for (const stored of [-1, 101, 500, "abc", "", null, true, { n: 40 }]) {
       __resetPreferenceStoreForTests();
       globals.__PAVILIO_PREFS__ = {
         version: 1,
-        [`speech.answerPane.opacityBottom@${ALPHA}`]: stored,
+        "speech.answerPane.opacityBottom": stored,
       };
-      expect(readPreference(preferences.answerOpacityBottom, ALPHA), String(stored)).toBe(100);
+      expect(
+        readPreference(preferences.answerOpacityBottom),
+        String(stored),
+      ).toBe(100);
     }
     // The bounds themselves are values, not fallbacks.
     for (const stored of [0, 55, 100]) {
       __resetPreferenceStoreForTests();
       globals.__PAVILIO_PREFS__ = {
         version: 1,
-        [`speech.answerPane.opacityBottom@${ALPHA}`]: stored,
+        "speech.answerPane.opacityBottom": stored,
       };
-      expect(readPreference(preferences.answerOpacityBottom, ALPHA)).toBe(stored);
+      expect(readPreference(preferences.answerOpacityBottom)).toBe(stored);
     }
   });
 

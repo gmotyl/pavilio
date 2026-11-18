@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { LayoutGrid, Maximize, Maximize2, Minimize2, Minus, Printer, X } from "lucide-react";
+import { LayoutGrid, Maximize, Maximize2, Minimize, Minus, Printer, X } from "lucide-react";
 import { TerminalView } from "./TerminalView";
 import type { BufferSnapshot, TerminalHandle } from "./TerminalView";
 import { sessionLabel, type SessionMeta } from "./useTerminalSessions";
@@ -19,6 +19,7 @@ import { CellSpeakButton } from "./CellSpeakButton";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { CellSpeechControlsToggle } from "./CellSpeechControlsToggle";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
+import { useSessionContextMenu } from "./SessionContextMenu";
 import { TerminalViewportModal } from "./TerminalViewportModal";
 import { visibleSessionId } from "./visibleSession";
 import {
@@ -51,7 +52,8 @@ interface Props {
   focusedId: string | null;
   maximized: boolean;
   onFocus: (id: string) => void;
-  onExit: (id: string) => void;
+  /** Kill a session; may resolve `false` when the DELETE failed. */
+  onExit: (id: string) => Promise<boolean | void> | void;
   onReady?: (sessionId: string, handle: TerminalHandle) => void;
   onRename?: (id: string, name: string) => void;
   /** The committed tiling. Empty means "no custom shape": the default preset is used. */
@@ -180,15 +182,19 @@ export function TerminalLayoutGrid({
           getLayoutPresets(visibleIds.length)[0] ?? { label: "", slots: [] },
         ));
 
+  const sessionMenu = useSessionContextMenu({ strip: sessions, kill: onExit });
   const modal = (
+    <>
+    {sessionMenu.element}
     <ConfirmCloseTerminalModal
-      sessionName={pendingSession?.name ?? null}
+      session={pendingSession ? { id: pendingSession.id, name: pendingSession.name } : null}
       onCancel={() => setPendingCloseId(null)}
-      onConfirm={() => {
-        if (pendingCloseId) onExit(pendingCloseId);
+      onConfirm={(ids) => {
+        ids.forEach((id) => onExit(id));
         setPendingCloseId(null);
       }}
     />
+    </>
   );
 
   if (count === 0) {
@@ -228,6 +234,7 @@ export function TerminalLayoutGrid({
         onFocus={onFocus}
         onExit={onExit}
         onRequestExit={setPendingCloseId}
+        onHeaderContextMenu={(e) => sessionMenu.onContextMenu(e, session)}
         onReady={onReady}
         onRename={onRename}
         onDragStart={() => overlayRef.current?.begin(session.id)}
@@ -371,6 +378,7 @@ interface CellProps {
   onFocus: (id: string) => void;
   onExit: (id: string) => void;
   onRequestExit: (id: string) => void;
+  onHeaderContextMenu: (e: React.MouseEvent) => void;
   onReady?: (id: string, handle: TerminalHandle) => void;
   onRename?: (id: string, name: string) => void;
   onDragStart: () => void;
@@ -393,6 +401,7 @@ function TerminalCell({
   onFocus,
   onExit,
   onRequestExit,
+  onHeaderContextMenu,
   onReady,
   onRename,
   onDragStart,
@@ -546,6 +555,7 @@ function TerminalCell({
         // row resolves to a sliver in a real browser.
         style={{ background: headerBg, cursor: "grab", height: 30, padding: "0 8px" }}
         title="Drag to place this terminal"
+        onContextMenu={onHeaderContextMenu}
         draggable
         onDragStart={(e) => {
           // jsdom's DragEvent constructor is missing, so tests dispatch drag events
@@ -757,6 +767,7 @@ function TerminalCell({
               testId={`terminal-cell-maximise-${session.id}`}
               title={maximized ? "Back to grid" : "Maximise"}
               ariaLabel={maximized ? "Grid" : "Maximise"}
+              active={maximized}
               onClick={(e) => {
                 e.stopPropagation();
                 onMaximise();
@@ -773,12 +784,13 @@ function TerminalCell({
               title={fullscreen ? "Exit fullscreen" : "Fullscreen: this cell over the whole panel"}
               ariaLabel={fullscreen ? "Exit fullscreen" : "Fullscreen"}
               pressed={fullscreen}
+              active={fullscreen}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleFullscreen();
               }}
             >
-              {fullscreen ? <Minimize2 size={11} /> : <Maximize size={11} />}
+              {fullscreen ? <Minimize size={11} /> : <Maximize size={11} />}
             </CellIconButton>
           )}
           <CellIconButton
@@ -843,6 +855,7 @@ function CellIconButton({
   ariaLabel,
   disabled,
   pressed,
+  active,
 }: {
   children: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
@@ -853,6 +866,8 @@ function CellIconButton({
   disabled?: boolean;
   /** A toggle's state, as `aria-pressed`; absent for plain buttons. */
   pressed?: boolean;
+  /** A toggle that is on: tinted via `is-active`. */
+  active?: boolean;
 }) {
   return (
     <button
@@ -865,7 +880,7 @@ function CellIconButton({
       data-testid={testId}
       // The class is shared with the colour picker's trigger (asserted by the
       // header tests), so the disabled look is inline rather than a class.
-      className="p-1 rounded transition-colors"
+      className={`p-1 rounded transition-colors${active ? " is-active" : ""}`}
       style={{
         color: "var(--text-muted)",
         ...(disabled ? { opacity: 0.4, cursor: "default" } : {}),
@@ -877,7 +892,7 @@ function CellIconButton({
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.color = "var(--text-muted)";
-        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.background = "";
       }}
     >
       {children}

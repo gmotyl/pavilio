@@ -23,6 +23,7 @@ import type { LayoutCommitKind } from "./orderingReducer";
 import type { GridSpeech } from "../speech/types";
 import { TerminalFullscreenLayer } from "./TerminalFullscreenLayer";
 import type { TerminalFullscreen } from "./useTerminalFullscreen";
+import { useCloseFocusedShortcut } from "./useCloseFocusedShortcut";
 
 export interface TerminalsSurfaceProps {
   // Current project context
@@ -33,7 +34,8 @@ export interface TerminalsSurfaceProps {
   sessions: SessionMeta[];
   focusedId: string | null;
   onFocus: (id: string | null) => void;
-  onDeleteSession: (id: string) => void;
+  /** Kill a session; resolves `false` when the DELETE failed. */
+  onDeleteSession: (id: string) => Promise<boolean | void> | void;
   onUpdateSession: (id: string, patch: { name?: string }) => void;
 
   // All-sessions (cross-project) data
@@ -202,6 +204,13 @@ export function TerminalsSurface({
   const shortcutBarYielded = useAnyAnswerPaneOpen(visibleId ? [visibleId] : []);
   const isMobile = useIsMobile();
 
+  // Alt+Shift+W: kill confirmation for this surface's focused session.
+  const closeFocused = useCloseFocusedShortcut({
+    surfaceId: fullscreen?.surfaceId ?? "",
+    sessions,
+    kill: onDeleteSession,
+  });
+
   // The fullscreen layer is desktop only: below `md` there are no controls and
   // an open layer is not shown (the state itself is the host's, and transient).
   const fullscreenState =
@@ -243,6 +252,7 @@ export function TerminalsSurface({
           ...(fillsBox ? {} : { maxHeight: "var(--vv-height, 100dvh)" }),
         }}
       >
+        {closeFocused}
         {/* Desktop toolbar */}
         <div className="hidden md:block">
           <TerminalToolbar

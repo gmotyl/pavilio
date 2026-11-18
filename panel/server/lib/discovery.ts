@@ -3,6 +3,7 @@ import { join, relative, isAbsolute } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { isProjectDir } from "./project-dir.js";
+import { projectGroup } from "./projects/group.js";
 import { projectKind, type ProjectKind } from "./projects/kind.js";
 
 export interface RepoEntry {
@@ -21,6 +22,7 @@ export interface Project {
   hasWiki: boolean; // `<project>/wiki/` is a directory — gates the wiki tab
   latestProgressDate: string | null;
   kind: ProjectKind; // `kind` from PROJECT.md frontmatter, default `project`
+  group: string | null; // `group` from PROJECT.md frontmatter, trimmed; null when absent
   lastActivity: string | null; // YYYY-MM-DD — later of newest progress file and newest wiki log entry
   repos: RepoEntry[];
 }
@@ -116,6 +118,7 @@ export function readProject(root: string, name: string): Project {
     hasWiki: statSync(join(dir, "wiki"), { throwIfNoEntry: false })?.isDirectory() ?? false,
     latestProgressDate,
     kind: projectKind(root, name),
+    group: projectGroup(root, name),
     lastActivity,
     repos,
   };

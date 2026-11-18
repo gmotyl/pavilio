@@ -1,5 +1,5 @@
 /**
- * The answer body's per-project bottom-edge opacity (`answerOpacityBottom`).
+ * The answer body's global bottom-edge opacity (`answerOpacityBottom`).
  *
  * Contract: at a value n below 100 the body paints
  * `linear-gradient(to bottom, #17171d 0%, color-mix(in srgb, #17171d n%, transparent) 100%)`
@@ -82,7 +82,7 @@ const field = () => screen.getByTestId(`answer-pane-composer-${SESSION}`) as HTM
 const wave = () => screen.queryByTestId(`answer-pane-wave-${SESSION}`);
 
 function setOpacity(n: number): void {
-  act(() => writePreference(preferences.answerOpacityBottom, n, "alpha"));
+  act(() => writePreference(preferences.answerOpacityBottom, n));
 }
 
 function mount(): void {

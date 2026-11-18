@@ -3,7 +3,7 @@ import {
   Plus,
   Maximize,
   Maximize2,
-  Minimize2,
+  Minimize,
   LayoutGrid,
   X,
   ChevronDown,
@@ -22,6 +22,7 @@ import { TerminalDisconnectedBadge } from "./TerminalDisconnectedBadge";
 import { ConfirmCloseTerminalModal } from "./ConfirmCloseTerminalModal";
 import { LayoutPresetMenu } from "./LayoutPresetMenu";
 import { MinimisedTray } from "./MinimisedTray";
+import { useSessionContextMenu } from "./SessionContextMenu";
 import type { LayoutPreset } from "./tileLayout";
 
 interface Props {
@@ -32,7 +33,8 @@ interface Props {
   repos?: { name: string; path: string }[];
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
-  onDelete: (id: string) => void;
+  /** Kill a session; resolves `false` when the DELETE failed. */
+  onDelete: (id: string) => Promise<boolean | void> | void;
   onRename: (id: string, name: string) => void;
   onToggleMaximize: () => void;
   onReorder: (fromId: string, toId: string) => void;
@@ -88,6 +90,8 @@ export function TerminalToolbar({
       ? sessions
       : sessions.filter((s) => !minimisedIds.includes(s.id));
   const minimised = sessions.filter((s) => minimisedIds.includes(s.id));
+  // Close others / Close all act on the whole strip, the minimised tray included.
+  const sessionMenu = useSessionContextMenu({ strip: sessions, kill: onDelete });
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -340,6 +344,7 @@ export function TerminalToolbar({
                 setDragOverId(null);
               }}
               onClick={() => onFocus(s.id)}
+              onContextMenu={(e) => sessionMenu.onContextMenu(e, s)}
               onMouseEnter={(e) => {
                 if (!focused)
                   e.currentTarget.style.background = "var(--bg-hover)";
@@ -444,13 +449,13 @@ export function TerminalToolbar({
             onClick={onToggleFullscreen}
             aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen terminal"}
             aria-pressed={fullscreen}
-            className="flex items-center px-2.5 transition-colors"
+            className={`flex items-center px-2.5 transition-colors${fullscreen ? " is-active" : ""}`}
             style={{ color: "var(--text-secondary)" }}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "")}
             title={fullscreen ? "Exit fullscreen" : "Fullscreen: tab strip and grid over the whole panel"}
           >
-            {fullscreen ? <Minimize2 size={13} /> : <Maximize size={13} />}
+            {fullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
           </button>
         )}
         <button
@@ -459,15 +464,14 @@ export function TerminalToolbar({
           onClick={onToggleMaximize}
           disabled={visible.length === 0}
           aria-label={maximized ? "Grid" : "Maximise"}
-          className="flex items-center px-2.5 transition-colors disabled:opacity-40"
+          aria-pressed={maximized}
+          className={`flex items-center px-2.5 transition-colors disabled:opacity-40${maximized ? " is-active" : ""}`}
           style={{ color: "var(--text-secondary)" }}
           onMouseEnter={(e) => {
             if (visible.length > 0)
               e.currentTarget.style.background = "var(--bg-hover)";
           }}
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.background = "transparent")
-          }
+          onMouseLeave={(e) => (e.currentTarget.style.background = "")}
           title={
             maximized
               ? "Back to grid (Esc or Cmd+Shift+Enter)"
@@ -483,11 +487,12 @@ export function TerminalToolbar({
         />
       </div>
 
+      {sessionMenu.element}
       <ConfirmCloseTerminalModal
-        sessionName={pendingSession?.name ?? null}
+        session={pendingSession ? { id: pendingSession.id, name: pendingSession.name } : null}
         onCancel={() => setPendingCloseId(null)}
-        onConfirm={() => {
-          if (pendingCloseId) onDelete(pendingCloseId);
+        onConfirm={(ids) => {
+          ids.forEach((id) => onDelete(id));
           setPendingCloseId(null);
         }}
       />

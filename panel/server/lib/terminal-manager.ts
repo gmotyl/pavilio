@@ -318,10 +318,12 @@ export function destroySession(id: string): boolean {
  */
 export function updateSession(
   id: string,
-  updates: { name?: string },
+  updates: { name?: string; project?: string },
 ): boolean {
   const session = sessions.get(id);
   if (!session) return false;
+  // A move reassigns the project only; process, cwd and name stay put.
+  if (updates.project !== undefined) session.project = updates.project;
   if (updates.name !== undefined) {
     session.name = updates.name;
     writeName(id, session.name, session.identityHomeDir);

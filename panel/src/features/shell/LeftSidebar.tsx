@@ -18,6 +18,10 @@ import {
   Wifi,
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
+import { SidebarGroupRow } from "./SidebarGroupRow";
+import { useSidebarRowMenu } from "./SidebarRowMenu";
+import { groupMap, ownFlag } from "./sidebarOrder";
+import { dropStyle, useSidebarDrag, type SidebarRowDragProps } from "./useSidebarDrag";
 import { useIsMobile } from "./useIsMobile";
 import { useSidebarState } from "./useSidebarState";
 import { projectHref } from "./projectHref";
@@ -150,6 +154,8 @@ type SidebarProject = {
   name: string;
   kind?: ProjectKind;
   lastActivity?: string | null;
+  /** Project group from PROJECT.md; only `project`-kind rows are grouped. */
+  group?: string | null;
 };
 
 /** A research row older than this many days is dimmed (unless a terminal runs). */
@@ -430,6 +436,47 @@ export default function LeftSidebar() {
     else if (!researchCollapsed) setResearchCollapsed(true);
   };
 
+  // The Projects tree: groups and ungrouped projects interleaved in the saved
+  // sidebar order. Discovery decides membership, so a group whose members are
+  // all archived (or starred, or research) simply has no node.
+  const [sidebarOrder, setSidebarOrder] = usePreference(preferences.sidebarOrder);
+  const [groupCollapsed, setGroupCollapsed] = usePreference(
+    preferences.groupCollapsed,
+  );
+  const dragProjects = useMemo(
+    () =>
+      otherProjects.map((p) => ({
+        name: String(p.name),
+        group: p.group ?? null,
+      })),
+    [otherProjects],
+  );
+  const { tree: projectTree, rowProps: dragRowProps } = useSidebarDrag({
+    projects: dragProjects,
+    order: sidebarOrder,
+    setOrder: setSidebarOrder,
+    isMobile,
+  });
+  const toggleGroup = (name: string) => {
+    const next = Object.assign(groupMap<boolean>(), groupCollapsed);
+    if (ownFlag(next, name)) delete next[name];
+    else next[name] = true;
+    setGroupCollapsed(next);
+  };
+  const rowMenu = useSidebarRowMenu({
+    groups: [
+      ...new Set(
+        projects
+          .map((p) => p.group)
+          .filter((g): g is string => typeof g === "string" && g !== ""),
+      ),
+    ],
+    order: sidebarOrder,
+    setOrder: setSidebarOrder,
+    collapsed: groupCollapsed,
+    setCollapsed: setGroupCollapsed,
+  });
+
   const sessionsByProject = useMemo(() => {
     const m = new Map<string, SessionMeta[]>();
     for (const s of sessions) {
@@ -440,7 +487,16 @@ export default function LeftSidebar() {
     return m;
   }, [sessions]);
 
-  const renderProjectRow = (project: SidebarProject) => {
+  // Keyed by the string form: an unresolved (undefined) name from an older
+  // server still gets its row, under the key the merge gave it.
+  const projectsByName = new Map<string, SidebarProject>(
+    otherProjects.map((p) => [String(p.name), p]),
+  );
+
+  const renderProjectRow = (
+    project: SidebarProject,
+    drag: SidebarRowDragProps = {},
+  ) => {
     const projectSessions = sessionsByProject.get(project.name) ?? [];
     const projectSessionIds = projectSessions.map((s) => s.id);
     const expandedNow = isExpanded(project.name);
@@ -481,10 +537,24 @@ export default function LeftSidebar() {
         <div
           data-testid={`sidebar-project-row-${project.name}`}
           data-dimmed={dimmed ? "true" : "false"}
+          {...drag}
+          onContextMenu={
+            hasName
+              ? (e) =>
+                  rowMenu.onProjectContextMenu(
+                    e,
+                    project.name,
+                    typeof project.group === "string" && project.group
+                      ? project.group
+                      : null,
+                  )
+              : undefined
+          }
           className="group flex items-center gap-1 rounded-md px-1 py-0.5"
           style={{
             background: isCurrent ? "var(--bg-active)" : "transparent",
             ...(dimmed ? { opacity: 0.55 } : {}),
+            ...dropStyle(drag["data-drop"], drag["data-dragging"] === "true"),
           }}
         >
           <button
@@ -517,6 +587,7 @@ export default function LeftSidebar() {
               is told apart by the active background and the weight alone. */}
           <NavLink
             to={projectHref(project.name, isMobile)}
+            draggable={false}
             className="flex-1 truncate text-[13px] py-0.5"
             style={{
               color: hasName
@@ -686,7 +757,7 @@ export default function LeftSidebar() {
         <section data-testid="sidebar-section-starred">
           <SectionHeader icon={Star} label="Starred" leading={hamburgerSlot} />
           <ul className="space-y-0.5">
-            {starredProjects.map(renderProjectRow)}
+            {starredProjects.map((p) => renderProjectRow(p))}
           </ul>
         </section>
       )}
@@ -698,8 +769,41 @@ export default function LeftSidebar() {
           testId="sidebar-section-projects"
           onNew={() => setNewKind("project")}
         />
-        <ul className="space-y-0.5">
-          {otherProjects.map(renderProjectRow)}
+        <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
+          {projectTree.map((node) => {
+            if (node.kind === "project") {
+              const p = projectsByName.get(node.name);
+              return p
+                ? renderProjectRow(p, dragRowProps(`p:${node.name}`, null))
+                : null;
+            }
+            const members = node.members
+              .map((m) => projectsByName.get(m))
+              .filter((p) => p !== undefined);
+            return (
+              <SidebarGroupRow
+                key={`g:${node.name}`}
+                name={node.name}
+                members={members.map((p) => p.name)}
+                sessionIds={members.flatMap((p) =>
+                  (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
+                )}
+                collapsed={ownFlag(groupCollapsed, node.name)}
+                onToggle={() => toggleGroup(node.name)}
+                isMobile={isMobile}
+                dragProps={dragRowProps(`g:${node.name}`, null)}
+                onContextMenu={(e) =>
+                  rowMenu.onGroupContextMenu(e, node.name, () =>
+                    toggleGroup(node.name),
+                  )
+                }
+              >
+                {members.map((p) =>
+                  renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
+                )}
+              </SidebarGroupRow>
+            );
+          })}
         </ul>
       </section>
       <section data-testid="sidebar-section-research">
@@ -716,7 +820,7 @@ export default function LeftSidebar() {
         />
         {!researchHidden && (
           <ul className="space-y-0.5">
-            {researchProjects.map(renderProjectRow)}
+            {researchProjects.map((p) => renderProjectRow(p))}
           </ul>
         )}
       </section>
@@ -905,6 +1009,7 @@ export default function LeftSidebar() {
           restore={restore}
         />
       )}
+      {rowMenu.element}
     </div>
   );
 }

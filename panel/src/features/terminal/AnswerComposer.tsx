@@ -66,6 +66,12 @@ const MOBILE_COMPOSER_MIN_ROWS = 2;
 const MOBILE_COMPOSER_MAX_ROWS = 6;
 
 /**
+ * The desktop row grows with its content up to this many rows of the field
+ * (or the dragged height, if that is taller), then the field scrolls.
+ */
+const DESKTOP_COMPOSER_MAX_ROWS = 10;
+
+/**
  * The line height the cap falls back to when `getComputedStyle` cannot report
  * one in pixels.
  *
@@ -193,6 +199,14 @@ export interface AnswerComposerProps {
    * that was silently dropped is a reply the user cannot get back.
    */
   send: (data: string) => boolean;
+  /**
+   * Desktop only: the tallest the field's row may GROW to, in px — the pane's
+   * applied height minus its other rows and the body's floor. Without it a long
+   * reply in a short pane pushes the key hint and drag row out of the pane and
+   * over the terminal. Never below the stored height (the pane's floor already
+   * reserves that). Absent: no limit beyond the ten-row cap.
+   */
+  maxRowHeight?: number;
   /**
    * A draft has just gone out. Raised at the moment the body is written, and
    * only then — the pane hands its body over to the waiting state here,
@@ -390,7 +404,7 @@ export interface AnswerComposerProps {
  * that the field opens at its declared height and stores nothing until it can
  * — is on that function.
  */
-export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerProps) {
+export function AnswerComposer({ sessionId, send, onSubmitted, maxRowHeight }: AnswerComposerProps) {
   // Seeded from the store, not from `""`: this mount may be the second one for
   // a pane the user closed mid-sentence.
   const [text, setText] = useState(() => getDraft(sessionId));
@@ -569,6 +583,61 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
     const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
     field.style.height = `${Math.min(field.scrollHeight, MOBILE_COMPOSER_MAX_ROWS * lineHeight)}px`;
   }, [text, isMobile]);
+
+  /**
+   * The desktop row grows with the reply from the grip's height (its floor)
+   * up to `max(that height, 10 rows)`; past that the field scrolls.
+   *
+   * The field is `flex: 1 1 auto` in a well stretched to the row, so while
+   * stretched its `scrollHeight` is at least the row-derived height — reading
+   * it then feeds the row's height back into itself and the row could only
+   * ever grow. So, like the mobile path, the field is collapsed to its
+   * collapsed size (`flex: none; height: 0px`) for the measurement and then
+   * restored; `scrollHeight` is then content + the field's padding. The rest
+   * of the row's chrome — the field's border and the row's own padding and
+   * border — comes from computed styles, not an estimate. The row's height is
+   * written straight to the DOM (no state, no extra render per keystroke);
+   * React's `style` prop keeps the stored `height` and rewrites it only when
+   * that changes, which reruns this effect anyway. A cleared field measures
+   * small again, so sending lands back on the dragged height.
+   */
+  useLayoutEffect(() => {
+    if (isMobile) return;
+    const field = fieldRef.current;
+    const row = field?.closest<HTMLElement>(".answer-pane-composer");
+    if (!field || !row) return;
+    const px = (value: string | undefined): number => {
+      const parsed = Number.parseFloat(value ?? "");
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const prevFlex = field.style.flex;
+    const prevHeight = field.style.height;
+    const prevScrollTop = field.scrollTop;
+    // Collapsed to 0px, not `auto`: `auto` keeps the `rows={2}` box, a few px
+    // taller than the declared default, which would lift an empty row above it.
+    field.style.flex = "none";
+    field.style.height = "0px";
+    const natural = field.scrollHeight;
+    field.style.flex = prevFlex;
+    field.style.height = prevHeight;
+    field.scrollTop = prevScrollTop;
+    const fieldStyle = getComputedStyle(field);
+    const rowStyle = getComputedStyle(row);
+    const parsedLineHeight = Number.parseFloat(fieldStyle.lineHeight);
+    const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : FALLBACK_LINE_HEIGHT_PX;
+    const fieldPadding = px(fieldStyle.paddingTop) + px(fieldStyle.paddingBottom);
+    const outer =
+      px(fieldStyle.borderTopWidth) +
+      px(fieldStyle.borderBottomWidth) +
+      px(rowStyle.paddingTop) +
+      px(rowStyle.paddingBottom) +
+      px(rowStyle.borderTopWidth) +
+      px(rowStyle.borderBottomWidth);
+    const rowsCap = DESKTOP_COMPOSER_MAX_ROWS * lineHeight + fieldPadding + outer;
+    const cap = Math.max(height, Math.min(rowsCap, maxRowHeight ?? Number.POSITIVE_INFINITY));
+    const wanted = Math.min(Math.max(height, natural + outer), cap);
+    row.style.height = `${wanted}px`;
+  }, [text, isMobile, height, maxRowHeight]);
 
   /**
    * A pick's caret, applied after React has written the new value — setting

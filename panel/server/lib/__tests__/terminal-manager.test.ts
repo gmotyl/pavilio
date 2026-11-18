@@ -310,6 +310,16 @@ describe("identity file lifecycle", () => {
     destroySession(meta.id)
   })
 
+  it("moving a session changes only its project", () => {
+    const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "alokai" })
+    const before = listSessions().find((s) => s.id === meta.id)!
+    expect(updateSession(meta.id, { project: "woozle" })).toBe(true)
+    const after = listSessions().find((s) => s.id === meta.id)!
+    expect(after).toEqual({ ...before, project: "woozle" })
+    expect(readIdentityFile(meta.id)).toBe(`${meta.name}\n`)
+    destroySession(meta.id)
+  })
+
   it("renaming an unknown session writes no file", () => {
     const ok = updateSession("00000000-0000-4000-8000-000000000000", { name: "ghost" })
     expect(ok).toBe(false)

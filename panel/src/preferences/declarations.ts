@@ -28,6 +28,7 @@ import { PROJECT_COLOR_HEX_RE, parseProjectMark } from "../features/projects/pro
 import { definePreference, type PreferenceCodec, type PreferenceDef } from "./types";
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
+import type { SidebarOrder } from "../features/shell/sidebarOrder";
 import type { RepoSearchScope } from "../features/projects/useRepoSearch";
 import type { GitViewMode } from "../features/git/useGitViewMode";
 import type { DrawerSide } from "../features/terminal/useTerminalDrawer";
@@ -98,6 +99,38 @@ function stringEntries(value: Record<string, unknown>): Record<string, string> {
     Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   );
 }
+
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+/** Not an object → throw (default); malformed entries are dropped, the rest kept. */
+const sidebarOrderCodec: PreferenceCodec<SidebarOrder> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a sidebar order: ${raw}`);
+    const groups = isRecord(parsed.groups) ? parsed.groups : {};
+    return {
+      top: strings(parsed.top),
+      groups: Object.fromEntries(
+        Object.entries(groups)
+          .filter(([, m]) => Array.isArray(m))
+          .map(([g, m]) => [g, strings(m)]),
+      ),
+    };
+  },
+  serialize: (value) => JSON.stringify(value),
+};
+
+const groupCollapsedCodec: PreferenceCodec<Record<string, boolean>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a collapse map: ${raw}`);
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, v]) => typeof v === "boolean"),
+    ) as Record<string, boolean>;
+  },
+  serialize: (value) => JSON.stringify(value),
+};
 
 /**
  * `speech.voice`, migrated on read. It used to be ONE voice id, stored as its
@@ -518,6 +551,26 @@ export const preferences = {
     scope: "global",
     default: [],
     codec: json<string[]>(),
+    portable: true,
+  }),
+  /**
+   * The sidebar's drag order: top-level `g:<group>` / `p:<project>` entries and
+   * each group's member order. Merged with discovery at render time
+   * (`features/shell/sidebarOrder.ts`), so stale entries are harmless.
+   */
+  sidebarOrder: definePreference<SidebarOrder>({
+    key: "shell.sidebarOrder", // was: nothing — new with project groups
+    scope: "global",
+    default: { top: [], groups: {} },
+    codec: sidebarOrderCodec,
+    portable: true,
+  }),
+  /** Collapsed sidebar groups by name; absent means expanded. */
+  groupCollapsed: definePreference<Record<string, boolean>>({
+    key: "shell.groupCollapsed", // was: nothing — new with project groups
+    scope: "global",
+    default: {},
+    codec: groupCollapsedCodec,
     portable: true,
   }),
   repoSearchScope: definePreference<RepoSearchScope>({
@@ -954,13 +1007,14 @@ export const preferences = {
   }),
   /**
    * Opacity (0–100) of the answer body's bottom edge; the top edge is always
-   * solid. Per project and portable, unlike the pane's height: it is a matter
-   * of taste, not of this window's viewport. 100 renders the solid pane; a
+   * solid. One global value, portable, unlike the pane's height: it is a matter
+   * of taste, not of this window's viewport. Older per-project values
+   * (`key@<project>`) are simply never read. 100 renders the solid pane; a
    * stored value outside 0–100 or not a number reads as 100.
    */
   answerOpacityBottom: definePreference({
     key: "speech.answerPane.opacityBottom", // was: nothing — new with the slider
-    scope: "project",
+    scope: "global",
     default: 100,
     codec: boundedNum(0, 100),
     portable: true,

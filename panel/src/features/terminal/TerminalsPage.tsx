@@ -51,13 +51,15 @@ export function TerminalsPage() {
           console.warn(
             `[terminals-page] DELETE session ${id} returned ${res.status}`,
           );
-          return;
+          return false;
         }
         destroyTerminal(id);
         if (focusedId === id) setFocusedId(null);
         await refresh();
+        return true;
       } catch (err) {
         console.warn(`[terminals-page] delete session ${id} failed:`, err);
+        return false;
       }
     },
     [refresh, focusedId],

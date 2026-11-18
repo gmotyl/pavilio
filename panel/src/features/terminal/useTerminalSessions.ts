@@ -136,6 +136,9 @@ export function sessionLabel(session: SessionMeta): string {
   return isAutoName(session) ? session.title ?? session.name : session.name;
 }
 
+/** Window event fired after a session moved project; per-project lists refetch. */
+export const SESSION_MOVED_EVENT = "pavilio:terminal-session-moved";
+
 export function useTerminalSessions(project: string) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [focusedId, setFocusedIdState] = useState<string | null>(() =>
@@ -179,6 +182,11 @@ export function useTerminalSessions(project: string) {
 
   useEffect(() => {
     fetchSessions();
+    // A session moved to another project: this per-project list owns its own
+    // fetch (not the shared store), so it refetches on the move's signal.
+    const onMoved = () => void fetchSessions();
+    window.addEventListener(SESSION_MOVED_EVENT, onMoved);
+    return () => window.removeEventListener(SESSION_MOVED_EVENT, onMoved);
   }, [fetchSessions]);
 
   // Adopt the session the surface actually shows when the stored focus cannot
@@ -290,7 +298,7 @@ export function useTerminalSessions(project: string) {
         console.warn(
           `[terminal] DELETE session ${id} returned ${res.status}`,
         );
-        return;
+        return false;
       }
       destroyTerminal(id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
@@ -304,8 +312,10 @@ export function useTerminalSessions(project: string) {
         writeTerminalFocus(project, next);
         return next;
       });
+      return true;
     } catch (err) {
       console.warn(`[terminal] delete session ${id} failed:`, err);
+      return false;
     }
     // `project` is read only inside the focus updater, which cannot go stale in a
     // way that matters here; `removeId` is a stable dispatch wrapper.

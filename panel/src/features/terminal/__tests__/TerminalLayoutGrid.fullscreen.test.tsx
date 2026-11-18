@@ -167,7 +167,7 @@ describe("TerminalLayoutGrid — fullscreen controls", () => {
     const exit = screen.getByTestId("terminal-cell-fullscreen-x-a");
     expect(exit).toHaveAccessibleName("Exit fullscreen");
     expect(exit).toHaveAttribute("aria-pressed", "true");
-    expect(exit.querySelector("svg.lucide-minimize-2")).not.toBeNull();
+    expect(exit.querySelector("svg.lucide-minimize")).not.toBeNull();
     expect(exit.querySelector("svg.lucide-maximize")).toBeNull();
     // ... while every other cell still offers to enter.
     const other = screen.getByTestId("terminal-cell-fullscreen-x-b");
@@ -179,7 +179,7 @@ describe("TerminalLayoutGrid — fullscreen controls", () => {
     const toolbarExit = screen.getByTestId("terminal-toolbar-fullscreen");
     expect(toolbarExit).toHaveAccessibleName("Exit fullscreen");
     expect(toolbarExit).toHaveAttribute("aria-pressed", "true");
-    expect(toolbarExit.querySelector("svg.lucide-minimize-2")).not.toBeNull();
+    expect(toolbarExit.querySelector("svg.lucide-minimize")).not.toBeNull();
   });
 
   it("controls appear on project tab, global view and drawer, not on mobile", async () => {
