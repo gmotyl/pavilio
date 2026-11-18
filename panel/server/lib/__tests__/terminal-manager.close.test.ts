@@ -304,17 +304,35 @@ describe("closeSession", () => {
     await p
   })
 
-  it("closeAllSessions picks up a session that appeared during the close", async () => {
+  it("closeAllSessions sweeps a session that appeared during the close", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const a = open()
-    const p = closeAllSessions(SHUTDOWN_SCHEDULE)
+    let done = false
+    const p = closeAllSessions(SHUTDOWN_SCHEDULE).then(() => void (done = true))
     fake.exits.get(a.pid)!()
     // Slipped in without going through createSession's guard (e.g. a spawn
-    // already in flight): the loop must still end it.
+    // already in flight). It is never exited by hand: only the sweep may end it.
     __resetShuttingDownForTests()
     const b = open()
     await vi.advanceTimersByTimeAsync(0)
-    fake.exits.get(b.pid)!()
+    expect(signals("SIGHUP")).toContain(b.pid)
+    expect(done).toBe(false)
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_SCHEDULE.termToKillMs)
+    expect(signals("SIGKILL")).toContain(b.pid)
     await p
-    expect(listSessions()).toEqual([])
+    expect(done).toBe(true)
+    warn.mockRestore()
+  })
+
+  it("closeAllSessions resolves though a session never exits, closing it once", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const stuck = open()
+    const p = closeAllSessions(SHUTDOWN_SCHEDULE)
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_SCHEDULE.termToKillMs + 5000)
+    await p
+    expect(listSessions().map((s) => s.id)).toEqual([stuck.id])
+    expect(signals("SIGHUP")).toEqual([stuck.pid])
+    expect(signals("SIGKILL")).toEqual([stuck.pid])
+    warn.mockRestore()
   })
 })
