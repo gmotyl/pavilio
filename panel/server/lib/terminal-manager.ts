@@ -431,15 +431,17 @@ async function runClose(
   // Done = PTY exited AND nothing in the snapshot is alive. After a PTY exit
   // with stragglers, keep polling until the window closes.
   const settle = async (ms: number): Promise<boolean> => {
-    let waited = 0;
-    if (!ptyExited() && ms > 0 && !(await waitForExit(id, ms))) waited = ms;
+    // One deadline per phase: a PTY that exits early must not buy the survivor
+    // poll a second full `ms`, or SIGKILL slips past the shutdown budget.
+    // Date.now is mocked by fake timers, so tests agree with real time.
+    const deadline = Date.now() + ms;
+    if (!ptyExited() && ms > 0 && !(await waitForExit(id, ms))) return false;
     if (!ptyExited()) return false;
-    // Budget is counted in poll steps, not wall time, so fake timers agree.
     const step = 50;
-    while (survivors().length > 0 && waited < ms) {
-      const slice = Math.min(step, ms - waited);
-      await new Promise((r) => setTimeout(r, slice));
-      waited += slice;
+    while (survivors().length > 0) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise((r) => setTimeout(r, Math.min(step, remaining)));
     }
     return survivors().length === 0;
   };

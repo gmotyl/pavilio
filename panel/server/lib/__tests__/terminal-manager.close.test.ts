@@ -109,6 +109,26 @@ describe("closeSession", () => {
     expect(await p).toBe("exited")
   })
 
+  it("a phase that sees the pty exit early still ends on schedule", async () => {
+    const { id, pid } = open()
+    table = new Map([[pid, [900]]])
+    alive.add(900)
+    const schedule = { hupToTermMs: 500, termToKillMs: 500, afterKillMs: 0 }
+    const p = closeSession(id, schedule)
+    await vi.advanceTimersByTimeAsync(100)
+    fake.exits.get(pid)!()
+    await vi.advanceTimersByTimeAsync(399)
+    expect(signals("SIGTERM")).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signals("SIGTERM")).toEqual([900])
+    await vi.advanceTimersByTimeAsync(499)
+    expect(signals("SIGKILL")).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signals("SIGKILL")).toEqual([900])
+    alive.delete(900)
+    await p
+  })
+
   it("survivors after SIGKILL report still-alive with a warning", async () => {
     const { id, pid } = open()
     table = new Map([[pid, [900]]])
