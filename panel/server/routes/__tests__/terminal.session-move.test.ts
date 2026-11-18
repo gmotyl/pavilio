@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
@@ -71,6 +71,14 @@ describe("PATCH /api/terminal/sessions/:id — session move", () => {
 
   it.each(["../motyl", "archived/oldie"])("project path %s is rejected", async (project) => {
     const res = await request(app()).patch("/api/terminal/sessions/s1").send({ project });
+    expect(res.status).toBe(400);
+    expect(store.sessions[0].project).toBe("motyl");
+  });
+
+  it("moving to a symlinked project dir is rejected", async () => {
+    // Discovery skips symlinked dirs, so the panel never lists this alias.
+    symlinkSync(join(projects.dir(), "archived", "oldie"), join(projects.dir(), "alias"));
+    const res = await request(app()).patch("/api/terminal/sessions/s1").send({ project: "alias" });
     expect(res.status).toBe(400);
     expect(store.sessions[0].project).toBe("motyl");
   });

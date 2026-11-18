@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { randomBytes } from "crypto";
-import { readFileSync } from "fs";
+import { lstatSync, readFileSync } from "fs";
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
 import { homedir, tmpdir, userInfo } from "os";
@@ -62,11 +62,17 @@ router.patch("/sessions/:id", (req, res) => {
   // rejected: PATCH is a partial update, and failing the whole request over one
   // field the model no longer has would break that client's renames too.
   // `project` moves the session: only discovered, live projects qualify —
-  // archived ones sit under `archived/` and fail the discovery rule.
+  // archived ones sit under `archived/` and fail the discovery rule, and a
+  // symlinked dir is skipped by discovery (Dirent.isDirectory), so lstat here too.
   const { name, project } = req.body ?? {};
   const updates: { name?: string; project?: string } = { name };
   if (project !== undefined) {
-    if (typeof project !== "string" || !isProjectDir(getConfig().projectsDir, project)) {
+    const { projectsDir } = getConfig();
+    if (
+      typeof project !== "string" ||
+      !isProjectDir(projectsDir, project) ||
+      !lstatSync(join(projectsDir, project), { throwIfNoEntry: false })?.isDirectory()
+    ) {
       return res.status(400).json({ error: "Unknown or archived project" });
     }
     updates.project = project;
