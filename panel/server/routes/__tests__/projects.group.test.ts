@@ -92,6 +92,18 @@ describe("project group endpoints", () => {
     expect(status).toContain(" M projects/gamma/PROJECT.md");
   });
 
+  it("a glob-like project name commits only its own card", async () => {
+    card("foo*");
+    card("foobar");
+    git("add", "-A");
+    git("commit", "-q", "-m", "more");
+    writeFileSync(join(ws.dir(), "foobar", "PROJECT.md"), read("foobar") + "\nDirty.\n");
+    const res = await request(app()).put("/api/projects/foo*/group").send({ group: "G" });
+    expect(res.status).toBe(200);
+    expect(lastFiles()).toEqual(["projects/foo*/PROJECT.md"]);
+    expect(git("status", "--porcelain")).toBe("M projects/foobar/PROJECT.md");
+  });
+
   it("git failure restores the file and returns 500", async () => {
     const hook = join(ws.root(), ".git", "hooks", "pre-commit");
     writeFileSync(hook, "#!/bin/sh\necho hook-says-no >&2\nexit 1\n");
