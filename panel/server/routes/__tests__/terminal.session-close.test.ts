@@ -11,7 +11,7 @@ vi.mock("../../lib/terminal-manager", () => ({
 }));
 
 import terminalRouter from "../terminal";
-import { closeSession } from "../../lib/terminal-manager";
+import { closeSession, createSession } from "../../lib/terminal-manager";
 
 const del = () => request(makeApp(terminalRouter, "/api/terminal")).delete("/api/terminal/sessions/s1");
 
@@ -51,5 +51,18 @@ describe("DELETE /api/terminal/sessions/:id", () => {
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: "Session close failed" });
     expect(errorSpy).toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/terminal/sessions during shutdown", () => {
+  it("POST answers 503 when the panel is shutting down", async () => {
+    vi.mocked(createSession).mockImplementation(() => {
+      throw Object.assign(new Error("shutting down"), { code: "PANEL_SHUTTING_DOWN" });
+    });
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
+      .post("/api/terminal/sessions")
+      .send({ cwd: "/tmp", project: "p" });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: "Panel is shutting down" });
   });
 });

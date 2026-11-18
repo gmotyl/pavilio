@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import {
   __setCloseDeps,
   closeAllSessions,
+  __resetShuttingDownForTests,
   closeSession,
   createSession,
   getSession,
@@ -69,6 +70,7 @@ afterEach(() => {
   for (const exit of fake.exits.values()) exit()
   fake.exits.clear()
   __setCloseDeps()
+  __resetShuttingDownForTests()
   vi.useRealTimers()
   if (previousStateDir === undefined) delete process.env.PANEL_AUTH_STATE_DIR
   else process.env.PANEL_AUTH_STATE_DIR = previousStateDir
@@ -288,6 +290,29 @@ describe("closeSession", () => {
     const p = closeAllSessions(SHUTDOWN_SCHEDULE)
     expect(signals("SIGHUP")).toEqual([a.pid, b.pid].sort())
     fake.exits.get(a.pid)!()
+    fake.exits.get(b.pid)!()
+    await p
+    expect(listSessions()).toEqual([])
+  })
+
+  it("createSession refuses once closeAllSessions has started", async () => {
+    const a = open()
+    const p = closeAllSessions(SHUTDOWN_SCHEDULE)
+    expect(() => open()).toThrowError(/shutting down/)
+    expect(listSessions().map((s) => s.id)).toEqual([a.id])
+    fake.exits.get(a.pid)!()
+    await p
+  })
+
+  it("closeAllSessions picks up a session that appeared during the close", async () => {
+    const a = open()
+    const p = closeAllSessions(SHUTDOWN_SCHEDULE)
+    fake.exits.get(a.pid)!()
+    // Slipped in without going through createSession's guard (e.g. a spawn
+    // already in flight): the loop must still end it.
+    __resetShuttingDownForTests()
+    const b = open()
+    await vi.advanceTimersByTimeAsync(0)
     fake.exits.get(b.pid)!()
     await p
     expect(listSessions()).toEqual([])

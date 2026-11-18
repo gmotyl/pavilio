@@ -46,15 +46,25 @@ router.post("/sessions", (req, res) => {
   // non-string/empty) value falls back to the project's stored default.
   const effectiveRunAsUser =
     typeof runAsUser === "string" && runAsUser ? runAsUser : getDefaultUser(project);
-  const session = createSession({
-    cwd: effectiveCwd,
-    cols,
-    rows,
-    project,
-    name,
-    runAsUser: effectiveRunAsUser,
-  });
-  res.status(201).json(session);
+  try {
+    const session = createSession({
+      cwd: effectiveCwd,
+      cols,
+      rows,
+      project,
+      name,
+      runAsUser: effectiveRunAsUser,
+    });
+    res.status(201).json(session);
+  } catch (err) {
+    // Matched by code, not instanceof: shutdown has begun and the final sweep
+    // must not race a fresh PTY.
+    if ((err as { code?: string }).code === "PANEL_SHUTTING_DOWN") {
+      res.status(503).json({ error: "Panel is shutting down" });
+      return;
+    }
+    throw err;
+  }
 });
 
 router.patch("/sessions/:id", (req, res) => {

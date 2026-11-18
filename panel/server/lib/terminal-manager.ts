@@ -125,6 +125,22 @@ function panelOwner(): TerminalOwner | undefined {
   return uid < 0 ? undefined : { uid, gid };
 }
 
+/** Set once shutdown starts: no session may be created after the final sweep. */
+let closingForShutdown = false;
+
+/** Thrown by `createSession` while the panel is shutting down. */
+export class PanelShuttingDownError extends Error {
+  readonly code = "PANEL_SHUTTING_DOWN";
+  constructor() {
+    super("Panel is shutting down");
+  }
+}
+
+/** Test-only: re-open session creation after a `closeAllSessions` call. */
+export function __resetShuttingDownForTests(): void {
+  closingForShutdown = false;
+}
+
 export function createSession(opts: {
   cwd: string;
   cols: number;
@@ -133,6 +149,7 @@ export function createSession(opts: {
   name?: string;
   runAsUser?: string;
 }): TerminalSessionMeta {
+  if (closingForShutdown) throw new PanelShuttingDownError();
   const id = randomUUID();
   const shell = defaultShell();
 
@@ -535,9 +552,16 @@ export function closeSession(
 }
 
 export async function closeAllSessions(schedule: CloseSchedule): Promise<void> {
-  await Promise.allSettled(
-    Array.from(sessions.keys()).map((id) => closeSession(id, schedule)),
-  );
+  closingForShutdown = true;
+  // Sweep until a pass finds nothing new; each id is closed once, and
+  // closeSession itself is bounded by `schedule`, so this terminates.
+  const handled = new Set<string>();
+  for (;;) {
+    const fresh = Array.from(sessions.keys()).filter((id) => !handled.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) handled.add(id);
+    await Promise.allSettled(fresh.map((id) => closeSession(id, schedule)));
+  }
 }
 
 /**
