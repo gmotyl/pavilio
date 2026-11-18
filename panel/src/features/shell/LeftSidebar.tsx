@@ -406,7 +406,15 @@ export default function LeftSidebar() {
   const visibleProjects = projects.filter((p) => !archivedNames.has(p.name));
   const starredProjects = visibleProjects.filter((p) => isFavorite(p.name));
   const unstarred = visibleProjects.filter((p) => !isFavorite(p.name));
-  const otherProjects = unstarred.filter((p) => kindOf(p) === "project");
+  // The Projects tree also lists a starred project that has a group, so the
+  // group stays whole (count, icon, collapsed dot). An ungrouped starred
+  // project lives in Starred only; a starred research project never joins a
+  // group (Research and groups ignore it, as before).
+  const otherProjects = visibleProjects.filter(
+    (p) =>
+      kindOf(p) === "project" &&
+      (!isFavorite(p.name) || (typeof p.group === "string" && p.group !== "")),
+  );
   const researchProjects = unstarred
     .filter((p) => kindOf(p) !== "project")
     .sort(compareResearch);

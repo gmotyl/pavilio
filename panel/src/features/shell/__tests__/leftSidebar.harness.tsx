@@ -16,7 +16,7 @@
 import type { CellSpeechState } from "../../speech/types";
 import type { SessionMeta } from "../../terminal/useTerminalSessions";
 
-type Project = { name: string; repos: unknown[] };
+type Project = { name: string; repos: unknown[]; group?: string; kind?: string };
 
 export const mockShellDeps = {
   useProjects: (projects: () => Project[]) => ({
@@ -28,11 +28,12 @@ export const mockShellDeps = {
   useArchivedProjects: () => ({
     useArchivedProjects: () => ({ archive: [], archivedNames: new Set() }),
   }),
-  useFavorites: () => ({
+  /** `starred` is read on every call, so a test can swap the set per test. */
+  useFavorites: (starred: () => ReadonlySet<string> = () => new Set()) => ({
     useFavorites: () => ({
-      isFavorite: () => false,
+      isFavorite: (name: string) => starred().has(name),
       toggleFavorite: () => {},
-      favorites: [],
+      favorites: [...starred()],
     }),
   }),
   useMobileAccessStatus: () => ({

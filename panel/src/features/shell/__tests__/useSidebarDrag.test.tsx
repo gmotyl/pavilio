@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
+// The activity LED needs the speech host; the drag behaviour does not.
+vi.mock("../../terminal/ProjectActivityLed", () => ({ ProjectActivityLed: () => null }));
+
+import { SidebarGroupRow } from "../SidebarGroupRow";
 import { applyDrop, dropStyle, useSidebarDrag } from "../useSidebarDrag";
 import type { SidebarOrder } from "../sidebarOrder";
 import * as alertStore from "../../alerts/store";
@@ -431,5 +435,100 @@ describe("useSidebarDrag", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(onOrder).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** The real group row (role=button, onClick=onToggle) wired to the drag hook. */
+function GroupRowHarness({
+  onOrder,
+  onToggle,
+}: {
+  onOrder: (o: SidebarOrder) => void;
+  onToggle: () => void;
+}) {
+  const [order, setOrder] = useState(ORDER);
+  const drag = useSidebarDrag({
+    projects: PROJECTS,
+    order,
+    setOrder: (o) => {
+      setOrder(o);
+      onOrder(o);
+    },
+    isMobile: false,
+  });
+  return (
+    <ul>
+      {drag.tree.map((n) =>
+        n.kind === "project" ? (
+          <li key={n.name}>
+            <div data-testid={`row-${n.name}`} {...drag.rowProps(`p:${n.name}`, null)} />
+          </li>
+        ) : (
+          <SidebarGroupRow
+            key={n.name}
+            name={n.name}
+            members={n.members}
+            sessionIds={[]}
+            collapsed={false}
+            onToggle={onToggle}
+            isMobile={false}
+            dragProps={drag.rowProps(`g:${n.name}`, null)}
+          >
+            {n.members.map((m) => (
+              <li key={m}>
+                <div data-testid={`row-${m}`} {...drag.rowProps(`p:${m}`, n.name)} />
+              </li>
+            ))}
+          </SidebarGroupRow>
+        ),
+      )}
+    </ul>
+  );
+}
+
+describe("useSidebarDrag on a group row", () => {
+  it("dragging a group row past the threshold does not toggle it", () => {
+    const onOrder = vi.fn();
+    const onToggle = vi.fn();
+    render(<GroupRowHarness onOrder={onOrder} onToggle={onToggle} />);
+    startDrag("sidebar-group-row-InfoPoly");
+    hover("row-pavilio", 18);
+    drop();
+    // The browser's click after a drag lands on the row; it must be swallowed.
+    fireEvent.click(screen.getByTestId("sidebar-group-row-InfoPoly"));
+    expect(onOrder).toHaveBeenCalledTimes(1);
+    expect(onOrder.mock.calls[0][0].top).toEqual([
+      "g:Motyl OSS",
+      "p:anytts",
+      "p:pavilio",
+      "g:InfoPoly",
+    ]);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("a drag can start on the group chevron", () => {
+    const onOrder = vi.fn();
+    const onToggle = vi.fn();
+    render(<GroupRowHarness onOrder={onOrder} onToggle={onToggle} />);
+    startDrag("sidebar-group-toggle-InfoPoly");
+    hover("row-pavilio", 18);
+    drop();
+    fireEvent.click(screen.getByTestId("sidebar-group-toggle-InfoPoly"));
+    expect(onOrder).toHaveBeenCalledTimes(1);
+    expect(onOrder.mock.calls[0][0].top.at(-1)).toBe("g:InfoPoly");
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("a sub-threshold press on a group row toggles it", () => {
+    const onOrder = vi.fn();
+    const onToggle = vi.fn();
+    render(<GroupRowHarness onOrder={onOrder} onToggle={onToggle} />);
+    const row = screen.getByTestId("sidebar-group-row-InfoPoly");
+    fireEvent.pointerDown(row, { button: 0, clientX: 0, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: 1, clientY: 12, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 1, clientY: 12, pointerId: 1 });
+    fireEvent.click(row);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onOrder).not.toHaveBeenCalled();
   });
 });
