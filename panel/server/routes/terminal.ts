@@ -83,7 +83,15 @@ router.patch("/sessions/:id", (req, res) => {
 });
 
 router.delete("/sessions/:id", async (req, res) => {
-  const outcome = await closeSession(req.params.id);
+  let outcome: Awaited<ReturnType<typeof closeSession>>;
+  try {
+    outcome = await closeSession(req.params.id);
+  } catch (err) {
+    // An async handler's rejection would escape Express 4 as an unhandled
+    // rejection, so answer it here.
+    console.error(`[terminal] closing session ${req.params.id} failed:`, err);
+    return res.status(500).json({ error: "Session close failed" });
+  }
   if (outcome === "not-found") {
     return res.status(404).json({ error: "Session not found" });
   }
