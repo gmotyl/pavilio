@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const flushPreferences = vi.fn(() => Promise.resolve());
 vi.mock("../preferences-store.js", () => ({ flushPreferences: () => flushPreferences() }));
 
+// Keeps node-pty out of the import graph; the close itself is covered by
+// shutdown-sessions.test.ts.
+vi.mock("../terminal-manager.js", () => ({
+  SHUTDOWN_SCHEDULE: {},
+  closeAllSessions: () => Promise.resolve(),
+}));
+
 type Handler = (arg: unknown) => void;
 
 // The real process handlers would outlive the test and swallow vitest's own

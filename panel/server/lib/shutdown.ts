@@ -7,6 +7,8 @@
 // 128 + signal number, the code a shell reports for a signalled process.
 
 import { flushPreferences } from "./preferences-store.js";
+// terminal-manager does not import this module, so there is no import cycle.
+import { closeAllSessions, SHUTDOWN_SCHEDULE } from "./terminal-manager.js";
 
 /** Signal → its number, for the conventional 128 + n exit code. */
 const SIGNALS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
@@ -16,6 +18,16 @@ let crashLogInstalled = false;
 
 /** How long a dying panel waits for the preference flush before exiting anyway. */
 const FLUSH_TIMEOUT_MS = 1000;
+
+/**
+ * Flush preferences and end every terminal session's process tree. Never
+ * rejects: a failed kill or write must not be the reason a shutdown hangs.
+ * SHUTDOWN_SCHEDULE (HUP, KILL after 500 ms, no wait after KILL) fits inside
+ * FLUSH_TIMEOUT_MS, which stays the hard cap either way.
+ */
+async function flushAndCloseSessions(): Promise<void> {
+  await Promise.allSettled([flushPreferences(), closeAllSessions(SHUTDOWN_SCHEDULE)]);
+}
 
 /**
  * Log an uncaught exception or unhandled rejection with a timestamp, flush
@@ -31,9 +43,9 @@ export function installCrashLog(): void {
 
   const die = (kind: string, err: unknown) => {
     console.error(`[panel] ${new Date().toISOString()} ${kind} — panel exiting:`, err);
-    // A flush that hangs must not keep a broken process alive.
+    // A flush or close that hangs must not keep a broken process alive.
     setTimeout(() => process.exit(1), FLUSH_TIMEOUT_MS).unref();
-    void flushPreferences().then(() => process.exit(1));
+    void flushAndCloseSessions().then(() => process.exit(1));
   };
   process.on("uncaughtException", (err) => die("uncaught exception", err));
   process.on("unhandledRejection", (reason) => die("unhandled rejection", reason));
@@ -61,9 +73,7 @@ export function installPreferenceFlush(): void {
       flushing = true;
       setTimeout(() => process.exit(128 + number), FLUSH_TIMEOUT_MS).unref();
       void (async () => {
-        // Never rejects — a failed write is logged by the store, and a full
-        // disk must not be the reason a shutdown hangs.
-        await flushPreferences();
+        await flushAndCloseSessions();
         process.exit(128 + number);
       })();
     });
