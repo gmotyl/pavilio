@@ -8,7 +8,9 @@ import type {
 import { alerts } from "../alerts/store";
 import { refreshProjects } from "../projects/useProjects";
 import {
+  groupMap,
   mergeSidebarOrder,
+  ownList,
   type SidebarNode,
   type SidebarOrder,
 } from "./sidebarOrder";
@@ -57,7 +59,7 @@ export function dropStyle(edge: Edge | undefined, dragging = false): CSSProperti
 
 /** The order the tree currently shows, as a fully explicit SidebarOrder. */
 function orderOf(tree: SidebarNode[]): SidebarOrder {
-  const groups: Record<string, string[]> = {};
+  const groups = groupMap<string[]>();
   const top = tree.map((n) => {
     if (n.kind === "group") groups[n.name] = [...n.members];
     return `${n.kind === "group" ? "g" : "p"}:${n.name}`;
@@ -89,18 +91,18 @@ export function applyDrop(
   // Remove from where it was.
   if (source.container === null) order.top = order.top.filter((k) => k !== source.key);
   else
-    order.groups[source.container] = (order.groups[source.container] ?? []).filter(
+    order.groups[source.container] = (ownList(order.groups, source.container) ?? []).filter(
       (m) => m !== name,
     );
 
   let dest: string | null;
   if (t.edge === "into") {
     dest = t.key.slice(2);
-    const list = order.groups[dest] ?? [];
+    const list = ownList(order.groups, dest) ?? [];
     order.groups[dest] = [...list.filter((m) => m !== name), name];
   } else {
     dest = t.container;
-    const list = dest === null ? order.top : (order.groups[dest] ?? []);
+    const list = dest === null ? order.top : (ownList(order.groups, dest) ?? []);
     const item = dest === null ? source.key : name;
     const anchor = dest === null ? t.key : t.key.slice(2);
     const at = list.indexOf(anchor);
@@ -110,7 +112,7 @@ export function applyDrop(
     else order.groups[dest] = next;
   }
   // An emptied group stays out of the saved order (it vanishes on refresh).
-  if (source.container !== null && order.groups[source.container]?.length === 0) {
+  if (source.container !== null && ownList(order.groups, source.container)?.length === 0) {
     delete order.groups[source.container];
     order.top = order.top.filter((k) => k !== `g:${source.container}`);
   }
@@ -172,6 +174,9 @@ export function useSidebarDrag({
   const draggingRef = useRef<Source | null>(null);
   draggingRef.current = dragging;
   const mounted = useRef(true);
+  // Every drop bumps this; a cross-group drop whose refresh settles after a
+  // newer drop must not write its older order over the newer one.
+  const dropSeq = useRef(0);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     mounted.current = true;
@@ -186,6 +191,7 @@ export function useSidebarDrag({
     async (source: Source, t: Target) => {
       const result = applyDrop(treeRef.current, source, t);
       if (!result) return;
+      const seq = ++dropSeq.current;
       if (!result.group) {
         setOrder(result.order);
         return;
@@ -200,7 +206,7 @@ export function useSidebarDrag({
         });
         if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       } catch (err) {
-        if (mounted.current) setPending(null);
+        if (mounted.current && seq === dropSeq.current) setPending(null);
         alerts.error(`Could not move ${project}`, {
           detail: err instanceof Error ? err.message : String(err),
           project,
@@ -212,11 +218,16 @@ export function useSidebarDrag({
       // order is saved even after an unmount: the group already moved on the
       // server, and setOrder is a preference write (store + PATCH), which
       // outlives this component; its local setState is a no-op once unmounted.
+      // A newer drop was computed from a tree that already showed this one, so
+      // its order supersedes this snapshot; this pending override then clears
+      // once discovery reports the group.
       try {
         await refreshProjects();
       } finally {
-        setOrder(result.order);
-        if (mounted.current) setPending(null);
+        if (seq === dropSeq.current) {
+          setOrder(result.order);
+          if (mounted.current) setPending(null);
+        }
       }
     },
     [setOrder],

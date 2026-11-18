@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { dropStyle, useSidebarDrag } from "../useSidebarDrag";
+import { applyDrop, dropStyle, useSidebarDrag } from "../useSidebarDrag";
 import type { SidebarOrder } from "../sidebarOrder";
 import * as alertStore from "../../alerts/store";
 
@@ -367,6 +367,54 @@ describe("useSidebarDrag", () => {
     hover("row-anytts", 2);
     expect(screen.getByTestId("row-anytts").hasAttribute("data-drop")).toBe(false);
     expect(screen.getByTestId("row-pavilio").hasAttribute("data-drop")).toBe(false);
+  });
+
+  it("a slow refresh from an older drop does not overwrite a newer drop's order", async () => {
+    let resolveList!: (r: Response) => void;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/projects") return new Promise<Response>((r) => (resolveList = r));
+      return new Response(JSON.stringify({ group: "InfoPoly" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const listener = (e: Event) => {
+      (e as CustomEvent<{ waitUntil: (p: Promise<unknown>) => void }>).detail.waitUntil(
+        fetch("/api/projects"),
+      );
+    };
+    window.addEventListener("pavilio:projects-refresh", listener);
+    const onOrder = vi.fn();
+    try {
+      render(<Harness onOrder={onOrder} />);
+      // A: cross-group, its refresh hangs.
+      startDrag("row-anytts");
+      hover("row-g-InfoPoly", 10);
+      await act(async () => drop());
+      // B: same-group reorder, saved at once.
+      startDrag("row-zdrofit-sniper");
+      hover("row-omnivoice-server", 2);
+      await act(async () => drop());
+      expect(onOrder).toHaveBeenCalledTimes(1);
+      const newer = onOrder.mock.calls[0][0] as SidebarOrder;
+      expect(newer.groups["Motyl OSS"]).toEqual(["zdrofit-sniper", "omnivoice-server"]);
+      expect(newer.groups.InfoPoly).toEqual(["infopoly", "anytts"]);
+      await act(async () => resolveList(new Response("[]")));
+      expect(onOrder).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("pavilio:projects-refresh", listener);
+    }
+  });
+
+  it("group names that shadow Object.prototype drop like any group", () => {
+    const tree = [
+      { kind: "group" as const, name: "toString", members: ["a"] },
+      { kind: "project" as const, name: "b" },
+    ];
+    const r = applyDrop(tree, { key: "p:b", container: null }, { key: "g:toString", container: null, edge: "into" });
+    expect(r?.order.groups.toString).toEqual(["a", "b"]);
+    expect(r?.group).toEqual({ project: "b", group: "toString" });
+    const out = applyDrop(tree, { key: "p:a", container: "toString" }, { key: "p:b", container: null, edge: "after" });
+    expect(out?.order.top).toEqual(["p:b", "p:a"]);
+    expect(Object.hasOwn(out!.order.groups, "toString")).toBe(false);
   });
 
   it("unmount after a successful PUT still saves the order", async () => {
