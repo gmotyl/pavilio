@@ -94,8 +94,9 @@ const sessions: SessionMeta[] = [
  * the `sessions` above — before every test.
  */
 const shell = vi.hoisted(() => ({
-  projects: (): Array<{ name: string; repos: unknown[] }> => [],
+  projects: (): Array<{ name: string; repos: unknown[]; group?: string; kind?: string }> => [],
   sessions: (): SessionMeta[] => [],
+  starred: new Set<string>() as ReadonlySet<string>,
 }));
 
 vi.mock("../../projects/useProjects", () =>
@@ -108,7 +109,7 @@ vi.mock("../../projects/useArchivedProjects", () =>
   import("./leftSidebar.harness").then((m) => m.mockShellDeps.useArchivedProjects()),
 );
 vi.mock("../../projects/useFavorites", () =>
-  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useFavorites()),
+  import("./leftSidebar.harness").then((m) => m.mockShellDeps.useFavorites(() => shell.starred)),
 );
 vi.mock("../../mobile-access/useMobileAccessStatus", () =>
   import("./leftSidebar.harness").then((m) => m.mockShellDeps.useMobileAccessStatus()),
@@ -191,6 +192,7 @@ beforeEach(() => {
     { name: "atlas", repos: [] },
   ];
   shell.sessions = () => sessions;
+  shell.starred = new Set();
 });
 
 describe("LeftSidebar terminal-session row navigation", () => {
@@ -1003,5 +1005,124 @@ describe("LeftSidebar.mobileMenu", () => {
 
     expect(screen.queryByTestId("sidebar-session-s1")).not.toBeInTheDocument();
     expect(readPreference(preferences.projectExpanded, "vector")).toBe(false);
+  });
+});
+
+describe("LeftSidebar.starredGroupMembers", () => {
+  beforeEach(() => {
+    __resetPreferenceStoreForTests();
+    shell.sessions = () => [];
+    shell.projects = () => [
+      { name: "motyl", repos: [], group: "motyl" },
+      { name: "mopsy", repos: [], group: "motyl" },
+      { name: "infopoly", repos: [], group: "infopoly" },
+      { name: "gitara", repos: [] },
+      { name: "notes", repos: [], kind: "research", group: "notes" },
+    ];
+  });
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+    __resetPreferenceStoreForTests();
+  });
+
+  const starredSection = () => screen.getByTestId("sidebar-section-starred");
+  const projectsTree = () => screen.getByTestId("sidebar-projects-tree");
+  const rowIn = (scope: HTMLElement, name: string) =>
+    scope.querySelector(`[data-testid='sidebar-project-row-${name}']`);
+  const membersOf = (group: string) =>
+    Array.from(
+      screen
+        .getByTestId(`sidebar-group-members-${group}`)
+        .querySelectorAll("[data-testid^='sidebar-project-row-']"),
+    ).map((el) => el.getAttribute("data-testid"));
+
+  it("starred group member is listed in Starred and in its group", () => {
+    shell.starred = new Set(["motyl"]);
+    setup();
+    expect(rowIn(starredSection(), "motyl")).not.toBeNull();
+    expect(
+      rowIn(screen.getByTestId("sidebar-group-members-motyl"), "motyl"),
+    ).not.toBeNull();
+  });
+
+  it("starred member keeps its saved position inside the group", () => {
+    writePreference(preferences.sidebarOrder, { top: [], groups: { motyl: ["mopsy", "motyl"] } });
+    shell.starred = new Set(["motyl"]);
+    setup();
+    expect(membersOf("motyl")).toEqual([
+      "sidebar-project-row-mopsy",
+      "sidebar-project-row-motyl",
+    ]);
+  });
+
+  it("group count and icon include a starred member", () => {
+    shell.starred = new Set(["motyl"]);
+    writePreference(preferences.sidebarOrder, { top: [], groups: { motyl: ["motyl", "mopsy"] } });
+    setup();
+    expect(screen.getByTestId("sidebar-group-count-motyl").textContent).toBe("2");
+    const icon = screen.getByTestId("sidebar-group-icon-motyl");
+    expect(icon.querySelector("[data-testid='project-mark']")).not.toBeNull();
+    // First in the saved order: the deck icon is motyl's mark, so the group
+    // has the same colour as the motyl row.
+    const rowTile = rowIn(screen.getByTestId("sidebar-group-members-motyl"), "motyl")!.querySelector(
+      "[data-testid='project-mark']",
+    )!;
+    expect(icon.querySelector("[data-testid='project-mark']")!.getAttribute("data-color")).toBe(
+      rowTile.getAttribute("data-color"),
+    );
+  });
+
+  it("group whose only member is starred is shown", () => {
+    shell.starred = new Set(["infopoly"]);
+    setup();
+    expect(screen.queryByTestId("sidebar-group-row-infopoly")).not.toBeNull();
+    expect(
+      rowIn(screen.getByTestId("sidebar-group-members-infopoly"), "infopoly"),
+    ).not.toBeNull();
+  });
+
+  it("ungrouped starred project stays out of the Projects tree", () => {
+    shell.starred = new Set(["gitara"]);
+    setup();
+    expect(rowIn(starredSection(), "gitara")).not.toBeNull();
+    expect(rowIn(projectsTree(), "gitara")).toBeNull();
+  });
+
+  it("starred research project with a group stays in Starred only", () => {
+    shell.starred = new Set(["notes"]);
+    setup();
+    expect(rowIn(starredSection(), "notes")).not.toBeNull();
+    expect(rowIn(projectsTree(), "notes")).toBeNull();
+    expect(screen.queryByTestId("sidebar-group-row-notes")).toBeNull();
+    const research = screen.getByTestId("sidebar-section-research");
+    expect(rowIn(research, "notes")).toBeNull();
+  });
+
+  it("collapsed group dot includes a starred member's sessions", () => {
+    shell.starred = new Set(["motyl"]);
+    shell.sessions = () => [
+      { id: "m1", project: "motyl", name: "m", cwd: "/", pid: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+    ];
+    writePreference(preferences.groupCollapsed, { motyl: true });
+    setup();
+    act(() => {
+      setActivity("m1", "attention");
+    });
+    const slot = screen.getByTestId("sidebar-group-slot-motyl");
+    expect(slot.querySelector("[data-state='attention']")).not.toBeNull();
+  });
+
+  it("both copies of a starred member share the expanded state", () => {
+    shell.starred = new Set(["motyl"]);
+    shell.sessions = () => [
+      { id: "m1", project: "motyl", name: "m", cwd: "/", pid: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+    ];
+    setup();
+    const [starredCopyBtn] = within(starredSection()).getAllByTestId("sidebar-project-expand-motyl");
+    fireEvent.click(starredCopyBtn);
+    const inGroup = screen.getByTestId("sidebar-group-members-motyl");
+    expect(within(inGroup).queryByTestId("sidebar-session-m1")).not.toBeNull();
+    expect(within(starredSection()).queryByTestId("sidebar-session-m1")).not.toBeNull();
   });
 });
