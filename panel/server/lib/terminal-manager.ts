@@ -526,6 +526,11 @@ async function runClose(
   return "still-alive";
 }
 
+function tightenPending(pending: PendingClose, schedule: CloseSchedule): void {
+  pending.control.schedule = tighten(pending.control.schedule, schedule);
+  pending.control.wake?.();
+}
+
 /**
  * End a session's processes and wait for its PTY to exit. Deletes nothing
  * itself: the session leaves the map in the PTY's `onExit` handler.
@@ -537,8 +542,7 @@ export function closeSession(
   const pending = pendingCloses.get(id);
   if (pending) {
     // Same promise, but a tighter schedule (shutdown) speeds the close up.
-    pending.control.schedule = tighten(pending.control.schedule, schedule);
-    pending.control.wake?.();
+    tightenPending(pending, schedule);
     return pending.promise;
   }
   const session = sessions.get(id);
@@ -557,10 +561,22 @@ export async function closeAllSessions(schedule: CloseSchedule): Promise<void> {
   // closeSession itself is bounded by `schedule`, so this terminates.
   const handled = new Set<string>();
   for (;;) {
-    const fresh = Array.from(sessions.keys()).filter((id) => !handled.has(id));
+    // A close can outlive its session (the PTY exited, orphans remain), so the
+    // pending closes are swept too, not only the ids still in `sessions`.
+    const ids = new Set([...sessions.keys(), ...pendingCloses.keys()]);
+    const fresh = Array.from(ids).filter((id) => !handled.has(id));
     if (fresh.length === 0) return;
     for (const id of fresh) handled.add(id);
-    await Promise.allSettled(fresh.map((id) => closeSession(id, schedule)));
+    await Promise.allSettled(
+      fresh.map((id) => {
+        const pending = pendingCloses.get(id);
+        if (pending) {
+          tightenPending(pending, schedule);
+          return pending.promise;
+        }
+        return closeSession(id, schedule);
+      }),
+    );
   }
 }
 

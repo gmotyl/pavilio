@@ -335,4 +335,26 @@ describe("closeSession", () => {
     expect(signals("SIGKILL")).toEqual([stuck.pid])
     warn.mockRestore()
   })
+
+  it("closeAllSessions tightens a close whose session already left the map", async () => {
+    const { id, pid } = open()
+    table = new Map([[pid, [900]]])
+    alive.add(900)
+    const p = closeSession(id)
+    await vi.advanceTimersByTimeAsync(100)
+    fake.exits.get(pid)!()
+    expect(getSession(id)).toBeUndefined()
+    let done = false
+    const all = closeAllSessions(SHUTDOWN_SCHEDULE).then(() => void (done = true))
+    await vi.advanceTimersByTimeAsync(399)
+    expect(signals("SIGKILL")).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signals("SIGKILL")).toEqual([900])
+    // SHUTDOWN allows no wait after KILL, so both promises settle at once.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await all
+    expect(done).toBe(true)
+    expect(await p).toBe("still-alive")
+    warn.mockRestore()
+  })
 })
