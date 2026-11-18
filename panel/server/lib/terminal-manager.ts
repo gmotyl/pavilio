@@ -364,16 +364,43 @@ export function __setCloseDeps(deps?: Partial<CloseDeps>): void {
 /** Wake-ups for closes waiting on a session's PTY exit, keyed by session id. */
 const exitWaiters = new Map<string, Array<() => void>>();
 /** One in-flight close per session; repeat closes share it. */
-const pendingCloses = new Map<string, Promise<CloseOutcome>>();
+const pendingCloses = new Map<string, PendingClose>();
+
+/** A running close plus the hook that lets a later, shorter schedule speed it up. */
+interface PendingClose {
+  promise: Promise<CloseOutcome>;
+  control: CloseControl;
+}
+
+interface CloseControl {
+  /** The schedule the running close currently follows; only ever tightened. */
+  schedule: CloseSchedule;
+  /** Interrupts the wait in progress so it re-reads `schedule`. */
+  wake?: () => void;
+}
+
+/** Field-wise tightest of two schedules; a skipped TERM stays skipped. */
+function tighten(a: CloseSchedule, b: CloseSchedule): CloseSchedule {
+  return {
+    hupToTermMs:
+      a.hupToTermMs === null || b.hupToTermMs === null
+        ? null
+        : Math.min(a.hupToTermMs, b.hupToTermMs),
+    termToKillMs: Math.min(a.termToKillMs, b.termToKillMs),
+    afterKillMs: Math.min(a.afterKillMs, b.afterKillMs),
+  };
+}
 
 /** Resolves true when the session's PTY exits within `ms`, false on timeout. */
-function waitForExit(id: string, ms: number): Promise<boolean> {
+function waitForExit(id: string, ms: number, control?: CloseControl): Promise<boolean> {
   return new Promise((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const wake = () => {
       if (timer) clearTimeout(timer);
+      if (control) control.wake = undefined;
       resolve(true);
     };
+    if (control) control.wake = wake;
     const list = exitWaiters.get(id) ?? [];
     list.push(wake);
     exitWaiters.set(id, list);
@@ -384,6 +411,7 @@ function waitForExit(id: string, ms: number): Promise<boolean> {
         if (next.length > 0) exitWaiters.set(id, next);
         else exitWaiters.delete(id);
       }
+      if (control) control.wake = undefined;
       resolve(false);
     }, ms);
   });
@@ -391,7 +419,7 @@ function waitForExit(id: string, ms: number): Promise<boolean> {
 
 async function runClose(
   session: TerminalSession,
-  schedule: CloseSchedule,
+  control: CloseControl,
 ): Promise<CloseOutcome> {
   const id = session.id;
   const rootPid = session.pty.pid;
@@ -430,36 +458,53 @@ async function runClose(
   };
   // Done = PTY exited AND nothing in the snapshot is alive. After a PTY exit
   // with stragglers, keep polling until the window closes.
-  const settle = async (ms: number): Promise<boolean> => {
+  // `phaseMs` is re-read on every wake-up so an escalation applies at once.
+  const settle = async (phaseMs: () => number): Promise<boolean> => {
     // One deadline per phase: a PTY that exits early must not buy the survivor
     // poll a second full `ms`, or SIGKILL slips past the shutdown budget.
     // Date.now is mocked by fake timers, so tests agree with real time.
-    const deadline = Date.now() + ms;
-    if (!ptyExited() && ms > 0 && !(await waitForExit(id, ms))) return false;
-    if (!ptyExited()) return false;
+    const start = Date.now();
     const step = 50;
-    while (survivors().length > 0) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
-      await new Promise((r) => setTimeout(r, Math.min(step, remaining)));
+    for (;;) {
+      const remaining = start + phaseMs() - Date.now();
+      if (!ptyExited()) {
+        if (remaining <= 0) return false;
+        // Woken by exit, timeout or escalation; the loop re-evaluates all three.
+        await waitForExit(id, remaining, control);
+        continue;
+      }
+      if (survivors().length === 0) return true;
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          control.wake = undefined;
+          resolve();
+        }, Math.min(step, remaining));
+        control.wake = () => {
+          clearTimeout(timer);
+          control.wake = undefined;
+          resolve();
+        };
+      });
     }
-    return survivors().length === 0;
   };
 
   snapshot();
   signal("SIGHUP");
-  const afterHupMs = schedule.hupToTermMs ?? schedule.termToKillMs;
-  if (await settle(afterHupMs)) return "exited";
+  if (await settle(() => control.schedule.hupToTermMs ?? control.schedule.termToKillMs)) {
+    return "exited";
+  }
 
-  if (schedule.hupToTermMs !== null) {
+  // Read after the HUP phase so an escalation that skips TERM is honoured.
+  if (control.schedule.hupToTermMs !== null) {
     snapshot();
     signal("SIGTERM");
-    if (await settle(schedule.termToKillMs)) return "exited";
+    if (await settle(() => control.schedule.termToKillMs)) return "exited";
   }
 
   snapshot();
   signal("SIGKILL");
-  if (await settle(schedule.afterKillMs)) return "exited";
+  if (await settle(() => control.schedule.afterKillMs)) return "exited";
   console.warn(`[terminal] session ${id} still alive after SIGKILL`);
   return "still-alive";
 }
@@ -473,13 +518,19 @@ export function closeSession(
   schedule: CloseSchedule = CLOSE_SCHEDULE,
 ): Promise<CloseOutcome> {
   const pending = pendingCloses.get(id);
-  if (pending) return pending;
+  if (pending) {
+    // Same promise, but a tighter schedule (shutdown) speeds the close up.
+    pending.control.schedule = tighten(pending.control.schedule, schedule);
+    pending.control.wake?.();
+    return pending.promise;
+  }
   const session = sessions.get(id);
   if (!session) return Promise.resolve("not-found");
-  const promise = runClose(session, schedule).finally(() => {
+  const control: CloseControl = { schedule };
+  const promise = runClose(session, control).finally(() => {
     pendingCloses.delete(id);
   });
-  pendingCloses.set(id, promise);
+  pendingCloses.set(id, { promise, control });
   return promise;
 }
 

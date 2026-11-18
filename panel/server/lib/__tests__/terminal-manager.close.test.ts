@@ -241,6 +241,33 @@ describe("closeSession", () => {
     await a
   })
 
+  it("a shorter schedule escalates a pending close and keeps one promise", async () => {
+    const { id, pid } = open()
+    const a = closeSession(id)
+    await vi.advanceTimersByTimeAsync(100)
+    const b = closeSession(id, SHUTDOWN_SCHEDULE)
+    expect(b).toBe(a)
+    expect(signals("SIGHUP")).toEqual([pid])
+    // 500 ms phase measured from the HUP at t=0, TERM skipped.
+    await vi.advanceTimersByTimeAsync(399)
+    expect(signals("SIGKILL")).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signals("SIGKILL")).toEqual([pid])
+    expect(signals("SIGTERM")).toEqual([])
+    fake.exits.get(pid)!()
+    await a
+  })
+
+  it("a longer schedule never relaxes a pending close", async () => {
+    const { id, pid } = open()
+    const a = closeSession(id, SHUTDOWN_SCHEDULE)
+    expect(closeSession(id, CLOSE_SCHEDULE)).toBe(a)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(signals("SIGKILL")).toEqual([pid])
+    fake.exits.get(pid)!()
+    await a
+  })
+
   it("closing an unknown session reports not-found", async () => {
     expect(await closeSession("nope")).toBe("not-found")
   })
