@@ -37,9 +37,14 @@ export type AnswerRecordKind = "audio" | "speaker";
 const EXTENSION: Record<AnswerRecordKind, string> = { audio: ".mp3", speaker: ".speaker.json" };
 
 /**
- * `*Units` count audio files only — one per cached answer unit, the number a
- * reader of the startup log cares about; `*Bytes` count every file (speaker
- * records and stray temp files included), the real disk footprint.
+ * `*Units` count committed audio files only — one per cached answer unit, the
+ * number a reader of the startup log cares about. `*Bytes` count every file
+ * under the root at sweep time, the real disk footprint, speaker records
+ * included. Every write runs entirely under the store lock, so the sweep never
+ * sees a write half done and the totals are exact for the directory it saw: a
+ * write queued during the sweep lands after it and is not counted. A `.tmp-*`
+ * file the sweep sees is an orphan of a crashed process and is judged by age
+ * like any other file.
  */
 export interface AnswerSweepTotals {
   removedUnits: number;
@@ -53,7 +58,7 @@ export interface AnswerAudioCache {
   read(key: AnswerKey, kind?: AnswerRecordKind): Promise<Uint8Array | undefined>;
   /** Atomic (temp file + rename); errors are swallowed. `kind` defaults to `"audio"`. */
   write(key: AnswerKey, bytes: Uint8Array, kind?: AnswerRecordKind): Promise<void>;
-  /** Deletes files older than the TTL and reports what was removed and kept. */
+  /** Deletes files older than the TTL and reports what was removed and kept (see {@link AnswerSweepTotals}). */
   sweep(): Promise<AnswerSweepTotals>;
   /** Deletes every file under the root; a write started before the clear never lands after it. */
   clear(): Promise<void>;
@@ -74,9 +79,11 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
   const root = opts.root ?? join(homedir(), ANSWER_CACHE_DIR);
   const now = opts.now ?? Date.now;
   const warned = new Set<FailureKind>();
-  // Every mutation of the root (a write's commit, sweep, clear) runs through
-  // one in-process FIFO lock, so none of them interleave. The server is a
-  // single process; reads stay lock-free because commits are atomic renames.
+  // Every mutation of the root (a whole write, sweep, clear) runs through one
+  // in-process FIFO lock, so none of them interleave. The server is a single
+  // process; reads stay lock-free because commits are atomic renames. Writes
+  // are small and synthesis happens before them, so serializing the disk
+  // write costs next to nothing.
   let tail: Promise<unknown> = Promise.resolve();
   function serialize<T>(fn: () => Promise<T>): Promise<T> {
     const run = tail.then(fn, fn);
@@ -86,9 +93,6 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
   // Clear generation, bumped when clear() is called. A write remembers it at
   // its start and commits only if no clear was called since.
   let generation = 0;
-  // Temp files of writes still in flight: each is owned (renamed or removed)
-  // by its write, so sweep and clear leave them alone.
-  const pending = new Set<string>();
 
   function warnOnce(kind: FailureKind, err: unknown): void {
     if (warned.has(kind)) return;
@@ -111,27 +115,22 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
 
     async write(key, bytes, kind = "audio") {
       const file = join(root, fileName(key, kind));
-      const tempName = `.tmp-${randomBytes(6).toString("hex")}`;
-      const temp = join(root, tempName);
+      const temp = join(root, `.tmp-${randomBytes(6).toString("hex")}`);
       const startedAt = generation;
-      pending.add(tempName);
-      try {
-        // The slow part runs outside the lock; only the commit is serialized.
-        await mkdir(root, { recursive: true });
-        await writeFile(temp, bytes);
-        await serialize(async () => {
-          // A clear was called after this write started: it must not land.
-          if (generation !== startedAt) return void (await rm(temp, { force: true }));
+      await serialize(async () => {
+        // A clear was called after this write started: it must not land.
+        if (generation !== startedAt) return;
+        try {
+          await mkdir(root, { recursive: true });
+          await writeFile(temp, bytes);
           await rename(temp, file);
-        });
-      } catch (err) {
-        // ENOENT: the root vanished under the write. A lost race, not a broken
-        // disk, so it keeps the one warning.
-        if (!isMissing(err)) warnOnce("write", err);
-        await rm(temp, { force: true }).catch(() => {});
-      } finally {
-        pending.delete(tempName);
-      }
+        } catch (err) {
+          // ENOENT: the root vanished under the write. A lost race, not a
+          // broken disk, so it keeps the one warning.
+          if (!isMissing(err)) warnOnce("write", err);
+          await rm(temp, { force: true }).catch(() => {});
+        }
+      });
     },
 
     sweep() {
@@ -146,7 +145,6 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
         }
         const at = now();
         for (const name of names) {
-          if (pending.has(name)) continue;
           try {
             const file = join(root, name);
             const info = await stat(file);
@@ -178,8 +176,9 @@ export function createAnswerAudioCache(opts: { root?: string; now?: () => number
           if (isMissing(err)) return;
           throw err;
         }
-        const owned = names.filter((name) => !pending.has(name));
-        await Promise.all(owned.map((name) => rm(join(root, name), { recursive: true, force: true })));
+        // No write is half done under the lock, so every file here (an
+        // orphaned temp file included) is fair game.
+        await Promise.all(names.map((name) => rm(join(root, name), { recursive: true, force: true })));
       });
     },
   };
