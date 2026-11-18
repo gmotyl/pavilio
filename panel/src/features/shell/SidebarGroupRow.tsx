@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ProjectMark } from "../projects/ProjectMark";
 import { ProjectActivityLed } from "../terminal/ProjectActivityLed";
@@ -47,6 +47,9 @@ export function SidebarGroupRow({
   children: ReactNode;
 }) {
   const tileSize = isMobile ? 24 : 22;
+  // The row has an explicit aria-label, which hides descendants from the
+  // accessible name; describe it by the status slot instead.
+  const statusId = useId();
   return (
     <li data-group={name}>
       <div
@@ -55,6 +58,7 @@ export function SidebarGroupRow({
         role="button"
         tabIndex={0}
         aria-expanded={!collapsed}
+        aria-describedby={statusId}
         aria-label={collapsed ? `Expand ${name}` : `Collapse ${name}`}
         onClick={onToggle}
         onKeyDown={(e) => {
@@ -79,7 +83,7 @@ export function SidebarGroupRow({
         >
           {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
         </span>
-        <span data-testid={`sidebar-group-slot-${name}`} className="contents">
+        <span id={statusId} data-testid={`sidebar-group-slot-${name}`} className="contents">
           <ProjectActivityLed sessionIds={collapsed ? sessionIds : []} />
         </span>
         <span

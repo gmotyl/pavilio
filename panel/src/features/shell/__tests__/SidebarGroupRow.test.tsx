@@ -312,6 +312,35 @@ describe("SidebarGroupRow", () => {
     ).toBeNull();
   });
 
+  it("collapsed group exposes its aggregate status as the accessible description", () => {
+    writePreference(preferences.groupCollapsed, { InfoPoly: true });
+    shell.sessions = () => [session("a", "infopoly"), session("b", "woozle")];
+    setup();
+    act(() => {
+      _applyEventForTests({ sessionId: "b", state: "attention", at: 1, attentionSinceAt: 1 });
+    });
+    const row = groupRow("InfoPoly");
+    // The explicit aria-label stays the contract name.
+    expect(row.getAttribute("aria-label")).toBe("Expand InfoPoly");
+    const id = row.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    const target = document.getElementById(id!);
+    expect(target).toBe(screen.getByTestId("sidebar-group-slot-InfoPoly"));
+    expect(target!.querySelector("[aria-label]")!.getAttribute("aria-label")).toBe(
+      "Needs attention",
+    );
+    // Each group gets its own id.
+    expect(groupRow("Motyl OSS").getAttribute("aria-describedby")).not.toBe(id);
+  });
+
+  it("expanded group's description target is empty", () => {
+    shell.sessions = () => [session("a", "infopoly")];
+    setup();
+    const id = groupRow("InfoPoly").getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)!.querySelector("[aria-label]")).toBeNull();
+  });
+
   it("groups and projects interleave in saved order with links last", () => {
     writePreference(preferences.sidebarOrder, {
       top: ["g:InfoPoly", "p:pavilio", "g:Motyl OSS"],
