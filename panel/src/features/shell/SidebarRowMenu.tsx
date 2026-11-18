@@ -4,7 +4,7 @@ import { useIsMobile } from "./useIsMobile";
 import { refreshProjects } from "../projects/useProjects";
 import { alerts } from "../alerts/store";
 import { itemCls, labelCls, menuStyle } from "../terminal/SessionContextMenu";
-import { renameGroupCollapsed, renameGroupInOrder, type SidebarOrder } from "./sidebarOrder";
+import { ownFlag, renameGroupCollapsed, renameGroupInOrder, type SidebarOrder } from "./sidebarOrder";
 
 interface Item {
   key: string;
@@ -303,7 +303,7 @@ export function useSidebarRowMenu({
       },
       {
         key: "toggle",
-        label: collapsed[m.group] ? "Expand" : "Collapse",
+        label: ownFlag(collapsed, m.group) ? "Expand" : "Collapse",
         run: () => {
           close();
           m.toggle();

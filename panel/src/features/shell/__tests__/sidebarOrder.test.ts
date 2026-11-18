@@ -107,4 +107,27 @@ describe("sidebarOrder", () => {
       renameGroupCollapsed({ Old: true, New: false }, "Old", "New"),
     ).toEqual({ New: false });
   });
+
+  it("group names that shadow Object.prototype are ordinary groups", () => {
+    const nodes = mergeSidebarOrder(empty, [
+      { name: "a", group: "toString" },
+      { name: "b", group: "__proto__" },
+      { name: "c", group: "constructor" },
+    ]);
+    expect(nodes).toEqual([
+      { kind: "group", name: "__proto__", members: ["b"] },
+      { kind: "group", name: "constructor", members: ["c"] },
+      { kind: "group", name: "toString", members: ["a"] },
+    ]);
+    const renamed = renameGroupInOrder(
+      { top: ["g:Old"], groups: { Old: ["x"] } },
+      "Old",
+      "__proto__",
+    );
+    expect(Object.keys(renamed.groups)).toEqual(["__proto__"]);
+    expect(Object.hasOwn(renamed.groups, "__proto__")).toBe(true);
+    expect(renameGroupCollapsed({ Old: true }, "Old", "toString")).toEqual({
+      toString: true,
+    });
+  });
 });

@@ -14,6 +14,20 @@ export type SidebarNode =
 
 const byName = (a: string, b: string) => a.localeCompare(b);
 
+/**
+ * Group names are free text, so a name like `toString` or `__proto__` must never
+ * resolve through Object.prototype: read own keys only, and build maps without a
+ * prototype so assignment cannot reach it either.
+ */
+export const ownList = (
+  rec: Record<string, string[]>,
+  key: string,
+): string[] | undefined => (Object.hasOwn(rec, key) ? rec[key] : undefined);
+export const ownFlag = (rec: Record<string, boolean>, key: string): boolean =>
+  Object.hasOwn(rec, key) && rec[key] === true;
+export const groupMap = <T>(): Record<string, T> =>
+  Object.create(null) as Record<string, T>;
+
 /** Saved names first (if still present), then the rest alphabetically. */
 function ordered(
   saved: readonly string[],
@@ -52,7 +66,7 @@ export function mergeSidebarOrder(
       ? {
           kind: "group",
           name,
-          members: ordered(order.groups[name] ?? [], members.get(name) ?? []),
+          members: ordered(ownList(order.groups, name) ?? [], members.get(name) ?? []),
         }
       : { kind: "project", name };
   });
@@ -72,13 +86,16 @@ export function renameGroupInOrder(
   const top = [
     ...new Set(order.top.map((k) => (k === `g:${from}` ? `g:${to}` : k))),
   ];
-  const groups: Record<string, string[]> = {};
+  const groups = groupMap<string[]>();
   for (const [g, m] of Object.entries(order.groups)) {
     if (g !== from) groups[g] = m;
   }
-  if (from in order.groups || to in order.groups) {
+  if (Object.hasOwn(order.groups, from) || Object.hasOwn(order.groups, to)) {
     groups[to] = [
-      ...new Set([...(order.groups[to] ?? []), ...(order.groups[from] ?? [])]),
+      ...new Set([
+        ...(ownList(order.groups, to) ?? []),
+        ...(ownList(order.groups, from) ?? []),
+      ]),
     ];
   }
   return { top, groups };
@@ -94,8 +111,9 @@ export function renameGroupCollapsed(
   to: string,
 ): Record<string, boolean> {
   if (from === to) return collapsed;
-  const next: Record<string, boolean> = {};
+  const next = groupMap<boolean>();
   for (const [g, v] of Object.entries(collapsed)) if (g !== from) next[g] = v;
-  if (!(to in next) && from in collapsed) next[to] = collapsed[from];
+  if (!Object.hasOwn(next, to) && Object.hasOwn(collapsed, from))
+    next[to] = collapsed[from];
   return next;
 }

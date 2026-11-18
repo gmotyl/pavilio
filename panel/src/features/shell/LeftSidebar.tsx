@@ -20,6 +20,7 @@ import {
 import { HamburgerSlot } from "./SidebarHamburger";
 import { SidebarGroupRow } from "./SidebarGroupRow";
 import { useSidebarRowMenu } from "./SidebarRowMenu";
+import { groupMap, ownFlag } from "./sidebarOrder";
 import { dropStyle, useSidebarDrag, type SidebarRowDragProps } from "./useSidebarDrag";
 import { useIsMobile } from "./useIsMobile";
 import { useSidebarState } from "./useSidebarState";
@@ -457,8 +458,8 @@ export default function LeftSidebar() {
     isMobile,
   });
   const toggleGroup = (name: string) => {
-    const next = { ...groupCollapsed };
-    if (next[name]) delete next[name];
+    const next = Object.assign(groupMap<boolean>(), groupCollapsed);
+    if (ownFlag(next, name)) delete next[name];
     else next[name] = true;
     setGroupCollapsed(next);
   };
@@ -787,7 +788,7 @@ export default function LeftSidebar() {
                 sessionIds={members.flatMap((p) =>
                   (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
                 )}
-                collapsed={groupCollapsed[node.name] === true}
+                collapsed={ownFlag(groupCollapsed, node.name)}
                 onToggle={() => toggleGroup(node.name)}
                 isMobile={isMobile}
                 dragProps={dragRowProps(`g:${node.name}`, null)}
