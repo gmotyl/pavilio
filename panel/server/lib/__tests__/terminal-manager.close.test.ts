@@ -111,10 +111,36 @@ describe("closeSession", () => {
     const p = closeSession(id)
     // The child was reparented to init: no longer reachable from the PTY pid.
     table = new Map([[1, [900]]])
+    expect(signals("SIGHUP")).toEqual([pid, 900].sort())
     await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.hupToTermMs!)
     expect(signals("SIGTERM")).toContain(900)
     await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.termToKillMs)
     expect(signals("SIGKILL")).toContain(900)
+    fake.exits.get(pid)!()
+    await p
+  })
+
+  it("a child spawned after SIGHUP receives SIGTERM", async () => {
+    const { id, pid } = open()
+    const p = closeSession(id)
+    // Appears only after the HUP window: the TERM snapshot must see it.
+    table = new Map([[pid, [901]]])
+    await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.hupToTermMs!)
+    expect(signals("SIGHUP")).toEqual([pid])
+    expect(signals("SIGTERM")).toEqual([pid, 901].sort())
+    fake.exits.get(pid)!()
+    await p
+  })
+
+  it("a child spawned after SIGTERM receives SIGKILL", async () => {
+    const { id, pid } = open()
+    const p = closeSession(id)
+    await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.hupToTermMs!)
+    // Appears only after the TERM window: the KILL snapshot must see it.
+    table = new Map([[pid, [902]]])
+    await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.termToKillMs)
+    expect(signals("SIGTERM")).toEqual([pid])
+    expect(signals("SIGKILL")).toEqual([pid, 902].sort())
     fake.exits.get(pid)!()
     await p
   })
