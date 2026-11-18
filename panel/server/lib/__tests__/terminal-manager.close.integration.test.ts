@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { descendants, readProcessTable } from "../session-tree"
 import { closeSession, createSession, getSession, listSessions } from "../terminal-manager"
 
 // Real pty, real processes: no fakes. Drives the close escalation end to end
@@ -10,14 +11,19 @@ import { closeSession, createSession, getSession, listSessions } from "../termin
 // the session (`setsid`) so only the process-table snapshot can find it.
 const SHORT_SCHEDULE = { hupToTermMs: 200, termToKillMs: 200, afterKillMs: 500 }
 
-function findSleeps(): number[] {
+// Sleeps are discovered only inside the PTY's process tree, so a concurrent
+// run of this suite elsewhere on the machine can neither be seen nor killed.
+function findSleeps(rootPid: number): number[] {
+  const tree = [...descendants(rootPid, readProcessTable())].filter((p) => p !== rootPid)
+  if (tree.length === 0) return []
   try {
-    return execFileSync("pgrep", ["-f", "^sleep 99[89]$"], { encoding: "utf8" })
+    return execFileSync("ps", ["-o", "pid=,args=", "-p", tree.join(",")], { encoding: "utf8" })
       .split("\n")
-      .filter(Boolean)
-      .map(Number)
+      .map((line) => /^\s*(\d+)\s+sleep 99[89]$/.exec(line))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => Number(m[1]))
   } catch {
-    return [] // pgrep exits 1 when nothing matches
+    return [] // ps exits 1 when none of the pids exist
   }
 }
 
@@ -37,6 +43,7 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
   let previousShell: string | undefined
   let tempDir: string
   let pids: number[] = []
+  let rootPid: number | undefined
 
   beforeEach(() => {
     previousStateDir = process.env.PANEL_AUTH_STATE_DIR
@@ -46,11 +53,12 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
     // A plain sh: no rc files, deterministic regardless of the host's login shell.
     process.env.SHELL = "/bin/sh"
     pids = []
+    rootPid = undefined
   })
 
   afterEach(() => {
     // Never leak the 998/999 sleeps, whatever the test outcome.
-    for (const pid of [...pids, ...findSleeps()]) {
+    for (const pid of [...pids, ...(rootPid === undefined ? [] : findSleeps(rootPid))]) {
       try {
         process.kill(pid, "SIGKILL")
       } catch {
@@ -66,13 +74,14 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
 
   it("closing a session ends processes that ignore hangup and terminate", async () => {
     const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "t" })
+    rootPid = getSession(meta.id)!.pty.pid
     getSession(meta.id)!.pty.write(
       `sh -c "trap '' HUP TERM; setsid sleep 999 & sleep 998 & wait"\r`,
     )
 
     // Wait until both sleeps are running before closing.
     const deadline = Date.now() + 5000
-    while (Date.now() < deadline && (pids = findSleeps()).length < 2) await sleep(50)
+    while (Date.now() < deadline && (pids = findSleeps(rootPid)).length < 2) await sleep(50)
     expect(pids).toHaveLength(2)
 
     expect(await closeSession(meta.id, SHORT_SCHEDULE)).toBe("exited")
