@@ -6,6 +6,7 @@ import {
   __setCloseDeps,
   closeAllSessions,
   __resetShuttingDownForTests,
+  __exitWaiterCountForTests,
   closeSession,
   createSession,
   getSession,
@@ -356,5 +357,15 @@ describe("closeSession", () => {
     expect(done).toBe(true)
     expect(await p).toBe("still-alive")
     warn.mockRestore()
+  })
+
+  it("repeated closes do not accumulate exit waiters", async () => {
+    const { id, pid } = open()
+    const p = closeSession(id)
+    for (let i = 0; i < 20; i++) closeSession(id, CLOSE_SCHEDULE)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(__exitWaiterCountForTests(id)).toBe(1)
+    fake.exits.get(pid)!()
+    await p
   })
 })

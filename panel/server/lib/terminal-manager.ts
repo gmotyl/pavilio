@@ -408,13 +408,28 @@ function tighten(a: CloseSchedule, b: CloseSchedule): CloseSchedule {
   };
 }
 
+/** Test-only: how many closes are currently parked waiting on this session's exit. */
+export function __exitWaiterCountForTests(id: string): number {
+  return exitWaiters.get(id)?.length ?? 0;
+}
+
 /** Resolves true when the session's PTY exits within `ms`, false on timeout. */
 function waitForExit(id: string, ms: number, control?: CloseControl): Promise<boolean> {
   return new Promise((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const wake = () => {
+    // Every way out (exit, escalation wake, timeout) drops this waiter.
+    const drop = () => {
       if (timer) clearTimeout(timer);
       if (control) control.wake = undefined;
+      const current = exitWaiters.get(id);
+      if (current) {
+        const next = current.filter((w) => w !== wake);
+        if (next.length > 0) exitWaiters.set(id, next);
+        else exitWaiters.delete(id);
+      }
+    };
+    const wake = () => {
+      drop();
       resolve(true);
     };
     if (control) control.wake = wake;
@@ -422,13 +437,7 @@ function waitForExit(id: string, ms: number, control?: CloseControl): Promise<bo
     list.push(wake);
     exitWaiters.set(id, list);
     timer = setTimeout(() => {
-      const current = exitWaiters.get(id);
-      if (current) {
-        const next = current.filter((w) => w !== wake);
-        if (next.length > 0) exitWaiters.set(id, next);
-        else exitWaiters.delete(id);
-      }
-      if (control) control.wake = undefined;
+      drop();
       resolve(false);
     }, ms);
   });
