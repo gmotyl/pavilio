@@ -44,6 +44,7 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
   let tempDir: string
   let pids: number[] = []
   let rootPid: number | undefined
+  let sessionId: string | undefined
 
   beforeEach(() => {
     previousStateDir = process.env.PANEL_AUTH_STATE_DIR
@@ -54,6 +55,7 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
     process.env.SHELL = "/bin/sh"
     pids = []
     rootPid = undefined
+    sessionId = undefined
   })
 
   afterEach(() => {
@@ -61,6 +63,23 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
     for (const pid of [...pids, ...(rootPid === undefined ? [] : findSleeps(rootPid))]) {
       try {
         process.kill(pid, "SIGKILL")
+      } catch {
+        /* already gone */
+      }
+    }
+    // A failure before closeSession succeeds must not leak the PTY root: kill
+    // it (its onExit removes the session) and drop the session if still listed.
+    const live = sessionId === undefined ? undefined : getSession(sessionId)
+    if (live) {
+      try {
+        live.pty.kill("SIGKILL")
+      } catch {
+        /* already gone */
+      }
+    }
+    if (rootPid !== undefined) {
+      try {
+        process.kill(rootPid, "SIGKILL")
       } catch {
         /* already gone */
       }
@@ -74,6 +93,7 @@ describe.skipIf(process.platform === "win32")("closeSession (real pty)", () => {
 
   it("closing a session ends processes that ignore hangup and terminate", async () => {
     const meta = createSession({ cwd: process.cwd(), cols: 80, rows: 24, project: "t" })
+    sessionId = meta.id
     rootPid = getSession(meta.id)!.pty.pid
     getSession(meta.id)!.pty.write(
       `sh -c "trap '' HUP TERM; setsid sleep 999 & sleep 998 & wait"\r`,
