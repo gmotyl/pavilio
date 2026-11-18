@@ -329,6 +329,8 @@ export const SHUTDOWN_SCHEDULE: CloseSchedule = {
 interface CloseDeps {
   kill: (pid: number, signal: NodeJS.Signals) => void;
   readTable: () => ProcessTable;
+  /** True while `pid` still exists (EPERM counts: it exists, we just may not signal it). */
+  isAlive: (pid: number) => boolean;
 }
 
 const defaultCloseDeps: CloseDeps = {
@@ -342,6 +344,14 @@ const defaultCloseDeps: CloseDeps = {
     }
   },
   readTable: readProcessTable,
+  isAlive: (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code !== "ESRCH";
+    }
+  },
 };
 
 let closeDeps: CloseDeps = defaultCloseDeps;
@@ -388,14 +398,25 @@ async function runClose(
   const win = platform() === "win32";
   const tree = new Set<number>([rootPid]);
 
+  const ptyExited = () => !sessions.has(id);
   // Merge, never replace: once a shell dies its children are reparented to
-  // init and no longer reachable through parent links.
+  // init and no longer reachable through parent links. After the PTY exits the
+  // root pid may be recycled, so stop reading the table from it.
   const snapshot = () => {
-    if (win) return;
+    if (win || ptyExited()) return;
     for (const pid of descendants(rootPid, closeDeps.readTable())) tree.add(pid);
+  };
+  // The PTY's own pid is alive until its onExit; the rest of the snapshot is
+  // probed directly (the PTY is gone, so the table cannot tell us).
+  const survivors = () => {
+    if (win) return ptyExited() ? [] : [rootPid];
+    return Array.from(tree).filter((pid) =>
+      pid === rootPid ? !ptyExited() : closeDeps.isAlive(pid),
+    );
   };
   const signal = (sig: NodeJS.Signals) => {
     if (win) {
+      if (ptyExited()) return;
       try {
         session.pty.kill();
       } catch (err) {
@@ -403,26 +424,40 @@ async function runClose(
       }
       return;
     }
-    for (const pid of tree) closeDeps.kill(pid, sig);
+    // Once the PTY is gone only live survivors are targeted (pid reuse).
+    const targets = ptyExited() ? survivors() : Array.from(tree);
+    for (const pid of targets) closeDeps.kill(pid, sig);
+  };
+  // Done = PTY exited AND nothing in the snapshot is alive. After a PTY exit
+  // with stragglers, keep polling until the window closes.
+  const settle = async (ms: number): Promise<boolean> => {
+    let waited = 0;
+    if (!ptyExited() && ms > 0 && !(await waitForExit(id, ms))) waited = ms;
+    if (!ptyExited()) return false;
+    // Budget is counted in poll steps, not wall time, so fake timers agree.
+    const step = 50;
+    while (survivors().length > 0 && waited < ms) {
+      const slice = Math.min(step, ms - waited);
+      await new Promise((r) => setTimeout(r, slice));
+      waited += slice;
+    }
+    return survivors().length === 0;
   };
 
   snapshot();
   signal("SIGHUP");
   const afterHupMs = schedule.hupToTermMs ?? schedule.termToKillMs;
-  if (await waitForExit(id, afterHupMs)) return "exited";
+  if (await settle(afterHupMs)) return "exited";
 
   if (schedule.hupToTermMs !== null) {
     snapshot();
     signal("SIGTERM");
-    if (await waitForExit(id, schedule.termToKillMs)) return "exited";
+    if (await settle(schedule.termToKillMs)) return "exited";
   }
 
   snapshot();
   signal("SIGKILL");
-  if (schedule.afterKillMs > 0 && (await waitForExit(id, schedule.afterKillMs))) {
-    return "exited";
-  }
-  if (!sessions.has(id)) return "exited";
+  if (await settle(schedule.afterKillMs)) return "exited";
   console.warn(`[terminal] session ${id} still alive after SIGKILL`);
   return "still-alive";
 }

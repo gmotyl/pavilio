@@ -40,6 +40,7 @@ vi.mock("node-pty", () => ({
 type Sent = Array<[number, string]>
 let sent: Sent
 let table: Map<number, number[]>
+let alive: Set<number>
 let previousStateDir: string | undefined
 let tempDir: string
 
@@ -56,9 +57,11 @@ beforeEach(() => {
   process.env.PANEL_AUTH_STATE_DIR = tempDir
   sent = []
   table = new Map()
+  alive = new Set()
   __setCloseDeps({
     kill: (pid, signal) => void sent.push([pid, signal]),
     readTable: () => table,
+    isAlive: (pid) => alive.has(pid),
   })
 })
 
@@ -84,6 +87,46 @@ describe("closeSession", () => {
 
   it("exit on hangup sends no further signal", async () => {
     const { id, pid } = open()
+    const p = closeSession(id)
+    fake.exits.get(pid)!()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await p).toBe("exited")
+    expect(sent.every(([, s]) => s === "SIGHUP")).toBe(true)
+  })
+
+  it("a snapshot child that ignores hangup after the pty exits gets TERM then KILL", async () => {
+    const { id, pid } = open()
+    table = new Map([[pid, [900]]])
+    alive.add(900)
+    const p = closeSession(id)
+    fake.exits.get(pid)!()
+    await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.hupToTermMs!)
+    expect(signals("SIGTERM")).toEqual([900])
+    await vi.advanceTimersByTimeAsync(CLOSE_SCHEDULE.termToKillMs)
+    expect(signals("SIGKILL")).toEqual([900])
+    alive.delete(900)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await p).toBe("exited")
+  })
+
+  it("survivors after SIGKILL report still-alive with a warning", async () => {
+    const { id, pid } = open()
+    table = new Map([[pid, [900]]])
+    alive.add(900)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const p = closeSession(id)
+    fake.exits.get(pid)!()
+    await vi.advanceTimersByTimeAsync(
+      CLOSE_SCHEDULE.hupToTermMs! + CLOSE_SCHEDULE.termToKillMs + CLOSE_SCHEDULE.afterKillMs,
+    )
+    expect(await p).toBe("still-alive")
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("pty exit with every snapshot pid dead sends no TERM or KILL", async () => {
+    const { id, pid } = open()
+    table = new Map([[pid, [900]]])
     const p = closeSession(id)
     fake.exits.get(pid)!()
     await vi.advanceTimersByTimeAsync(10_000)
