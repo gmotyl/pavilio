@@ -18,6 +18,7 @@ import { nextSessionName, removeName, writeName } from "./terminal-identity";
 import { createTitleState, scanTitle, type TitleState } from "./terminal-title";
 import { listOsUsers, hasGitBindMount } from "./os-users";
 import { translateCwd, buildRunAsSpawnCommand } from "./terminal-run-as";
+import { descendants, readProcessTable, type ProcessTable } from "./session-tree";
 
 export interface TerminalSession {
   id: string;
@@ -279,11 +280,16 @@ export function createSession(opts: {
     }
   });
 
+  // The only place a session leaves the map. `closeSession` signals the
+  // processes and waits for this event; it never tears anything down itself.
   ptyProcess.onExit(() => {
     destroyReplay(id);
     removeSession(id);
     removeName(id, session.identityHomeDir);
     sessions.delete(id);
+    const waiters = exitWaiters.get(id);
+    exitWaiters.delete(id);
+    for (const wake of waiters ?? []) wake();
   });
 
   return toMeta(session);
@@ -297,14 +303,153 @@ export function listSessions(): TerminalSessionMeta[] {
   return Array.from(sessions.values()).map(toMeta);
 }
 
-export function destroySession(id: string): boolean {
+export type CloseOutcome = "exited" | "not-found" | "still-alive";
+
+export interface CloseSchedule {
+  /** Wait after SIGHUP before SIGTERM; `null` skips SIGTERM entirely. */
+  hupToTermMs: number | null;
+  /** Wait after SIGTERM (or after SIGHUP when TERM is skipped) before SIGKILL. */
+  termToKillMs: number;
+  /** Wait after SIGKILL for the PTY to report its exit. */
+  afterKillMs: number;
+}
+
+export const CLOSE_SCHEDULE: CloseSchedule = {
+  hupToTermMs: 2000,
+  termToKillMs: 2000,
+  afterKillMs: 1000,
+};
+
+export const SHUTDOWN_SCHEDULE: CloseSchedule = {
+  hupToTermMs: null,
+  termToKillMs: 500,
+  afterKillMs: 0,
+};
+
+interface CloseDeps {
+  kill: (pid: number, signal: NodeJS.Signals) => void;
+  readTable: () => ProcessTable;
+}
+
+const defaultCloseDeps: CloseDeps = {
+  kill: (pid, signal) => {
+    try {
+      process.kill(pid, signal);
+    } catch (err) {
+      // ESRCH: the process is already gone, which is what we wanted.
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") return;
+      console.warn(`[terminal] kill ${signal} ${pid} failed:`, err);
+    }
+  },
+  readTable: readProcessTable,
+};
+
+let closeDeps: CloseDeps = defaultCloseDeps;
+
+/** Test seam: replace signal delivery and/or the process table reader. */
+export function __setCloseDeps(deps?: Partial<CloseDeps>): void {
+  closeDeps = deps ? { ...defaultCloseDeps, ...deps } : defaultCloseDeps;
+}
+
+/** Wake-ups for closes waiting on a session's PTY exit, keyed by session id. */
+const exitWaiters = new Map<string, Array<() => void>>();
+/** One in-flight close per session; repeat closes share it. */
+const pendingCloses = new Map<string, Promise<CloseOutcome>>();
+
+/** Resolves true when the session's PTY exits within `ms`, false on timeout. */
+function waitForExit(id: string, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const wake = () => {
+      if (timer) clearTimeout(timer);
+      resolve(true);
+    };
+    const list = exitWaiters.get(id) ?? [];
+    list.push(wake);
+    exitWaiters.set(id, list);
+    timer = setTimeout(() => {
+      const current = exitWaiters.get(id);
+      if (current) {
+        const next = current.filter((w) => w !== wake);
+        if (next.length > 0) exitWaiters.set(id, next);
+        else exitWaiters.delete(id);
+      }
+      resolve(false);
+    }, ms);
+  });
+}
+
+async function runClose(
+  session: TerminalSession,
+  schedule: CloseSchedule,
+): Promise<CloseOutcome> {
+  const id = session.id;
+  const rootPid = session.pty.pid;
+  const win = platform() === "win32";
+  const tree = new Set<number>([rootPid]);
+
+  // Merge, never replace: once a shell dies its children are reparented to
+  // init and no longer reachable through parent links.
+  const snapshot = () => {
+    if (win) return;
+    for (const pid of descendants(rootPid, closeDeps.readTable())) tree.add(pid);
+  };
+  const signal = (sig: NodeJS.Signals) => {
+    if (win) {
+      try {
+        session.pty.kill();
+      } catch (err) {
+        console.warn("[terminal] pty.kill failed:", err);
+      }
+      return;
+    }
+    for (const pid of tree) closeDeps.kill(pid, sig);
+  };
+
+  snapshot();
+  signal("SIGHUP");
+  const afterHupMs = schedule.hupToTermMs ?? schedule.termToKillMs;
+  if (await waitForExit(id, afterHupMs)) return "exited";
+
+  if (schedule.hupToTermMs !== null) {
+    snapshot();
+    signal("SIGTERM");
+    if (await waitForExit(id, schedule.termToKillMs)) return "exited";
+  }
+
+  snapshot();
+  signal("SIGKILL");
+  if (schedule.afterKillMs > 0 && (await waitForExit(id, schedule.afterKillMs))) {
+    return "exited";
+  }
+  if (!sessions.has(id)) return "exited";
+  console.warn(`[terminal] session ${id} still alive after SIGKILL`);
+  return "still-alive";
+}
+
+/**
+ * End a session's processes and wait for its PTY to exit. Deletes nothing
+ * itself: the session leaves the map in the PTY's `onExit` handler.
+ */
+export function closeSession(
+  id: string,
+  schedule: CloseSchedule = CLOSE_SCHEDULE,
+): Promise<CloseOutcome> {
+  const pending = pendingCloses.get(id);
+  if (pending) return pending;
   const session = sessions.get(id);
-  if (!session) return false;
-  session.pty.kill();
-  destroyReplay(id);
-  removeName(id, session.identityHomeDir);
-  sessions.delete(id);
-  return true;
+  if (!session) return Promise.resolve("not-found");
+  const promise = runClose(session, schedule).finally(() => {
+    pendingCloses.delete(id);
+  });
+  pendingCloses.set(id, promise);
+  return promise;
+}
+
+export async function closeAllSessions(schedule: CloseSchedule): Promise<void> {
+  await Promise.allSettled(
+    Array.from(sessions.keys()).map((id) => closeSession(id, schedule)),
+  );
 }
 
 /**

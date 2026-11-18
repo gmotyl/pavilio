@@ -5,7 +5,7 @@ import { tmpdir, homedir, userInfo } from "node:os"
 import {
   _resetAssignedNamesForTests,
   createSession,
-  destroySession,
+  getSession,
   getSessionOwner,
   listSessions,
   nudgeSession,
@@ -90,12 +90,20 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true })
 })
 
+// Stand-in for the PTY dying: closeSession removes nothing itself, so tests
+// that only need a session gone fire the exit handler the manager registered.
+const ptyExitHandlers = new WeakMap<object, () => void>()
+function destroySession(id: string): void {
+  const session = getSession(id)
+  if (session) ptyExitHandlers.get(session.pty)?.()
+}
+
 vi.mock("node-pty", () => ({
   spawn: (file: string, args: string[], options: Record<string, unknown>) => {
     lastSpawnCall = { file, args, options }
     const dataCallbacks: Array<(data: string) => void> = []
     lastPtyDataCallbacks = dataCallbacks
-    return {
+    const fakePty = {
       pid: 1234,
       onData: (cb: (data: string) => void) => {
         dataCallbacks.push(cb)
@@ -103,12 +111,14 @@ vi.mock("node-pty", () => ({
       },
       onExit: (cb: () => void) => {
         lastPtyExitCallback = cb
+        ptyExitHandlers.set(fakePty, cb)
         return { dispose: () => {} }
       },
       resize: () => {},
       kill: () => {},
       write: () => {},
     }
+    return fakePty
   },
 }))
 

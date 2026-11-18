@@ -14,7 +14,7 @@ const store = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
-  destroySession: vi.fn(),
+  closeSession: vi.fn(),
   listSessions: vi.fn(() => store.sessions.map((s) => ({ ...s }))),
   updateSession: vi.fn((id: string, u: { name?: string; project?: string }) => {
     const s = store.sessions.find((x) => x.id === id);

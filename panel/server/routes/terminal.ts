@@ -8,7 +8,7 @@ import { homedir, tmpdir, userInfo } from "os";
 import {
   createSession,
   listSessions,
-  destroySession,
+  closeSession,
   updateSession,
   getSessionOwner,
 } from "../lib/terminal-manager.js";
@@ -82,9 +82,14 @@ router.patch("/sessions/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete("/sessions/:id", (req, res) => {
-  const ok = destroySession(req.params.id);
-  if (!ok) return res.status(404).json({ error: "Session not found" });
+router.delete("/sessions/:id", async (req, res) => {
+  const outcome = await closeSession(req.params.id);
+  if (outcome === "not-found") {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  if (outcome === "still-alive") {
+    return res.status(500).json({ error: "Session did not exit" });
+  }
   res.json({ ok: true });
 });
 
