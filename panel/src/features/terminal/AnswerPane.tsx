@@ -671,7 +671,16 @@ export function AnswerPane({
           held goes back to the body, which is what "returns its height to the
           text" means. */}
       {composerOn ? (
-        <AnswerComposer sessionId={sessionId} send={send} onSubmitted={onSubmitted} />
+        <AnswerComposer
+          sessionId={sessionId}
+          send={send}
+          onSubmitted={onSubmitted}
+          maxRowHeight={
+            appliedHeight === null
+              ? undefined
+              : appliedHeight - ANSWER_PANE_COMPOSER_CHROME - ANSWER_PANE_BODY_FLOOR
+          }
+        />
       ) : null}
       {/* The pane's own bottom edge — dragged up to uncover the terminal
           without closing the pane. Its own row at the foot of the column,

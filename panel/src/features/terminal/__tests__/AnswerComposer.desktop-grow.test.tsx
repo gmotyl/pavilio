@@ -176,6 +176,30 @@ describe("desktop composer growth", () => {
     expect(rowHeight()).toBe(tall);
   });
 
+  it("growth stops at the pane's free space, never below the dragged height", () => {
+    installMatchMedia();
+    const base = 2 * LH + CHROME;
+    writePreference(preferences.answerComposerHeight, base, PROJECT);
+    const room = 4 * LH + CHROME;
+    const { rerender } = render(
+      <AnswerComposer sessionId={SESSION} send={() => true} onSubmitted={vi.fn()} maxRowHeight={room} />,
+    );
+    type("x\n".repeat(30), 30);
+    expect(rowHeight()).toBe(room);
+
+    // A shorter pane remeasures without a keystroke.
+    rerender(
+      <AnswerComposer sessionId={SESSION} send={() => true} onSubmitted={vi.fn()} maxRowHeight={3 * LH + CHROME} />,
+    );
+    expect(rowHeight()).toBe(3 * LH + CHROME);
+
+    // The pane's floor reserves the dragged height, so the row never drops below it.
+    rerender(
+      <AnswerComposer sessionId={SESSION} send={() => true} onSubmitted={vi.fn()} maxRowHeight={base - 10} />,
+    );
+    expect(rowHeight()).toBe(base);
+  });
+
   it("sending returns to dragged height", () => {
     installMatchMedia();
     const chrome = CHROME;

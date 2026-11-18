@@ -200,6 +200,14 @@ export interface AnswerComposerProps {
    */
   send: (data: string) => boolean;
   /**
+   * Desktop only: the tallest the field's row may GROW to, in px — the pane's
+   * applied height minus its other rows and the body's floor. Without it a long
+   * reply in a short pane pushes the key hint and drag row out of the pane and
+   * over the terminal. Never below the stored height (the pane's floor already
+   * reserves that). Absent: no limit beyond the ten-row cap.
+   */
+  maxRowHeight?: number;
+  /**
    * A draft has just gone out. Raised at the moment the body is written, and
    * only then — the pane hands its body over to the waiting state here,
    * because it is the pane that knows which answer the draft was a reply to.
@@ -396,7 +404,7 @@ export interface AnswerComposerProps {
  * that the field opens at its declared height and stores nothing until it can
  * — is on that function.
  */
-export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerProps) {
+export function AnswerComposer({ sessionId, send, onSubmitted, maxRowHeight }: AnswerComposerProps) {
   // Seeded from the store, not from `""`: this mount may be the second one for
   // a pane the user closed mid-sentence.
   const [text, setText] = useState(() => getDraft(sessionId));
@@ -625,10 +633,11 @@ export function AnswerComposer({ sessionId, send, onSubmitted }: AnswerComposerP
       px(rowStyle.paddingBottom) +
       px(rowStyle.borderTopWidth) +
       px(rowStyle.borderBottomWidth);
-    const cap = Math.max(height, DESKTOP_COMPOSER_MAX_ROWS * lineHeight + fieldPadding + outer);
+    const rowsCap = DESKTOP_COMPOSER_MAX_ROWS * lineHeight + fieldPadding + outer;
+    const cap = Math.max(height, Math.min(rowsCap, maxRowHeight ?? Number.POSITIVE_INFINITY));
     const wanted = Math.min(Math.max(height, natural + outer), cap);
     row.style.height = `${wanted}px`;
-  }, [text, isMobile, height]);
+  }, [text, isMobile, height, maxRowHeight]);
 
   /**
    * A pick's caret, applied after React has written the new value — setting
