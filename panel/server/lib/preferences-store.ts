@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { identityKey, isIdentityKey, parseIdentityKey, readAllIdentities, writeIdentity } from "./project-identity.js";
 
 export interface PreferencesDoc {
   /** Format marker. This panel writes — and only writes — `CURRENT_VERSION`. */
@@ -146,6 +147,7 @@ export async function replacePreferences(next: Record<string, unknown>): Promise
   }
   while (inFlight) await inFlight;
   doc = { ...next, version: normalizeVersion(next.version) };
+  adoptProjectIdentity();
   dirty = false;
   refusalLogged = false;
   unstorableWarned.clear();
@@ -180,6 +182,7 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
     if (key === "version") continue;
     if (value === null) {
       delete next[key];
+      routeIdentity(key, null);
       continue;
     }
     // `undefined` is what `{ theme: getTheme() }` produces in ordinary TS when
@@ -192,10 +195,46 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
       continue;
     }
     next[key] = value;
+    routeIdentity(key, value);
   }
   doc = next;
   scheduleWrite();
   return doc;
+}
+
+/** Identity keys live in `<project>/identity.json`, not the machine file. */
+function routeIdentity(key: string, value: unknown): void {
+  const parsed = parseIdentityKey(key);
+  if (!parsed) return;
+  if (value !== null && typeof value !== "string") return;
+  writeIdentity(parsed.project, { [parsed.field]: value });
+}
+
+/**
+ * Reconcile the in-memory doc with the per-project identity files: identity.json
+ * wins over a machine value; a machine-only identity value migrates into
+ * identity.json (first machine to boot wins). Values stay in memory so reads
+ * work; `serialize` keeps them out of the machine file, and a doc that carried
+ * them is flushed once so the file drops them.
+ */
+export function adoptProjectIdentity(): void {
+  const hadLegacy = Object.keys(doc).some(isIdentityKey);
+  const identities = readAllIdentities();
+  for (const key of Object.keys(doc)) {
+    const parsed = parseIdentityKey(key);
+    const value = doc[key];
+    if (!parsed || typeof value !== "string") continue;
+    if (identities[parsed.project]?.[parsed.field] === undefined) {
+      writeIdentity(parsed.project, { [parsed.field]: value });
+    }
+  }
+  for (const [project, id] of Object.entries(identities)) {
+    for (const field of ["color", "mark"] as const) {
+      const v = id[field];
+      if (v !== undefined) doc[identityKey(field, project)] = v;
+    }
+  }
+  if (hadLegacy) scheduleWrite();
 }
 
 /**
@@ -333,7 +372,7 @@ function warnUnstorable(key: string, value: unknown): void {
 function serialize(d: PreferencesDoc): string {
   const lines = [`  "version": ${JSON.stringify(d.version)}`];
   for (const key of Object.keys(d)
-    .filter((k) => k !== "version")
+    .filter((k) => k !== "version" && !isIdentityKey(k))
     .sort()) {
     // Belt and braces: `patchPreferences` already ignores unstorable values, so
     // this only fires for a doc assembled some other way. Emitting the line

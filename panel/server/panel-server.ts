@@ -9,7 +9,7 @@ import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
 import { loadConfig, getConfig, isPortExplicit } from "./config.js";
-import { loadPreferences } from "./lib/preferences-store.js";
+import { adoptProjectIdentity, loadPreferences } from "./lib/preferences-store.js";
 import { preferenceSeedsFor } from "./lib/preferencesPath.js";
 import { readMirrorIdSync } from "./lib/syncRole.js";
 import { WORKSPACE_ROOT } from "../panel.config.js";
@@ -133,6 +133,12 @@ export async function startPanel(
     getConfig().preferencesPath,
     preferenceSeedsFor(WORKSPACE_ROOT, machineId(), readMirrorIdSync(WORKSPACE_ROOT)),
   );
+  // Overlay per-project identity.json, migrating legacy machine-file keys.
+  try {
+    adoptProjectIdentity();
+  } catch (err) {
+    console.error("[preferences] project identity adoption failed:", err);
+  }
   // One-way fill of project colours from the old `.panel/project-colors.json`.
   try {
     importLegacyColors();
