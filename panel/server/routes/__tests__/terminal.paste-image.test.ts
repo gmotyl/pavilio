@@ -39,7 +39,7 @@ vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(),
   listSessions: vi.fn(() => state.ids.map((id) => ({ id }))),
-  destroySession: vi.fn(),
+  closeSession: vi.fn(),
   updateSession: vi.fn(),
   // Mirrors the real contract: the target account for a known session,
   // `undefined` for an unknown id and on a host without POSIX uids.

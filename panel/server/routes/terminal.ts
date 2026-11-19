@@ -8,7 +8,7 @@ import { homedir, tmpdir, userInfo } from "os";
 import {
   createSession,
   listSessions,
-  destroySession,
+  closeSession,
   updateSession,
   getSessionOwner,
 } from "../lib/terminal-manager.js";
@@ -46,15 +46,25 @@ router.post("/sessions", (req, res) => {
   // non-string/empty) value falls back to the project's stored default.
   const effectiveRunAsUser =
     typeof runAsUser === "string" && runAsUser ? runAsUser : getDefaultUser(project);
-  const session = createSession({
-    cwd: effectiveCwd,
-    cols,
-    rows,
-    project,
-    name,
-    runAsUser: effectiveRunAsUser,
-  });
-  res.status(201).json(session);
+  try {
+    const session = createSession({
+      cwd: effectiveCwd,
+      cols,
+      rows,
+      project,
+      name,
+      runAsUser: effectiveRunAsUser,
+    });
+    res.status(201).json(session);
+  } catch (err) {
+    // Matched by code, not instanceof: shutdown has begun and the final sweep
+    // must not race a fresh PTY.
+    if ((err as { code?: string }).code === "PANEL_SHUTTING_DOWN") {
+      res.status(503).json({ error: "Panel is shutting down" });
+      return;
+    }
+    throw err;
+  }
 });
 
 router.patch("/sessions/:id", (req, res) => {
@@ -82,9 +92,22 @@ router.patch("/sessions/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete("/sessions/:id", (req, res) => {
-  const ok = destroySession(req.params.id);
-  if (!ok) return res.status(404).json({ error: "Session not found" });
+router.delete("/sessions/:id", async (req, res) => {
+  let outcome: Awaited<ReturnType<typeof closeSession>>;
+  try {
+    outcome = await closeSession(req.params.id);
+  } catch (err) {
+    // An async handler's rejection would escape Express 4 as an unhandled
+    // rejection, so answer it here.
+    console.error(`[terminal] closing session ${req.params.id} failed:`, err);
+    return res.status(500).json({ error: "Session close failed" });
+  }
+  if (outcome === "not-found") {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  if (outcome === "still-alive") {
+    return res.status(500).json({ error: "Session did not exit" });
+  }
   res.json({ ok: true });
 });
 

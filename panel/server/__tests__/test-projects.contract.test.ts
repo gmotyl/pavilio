@@ -18,7 +18,7 @@ const PANEL = resolve(__dirname, "../..");
 
 const SLOW_INCLUDE = [
   "server/__tests__/{setup-sh,update-sh,pull-sh,machine-id-sh,consumer-push-guard,pm,panel-ctl,launcher-toolchain,setup-codex,setup-shortcut}.test.ts",
-  "server/lib/__tests__/{syncRepo,syncRole,trackedFiles}.test.ts",
+  "server/lib/__tests__/{syncRepo,syncRole,trackedFiles,terminal-manager.close.integration}.test.ts",
   "scripts/__tests__/install-speech-hook.test.ts",
   "hooks/__tests__/*.test.ts",
 ];
@@ -68,7 +68,7 @@ describe("test projects", () => {
     expect(slow.testTimeout).toBe(120_000);
     // default pool (forks): these suites chdir, mutate env and spawn children
     expect(slow.pool).toBeUndefined();
-    expect(slowFiles()).toHaveLength(18);
+    expect(slowFiles()).toHaveLength(19);
   });
 
   it("the node project excludes every node-slow suite", () => {

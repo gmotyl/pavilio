@@ -5,7 +5,6 @@ import { tmpdir } from "node:os"
 import {
   _resetAssignedNamesForTests,
   createSession,
-  destroySession,
   getModePreamble,
   getSession,
   listSessions,
@@ -56,21 +55,33 @@ function emitPtyData(data: string): void {
   for (const cb of lastPtyDataCallbacks) cb(data)
 }
 
+// Stand-in for the PTY dying: closeSession removes nothing itself, so tests
+// that only need a session gone fire the exit handler the manager registered.
+const ptyExitHandlers = new WeakMap<object, () => void>()
+function destroySession(id: string): void {
+  const session = getSession(id)
+  if (session) ptyExitHandlers.get(session.pty)?.()
+}
+
 vi.mock("node-pty", () => ({
   spawn: () => {
     const dataCallbacks: Array<(data: string) => void> = []
     lastPtyDataCallbacks = dataCallbacks
-    return {
+    const fakePty = {
       pid: 4321,
       onData: (cb: (data: string) => void) => {
         dataCallbacks.push(cb)
         return { dispose: () => {} }
       },
-      onExit: () => ({ dispose: () => {} }),
+      onExit: (cb: () => void) => {
+        ptyExitHandlers.set(fakePty, cb)
+        return { dispose: () => {} }
+      },
       resize: () => {},
       kill: () => {},
       write: () => {},
     }
+    return fakePty
   },
 }))
 

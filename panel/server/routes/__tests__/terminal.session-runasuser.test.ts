@@ -6,7 +6,7 @@ vi.mock("../../config", () => configMock(() => "/tmp/unused"));
 vi.mock("../../lib/terminal-manager", () => ({
   createSession: vi.fn(() => ({ id: "s1" })),
   listSessions: vi.fn(() => []),
-  destroySession: vi.fn(),
+  closeSession: vi.fn(),
   updateSession: vi.fn(() => true),
 }));
 vi.mock("../../lib/project-default-user", () => ({
