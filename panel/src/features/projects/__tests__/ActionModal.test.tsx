@@ -230,6 +230,21 @@ describe("ActionModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("fails closed on Save and Delete when [A, A] shrinks to [A] under index 0", () => {
+    for (const name of ["Save", "Delete"]) {
+      writePreference(preferences.homeActions, [SEED[0], SEED[0]]);
+      const onClose = vi.fn();
+      const { unmount } = render(<ActionModal index={0} onClose={onClose} />);
+      // Another tab removes the first entry; actions[0] still equals the original.
+      act(() => writePreference(preferences.homeActions, [SEED[0]]));
+      fireEvent.change(field("Label"), { target: { value: "Renamed" } });
+      fireEvent.click(screen.getByRole("button", { name }));
+      expect(stored()).toEqual([SEED[0]]);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
   it("fails closed on delete when several matches remain", () => {
     writePreference(preferences.homeActions, [SEED[0], SEED[0], SEED[0]]);
     render(<ActionModal index={2} onClose={() => {}} />);

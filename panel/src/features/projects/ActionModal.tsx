@@ -27,11 +27,11 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   // position by identity instead of trusting the opening index.
   const original = useRef<HomeAction | null>(index !== null ? (actions[index] ?? null) : null).current;
   const editing = original;
-  // Whether an identical entry sat beside it at open: then a later field match
-  // cannot tell the two apart and only the opening slot is trustworthy.
-  const hadTwin = useRef(
-    original !== null && actions.filter((a, i) => i !== index && sameAction(a, original)).length > 0,
-  ).current;
+  // How many entries were identical to it at open (itself included). More than
+  // one means a field match cannot tell them apart, and any change in that
+  // count means the list moved underneath us.
+  const twinCount = useRef(original === null ? 0 : actions.filter((a) => sameAction(a, original)).length).current;
+  const hadTwin = twinCount > 1;
   const isNew = original === null;
 
   const runners = [...launchers.map((l) => l.name), "shell"];
@@ -84,6 +84,8 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   const currentIndex = () => {
     if (original === null) return -1;
     const same = (a: HomeAction) => sameAction(a, original);
+    // With twins, a changed count of identical entries makes every slot suspect.
+    if (hadTwin && actions.filter(same).length !== twinCount) return -1;
     // Prefer the opening position while it still holds the original, so one of
     // several identical actions keeps its own slot.
     const opened = index !== null ? actions[index] : undefined;
