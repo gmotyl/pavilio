@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const proj = (name: string) => ({
   name,
@@ -15,9 +15,8 @@ const proj = (name: string) => ({
   repos: [],
   group: null,
 });
-vi.mock("../useProjects", () => ({
-  useProjects: () => [proj("metro"), proj("workspace")],
-}));
+let PROJECTS = [proj("metro"), proj("workspace")];
+vi.mock("../useProjects", () => ({ useProjects: () => PROJECTS }));
 
 import { ActionModal } from "../ActionModal";
 import { preferences } from "../../../preferences/declarations";
@@ -38,6 +37,7 @@ const stored = () => readPreference(preferences.homeActions);
 
 describe("ActionModal", () => {
   beforeEach(() => {
+    PROJECTS = [proj("metro"), proj("workspace")];
     __resetPreferenceStoreForTests();
     writePreference(preferences.homeActions, SEED);
   });
@@ -161,5 +161,60 @@ describe("ActionModal", () => {
     fireEvent.click(screen.getByRole("dialog"));
     expect(onClose).toHaveBeenCalledTimes(3);
     expect(stored()).toEqual(SEED);
+  });
+
+  it("new action picks up a project list that loads after it opened", () => {
+    PROJECTS = [];
+    const { rerender } = render(<ActionModal index={null} onClose={() => {}} />);
+    expect((field("Project") as unknown as HTMLSelectElement).value).toBe("");
+    fireEvent.change(field("Label"), { target: { value: "X" } });
+    fireEvent.change(field("Prompt"), { target: { value: "go" } });
+    // An empty Project keeps Save disabled.
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    PROJECTS = [proj("metro"), proj("workspace")];
+    rerender(<ActionModal index={null} onClose={() => {}} />);
+    expect((field("Project") as unknown as HTMLSelectElement).value).toBe("workspace");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a project the user picked survives the list loading", () => {
+    PROJECTS = [proj("metro")];
+    const { rerender } = render(<ActionModal index={null} onClose={() => {}} />);
+    fireEvent.change(field("Project"), { target: { value: "metro" } });
+    PROJECTS = [proj("workspace"), proj("metro")];
+    rerender(<ActionModal index={null} onClose={() => {}} />);
+    expect((field("Project") as unknown as HTMLSelectElement).value).toBe("metro");
+  });
+
+  it("save and delete follow the edited action when the list is reordered", () => {
+    const { unmount } = render(<ActionModal index={0} onClose={() => {}} />);
+    act(() => writePreference(preferences.homeActions, [SEED[1], SEED[0]]));
+    fireEvent.change(field("Label"), { target: { value: "Harvest 2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(stored()).toEqual([SEED[1], { ...SEED[0], label: "Harvest 2" }]);
+    unmount();
+
+    writePreference(preferences.homeActions, SEED);
+    render(<ActionModal index={0} onClose={() => {}} />);
+    act(() => writePreference(preferences.homeActions, [SEED[1], SEED[0]]));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(stored()).toEqual([SEED[1]]);
+  });
+
+  it("closes without writing when the edited action is gone", () => {
+    const onClose = vi.fn();
+    render(<ActionModal index={0} onClose={onClose} />);
+    act(() => writePreference(preferences.homeActions, [SEED[1]]));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(stored()).toEqual([SEED[1]]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a stored runner that is no longer a launcher pressed", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Old", runner: "gemini", text: "x", project: "metro" },
+    ]);
+    render(<ActionModal index={0} onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: "gemini" }).getAttribute("aria-pressed")).toBe("true");
   });
 });

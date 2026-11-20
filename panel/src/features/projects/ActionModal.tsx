@@ -19,21 +19,31 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   const [actions, setActions] = usePreference(preferences.homeActions);
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const projects = useProjects();
-  const editing = index !== null ? (actions[index] ?? null) : null;
-  const isNew = editing === null;
+  // The edited action is captured once at open: `home.actions` can change
+  // underneath (second tab, drag reorder), so Save/Delete resolve its current
+  // position by identity instead of trusting the opening index.
+  const original = useRef<HomeAction | null>(index !== null ? (actions[index] ?? null) : null).current;
+  const editing = original;
+  const isNew = original === null;
 
   const runners = [...launchers.map((l) => l.name), "shell"];
   const projectNames = projects.map((p) => p.name);
 
   const [label, setLabel] = useState(editing?.label ?? "");
-  const [runner, setRunner] = useState(editing?.runner ?? runners[0]);
   const [text, setText] = useState(editing?.text ?? "");
-  const [project, setProject] = useState(
-    editing?.project ?? (projectNames.includes("workspace") ? "workspace" : (projectNames[0] ?? "")),
-  );
+  // `null` = untouched: the default is derived, so a project list that loads
+  // after the modal opened still fills the field.
+  const [pickedRunner, setPickedRunner] = useState<string | null>(null);
+  const [pickedProject, setPickedProject] = useState<string | null>(null);
+  const runner = pickedRunner ?? editing?.runner ?? runners[0];
+  const project =
+    pickedProject ??
+    editing?.project ??
+    (projectNames.includes("workspace") ? "workspace" : (projectNames[0] ?? ""));
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // The stored project may be gone from the list; keep it selectable.
+  // A stored runner / project may be gone from its list; keep it shown.
+  const runnerOptions = runners.includes(runner) ? runners : [runner, ...runners];
   const projectOptions =
     project !== "" && !projectNames.includes(project) ? [project, ...projectNames] : projectNames;
   const isShell = runner === "shell";
@@ -62,20 +72,32 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
     return () => window.removeEventListener("keydown", onKey, true);
   }, [close]);
 
+  /** Where the edited action sits now; -1 when it is gone. */
+  const currentIndex = () =>
+    original === null
+      ? -1
+      : actions.findIndex(
+          (a) =>
+            a.label === original.label &&
+            a.runner === original.runner &&
+            a.text === original.text &&
+            a.project === original.project,
+        );
+
   const save = () => {
     if (!canSave) return;
     const next: HomeAction = { label: label.trim(), runner, text: text.trim(), project };
-    setActions(
-      isNew || index === null
-        ? [...actions, next]
-        : actions.map((a, i) => (i === index ? next : a)),
-    );
+    if (isNew) setActions([...actions, next]);
+    else {
+      const at = currentIndex();
+      if (at >= 0) setActions(actions.map((a, i) => (i === at ? next : a)));
+    }
     onClose();
   };
 
   const remove = () => {
-    if (index === null) return;
-    setActions(actions.filter((_, i) => i !== index));
+    const at = currentIndex();
+    if (at >= 0) setActions(actions.filter((_, i) => i !== at));
     onClose();
   };
 
@@ -129,12 +151,12 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
             className="inline-flex flex-wrap rounded-md overflow-hidden self-start"
             style={{ border: "1px solid var(--border-subtle)" }}
           >
-            {runners.map((r) => (
+            {runnerOptions.map((r) => (
               <button
                 key={r}
                 type="button"
                 aria-pressed={runner === r}
-                onClick={() => setRunner(r)}
+                onClick={() => setPickedRunner(r)}
                 className="px-2.5 py-0.5 text-[12px]"
                 style={{
                   background: runner === r ? "var(--bg-hover)" : "transparent",
@@ -161,7 +183,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
           <select
             id="action-project"
             value={project}
-            onChange={(e) => setProject(e.target.value)}
+            onChange={(e) => setPickedProject(e.target.value)}
             className="rounded-md px-2 py-1 text-[13px] min-w-0 w-full"
             style={FIELD_STYLE}
           >
