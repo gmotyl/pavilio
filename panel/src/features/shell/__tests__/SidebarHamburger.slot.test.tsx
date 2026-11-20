@@ -16,8 +16,8 @@ import {
  * The AC is a claim about two boxes lining up — one fixed to the viewport by
  * the stylesheet, one laid out in flow by `LeftSidebar` — and it shipped with
  * nothing asserting either half. Four independent edits used to leave the whole
- * suite green while sliding `<h2>Projects</h2>` under the button: dropping both
- * `leading={<HamburgerSlot />}` props, zeroing `.sidebar-hamburger-slot`'s
+ * suite green while sliding `<h2>Projects</h2>` under the button: dropping the
+ * `HamburgerSlot` from the first (Home) row, zeroing `.sidebar-hamburger-slot`'s
  * width, dropping `className="sidebar-hamburger"` (which un-positions the
  * control entirely), and moving `left: 16px` to somewhere else.
  *

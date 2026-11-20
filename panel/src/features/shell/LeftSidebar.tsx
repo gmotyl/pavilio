@@ -763,6 +763,7 @@ export default function LeftSidebar() {
           style={({ isActive }) => ({
             color: "var(--text-primary)",
             background: isActive ? "var(--bg-active)" : "transparent",
+            boxShadow: isActive ? "inset 2px 0 0 var(--accent)" : "none",
           })}
         >
           <HomeIcon size={13} aria-hidden="true" />
@@ -801,42 +802,42 @@ export default function LeftSidebar() {
           onNew={() => setNewKind("project")}
         />
         {!projectsCollapsed && (
-        <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
-          {projectTree.map((node) => {
-            if (node.kind === "project") {
-              const p = projectsByName.get(node.name);
-              return p
-                ? renderProjectRow(p, dragRowProps(`p:${node.name}`, null))
-                : null;
-            }
-            const members = node.members
-              .map((m) => projectsByName.get(m))
-              .filter((p) => p !== undefined);
-            return (
-              <SidebarGroupRow
-                key={`g:${node.name}`}
-                name={node.name}
-                members={members.map((p) => p.name)}
-                sessionIds={members.flatMap((p) =>
-                  (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
-                )}
-                collapsed={ownFlag(groupCollapsed, node.name)}
-                onToggle={() => toggleGroup(node.name)}
-                isMobile={isMobile}
-                dragProps={dragRowProps(`g:${node.name}`, null)}
-                onContextMenu={(e) =>
-                  rowMenu.onGroupContextMenu(e, node.name, () =>
-                    toggleGroup(node.name),
-                  )
-                }
-              >
-                {members.map((p) =>
-                  renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
-                )}
-              </SidebarGroupRow>
-            );
-          })}
-        </ul>
+          <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
+            {projectTree.map((node) => {
+              if (node.kind === "project") {
+                const p = projectsByName.get(node.name);
+                return p
+                  ? renderProjectRow(p, dragRowProps(`p:${node.name}`, null))
+                  : null;
+              }
+              const members = node.members
+                .map((m) => projectsByName.get(m))
+                .filter((p) => p !== undefined);
+              return (
+                <SidebarGroupRow
+                  key={`g:${node.name}`}
+                  name={node.name}
+                  members={members.map((p) => p.name)}
+                  sessionIds={members.flatMap((p) =>
+                    (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
+                  )}
+                  collapsed={ownFlag(groupCollapsed, node.name)}
+                  onToggle={() => toggleGroup(node.name)}
+                  isMobile={isMobile}
+                  dragProps={dragRowProps(`g:${node.name}`, null)}
+                  onContextMenu={(e) =>
+                    rowMenu.onGroupContextMenu(e, node.name, () =>
+                      toggleGroup(node.name),
+                    )
+                  }
+                >
+                  {members.map((p) =>
+                    renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
+                  )}
+                </SidebarGroupRow>
+              );
+            })}
+          </ul>
         )}
       </section>
       <section data-testid="sidebar-section-research">

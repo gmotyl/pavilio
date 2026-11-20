@@ -120,9 +120,11 @@ describe("LeftSidebar Home link and folds", () => {
   it("Home link is active only on /", () => {
     const root = setup("/");
     expect(screen.getByTestId("sidebar-home-link").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByTestId("sidebar-home-link").style.boxShadow).toContain("var(--accent)");
     root.unmount();
     setup("/project/vector");
     expect(screen.getByTestId("sidebar-home-link").getAttribute("aria-current")).toBeNull();
+    expect(screen.getByTestId("sidebar-home-link").style.boxShadow).not.toContain("accent");
   });
 
   it("sections are Starred, Projects, Research with no Actions", () => {
