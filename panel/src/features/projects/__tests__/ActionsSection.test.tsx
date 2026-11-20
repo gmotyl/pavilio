@@ -16,7 +16,8 @@ const proj = (name: string, group: string | null = null) => ({
   repos: [],
   group,
 });
-const PROJECTS = [proj("workspace", "Workspace"), proj("metro", "Clients"), proj("gitara")];
+const ALL = [proj("workspace", "Workspace"), proj("metro", "Clients"), proj("gitara")];
+let PROJECTS: typeof ALL = ALL;
 
 vi.mock("../useProjects", () => ({ useProjects: () => PROJECTS }));
 vi.mock("../../mobile-access/MobileAccessButton", () => ({ MobileAccessButton: () => null }));
@@ -51,6 +52,7 @@ function mount() {
 
 describe("ActionsSection", () => {
   beforeEach(() => {
+    PROJECTS = ALL;
     __resetPreferenceStoreForTests();
     launches.fn.mockClear();
     launches.fn.mockImplementation(async () => {});
@@ -156,5 +158,18 @@ describe("ActionsSection", () => {
     const style = screen.getByTestId("actions-grid").getAttribute("style") ?? "";
     expect(style).toContain("repeat(auto-fill");
     expect(style).toContain("minmax(210px");
+  });
+
+  it("while projects load, no project-missing blocker and a click still runs", async () => {
+    PROJECTS = [];
+    render(
+      <MemoryRouter>
+        <ActionsSection />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Process meetings")).toBeTruthy();
+    expect(screen.queryByText("project missing")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Run Process meetings" }));
+    await waitFor(() => expect(launches.fn).toHaveBeenCalledTimes(1));
   });
 });

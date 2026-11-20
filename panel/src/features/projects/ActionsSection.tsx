@@ -110,7 +110,12 @@ export function ActionsSection({
   const [actions] = usePreference(preferences.homeActions);
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const projects = useProjects();
-  const names = new Set(projects.map((p) => p.name));
+  // An empty list means projects are still loading (or the fetch failed): the
+  // project check would flag every card, so it is skipped and a launch is left
+  // to succeed or raise its own error alert. Runner checks still apply.
+  const names = new Set(
+    projects.length === 0 ? actions.map((a) => a.project) : projects.map((p) => p.name),
+  );
 
   return (
     <section data-testid="actions-section" className="mb-6">
@@ -136,7 +141,7 @@ export function ActionsSection({
       >
         {actions.map((action, i) => (
           <ActionCard
-            key={i}
+            key={`${action.label}|${action.project}|${i}`}
             action={action}
             index={i}
             blocker={actionBlocker(action, launchers, names)}
