@@ -32,6 +32,7 @@ export function GroupChips({
         return (
           <button
             key={c.key ?? "__all"}
+            data-testid={`group-chip-${c.key ?? "all"}`}
             type="button"
             aria-pressed={pressed}
             onClick={() => onSelect(c.key)}

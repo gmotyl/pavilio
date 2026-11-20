@@ -66,6 +66,7 @@ function ActionCard({
         </span>
       )}
       <button
+        data-testid={`action-run-${index}`}
         type="button"
         title={`Run ${action.label}`}
         aria-label={`Run ${action.label}`}
@@ -105,6 +106,7 @@ function ActionCard({
         )}
       </button>
       <button
+        data-testid={`action-edit-${index}`}
         type="button"
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
@@ -195,6 +197,7 @@ export function ActionsSection({
           />
         ))}
         <button
+          data-testid="actions-new"
           type="button"
           onClick={() => {
             setModal(null);

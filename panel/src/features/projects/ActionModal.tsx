@@ -157,6 +157,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
             {runnerOptions.map((r) => (
               <button
                 key={r}
+                data-testid={`action-modal-runner-${r}`}
                 type="button"
                 aria-pressed={runner === r}
                 onClick={() => setPickedRunner(r)}
@@ -205,6 +206,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
         <div className="flex gap-2">
           {!isNew && (
             <button
+              data-testid="action-modal-delete"
               type="button"
               onClick={remove}
               className={btn}
@@ -215,6 +217,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
           )}
           <span className="flex-1" />
           <button
+            data-testid="action-modal-cancel"
             type="button"
             onClick={close}
             className={btn}
@@ -223,6 +226,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
             Cancel
           </button>
           <button
+            data-testid="action-modal-save"
             type="button"
             disabled={!canSave}
             onClick={save}
