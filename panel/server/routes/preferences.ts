@@ -29,7 +29,7 @@ import {
   getPreferences,
   getPreferencesPath,
   isReadOnly,
-  lastPatchPersisted,
+  lastPatchIdentityFailed,
   patchPreferences,
   readDoc,
   replacePreferences,
@@ -137,7 +137,13 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // Every other open panel tab holds the same document in memory; this is how
   // they learn which keys to re-read.
   broadcast({ type: "preferences-change", keys });
-  res.json({ ok: true, persisted: !isReadOnly() && lastPatchPersisted() });
+  // A project identity.json that refused the write would lose the change on
+  // reload. The in-memory value is applied either way; a 5xx makes the client
+  // keep the keys dirty and re-send them on its next flush.
+  if (lastPatchIdentityFailed()) {
+    return res.status(503).json({ ok: false, persisted: false, error: "project identity.json write failed" });
+  }
+  res.json({ ok: true, persisted: !isReadOnly() });
 });
 
 /** A machine id as `sanitizeHostname` produces it — no dots, no slashes, so never a path. */

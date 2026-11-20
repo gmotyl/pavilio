@@ -1,5 +1,5 @@
 import { readdirSync, existsSync, readFileSync, statSync, realpathSync } from "fs";
-import { join, relative, isAbsolute } from "path";
+import { join, relative, isAbsolute, sep } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { isProjectDir } from "./project-dir.js";
@@ -153,7 +153,8 @@ export function resolvesInsideProjectsDir(projectsDir: string, dir: string): boo
   try {
     const realRoot = realpathSync(projectsDir);
     const rel = relative(realRoot, realpathSync(dir));
-    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+    // `..` only as a whole parent segment: a project may be named `..notes`.
+    return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
   } catch {
     return false;
   }

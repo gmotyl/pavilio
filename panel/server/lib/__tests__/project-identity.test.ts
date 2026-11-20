@@ -12,7 +12,7 @@ import {
   adoptProjectIdentity,
   flushPreferences,
   getPreferences,
-  lastPatchPersisted,
+  lastPatchIdentityFailed,
   loadPreferences,
   patchPreferences,
   replacePreferences,
@@ -35,7 +35,7 @@ describe("project identity", () => {
   });
 
   it("writeIdentity: sorted keys, null deletes, empty removes the file, unknown project is a no-op", () => {
-    expect(writeIdentity("alpha", { mark: "image:mark.webp", color: "#61afef" })).toBe(true);
+    expect(writeIdentity("alpha", { mark: "image:mark.webp", color: "#61afef" })).toBe("ok");
     expect(readFileSync(idFile("alpha"), "utf8")).toBe(
       '{\n  "color": "#61afef",\n  "mark": "image:mark.webp"\n}\n',
     );
@@ -43,8 +43,8 @@ describe("project identity", () => {
     expect(readIdentity("alpha")).toEqual({ mark: "image:mark.webp" });
     writeIdentity("alpha", { mark: null });
     expect(existsSync(idFile("alpha"))).toBe(false);
-    expect(writeIdentity("nope", { color: "#fff" })).toBe(false);
-    expect(writeIdentity("../x", { color: "#fff" })).toBe(false);
+    expect(writeIdentity("nope", { color: "#fff" })).toBe("missing");
+    expect(writeIdentity("../x", { color: "#fff" })).toBe("missing");
   });
 
   it("routes identity patches to identity.json, not the machine file", async () => {
@@ -114,7 +114,7 @@ describe("project identity", () => {
     try {
       writeFileSync(join(outside, "identity.json"), '{"color":"#999999"}\n');
       symlinkSync(outside, join(root, "escape"));
-      expect(writeIdentity("escape", { color: "#123456" })).toBe(false);
+      expect(writeIdentity("escape", { color: "#123456" })).toBe("missing");
       expect(readFileSync(join(outside, "identity.json"), "utf8")).toBe('{"color":"#999999"}\n');
       expect(readIdentity("escape")).toEqual({});
       expect(readAllIdentities().escape).toBeUndefined();
@@ -134,16 +134,46 @@ describe("project identity", () => {
     expect(readIdentity("__proto__")).toEqual({ color: "#444444", mark: "image:m.webp" });
   });
 
-  it("a failed identity write keeps the value in the machine file; a failed delete is reported", async () => {
-    // A non-empty directory where identity.json should be makes rename and rm fail.
-    mkdirSync(join(idFile("alpha"), "x"), { recursive: true });
+  // A non-empty directory where identity.json should be makes rename and rm fail.
+  const blockIdentity = (p: string) => mkdirSync(join(idFile(p), "x"), { recursive: true });
+
+  it("a failed PATCH identity write or delete is reported, never parked in the machine file", async () => {
+    blockIdentity("alpha");
     loadPreferences(machineFile());
     patchPreferences({ "project.color@alpha": "#555555" });
-    expect(lastPatchPersisted()).toBe(true);
+    expect(lastPatchIdentityFailed()).toBe(true);
+    await flushPreferences();
+    expect(machineText()).not.toContain("project.");
+
+    patchPreferences({ "project.color@alpha": null });
+    expect(lastPatchIdentityFailed()).toBe(true);
+    patchPreferences({ theme: "dark" });
+    expect(lastPatchIdentityFailed()).toBe(false);
+    // A missing project is memory-only by design, not a failure.
+    patchPreferences({ "project.color@nope": "#666666" });
+    expect(lastPatchIdentityFailed()).toBe(false);
+  });
+
+  it("an empty string removes the identity field", () => {
+    writeIdentity("alpha", { color: "#111111", mark: "image:m.webp" });
+    loadPreferences(machineFile());
+    patchPreferences({ "project.mark@alpha": "" });
+    expect(lastPatchIdentityFailed()).toBe(false);
+    expect(readIdentity("alpha")).toEqual({ color: "#111111" });
+  });
+
+  it("boot migration: a failed write is retained and retried; a missing project is dropped", async () => {
+    blockIdentity("alpha");
+    writeFileSync(
+      machineFile(),
+      JSON.stringify({ version: 1, "project.color@alpha": "#555555", "project.color@gone": "#777777" }),
+    );
+    loadPreferences(machineFile());
+    adoptProjectIdentity();
     await flushPreferences();
     expect(machineText()).toContain('"project.color@alpha": "#555555"');
+    expect(machineText()).not.toContain("project.color@gone");
 
-    // Once identity.json is writable again, the next boot migrates it out.
     rmSync(idFile("alpha"), { recursive: true, force: true });
     _resetPreferencesForTests();
     loadPreferences(machineFile());
@@ -151,13 +181,11 @@ describe("project identity", () => {
     expect(readIdentity("alpha")).toEqual({ color: "#555555" });
     await flushPreferences();
     expect(machineText()).not.toContain("project.");
+  });
 
-    // A delete that cannot reach identity.json is not persisted.
-    rmSync(idFile("alpha"));
-    mkdirSync(join(idFile("alpha"), "x"), { recursive: true });
-    patchPreferences({ "project.color@alpha": null });
-    expect(lastPatchPersisted()).toBe(false);
-    patchPreferences({ theme: "dark" });
-    expect(lastPatchPersisted()).toBe(true);
+  it("a project whose name starts with two dots is inside projectsDir", () => {
+    mkdirSync(join(root, "..notes"));
+    expect(writeIdentity("..notes", { color: "#888888" })).toBe("ok");
+    expect(readIdentity("..notes")).toEqual({ color: "#888888" });
   });
 });

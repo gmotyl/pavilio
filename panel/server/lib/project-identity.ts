@@ -87,12 +87,14 @@ export function readAllIdentities(): Record<string, Identity> {
 /**
  * Merge `patch` into the project's identity.json; `null` deletes a field.
  * Atomic (tmp + rename). The file is removed when no field is left. Returns
- * false when the project directory does not exist — nothing is created for
- * an unknown project.
+ * `"missing"` when the project directory does not exist (nothing is created
+ * for an unknown project) and `"failed"` when the filesystem refused the write.
  */
-export function writeIdentity(name: string, patch: { [K in IdentityField]?: string | null }): boolean {
+export type IdentityWriteResult = "ok" | "missing" | "failed";
+
+export function writeIdentity(name: string, patch: { [K in IdentityField]?: string | null }): IdentityWriteResult {
   const dir = projectDir(name);
-  if (!dir) return false;
+  if (!dir) return "missing";
   const file = join(dir, "identity.json");
   const next: Identity = readFile(file);
   for (const f of FIELDS) {
@@ -106,9 +108,9 @@ export function writeIdentity(name: string, patch: { [K in IdentityField]?: stri
       rmSync(file, { force: true });
     } catch (err) {
       console.error(`[identity] remove ${file} failed:`, err);
-      return false;
+      return "failed";
     }
-    return true;
+    return "ok";
   }
   const sorted: Record<string, string> = {};
   for (const f of FIELDS) if (next[f]) sorted[f] = next[f];
@@ -118,9 +120,13 @@ export function writeIdentity(name: string, patch: { [K in IdentityField]?: stri
     writeFileSync(tmp, `${JSON.stringify(sorted, null, 2)}\n`, "utf8");
     renameSync(tmp, file);
   } catch (err) {
-    rmSync(tmp, { force: true });
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // The write already failed; a leftover tmp file is harmless.
+    }
     console.error(`[identity] write ${file} failed:`, err);
-    return false;
+    return "failed";
   }
-  return true;
+  return "ok";
 }
