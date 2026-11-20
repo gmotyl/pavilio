@@ -5,6 +5,7 @@ import { usePreference } from "../../preferences/usePreference";
 import { preferences } from "../../preferences/declarations";
 import { buildSections } from "./dashboardSections";
 import { GroupChips } from "./GroupChips";
+import { ActionsSection } from "./ActionsSection";
 import { useProjects, Project } from "./useProjects";
 import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
 import { useFileDropTarget } from "../explorer/useFileDrag";
@@ -164,6 +165,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-6">
+      <ActionsSection />
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold mb-1">Projects</h1>
