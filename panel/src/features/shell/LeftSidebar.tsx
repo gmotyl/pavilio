@@ -449,6 +449,17 @@ export default function LeftSidebar() {
     setProjectsRevealed(mobileMenuOpen && revealInProjects && projectsCollapsed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobileMenuOpen, revealInProjects]);
+  // The group holding the current project is revealed the same way, so a
+  // collapsed group does not hide it inside an open Projects section.
+  const revealGroup =
+    revealProject === null
+      ? null
+      : (otherProjects.find((p) => p.name === revealProject)?.group ?? null);
+  const [revealedGroup, setRevealedGroup] = useState<string | null>(null);
+  useEffect(() => {
+    setRevealedGroup(mobileMenuOpen && revealGroup ? revealGroup : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealGroup]);
   const starredHidden = starredCollapsed && !starredRevealed;
   const projectsHidden = projectsCollapsed && !projectsRevealed;
   const toggleStarred = () => {
@@ -523,6 +534,12 @@ export default function LeftSidebar() {
     starredProjects.map((p) => [String(p.name), p]),
   );
   const toggleGroup = (name: string) => {
+    // Folding a revealed group only ends the reveal; storage already says collapsed.
+    if (revealedGroup === name && ownFlag(groupCollapsed, name)) {
+      setRevealedGroup(null);
+      return;
+    }
+    if (revealedGroup === name) setRevealedGroup(null);
     const next = Object.assign(groupMap<boolean>(), groupCollapsed);
     if (ownFlag(next, name)) delete next[name];
     else next[name] = true;
@@ -902,7 +919,7 @@ export default function LeftSidebar() {
                   sessionIds={members.flatMap((p) =>
                     (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
                   )}
-                  collapsed={ownFlag(groupCollapsed, node.name)}
+                  collapsed={ownFlag(groupCollapsed, node.name) && revealedGroup !== node.name}
                   onToggle={() => toggleGroup(node.name)}
                   isMobile={isMobile}
                   dragProps={dragRowProps(`g:${node.name}`, null)}

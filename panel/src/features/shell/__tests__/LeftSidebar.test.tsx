@@ -972,6 +972,27 @@ describe("LeftSidebar.mobileMenu", () => {
     expect(readPreference(preferences.projectsCollapsed)).toBe(true);
   });
 
+  it("opening the sidebar on mobile reveals the current project's collapsed group, without writing it", () => {
+    shell.projects = () => [
+      { name: "vector", repos: [], group: "alokai" },
+      { name: "atlas", repos: [], group: "alokai" },
+    ];
+    writePreference(preferences.groupCollapsed, { alokai: true });
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+
+    openMenu();
+
+    expect(screen.getByTestId("sidebar-project-row-vector")).toBeInTheDocument();
+    expect(readPreference(preferences.groupCollapsed)).toEqual({ alokai: true });
+
+    // Folding the revealed group hides it again and still writes nothing.
+    fireEvent.click(screen.getByTestId("sidebar-group-toggle-alokai"));
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+    expect(readPreference(preferences.groupCollapsed)).toEqual({ alokai: true });
+  });
+
   it("opening the sidebar on mobile reveals the current project in a collapsed Starred section, without writing it", () => {
     shell.starred = new Set(["vector"]);
     writePreference(preferences.starredCollapsed, true);
