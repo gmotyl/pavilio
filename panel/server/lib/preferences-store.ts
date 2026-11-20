@@ -48,6 +48,9 @@ let dirty = false;
 let tmpSeq = 0;
 let refusalLogged = false;
 const unstorableWarned = new Set<string>();
+/** Identity keys whose identity.json write failed — kept in the machine file. */
+const identityFallback = new Set<string>();
+let identityDeleteFailed = false;
 
 /**
  * Read the document at `path` into memory. Boot-time and synchronous; never
@@ -178,6 +181,7 @@ export async function replacePreferences(next: Record<string, unknown>): Promise
  */
 export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc {
   const next: PreferencesDoc = { ...doc, version: doc.version };
+  identityDeleteFailed = false;
   for (const [key, value] of Object.entries(patch)) {
     if (key === "version") continue;
     if (value === null) {
@@ -202,12 +206,31 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
   return doc;
 }
 
-/** Identity keys live in `<project>/identity.json`, not the machine file. */
+/**
+ * Identity keys live in `<project>/identity.json`, not the machine file. When
+ * that write fails, a set value is kept in the machine file instead
+ * (`identityFallback`) so the acknowledged change survives a restart, and the
+ * next boot's adoption retries the migration. A failed delete cannot be kept
+ * anywhere — it is reported through `lastPatchPersisted`.
+ */
 function routeIdentity(key: string, value: unknown): void {
   const parsed = parseIdentityKey(key);
   if (!parsed) return;
   if (value !== null && typeof value !== "string") return;
-  writeIdentity(parsed.project, { [parsed.field]: value });
+  const ok = writeIdentity(parsed.project, { [parsed.field]: value });
+  if (value === null) {
+    identityFallback.delete(key);
+    if (!ok) identityDeleteFailed = true;
+  } else if (ok) identityFallback.delete(key);
+  else identityFallback.add(key);
+}
+
+/**
+ * False when the latest `patchPreferences` could not remove an identity value
+ * from its project's identity.json, so the deletion will not survive a reload.
+ */
+export function lastPatchPersisted(): boolean {
+  return !identityDeleteFailed;
 }
 
 /**
@@ -225,8 +248,10 @@ export function adoptProjectIdentity(): void {
     const value = doc[key];
     if (!parsed || typeof value !== "string") continue;
     if (identities[parsed.project]?.[parsed.field] === undefined) {
-      writeIdentity(parsed.project, { [parsed.field]: value });
-    }
+      // A failed migration keeps the value in the machine file until a later boot succeeds.
+      if (writeIdentity(parsed.project, { [parsed.field]: value })) identityFallback.delete(key);
+      else identityFallback.add(key);
+    } else identityFallback.delete(key);
   }
   for (const [project, id] of Object.entries(identities)) {
     for (const field of ["color", "mark"] as const) {
@@ -282,6 +307,8 @@ export function _resetPreferencesForTests(): void {
   targetPath = "";
   refusalLogged = false;
   unstorableWarned.clear();
+  identityFallback.clear();
+  identityDeleteFailed = false;
 }
 
 /**
@@ -372,7 +399,7 @@ function warnUnstorable(key: string, value: unknown): void {
 function serialize(d: PreferencesDoc): string {
   const lines = [`  "version": ${JSON.stringify(d.version)}`];
   for (const key of Object.keys(d)
-    .filter((k) => k !== "version" && !isIdentityKey(k))
+    .filter((k) => k !== "version" && (!isIdentityKey(k) || identityFallback.has(k)))
     .sort()) {
     // Belt and braces: `patchPreferences` already ignores unstorable values, so
     // this only fires for a doc assembled some other way. Emitting the line

@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 let root = "";
 vi.mock("../../config.js", () => ({ getConfig: () => ({ projectsDir: root }) }));
 
-import { readIdentity, writeIdentity } from "../project-identity.js";
+import { readAllIdentities, readIdentity, writeIdentity } from "../project-identity.js";
 import {
   _resetPreferencesForTests,
   adoptProjectIdentity,
   flushPreferences,
   getPreferences,
+  lastPatchPersisted,
   loadPreferences,
   patchPreferences,
   replacePreferences,
@@ -106,5 +107,57 @@ describe("project identity", () => {
     expect(readIdentity("alpha")).toEqual({ color: "#aaaaaa" });
     expect(readIdentity("beta")).toEqual({ color: "#dddddd" });
     expect(getPreferences()["project.color@alpha"]).toBe("#aaaaaa");
+  });
+
+  it("a project dir symlinked outside projectsDir is neither written nor read", () => {
+    const outside = mkdtempSync(join(tmpdir(), "pavilio-identity-outside-"));
+    try {
+      writeFileSync(join(outside, "identity.json"), '{"color":"#999999"}\n');
+      symlinkSync(outside, join(root, "escape"));
+      expect(writeIdentity("escape", { color: "#123456" })).toBe(false);
+      expect(readFileSync(join(outside, "identity.json"), "utf8")).toBe('{"color":"#999999"}\n');
+      expect(readIdentity("escape")).toEqual({});
+      expect(readAllIdentities().escape).toBeUndefined();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("a project named __proto__ is an ordinary entry and survives boot adoption", async () => {
+    mkdirSync(join(root, "__proto__"));
+    writeIdentity("__proto__", { color: "#444444" });
+    expect(Object.keys(readAllIdentities())).toContain("__proto__");
+    writeFileSync(machineFile(), JSON.stringify({ version: 1, "project.mark@__proto__": "image:m.webp" }));
+    loadPreferences(machineFile());
+    adoptProjectIdentity();
+    expect(getPreferences()["project.color@__proto__"]).toBe("#444444");
+    expect(readIdentity("__proto__")).toEqual({ color: "#444444", mark: "image:m.webp" });
+  });
+
+  it("a failed identity write keeps the value in the machine file; a failed delete is reported", async () => {
+    // A non-empty directory where identity.json should be makes rename and rm fail.
+    mkdirSync(join(idFile("alpha"), "x"), { recursive: true });
+    loadPreferences(machineFile());
+    patchPreferences({ "project.color@alpha": "#555555" });
+    expect(lastPatchPersisted()).toBe(true);
+    await flushPreferences();
+    expect(machineText()).toContain('"project.color@alpha": "#555555"');
+
+    // Once identity.json is writable again, the next boot migrates it out.
+    rmSync(idFile("alpha"), { recursive: true, force: true });
+    _resetPreferencesForTests();
+    loadPreferences(machineFile());
+    adoptProjectIdentity();
+    expect(readIdentity("alpha")).toEqual({ color: "#555555" });
+    await flushPreferences();
+    expect(machineText()).not.toContain("project.");
+
+    // A delete that cannot reach identity.json is not persisted.
+    rmSync(idFile("alpha"));
+    mkdirSync(join(idFile("alpha"), "x"), { recursive: true });
+    patchPreferences({ "project.color@alpha": null });
+    expect(lastPatchPersisted()).toBe(false);
+    patchPreferences({ theme: "dark" });
+    expect(lastPatchPersisted()).toBe(true);
   });
 });

@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getConfig } from "../config.js";
+import { resolvesInsideProjectsDir } from "./discovery.js";
 
 export type IdentityField = "color" | "mark";
 export interface Identity {
@@ -33,7 +34,11 @@ function safeName(name: string): boolean {
 
 function projectDir(name: string): string | undefined {
   if (!safeName(name)) return undefined;
-  const dir = join(getConfig().projectsDir, name);
+  const { projectsDir } = getConfig();
+  const dir = join(projectsDir, name);
+  // A symlinked project dir pointing outside projectsDir must never receive
+  // an identity write (or be read from).
+  if (!resolvesInsideProjectsDir(projectsDir, dir)) return undefined;
   try {
     return statSync(dir).isDirectory() ? dir : undefined;
   } catch {
@@ -63,7 +68,8 @@ export function readIdentity(name: string): Identity {
 
 /** Every project's identity, keyed by project name. Projects without one are omitted. */
 export function readAllIdentities(): Record<string, Identity> {
-  const out: Record<string, Identity> = {};
+  // Null prototype: a project named `__proto__` must be an ordinary entry.
+  const out: Record<string, Identity> = Object.create(null) as Record<string, Identity>;
   let names: string[] = [];
   try {
     names = readdirSync(getConfig().projectsDir);
@@ -96,7 +102,12 @@ export function writeIdentity(name: string, patch: { [K in IdentityField]?: stri
     else next[f] = v;
   }
   if (!next.color && !next.mark) {
-    rmSync(file, { force: true });
+    try {
+      rmSync(file, { force: true });
+    } catch (err) {
+      console.error(`[identity] remove ${file} failed:`, err);
+      return false;
+    }
     return true;
   }
   const sorted: Record<string, string> = {};

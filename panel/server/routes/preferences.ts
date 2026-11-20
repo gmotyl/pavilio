@@ -29,6 +29,7 @@ import {
   getPreferences,
   getPreferencesPath,
   isReadOnly,
+  lastPatchPersisted,
   patchPreferences,
   readDoc,
   replacePreferences,
@@ -136,7 +137,7 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // Every other open panel tab holds the same document in memory; this is how
   // they learn which keys to re-read.
   broadcast({ type: "preferences-change", keys });
-  res.json({ ok: true, persisted: !isReadOnly() });
+  res.json({ ok: true, persisted: !isReadOnly() && lastPatchPersisted() });
 });
 
 /** A machine id as `sanitizeHostname` produces it — no dots, no slashes, so never a path. */
