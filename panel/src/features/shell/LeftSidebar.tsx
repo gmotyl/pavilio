@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Archive as ArchiveIcon,
@@ -16,6 +16,7 @@ import {
   Star,
   Terminal as TerminalIcon,
   Wifi,
+  Home as HomeIcon,
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
 import { SidebarGroupRow } from "./SidebarGroupRow";
@@ -62,17 +63,10 @@ import {
   matchProjectFromViewPath,
 } from "../projects/matchProjectFromPath";
 
-/**
- * `leading` is the slot the corner hamburger occupies — passed to whichever
- * header renders FIRST, because that is the row the fixed button lands on. It
- * is a reserved box rather than the button itself: `.sidebar` is
- * `overflow: hidden` and `.sidebar-collapsed` is `pointer-events: none`, so the
- * control cannot live in this tree. See `SidebarHamburger`.
- */
+/** A section heading, optionally a ▾/▸ fold toggle with a count and a new button. */
 function SectionHeader({
   icon: Icon,
   label,
-  leading,
   collapse,
   count,
   testId,
@@ -80,7 +74,6 @@ function SectionHeader({
 }: {
   icon: typeof FolderOpen;
   label: string;
-  leading?: ReactNode;
   /** Makes the header a ▾/▸ toggle for its section. */
   collapse?: { collapsed: boolean; onToggle: () => void };
   /** Row count shown after the label; stays visible while collapsed. */
@@ -105,7 +98,6 @@ function SectionHeader({
     const Chevron = collapse.collapsed ? ChevronRight : ChevronDown;
     return (
       <div className="flex items-center gap-2 mb-2 px-1">
-        {leading}
         <button
           type="button"
           data-testid={testId ? `${testId}-toggle` : undefined}
@@ -137,7 +129,6 @@ function SectionHeader({
   }
   return (
     <div className="flex items-center gap-2 mb-2 px-1">
-      {leading}
       <Icon size={12} style={{ color: "var(--text-tertiary)" }} />
       <h2
         className="text-[11px] font-semibold uppercase tracking-widest"
@@ -398,6 +389,12 @@ export default function LeftSidebar() {
 
   const [researchCollapsed, setResearchCollapsed] = usePreference(
     preferences.researchSectionCollapsed,
+  );
+  const [starredCollapsed, setStarredCollapsed] = usePreference(
+    preferences.starredCollapsed,
+  );
+  const [projectsCollapsed, setProjectsCollapsed] = usePreference(
+    preferences.projectsCollapsed,
   );
 
   // Starred keeps every kind; the rest split by kind — `project` into
@@ -736,13 +733,8 @@ export default function LeftSidebar() {
     );
   };
 
-  // Which header row reserves the hamburger's box, decided ONCE. It belongs to
-  // the first row on screen, which is Starred when there is one and Projects
-  // otherwise — an invariant, and one that two independent `leading` ternaries
-  // could disagree about. Two slots would double-indent, none would put the
-  // heading under the button, and both are a single edit away when the answer
-  // lives in two places.
-  const starredIsFirst = starredProjects.length > 0;
+  // The hamburger's box is the leading item of the first row, which is always
+  // the Home row — Starred and Projects no longer take turns holding it.
   const hamburgerSlot = <HamburgerSlot />;
 
   return (
@@ -761,22 +753,54 @@ export default function LeftSidebar() {
     // of this scrollport and away from the list it heads, which is a bigger
     // change than the misalignment earns.
     <div className="p-3 overflow-auto h-full flex flex-col gap-5">
-      {starredIsFirst && (
+      <div className="flex items-center gap-2 px-1" data-testid="sidebar-first-row">
+        {hamburgerSlot}
+        <NavLink
+          to="/"
+          end
+          data-testid="sidebar-home-link"
+          className="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px] font-semibold"
+          style={({ isActive }) => ({
+            color: "var(--text-primary)",
+            background: isActive ? "var(--bg-active)" : "transparent",
+          })}
+        >
+          <HomeIcon size={13} aria-hidden="true" />
+          <span>Home</span>
+        </NavLink>
+      </div>
+      {starredProjects.length > 0 && (
         <section data-testid="sidebar-section-starred">
-          <SectionHeader icon={Star} label="Starred" leading={hamburgerSlot} />
-          <ul className="space-y-0.5">
-            {starredProjects.map((p) => renderProjectRow(p))}
-          </ul>
+          <SectionHeader
+            icon={Star}
+            label="Starred"
+            testId="sidebar-section-starred"
+            count={starredProjects.length}
+            collapse={{
+              collapsed: starredCollapsed,
+              onToggle: () => setStarredCollapsed(!starredCollapsed),
+            }}
+          />
+          {!starredCollapsed && (
+            <ul className="space-y-0.5">
+              {starredProjects.map((p) => renderProjectRow(p))}
+            </ul>
+          )}
         </section>
       )}
       <section data-testid="sidebar-section-projects">
         <SectionHeader
           icon={FolderOpen}
           label="Projects"
-          leading={starredIsFirst ? undefined : hamburgerSlot}
           testId="sidebar-section-projects"
+          count={otherProjects.length}
+          collapse={{
+            collapsed: projectsCollapsed,
+            onToggle: () => setProjectsCollapsed(!projectsCollapsed),
+          }}
           onNew={() => setNewKind("project")}
         />
+        {!projectsCollapsed && (
         <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
           {projectTree.map((node) => {
             if (node.kind === "project") {
@@ -813,6 +837,7 @@ export default function LeftSidebar() {
             );
           })}
         </ul>
+        )}
       </section>
       <section data-testid="sidebar-section-research">
         <SectionHeader

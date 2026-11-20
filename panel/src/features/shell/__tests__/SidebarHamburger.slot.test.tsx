@@ -84,29 +84,31 @@ function setup(starred: string[] = []) {
 const headings = () => Array.from(document.querySelectorAll("h2"));
 
 /** The reserved boxes — there must be exactly one, in exactly one row. */
+const firstRow = () => screen.getByTestId("sidebar-first-row");
+const homeLink = () => screen.getByTestId("sidebar-home-link");
+
 const slots = () =>
   Array.from(document.querySelectorAll(".sidebar-hamburger-slot"));
 
 describe("the hamburger's reserved slot", () => {
   beforeEach(() => localStorage.clear());
 
-  it("is the leading item of the FIRST header row on screen", () => {
-    // No stars: Projects is the row at the top, so the slot is Projects'.
+  it("is the leading item of the FIRST row on screen, the Home row", () => {
+    // The first row is now always the Home row, with or without stars; the
+    // section headings below it carry no slot of their own.
     const plain = setup();
-    // Research renders even when it has no rows (its header carries the
-    // new-research button), but it is never the first row.
     expect(headings().map((h) => h.textContent)).toEqual([
       "Projects",
       "Research",
       "Git",
     ]);
     expect(slots()).toHaveLength(1);
-    expect(slots()[0].parentElement).toBe(headings()[0].parentElement);
-    expect(slots()[0].parentElement?.firstElementChild).toBe(slots()[0]);
+    expect(slots()[0].parentElement).toBe(firstRow());
+    expect(firstRow().firstElementChild).toBe(slots()[0]);
+    expect(firstRow().parentElement?.firstElementChild).toBe(firstRow());
     plain.unmount();
 
-    // A starred project pushes a Starred section above it, and the slot has to
-    // move with the row rather than stay with the section it started on.
+    // A Starred section appears below the Home row; the slot stays put.
     setup(["vector"]);
     expect(headings().map((h) => h.textContent)).toEqual([
       "Starred",
@@ -115,13 +117,13 @@ describe("the hamburger's reserved slot", () => {
       "Git",
     ]);
     expect(slots()).toHaveLength(1);
-    expect(slots()[0].parentElement).toBe(headings()[0].parentElement);
-    expect(slots()[0].parentElement?.firstElementChild).toBe(slots()[0]);
+    expect(slots()[0].parentElement).toBe(firstRow());
+    expect(firstRow().firstElementChild).toBe(slots()[0]);
   });
 
   it("is the button's own box, at the button's own origin", () => {
     setup();
-    const row = headings()[0].parentElement!;
+    const row = firstRow();
     const column = row.closest(".overflow-auto")!;
 
     // Same size. A slot narrower than the button (0px, say) reserves a corner
@@ -151,23 +153,24 @@ describe("the hamburger's reserved slot", () => {
   });
 
   it("leaves the heading clear of the button", () => {
-    setup();
-    const heading = headings()[0];
-    const row = heading.parentElement!;
+    const plain = setup();
+    const home = homeLink();
+    const row = firstRow();
 
-    // 12 (`p-3`) + 4 (`px-1`) + 24 (slot) + 8 (`gap-2`) + 12 (icon) + 8 (gap).
-    // Derived rather than written down, so the arithmetic tracks the row: drop
-    // the slot and it answers 36, zero the slot's width and it answers 44 —
-    // both of them under the button's 40px right edge, or on top of it.
+    // 12 (`p-3`) + 4 (`px-1`) + 24 (slot) + 8 (`gap-2`): the Home link starts
+    // just right of the button's 40px edge. Derived rather than written down,
+    // so the arithmetic tracks the row: drop the slot and it answers 24, zero
+    // the slot's width and it answers 24 as well — both under the button.
     expect(flexGap(row)).toBe(8);
-    expect(headingOriginX(heading)).toBe(68);
-    expect(headingOriginX(heading)).toBeGreaterThanOrEqual(
+    expect(headingOriginX(home)).toBe(48);
+    expect(headingOriginX(home)).toBeGreaterThanOrEqual(
       HAMBURGER.left + HAMBURGER.width,
     );
 
-    // And with a Starred row above, the same clearance on that row instead.
+    // Starred rows below change nothing about it.
+    plain.unmount();
     const starred = setup(["vector"]);
-    expect(headingOriginX(headings()[0])).toBe(68);
+    expect(headingOriginX(homeLink())).toBe(48);
     starred.unmount();
   });
 
