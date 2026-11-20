@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useFavorites } from "./useFavorites";
 import { usePreference } from "../../preferences/usePreference";
 import { preferences } from "../../preferences/declarations";
-import { buildSections } from "./dashboardSections";
+import { buildSections, resolveFilter } from "./dashboardSections";
 import { GroupChips } from "./GroupChips";
 import { ActionsSection } from "./ActionsSection";
 import { useProjects, Project } from "./useProjects";
@@ -157,9 +157,8 @@ export default function Dashboard() {
     [projects, favorites, starredOrder, sidebarOrder],
   );
   // A stored chip that names no current section reads as All.
-  const active =
-    filter !== null && sections.some((s) => s.name === filter) ? filter : null;
-  const visible = active === null ? sections : sections.filter((s) => s.name === active);
+  const active = resolveFilter(filter, sections);
+  const visible = active === null ? sections : sections.filter((s) => s.key === active);
   // Every section counts, Favourites included, matching the chip row.
   const groupCount = sections.length;
 
@@ -203,14 +202,14 @@ export default function Dashboard() {
       ) : (
         <>
           <GroupChips
-            chips={sections.map((x) => ({ name: x.name, count: x.projects.length }))}
+            chips={sections.map((x) => ({ key: x.key, name: x.name, count: x.projects.length }))}
             total={projects.length}
             selected={active}
             onSelect={setFilter}
           />
           {visible.map((section) => (
             <section
-              key={section.name}
+              key={section.key}
               data-testid={`dashboard-section-${section.name}`}
               className="mb-6"
             >

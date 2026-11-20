@@ -116,7 +116,7 @@ describe("Dashboard groups", () => {
     expect(screen.queryByTestId("dashboard-section-Workspace")).toBeNull();
     expect(screen.queryByTestId("dashboard-section-Favourites")).toBeNull();
     expect(screen.getByTestId("dashboard-section-Clients")).toBeTruthy();
-    expect(readPreference(preferences.homeGroupFilter)).toBe("Clients");
+    expect(readPreference(preferences.homeGroupFilter)).toBe("group:Clients");
   });
 
   it("cards keep icon, name, last active and star", () => {

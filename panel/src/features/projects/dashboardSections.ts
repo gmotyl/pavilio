@@ -3,9 +3,27 @@ import { orderStarred } from "../shell/starredOrder";
 
 export const FAVOURITES = "Favourites";
 export const OTHER = "Other";
+export const FAVOURITES_KEY = "fav";
+export const OTHER_KEY = "other";
+export const groupKey = (name: string) => `group:${name}`;
+
+/**
+ * Resolve a stored chip to a section key. Values stored before keys existed
+ * were plain group names; those still select that group, anything else is All.
+ */
+export function resolveFilter(
+  stored: string | null,
+  sections: readonly { key: string; kind: string; name: string }[],
+): string | null {
+  if (stored === null) return null;
+  if (sections.some((s) => s.key === stored)) return stored;
+  return sections.find((s) => s.kind === "group" && s.name === stored)?.key ?? null;
+}
 
 export interface Section<T extends { name: string }> {
-  /** Section label, also the value stored as the selected chip. */
+  /** Filter identity (`fav`, `other`, `group:<name>`): unlike `name`, it cannot collide. */
+  key: string;
+  /** Display label only. */
   name: string;
   kind: "favourites" | "group" | "other";
   projects: T[];
@@ -38,6 +56,7 @@ export function buildSections<T extends { name: string; group?: string | null }>
 
   const out: Section<T>[] = [
     {
+      key: FAVOURITES_KEY,
       name: FAVOURITES,
       kind: "favourites",
       projects: orderedStarred.map((n) => byName.get(n)!),
@@ -51,6 +70,7 @@ export function buildSections<T extends { name: string; group?: string | null }>
   for (const node of tree) {
     if (node.kind === "group") {
       out.push({
+        key: groupKey(node.name),
         name: node.name,
         kind: "group",
         projects: node.members.map((n) => byName.get(n)!),
@@ -59,6 +79,6 @@ export function buildSections<T extends { name: string; group?: string | null }>
       other.push(byName.get(node.name)!);
     }
   }
-  out.push({ name: OTHER, kind: "other", projects: other });
+  out.push({ key: OTHER_KEY, name: OTHER, kind: "other", projects: other });
   return out.filter((s) => s.projects.length > 0);
 }

@@ -1,4 +1,6 @@
 export interface GroupChip {
+  /** Filter identity; `name` is only the label. */
+  key: string;
   name: string;
   count: number;
 }
@@ -18,7 +20,7 @@ export function GroupChips({
 }) {
   const all: { key: string | null; label: string; count: number }[] = [
     { key: null, label: "All", count: total },
-    ...chips.map((c) => ({ key: c.name, label: c.name, count: c.count })),
+    ...chips.map((c) => ({ key: c.key, label: c.name, count: c.count })),
   ];
   return (
     <div
