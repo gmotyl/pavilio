@@ -14,4 +14,10 @@ describe("orderStarred", () => {
   it("keeps unknown names in their current order and drops duplicate saved names", () => {
     expect(orderStarred(["z", "z"], ["x", "z", "y"])).toEqual(["z", "x", "y"]);
   });
+
+  it("tolerates a saved order that is not a string array", () => {
+    expect(orderStarred({} as unknown as string[], ["a", "b"])).toEqual(["a", "b"]);
+    expect(orderStarred("x" as unknown as string[], ["a"])).toEqual(["a"]);
+    expect(orderStarred([1, "b"] as unknown as string[], ["a", "b"])).toEqual(["b", "a"]);
+  });
 });

@@ -634,7 +634,7 @@ export const preferences = {
     key: "shell.starredOrder", // was: nothing — new with the starred section
     scope: "global",
     default: [],
-    codec: json<string[]>(),
+    codec: listOf((v) => (typeof v === "string" ? v : null)),
     portable: true,
   }),
   /** Whether the sidebar's starred section is folded. */

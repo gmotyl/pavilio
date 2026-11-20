@@ -44,6 +44,14 @@ describe("home actions and sidebar section preferences", () => {
     ]);
   });
 
+  it("shell.starredOrder keeps only string entries and rejects non-lists", () => {
+    const codec = preferences.starredOrder.codec;
+    expect(codec.parse('["a","b"]')).toEqual(["a", "b"]);
+    expect(codec.parse('[1,"a"]')).toEqual(["a"]);
+    expect(() => codec.parse("{}")).toThrow();
+    expect(() => codec.parse('"x"')).toThrow();
+  });
+
   it("home.actions drops an entry with a blank or missing field", () => {
     const codec = preferences.homeActions.codec;
     const valid = { label: "Go", runner: "shell", text: "ls", project: "pavilio" };
