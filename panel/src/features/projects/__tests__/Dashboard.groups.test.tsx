@@ -21,6 +21,7 @@ const PROJECTS = [
   proj("infopoly", "Clients"),
   proj("pavilio", "Workspace"),
   proj("gitara", null),
+  proj("zepp", null),
 ];
 
 vi.mock("../useProjects", () => ({ useProjects: () => PROJECTS }));
@@ -64,8 +65,8 @@ describe("Dashboard groups", () => {
   it("renders Projects heading and count line", () => {
     mount();
     expect(screen.getByRole("heading", { level: 1, name: "Projects" })).toBeTruthy();
-    // Favourites is a view over the groups, so only Workspace and Clients count.
-    expect(screen.getByText("4 projects in 2 groups")).toBeTruthy();
+    // M counts every section, Favourites included (as the mockup does).
+    expect(screen.getByText("5 projects in 4 groups")).toBeTruthy();
   });
 
   it("chip row starts with All and shows counts; active chip is aria-pressed", () => {
@@ -73,10 +74,11 @@ describe("Dashboard groups", () => {
     const group = screen.getByRole("group", { name: "Filter by group" });
     const chips = within(group).getAllByRole("button");
     expect(chips.map((c) => c.textContent)).toEqual([
-      "All4",
+      "All5",
       "Favourites2",
       "Workspace1",
       "Clients2",
+      "Other1",
     ]);
     expect(chip(/^All/).getAttribute("aria-pressed")).toBe("true");
     expect(chip(/^Clients/).getAttribute("aria-pressed")).toBe("false");
@@ -89,7 +91,12 @@ describe("Dashboard groups", () => {
       "Favourites2",
       "Workspace1",
       "Clients2",
+      "Other1",
     ]);
+    const other = screen.getByTestId("dashboard-section-Other");
+    expect(
+      within(other).getAllByRole("heading", { level: 2 }).map((h) => h.textContent),
+    ).toEqual(["zepp"]);
     const fav = screen.getByTestId("dashboard-section-Favourites");
     expect(
       within(fav).getAllByRole("heading", { level: 2 }).map((h) => h.textContent),

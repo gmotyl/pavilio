@@ -159,8 +159,8 @@ export default function Dashboard() {
   const active =
     filter !== null && sections.some((s) => s.name === filter) ? filter : null;
   const visible = active === null ? sections : sections.filter((s) => s.name === active);
-  // Favourites is a view over the groups, so it is not counted as one.
-  const groupCount = sections.filter((s) => s.kind !== "favourites").length;
+  // Every section counts, Favourites included, matching the chip row.
+  const groupCount = sections.length;
 
   return (
     <div className="p-6">
