@@ -38,6 +38,7 @@ export type SidebarRowDragProps = {
   "data-dragging"?: "true";
   "data-drag-key"?: string;
   "data-drag-container"?: string;
+  "data-drag-scope"?: string;
   onPointerDown?: (e: ReactPointerEvent<HTMLElement>) => void;
   onDragStart?: (e: DragEvent<HTMLElement>) => void;
   onClickCapture?: (e: MouseEvent<HTMLElement>) => void;
@@ -126,11 +127,17 @@ export function useSidebarDrag({
   order,
   setOrder,
   isMobile,
+  scope = "tree",
 }: {
   projects: { name: string; group: string | null }[];
   order: SidebarOrder;
   setOrder: (o: SidebarOrder) => void;
   isMobile: boolean;
+  /**
+   * Rows of another list (Starred) carry a different scope, so a drag never
+   * resolves a row it does not own and nothing is dropped across lists.
+   */
+  scope?: string;
 }) {
   // Optimistic placement while a group PUT is in flight (or until discovery
   // reports the new group).
@@ -241,6 +248,7 @@ export function useSidebarDrag({
       const hit = src ? document.elementFromPoint?.(x, y) : null;
       const row = hit instanceof Element ? hit.closest<HTMLElement>("[data-drag-key]") : null;
       if (!src || !row) return null;
+      if ((row.dataset.dragScope ?? "tree") !== scope) return null;
       const key = row.dataset.dragKey as Key;
       const container = row.dataset.dragContainer ?? null;
       // The dragged row itself is no drop target.
@@ -307,7 +315,7 @@ export function useSidebarDrag({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
     };
-  }, [isMobile, commit]);
+  }, [isMobile, commit, scope]);
 
   const rowProps = useCallback(
     (key: Key, container: string | null): SidebarRowDragProps => {
@@ -321,6 +329,7 @@ export function useSidebarDrag({
         "data-dragging": dragging?.key === key ? ("true" as const) : undefined,
         "data-drag-key": key,
         "data-drag-container": container ?? undefined,
+        "data-drag-scope": scope,
         onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
           if (e.button !== 0) return;
           // Buttons inside the row (chevrons, stars) keep their own clicks.
@@ -345,7 +354,7 @@ export function useSidebarDrag({
         },
       };
     },
-    [isMobile, dragging, target],
+    [isMobile, dragging, target, scope],
   );
 
   return { tree, rowProps, dragging: dragging !== null };

@@ -1,4 +1,5 @@
 import { mergeSidebarOrder, type SidebarOrder } from "../shell/sidebarOrder";
+import { orderStarred } from "../shell/starredOrder";
 
 export const FAVOURITES = "Favourites";
 export const OTHER = "Other";
@@ -30,12 +31,10 @@ export function buildSections<T extends { name: string; group?: string | null }>
   const byName = new Map(projects.map((p) => [p.name, p]));
   const starred = projects.filter((p) => favorites.has(p.name));
   const starredNames = new Set(starred.map((p) => p.name));
-  // Saved order first; starred projects it does not name follow as listed.
-  const orderedStarred = [
-    ...new Set(starredOrder.filter((n) => starredNames.has(n))),
-  ];
-  const seen = new Set(orderedStarred);
-  for (const p of starred) if (!seen.has(p.name)) orderedStarred.push(p.name);
+  const orderedStarred = orderStarred(
+    starredOrder,
+    starred.map((p) => p.name),
+  );
 
   const out: Section<T>[] = [
     {

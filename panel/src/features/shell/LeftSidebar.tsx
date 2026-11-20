@@ -22,6 +22,7 @@ import { HamburgerSlot } from "./SidebarHamburger";
 import { SidebarGroupRow } from "./SidebarGroupRow";
 import { useSidebarRowMenu } from "./SidebarRowMenu";
 import { groupMap, ownFlag } from "./sidebarOrder";
+import { orderStarred } from "./starredOrder";
 import { dropStyle, useSidebarDrag, type SidebarRowDragProps } from "./useSidebarDrag";
 import { useIsMobile } from "./useIsMobile";
 import { useSidebarState } from "./useSidebarState";
@@ -462,6 +463,36 @@ export default function LeftSidebar() {
     setOrder: setSidebarOrder,
     isMobile,
   });
+  // Starred has its own order: the same drag, a separate scope, and its own
+  // preference. The hook's order is the fully explicit `orderStarred` result, so
+  // the tree it merges keeps that order instead of re-sorting newcomers.
+  const [starredOrder, setStarredOrder] = usePreference(preferences.starredOrder);
+  const orderedStarredNames = useMemo(
+    () =>
+      orderStarred(
+        starredOrder,
+        starredProjects.map((p) => String(p.name)),
+      ),
+    [starredOrder, starredProjects],
+  );
+  const starredDragProjects = useMemo(
+    () => orderedStarredNames.map((name) => ({ name, group: null })),
+    [orderedStarredNames],
+  );
+  const starredDragOrder = useMemo(
+    () => ({ top: orderedStarredNames.map((n) => `p:${n}`), groups: groupMap<string[]>() }),
+    [orderedStarredNames],
+  );
+  const { tree: starredTree, rowProps: starredRowProps } = useSidebarDrag({
+    projects: starredDragProjects,
+    order: starredDragOrder,
+    setOrder: (o) => setStarredOrder(o.top.map((k) => k.slice(2))),
+    isMobile,
+    scope: "starred",
+  });
+  const starredByName = new Map<string, SidebarProject>(
+    starredProjects.map((p) => [String(p.name), p]),
+  );
   const toggleGroup = (name: string) => {
     const next = Object.assign(groupMap<boolean>(), groupCollapsed);
     if (ownFlag(next, name)) delete next[name];
@@ -562,6 +593,22 @@ export default function LeftSidebar() {
             ...dropStyle(drag["data-drop"], drag["data-dragging"] === "true"),
           }}
         >
+          {/* Starred only: a grip on Projects rows would push them out of line
+              with their group rows, which have no leading slot for it. */}
+          {drag["data-drag-scope"] === "starred" && (
+            <span
+              data-drag-grip=""
+              aria-hidden="true"
+              className="w-2 shrink-0 text-[11px] leading-none opacity-0 group-hover:opacity-100 select-none"
+              style={{
+                color: "var(--text-tertiary)",
+                opacity: drag["data-dragging"] === "true" ? 1 : undefined,
+                cursor: "grab",
+              }}
+            >
+              ⋮⋮
+            </span>
+          )}
           <button
             type="button"
             data-testid={`sidebar-project-expand-${project.name}`}
@@ -784,7 +831,12 @@ export default function LeftSidebar() {
           />
           {!starredCollapsed && (
             <ul className="space-y-0.5">
-              {starredProjects.map((p) => renderProjectRow(p))}
+              {starredTree.map((node) => {
+                const p = starredByName.get(node.name);
+                return p
+                  ? renderProjectRow(p, starredRowProps(`p:${node.name}`, null))
+                  : null;
+              })}
             </ul>
           )}
         </section>
