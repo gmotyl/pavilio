@@ -9,6 +9,9 @@ const FIELD_STYLE = {
   border: "1px solid var(--border-subtle)",
 };
 
+const sameAction = (a: HomeAction, b: HomeAction) =>
+  a.label === b.label && a.runner === b.runner && a.text === b.text && a.project === b.project;
+
 /**
  * Add / edit / delete one Home action. `index` is the action being edited, or
  * `null` for a new one. Writes the whole `home.actions` list (starting from the
@@ -24,6 +27,11 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   // position by identity instead of trusting the opening index.
   const original = useRef<HomeAction | null>(index !== null ? (actions[index] ?? null) : null).current;
   const editing = original;
+  // Whether an identical entry sat beside it at open: then a later field match
+  // cannot tell the two apart and only the opening slot is trustworthy.
+  const hadTwin = useRef(
+    original !== null && actions.filter((a, i) => i !== index && sameAction(a, original)).length > 0,
+  ).current;
   const isNew = original === null;
 
   const runners = [...launchers.map((l) => l.name), "shell"];
@@ -75,16 +83,34 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   /** Where the edited action sits now; -1 when it is gone. */
   const currentIndex = () => {
     if (original === null) return -1;
-    const same = (a: HomeAction) =>
-      a.label === original.label &&
-      a.runner === original.runner &&
-      a.text === original.text &&
-      a.project === original.project;
+    const same = (a: HomeAction) => sameAction(a, original);
     // Prefer the opening position while it still holds the original, so one of
-    // several identical actions keeps its own slot; search only after a move.
+    // several identical actions keeps its own slot.
     const opened = index !== null ? actions[index] : undefined;
     if (opened && same(opened)) return index as number;
-    return actions.findIndex(same);
+    // Moved: resolve by fields only when that is unambiguous, else fail closed.
+    if (hadTwin) return -1;
+    const hits = actions.flatMap((a, i) => (same(a) ? [i] : []));
+    return hits.length === 1 ? hits[0] : -1;
+  };
+
+  // aria-modal: keep Tab / Shift+Tab cycling inside the dialog.
+  const trapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const items = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>("input, select, button:not([disabled])") ?? [],
+    );
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || active === dialogRef.current)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
   };
 
   const save = () => {
@@ -120,6 +146,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
         aria-modal="true"
         aria-labelledby="action-modal-title"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={trapTab}
         // Capped at the viewport minus a 16px gutter each side: fits at 390px.
         className="w-full max-w-[min(440px,calc(100vw-32px))] flex flex-col rounded-xl p-4 outline-none"
         style={{

@@ -218,6 +218,42 @@ describe("ActionModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("fails closed when an identical twin makes the edited slot ambiguous", () => {
+    writePreference(preferences.homeActions, [SEED[0], SEED[0]]);
+    const onClose = vi.fn();
+    render(<ActionModal index={1} onClose={onClose} />);
+    // Another tab deletes the 2nd entry; the survivor is indistinguishable.
+    act(() => writePreference(preferences.homeActions, [SEED[0]]));
+    fireEvent.change(field("Label"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(stored()).toEqual([SEED[0]]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed on delete when several matches remain", () => {
+    writePreference(preferences.homeActions, [SEED[0], SEED[0], SEED[0]]);
+    render(<ActionModal index={2} onClose={() => {}} />);
+    act(() => writePreference(preferences.homeActions, [SEED[0], SEED[0], SEED[1]]));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(stored()).toEqual([SEED[0], SEED[0], SEED[1]]);
+  });
+
+  it("traps Tab and Shift+Tab inside the dialog", () => {
+    render(<ActionModal index={0} onClose={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    const focusables = Array.from(
+      dialog.querySelectorAll<HTMLElement>("input, select, button:not([disabled])"),
+    );
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
   it("keeps a stored runner that is no longer a launcher pressed", () => {
     writePreference(preferences.homeActions, [
       { label: "Old", runner: "gemini", text: "x", project: "metro" },
