@@ -6,6 +6,9 @@ import { alerts } from "../alerts/store";
 import { actionBlocker, actionRunLine } from "./homeActions";
 import { useLaunchRun } from "./useLaunchRun";
 import { useProjects } from "./useProjects";
+import { useCardDrag } from "./useCardDrag";
+import { dropStyle } from "../shell/useSidebarDrag";
+import { useIsMobile } from "../shell/useIsMobile";
 
 /** The runner pill text: a shell action reads `sh`, an agent action its launcher name. */
 function runnerPill(a: HomeAction): string {
@@ -18,12 +21,14 @@ function ActionCard({
   blocker,
   line,
   onEdit,
+  dragProps,
 }: {
   action: HomeAction;
   index: number;
   blocker: string | null;
   line: string | null;
   onEdit: (index: number) => void;
+  dragProps: ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
 }) {
   // One hook per card: the launch hook is bound to a single project.
   const launch = useLaunchRun(action.project);
@@ -41,9 +46,25 @@ function ActionCard({
   return (
     <div
       data-testid={`action-card-${index}`}
+      {...dragProps.card}
       className="flex items-stretch rounded-[10px] border"
-      style={{ background: "var(--bg-surface)", borderColor: "var(--border-subtle)" }}
+      style={{
+        background: "var(--bg-surface)",
+        borderColor: "var(--border-subtle)",
+        ...dropStyle(dragProps.card["data-drop"], dragProps.card["data-dragging"] === "true"),
+      }}
     >
+      {dragProps.card["data-card-key"] !== undefined && (
+        <span
+          data-testid="action-grip"
+          aria-hidden="true"
+          {...dragProps.grip}
+          className="flex items-center px-1.5 text-[12px] select-none touch-none"
+          style={{ color: "var(--text-muted)", cursor: "grab" }}
+        >
+          ⋮⋮
+        </span>
+      )}
       <button
         type="button"
         title={`Run ${action.label}`}
@@ -110,7 +131,22 @@ export function ActionsSection({
   onEdit?: (index: number) => void;
   onNew?: () => void;
 }) {
-  const [actions] = usePreference(preferences.homeActions);
+  const [actions, setActions] = usePreference(preferences.homeActions);
+  const isMobile = useIsMobile();
+  // Content-based keys (a repeat gets an occurrence suffix) stay with their
+  // card across a reorder, unlike an index.
+  const seen = new Map<string, number>();
+  const keys = actions.map((a) => {
+    const base = `${a.label}|${a.project}|${a.runner}|${a.text}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return `${base}#${n}`;
+  });
+  const { cardProps } = useCardDrag({
+    keys,
+    disabled: isMobile,
+    onReorder: (next) => setActions(next.map((k) => actions[keys.indexOf(k)])),
+  });
   // `undefined` = closed, `null` = new action, a number = editing that index.
   const [modal, setModal] = useState<number | null | undefined>(undefined);
   const [launchers] = usePreference(preferences.terminalLaunchers);
@@ -146,7 +182,8 @@ export function ActionsSection({
       >
         {actions.map((action, i) => (
           <ActionCard
-            key={`${action.label}|${action.project}|${i}`}
+            key={keys[i]}
+            dragProps={cardProps(keys[i])}
             action={action}
             index={i}
             blocker={actionBlocker(action, launchers, names)}
