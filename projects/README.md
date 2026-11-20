@@ -10,10 +10,12 @@ The three folders here (`my-work`, `my-pet-project`, `my-blog`) are **examples**
 
 Read them once, then replace them with your own.
 
+A fourth folder, `workspace`, is **not** an example: it describes this repo itself (skills, settings, setup) and is the default project of the shipped Home actions. Keep it.
+
 ## Start your own
 
 ```bash
-# From the repo root:
+# From the repo root (removes only the three examples; `workspace` stays):
 rm -rf projects/my-work projects/my-pet-project projects/my-blog
 
 mkdir -p projects/my-project
