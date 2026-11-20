@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import type { TerminalLauncher } from "../../preferences/declarations";
@@ -25,15 +25,13 @@ import { usePeekTriggerProps } from "./peekTrigger";
 import FileListSidebar, { type FileListSource } from "./FileListSidebar";
 import FileRow from "./FileRow";
 import { RunBanner } from "./RunBanner";
-import { startTaskRun } from "./startTaskRun";
+import { useLaunchRun } from "./useLaunchRun";
 import { archiveRunLine, taskRunLine } from "./runPrompt";
 import { taskListStatus } from "./taskList";
 import { relativeToWorkspace } from "./relativeToWorkspace";
 import { useDocSpeech, type DocSpeech } from "./docSpeech";
 import { PagePlayFromHere } from "../speech/PagePlayFromHere";
 import { useWorkspaceRoot } from "./useWorkspaceRoot";
-import { dispatchTerminalFocus } from "../terminal/useTerminalSessions";
-import { useTerminalDrawerVisible } from "../terminal/useTerminalDrawer";
 
 interface Props {
   projectName: string;
@@ -347,10 +345,7 @@ export default function PlansTab({ projectName, archived = false }: Props) {
   // would name the panel owner's tree, so it never stands in.
   const runStatus =
     selectedPath && fileContent !== null ? taskListStatus(selectedPath, fileContent) : null;
-  const navigate = useNavigate();
-  // `useTerminalDrawerVisible` rather than `useTerminalDrawer().visible`: the
-  // same flag, but false (not a throw) outside a drawer provider.
-  const drawerVisible = useTerminalDrawerVisible();
+  const launchRun = useLaunchRun(projectName);
   // The failed launch's verb and message: Run and Archive share one slot.
   const [runError, setRunError] = useState<{ verb: "run" | "archive"; message: string } | null>(
     null,
@@ -362,26 +357,20 @@ export default function PlansTab({ projectName, archived = false }: Props) {
   useEffect(() => {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
-  // Starts a session typing `line`, then lands where the terminal shows: the
-  // focus is already stored by the create and the broadcast tells a mounted
-  // Terminal view (the drawer included); only with the drawer not visible
-  // does the panel navigate to the Terminals page to show it.
+  // Starts the run via the shared hook; a failure is reported under the
+  // tasks.md it was started from, not under whichever is open by then.
   const launch = useCallback(
     (line: string, verb: "run" | "archive") => {
       const startedFrom = selectedPathRef.current;
-      return startTaskRun({ project: projectName, runLine: line }).then(
-        (sessionId) => {
-          setRunError(null);
-          dispatchTerminalFocus(projectName, sessionId);
-          if (!drawerVisible) navigate(`/project/${encodeURIComponent(projectName)}/iterm`);
-        },
+      return launchRun(line).then(
+        () => setRunError(null),
         (err: unknown) => {
           if (selectedPathRef.current !== startedFrom) return;
           setRunError({ verb, message: err instanceof Error ? err.message : String(err) });
         },
       );
     },
-    [projectName, navigate, drawerVisible],
+    [launchRun],
   );
   const onRun = useCallback(
     ({ launcher, objective }: { launcher: TerminalLauncher; objective: string }) => {
