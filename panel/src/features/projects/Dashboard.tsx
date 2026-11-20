@@ -1,5 +1,10 @@
 import { Link, useNavigate } from "react-router-dom";
+import { useMemo } from "react";
 import { useFavorites } from "./useFavorites";
+import { usePreference } from "../../preferences/usePreference";
+import { preferences } from "../../preferences/declarations";
+import { buildSections } from "./dashboardSections";
+import { GroupChips } from "./GroupChips";
 import { useProjects, Project } from "./useProjects";
 import { MobileAccessButton } from "../mobile-access/MobileAccessButton";
 import { useFileDropTarget } from "../explorer/useFileDrag";
@@ -138,12 +143,24 @@ function ProjectCard({
 
 export default function Dashboard() {
   const projects = useProjects();
-  const { toggle, isFavorite, sortWithFavorites } = useFavorites();
+  const { toggle, isFavorite, favorites } = useFavorites();
+  const [starredOrder] = usePreference(preferences.starredOrder);
+  const [sidebarOrder] = usePreference(preferences.sidebarOrder);
+  const [filter, setFilter] = usePreference(preferences.homeGroupFilter);
   // Read once here and passed down: the hook backs onto a MutationObserver,
   // and one per card would mean one observer per project.
   const theme = usePanelTheme();
 
-  const sorted = sortWithFavorites(projects);
+  const sections = useMemo(
+    () => buildSections({ projects, favorites, starredOrder, sidebarOrder }),
+    [projects, favorites, starredOrder, sidebarOrder],
+  );
+  // A stored chip that names no current section reads as All.
+  const active =
+    filter !== null && sections.some((s) => s.name === filter) ? filter : null;
+  const visible = active === null ? sections : sections.filter((s) => s.name === active);
+  // Favourites is a view over the groups, so it is not counted as one.
+  const groupCount = sections.filter((s) => s.kind !== "favourites").length;
 
   return (
     <div className="p-6">
@@ -151,7 +168,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-semibold mb-1">Projects</h1>
           <p className="text-sm" style={{ color: "var(--text-tertiary)" }}>
-            {projects.length} projects in workspace
+            {projects.length} projects in {groupCount} groups
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -182,17 +199,50 @@ export default function Dashboard() {
       {projects.length === 0 ? (
         <p style={{ color: "var(--text-muted)" }}>Loading...</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {sorted.map((project) => (
-            <ProjectCard
-              key={project.name}
-              project={project}
-              isFav={isFavorite(project.name)}
-              onToggleFav={() => toggle(project.name)}
-              theme={theme}
-            />
+        <>
+          <GroupChips
+            chips={sections.map((x) => ({ name: x.name, count: x.projects.length }))}
+            total={projects.length}
+            selected={active}
+            onSelect={setFilter}
+          />
+          {visible.map((section) => (
+            <section
+              key={section.name}
+              data-testid={`dashboard-section-${section.name}`}
+              className="mb-6"
+            >
+              <div
+                data-testid="dashboard-section-head"
+                className="flex items-center gap-2 mb-2 text-[13px] font-semibold uppercase tracking-wider"
+                style={{ color: "var(--text-tertiary)" }}
+              >
+                {section.name}
+                <span
+                  className="rounded-full px-2 text-[11px] font-normal"
+                  style={{ background: "var(--bg-hover)" }}
+                >
+                  {section.projects.length}
+                </span>
+                <span
+                  className="flex-1 border-t"
+                  style={{ borderColor: "var(--border-subtle)" }}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {section.projects.map((project) => (
+                  <ProjectCard
+                    key={project.name}
+                    project={project}
+                    isFav={isFavorite(project.name)}
+                    onToggleFav={() => toggle(project.name)}
+                    theme={theme}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
-        </div>
+        </>
       )}
     </div>
   );
