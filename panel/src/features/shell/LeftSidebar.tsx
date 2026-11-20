@@ -432,6 +432,35 @@ export default function LeftSidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobileMenuOpen, revealIsResearch]);
   const researchHidden = researchCollapsed && !researchRevealed;
+
+  // Starred and Projects get the same in-memory reveal, decided when the menu
+  // opens and never written to the preference.
+  const revealInStarred =
+    revealProject !== null && starredProjects.some((p) => p.name === revealProject);
+  const revealInProjects =
+    revealProject !== null && otherProjects.some((p) => p.name === revealProject);
+  const [starredRevealed, setStarredRevealed] = useState(false);
+  useEffect(() => {
+    setStarredRevealed(mobileMenuOpen && revealInStarred && starredCollapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealInStarred]);
+  const [projectsRevealed, setProjectsRevealed] = useState(false);
+  useEffect(() => {
+    setProjectsRevealed(mobileMenuOpen && revealInProjects && projectsCollapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealInProjects]);
+  const starredHidden = starredCollapsed && !starredRevealed;
+  const projectsHidden = projectsCollapsed && !projectsRevealed;
+  const toggleStarred = () => {
+    setStarredRevealed(false);
+    if (starredHidden) setStarredCollapsed(false);
+    else if (!starredCollapsed) setStarredCollapsed(true);
+  };
+  const toggleProjects = () => {
+    setProjectsRevealed(false);
+    if (projectsHidden) setProjectsCollapsed(false);
+    else if (!projectsCollapsed) setProjectsCollapsed(true);
+  };
   // Any explicit tap ends the reveal and flips what the user sees, in one tap.
   // The stored preference is written only when it differs from the new state:
   // folding a revealed section stores nothing, as storage already says
@@ -825,11 +854,11 @@ export default function LeftSidebar() {
             testId="sidebar-section-starred"
             count={starredProjects.length}
             collapse={{
-              collapsed: starredCollapsed,
-              onToggle: () => setStarredCollapsed(!starredCollapsed),
+              collapsed: starredHidden,
+              onToggle: toggleStarred,
             }}
           />
-          {!starredCollapsed && (
+          {!starredHidden && (
             <ul className="space-y-0.5">
               {starredTree.map((node) => {
                 const p = starredByName.get(node.name);
@@ -848,12 +877,12 @@ export default function LeftSidebar() {
           testId="sidebar-section-projects"
           count={otherProjects.length}
           collapse={{
-            collapsed: projectsCollapsed,
-            onToggle: () => setProjectsCollapsed(!projectsCollapsed),
+            collapsed: projectsHidden,
+            onToggle: toggleProjects,
           }}
           onNew={() => setNewKind("project")}
         />
-        {!projectsCollapsed && (
+        {!projectsHidden && (
           <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
             {projectTree.map((node) => {
               if (node.kind === "project") {
