@@ -12,7 +12,7 @@ import {
   adoptProjectIdentity,
   flushPreferences,
   getPreferences,
-  lastPatchIdentityFailed,
+  lastPatchFailedKeys,
   loadPreferences,
   patchPreferences,
   replacePreferences,
@@ -141,24 +141,24 @@ describe("project identity", () => {
     blockIdentity("alpha");
     loadPreferences(machineFile());
     patchPreferences({ "project.color@alpha": "#555555" });
-    expect(lastPatchIdentityFailed()).toBe(true);
+    expect(lastPatchFailedKeys()).toEqual(["project.color@alpha"]);
     await flushPreferences();
     expect(machineText()).not.toContain("project.");
 
     patchPreferences({ "project.color@alpha": null });
-    expect(lastPatchIdentityFailed()).toBe(true);
+    expect(lastPatchFailedKeys()).toEqual(["project.color@alpha"]);
     patchPreferences({ theme: "dark" });
-    expect(lastPatchIdentityFailed()).toBe(false);
+    expect(lastPatchFailedKeys()).toEqual([]);
     // A missing project is memory-only by design, not a failure.
     patchPreferences({ "project.color@nope": "#666666" });
-    expect(lastPatchIdentityFailed()).toBe(false);
+    expect(lastPatchFailedKeys()).toEqual([]);
   });
 
   it("an empty string removes the identity field", () => {
     writeIdentity("alpha", { color: "#111111", mark: "image:m.webp" });
     loadPreferences(machineFile());
     patchPreferences({ "project.mark@alpha": "" });
-    expect(lastPatchIdentityFailed()).toBe(false);
+    expect(lastPatchFailedKeys()).toEqual([]);
     expect(readIdentity("alpha")).toEqual({ color: "#111111" });
   });
 
@@ -183,9 +183,30 @@ describe("project identity", () => {
     expect(machineText()).not.toContain("project.");
   });
 
-  it("a project whose name starts with two dots is inside projectsDir", () => {
+  it("a project whose name starts with dots is inside projectsDir and adopted at boot", async () => {
     mkdirSync(join(root, "..notes"));
     expect(writeIdentity("..notes", { color: "#888888" })).toBe("ok");
     expect(readIdentity("..notes")).toEqual({ color: "#888888" });
+    // The shared value wins over a legacy machine value, and is visible after boot.
+    writeFileSync(machineFile(), JSON.stringify({ version: 1, "project.color@..notes": "#999999" }));
+    loadPreferences(machineFile());
+    adoptProjectIdentity();
+    expect(getPreferences()["project.color@..notes"]).toBe("#888888");
+    expect(readIdentity("..notes")).toEqual({ color: "#888888" });
+    await flushPreferences();
+    expect(machineText()).not.toContain("project.");
+  });
+
+  it("a lookup error is a failure, not a missing project: legacy values are kept for the next boot", async () => {
+    // A self-referential symlink: stat fails with ELOOP, not ENOENT.
+    symlinkSync("loop", join(root, "loop"));
+    expect(writeIdentity("loop", { color: "#abcdef" })).toBe("failed");
+    writeFileSync(machineFile(), JSON.stringify({ version: 1, "project.color@loop": "#abcdef" }));
+    loadPreferences(machineFile());
+    adoptProjectIdentity();
+    await flushPreferences();
+    expect(machineText()).toContain('"project.color@loop": "#abcdef"');
+    patchPreferences({ "project.color@loop": "#fedcba" });
+    expect(lastPatchFailedKeys()).toEqual(["project.color@loop"]);
   });
 });

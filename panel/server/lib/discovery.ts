@@ -151,13 +151,18 @@ function isProjectName(name: string): boolean {
  */
 export function resolvesInsideProjectsDir(projectsDir: string, dir: string): boolean {
   try {
-    const realRoot = realpathSync(projectsDir);
-    const rel = relative(realRoot, realpathSync(dir));
-    // `..` only as a whole parent segment: a project may be named `..notes`.
-    return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    return isContainedPath(relative(realpathSync(projectsDir), realpathSync(dir)));
   } catch {
     return false;
   }
+}
+
+/**
+ * True when `rel` (from `relative(root, target)`) names a path strictly inside
+ * root. `..` counts only as a whole parent segment: a project may be named `..notes`.
+ */
+export function isContainedPath(rel: string): boolean {
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /**

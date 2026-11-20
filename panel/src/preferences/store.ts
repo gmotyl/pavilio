@@ -112,6 +112,15 @@ const inFlightKeys = new Set<string>();
 let ackClock = 0;
 const ackedAt = new Map<string, number>();
 let patchTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Bounded retry for keys the server explicitly refused (a 5xx naming
+ * `failedKeys`, e.g. a project identity.json it could not write). Unlike a
+ * network failure, nothing else may ever re-flush such a key — Appearance
+ * closes after Apply — so the store re-sends on its own, a few times, backing
+ * off. Reset by any acknowledged PATCH.
+ */
+export const PREFERENCE_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+let refusedRetries = 0;
 let channelUnsubscribe: (() => void) | null = null;
 
 /**
@@ -446,6 +455,21 @@ function queuePatch(key: string): void {
   patchTimer = setTimeout(flushPatch, PREFERENCE_PATCH_DEBOUNCE_MS);
 }
 
+/**
+ * The keys a non-2xx PATCH response says the server refused, restricted to the
+ * ones this batch sent; `undefined` when the response names none (a proxy
+ * error, an older server) and the whole batch must be treated as lost.
+ */
+async function refusedKeys(res: Response, sent: string[]): Promise<string[] | undefined> {
+  try {
+    const body = (await res.json()) as { failedKeys?: unknown };
+    if (!Array.isArray(body.failedKeys)) return undefined;
+    return body.failedKeys.filter((k): k is string => typeof k === "string" && sent.includes(k));
+  } catch {
+    return undefined;
+  }
+}
+
 function flushPatch(): void {
   patchTimer = null;
   if (pendingKeys.size === 0) return;
@@ -472,14 +496,26 @@ function flushPatch(): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    .then(async (res) => {
+      // A refusal that names its keys is partial: the server applied the rest.
+      const refused = res.ok ? [] : await refusedKeys(res, keys);
+      if (!refused) throw new Error(`HTTP ${res.status}`);
       // One tick for the whole batch: the server applied it as one PATCH.
       ackClock += 1;
       for (const key of keys) {
         inFlightKeys.delete(key);
-        ackedAt.set(key, ackClock);
+        if (refused.includes(key)) pendingKeys.add(key);
+        else ackedAt.set(key, ackClock);
       }
+      if (refused.length === 0) {
+        refusedRetries = 0;
+        return;
+      }
+      console.warn(`[preferences] server refused ${refused.join(", ")}; retrying`);
+      const delay = PREFERENCE_RETRY_DELAYS_MS[refusedRetries];
+      if (delay === undefined || patchTimer) return;
+      refusedRetries += 1;
+      patchTimer = setTimeout(flushPatch, delay);
     })
     .catch((err: unknown) => {
       // No rollback: the in-memory value is what the user asked for, and
@@ -600,6 +636,7 @@ export function __resetPreferenceStoreForTests(): void {
   inFlightKeys.clear();
   ackedAt.clear();
   ackClock = 0;
+  refusedRetries = 0;
   pendingNotifications.clear();
   // The machine-local warning is latched for the life of the tab, so without
   // this the first suite to hit a refusing store would silence every later

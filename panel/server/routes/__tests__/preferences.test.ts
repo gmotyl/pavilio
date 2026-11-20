@@ -304,9 +304,13 @@ describe("PATCH /api/preferences", () => {
     const app = makeApp(preferencesRouter);
     try {
       identity.result = "failed";
-      const failed = await request(app).patch("/api/preferences").send({ "project.mark@alpha": "" });
+      const failed = await request(app)
+        .patch("/api/preferences")
+        .send({ "project.mark@alpha": "", theme: "dark" });
       expect(failed.status).toBe(503);
-      expect(failed.body).toMatchObject({ ok: false, persisted: false });
+      // Only the refused key is named; `theme` was applied.
+      expect(failed.body).toMatchObject({ ok: false, persisted: false, failedKeys: ["project.mark@alpha"] });
+      expect(getPreferences().theme).toBe("dark");
 
       identity.result = "ok";
       const retried = await request(app).patch("/api/preferences").send({ "project.mark@alpha": "" });

@@ -50,7 +50,7 @@ let refusalLogged = false;
 const unstorableWarned = new Set<string>();
 /** Identity keys whose identity.json write failed — kept in the machine file. */
 const identityFallback = new Set<string>();
-let identityWriteFailed = false;
+let identityWriteFailed: string[] = [];
 
 /**
  * Read the document at `path` into memory. Boot-time and synchronous; never
@@ -181,7 +181,7 @@ export async function replacePreferences(next: Record<string, unknown>): Promise
  */
 export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc {
   const next: PreferencesDoc = { ...doc, version: doc.version };
-  identityWriteFailed = false;
+  identityWriteFailed = [];
   for (const [key, value] of Object.entries(patch)) {
     if (key === "version") continue;
     if (value === null) {
@@ -218,16 +218,17 @@ function routeIdentity(key: string, value: unknown): void {
   if (!parsed) return;
   if (value !== null && typeof value !== "string") return;
   const result = writeIdentity(parsed.project, { [parsed.field]: value === "" ? null : value });
-  if (result === "failed") identityWriteFailed = true;
+  if (result === "failed") identityWriteFailed.push(key);
   else identityFallback.delete(key);
 }
 
 /**
- * True when the latest `patchPreferences` could not write an identity value to
- * its project's identity.json, so the change will not survive a reload.
+ * The identity keys the latest `patchPreferences` could not write to their
+ * project's identity.json, so those changes will not survive a reload. Every
+ * other key of that patch was applied normally.
  */
-export function lastPatchIdentityFailed(): boolean {
-  return identityWriteFailed;
+export function lastPatchFailedKeys(): string[] {
+  return [...identityWriteFailed];
 }
 
 /**
@@ -308,7 +309,7 @@ export function _resetPreferencesForTests(): void {
   refusalLogged = false;
   unstorableWarned.clear();
   identityFallback.clear();
-  identityWriteFailed = false;
+  identityWriteFailed = [];
 }
 
 /**

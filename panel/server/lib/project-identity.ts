@@ -2,10 +2,20 @@
 // `<projectsDir>/<project>/identity.json`, so it follows the project across
 // machines instead of living in a per-machine preferences file.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { join, relative } from "node:path";
 import { getConfig } from "../config.js";
-import { resolvesInsideProjectsDir } from "./discovery.js";
+import { isContainedPath } from "./discovery.js";
 
 export type IdentityField = "color" | "mark";
 export interface Identity {
@@ -32,19 +42,34 @@ function safeName(name: string): boolean {
   return name !== "" && name !== "." && name !== ".." && !/[/\\\0]/.test(name);
 }
 
-function projectDir(name: string): string | undefined {
-  if (!safeName(name)) return undefined;
+/** The path really is not there — as opposed to a lookup the OS refused (EACCES, EIO …). */
+function isAbsent(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * The project's directory, `"missing"` when there is no such project (absent,
+ * not a directory, or a symlink resolving outside projectsDir), or `"failed"`
+ * when the lookup itself errored — a transient condition callers must not
+ * mistake for a missing project.
+ */
+function projectDir(name: string): string | "missing" | "failed" {
+  if (!safeName(name)) return "missing";
   const { projectsDir } = getConfig();
   const dir = join(projectsDir, name);
-  // A symlinked project dir pointing outside projectsDir must never receive
-  // an identity write (or be read from).
-  if (!resolvesInsideProjectsDir(projectsDir, dir)) return undefined;
   try {
-    return statSync(dir).isDirectory() ? dir : undefined;
-  } catch {
-    return undefined;
+    if (!statSync(dir).isDirectory()) return "missing";
+    // A symlinked project dir pointing outside projectsDir must never receive
+    // an identity write (or be read from).
+    const rel = relative(realpathSync(projectsDir), realpathSync(dir));
+    return isContainedPath(rel) ? dir : "missing";
+  } catch (err) {
+    return isAbsent(err) ? "missing" : "failed";
   }
 }
+
+const isLiveDir = (d: string | "missing" | "failed"): d is string => d !== "missing" && d !== "failed";
 
 function readFile(file: string): Identity {
   try {
@@ -63,7 +88,7 @@ function readFile(file: string): Identity {
 
 export function readIdentity(name: string): Identity {
   const dir = projectDir(name);
-  return dir ? readFile(join(dir, "identity.json")) : {};
+  return isLiveDir(dir) ? readFile(join(dir, "identity.json")) : {};
 }
 
 /** Every project's identity, keyed by project name. Projects without one are omitted. */
@@ -76,8 +101,10 @@ export function readAllIdentities(): Record<string, Identity> {
   } catch {
     return out;
   }
+  // Same membership as discovery: any one-segment name, dot-prefixed ones
+  // (`..notes`) included — dirs without an identity.json are skipped below.
   for (const name of names) {
-    if (name.startsWith(".") || !safeName(name)) continue;
+    if (!safeName(name)) continue;
     const id = readIdentity(name);
     if (id.color || id.mark) out[name] = id;
   }
@@ -94,7 +121,7 @@ export type IdentityWriteResult = "ok" | "missing" | "failed";
 
 export function writeIdentity(name: string, patch: { [K in IdentityField]?: string | null }): IdentityWriteResult {
   const dir = projectDir(name);
-  if (!dir) return "missing";
+  if (!isLiveDir(dir)) return dir;
   const file = join(dir, "identity.json");
   const next: Identity = readFile(file);
   for (const f of FIELDS) {

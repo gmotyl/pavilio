@@ -29,7 +29,7 @@ import {
   getPreferences,
   getPreferencesPath,
   isReadOnly,
-  lastPatchIdentityFailed,
+  lastPatchFailedKeys,
   patchPreferences,
   readDoc,
   replacePreferences,
@@ -138,10 +138,13 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // they learn which keys to re-read.
   broadcast({ type: "preferences-change", keys });
   // A project identity.json that refused the write would lose the change on
-  // reload. The in-memory value is applied either way; a 5xx makes the client
-  // keep the keys dirty and re-send them on its next flush.
-  if (lastPatchIdentityFailed()) {
-    return res.status(503).json({ ok: false, persisted: false, error: "project identity.json write failed" });
+  // reload. Every other key was applied; `failedKeys` tells the client to
+  // re-send only these, so a refused key never drags a stale neighbour along.
+  const failedKeys = lastPatchFailedKeys();
+  if (failedKeys.length > 0) {
+    return res
+      .status(503)
+      .json({ ok: false, persisted: false, failedKeys, error: "project identity.json write failed" });
   }
   res.json({ ok: true, persisted: !isReadOnly() });
 });
