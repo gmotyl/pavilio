@@ -201,6 +201,14 @@ describe("ActionModal", () => {
     expect(stored()).toEqual([SEED[1]]);
   });
 
+  it("editing the second of two identical actions edits that one", () => {
+    writePreference(preferences.homeActions, [SEED[0], SEED[0]]);
+    render(<ActionModal index={1} onClose={() => {}} />);
+    fireEvent.change(field("Label"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(stored()).toEqual([SEED[0], { ...SEED[0], label: "Renamed" }]);
+  });
+
   it("closes without writing when the edited action is gone", () => {
     const onClose = vi.fn();
     render(<ActionModal index={0} onClose={onClose} />);

@@ -73,16 +73,19 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   }, [close]);
 
   /** Where the edited action sits now; -1 when it is gone. */
-  const currentIndex = () =>
-    original === null
-      ? -1
-      : actions.findIndex(
-          (a) =>
-            a.label === original.label &&
-            a.runner === original.runner &&
-            a.text === original.text &&
-            a.project === original.project,
-        );
+  const currentIndex = () => {
+    if (original === null) return -1;
+    const same = (a: HomeAction) =>
+      a.label === original.label &&
+      a.runner === original.runner &&
+      a.text === original.text &&
+      a.project === original.project;
+    // Prefer the opening position while it still holds the original, so one of
+    // several identical actions keeps its own slot; search only after a move.
+    const opened = index !== null ? actions[index] : undefined;
+    if (opened && same(opened)) return index as number;
+    return actions.findIndex(same);
+  };
 
   const save = () => {
     if (!canSave) return;
