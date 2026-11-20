@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ActionModal } from "./ActionModal";
 import { usePreference } from "../../preferences/usePreference";
 import { preferences, type HomeAction } from "../../preferences/declarations";
 import { alerts } from "../alerts/store";
@@ -97,8 +99,9 @@ function ActionCard({
 
 /**
  * The Home page's Actions block: one card per configured action plus a dashed
- * "+ New action" card. Never filtered by the group chips. The edit modal
- * arrives separately; `onEdit` / `onNew` are its entry points.
+ * "+ New action" card. Never filtered by the group chips. Edit and
+ * "+ New action" open the action modal; `onEdit` / `onNew` are optional
+ * observers called as it opens.
  */
 export function ActionsSection({
   onEdit = () => {},
@@ -108,6 +111,8 @@ export function ActionsSection({
   onNew?: () => void;
 }) {
   const [actions] = usePreference(preferences.homeActions);
+  // `undefined` = closed, `null` = new action, a number = editing that index.
+  const [modal, setModal] = useState<number | null | undefined>(undefined);
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const projects = useProjects();
   // An empty list means projects are still loading (or the fetch failed): the
@@ -146,18 +151,25 @@ export function ActionsSection({
             index={i}
             blocker={actionBlocker(action, launchers, names)}
             line={actionRunLine(action, launchers)}
-            onEdit={onEdit}
+            onEdit={(i) => {
+              setModal(i);
+              onEdit(i);
+            }}
           />
         ))}
         <button
           type="button"
-          onClick={onNew}
+          onClick={() => {
+            setModal(null);
+            onNew();
+          }}
           className="rounded-[10px] border border-dashed text-[13px] px-3 py-2.5"
           style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)", minHeight: 58 }}
         >
           + New action
         </button>
       </div>
+      {modal !== undefined && <ActionModal index={modal} onClose={() => setModal(undefined)} />}
     </section>
   );
 }

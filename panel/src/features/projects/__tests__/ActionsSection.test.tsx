@@ -104,6 +104,17 @@ describe("ActionsSection", () => {
     expect(onNew).toHaveBeenCalled();
   });
 
+  it("Edit and + New action open the action modal", () => {
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Knowledge harvest" }));
+    expect(screen.getByRole("heading", { name: "Edit action" })).toBeTruthy();
+    expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Knowledge harvest");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByText("+ New action"));
+    expect(screen.getByRole("heading", { name: "New action" })).toBeTruthy();
+  });
+
   it("defaults render when nothing is stored", () => {
     mount();
     for (const label of ["Process meetings", "Knowledge harvest"]) {
