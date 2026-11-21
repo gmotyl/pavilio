@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectView from "../ProjectView";
@@ -118,13 +118,26 @@ describe("ProjectView — Overview", () => {
     writePreference(preferences.homeActions, [
       { label: "Old job", runner: "claude", text: "x", project: "ghost" },
     ]);
-    mockFetchResponses({
+    const base = mockFetchResponses({
       "/api/projects/ghost": { name: "ghost", archived: true },
       "/api/projects": [{ name: "pavilio", path: "/p", repos: [] }],
       "/api/files/read/": { content: PROJECT_MD, absolutePath: "/x/PROJECT.md" },
       "/api/scripts": { scripts: [] },
       "/api/files/index": [],
     });
+    // Hold the project-detail response open so the pending window is observable.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes("/api/projects/ghost")) await gate;
+        return base(input);
+      }),
+    );
     render(
       <MemoryRouter initialEntries={["/project/ghost"]}>
         <Routes>
@@ -132,7 +145,12 @@ describe("ProjectView — Overview", () => {
         </Routes>
       </MemoryRouter>,
     );
+    // Detail pending: the project is neither listed nor confirmed live.
     await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId("archived-banner")).toBeNull();
+    expect(screen.queryByTestId("actions-section")).toBeNull();
+    release();
+    await screen.findByTestId("archived-banner");
     expect(screen.queryByTestId("actions-section")).toBeNull();
     __resetPreferenceStoreForTests();
   });
