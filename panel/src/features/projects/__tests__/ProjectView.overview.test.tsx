@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectView from "../ProjectView";
 import { mockFetchResponses } from "../../../test-utils";
+import { preferences } from "../../../preferences/declarations";
+import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
 
 const PROJECT_MD = [
   "# Pavilio",
@@ -72,6 +74,43 @@ describe("ProjectView — Overview", () => {
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(follows(actions, md)).toBe(true);
     expect(follows(md, settings)).toBe(true);
+  });
+
+  it("shows the project's own actions at the top, and nothing for a project without any", async () => {
+    __resetPreferenceStoreForTests();
+    writePreference(preferences.homeActions, [
+      { label: "Process meetings", runner: "claude", text: "x", project: "workspace" },
+      { label: "Other", runner: "claude", text: "y", project: "metro" },
+    ]);
+    mockFetchResponses({
+      "/api/projects": [
+        { name: "workspace", path: "/w", repos: [] },
+        { name: "pavilio", path: "/p", repos: [] },
+      ],
+      "/api/files/read/": { content: PROJECT_MD, absolutePath: "/x/PROJECT.md" },
+      "/api/scripts": { scripts: [] },
+      "/api/files/index": [],
+    });
+    const view = (name: string) => (
+      <MemoryRouter initialEntries={[`/project/${name}`]}>
+        <Routes>
+          <Route path="/project/:name" element={<ProjectView />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const first = render(view("workspace"));
+    const section = await screen.findByTestId("actions-section");
+    expect(within(section).getByText("Process meetings")).toBeInTheDocument();
+    expect(within(section).queryByText("Other")).toBeNull();
+    const md = await screen.findByTestId("project-md");
+    expect(section.compareDocumentPosition(md) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const strip = screen.queryByTestId("project-group-strip");
+    if (strip) expect(section.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    first.unmount();
+    render(view("pavilio"));
+    await screen.findByTestId("project-md");
+    expect(screen.queryByTestId("actions-section")).toBeNull();
+    __resetPreferenceStoreForTests();
   });
 
   it("PROJECT.md starts collapsed with a one-line peek", async () => {

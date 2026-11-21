@@ -18,7 +18,16 @@ const sameAction = (a: HomeAction, b: HomeAction) =>
  * defaults when nothing is stored yet) and closes; Cancel, Esc and a backdrop
  * click close without writing.
  */
-export function ActionModal({ index, onClose }: { index: number | null; onClose: () => void }) {
+export function ActionModal({
+  index,
+  onClose,
+  defaultProject,
+}: {
+  index: number | null;
+  onClose: () => void;
+  /** Pre-selected project for a new action (the project page it was opened from). */
+  defaultProject?: string;
+}) {
   const [actions, setActions] = usePreference(preferences.homeActions);
   const [launchers] = usePreference(preferences.terminalLaunchers);
   const projects = useProjects();
@@ -47,6 +56,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
   const project =
     pickedProject ??
     editing?.project ??
+    defaultProject ??
     (projectNames.includes("workspace") ? "workspace" : (projectNames[0] ?? ""));
   const dialogRef = useRef<HTMLDivElement>(null);
 

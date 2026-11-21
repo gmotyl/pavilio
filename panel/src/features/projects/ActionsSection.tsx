@@ -129,9 +129,12 @@ function ActionCard({
 export function ActionsSection({
   onEdit = () => {},
   onNew = () => {},
+  project,
 }: {
   onEdit?: (index: number) => void;
   onNew?: () => void;
+  /** Show only this project's actions (no drag, New defaults to it); hidden when it has none. */
+  project?: string;
 }) {
   const [actions, setActions] = usePreference(preferences.homeActions);
   const isMobile = useIsMobile();
@@ -146,7 +149,7 @@ export function ActionsSection({
   });
   const { cardProps } = useCardDrag({
     keys,
-    disabled: isMobile,
+    disabled: isMobile || project !== undefined,
     onReorder: (next) => setActions(next.map((k) => actions[keys.indexOf(k)])),
   });
   // `undefined` = closed, `null` = new action, a number = editing that index.
@@ -160,6 +163,12 @@ export function ActionsSection({
     projects.length === 0 ? actions.map((a) => a.project) : projects.map((p) => p.name),
   );
 
+  // Cards keep their index in the FULL list: edit/delete resolve against it.
+  const visible = actions
+    .map((action, i) => ({ action, i }))
+    .filter(({ action }) => project === undefined || action.project === project);
+  if (project !== undefined && visible.length === 0) return null;
+
   return (
     <section data-testid="actions-section" className="mb-6">
       <div
@@ -172,7 +181,7 @@ export function ActionsSection({
           className="rounded-full px-2 text-[11px] font-normal"
           style={{ background: "var(--bg-hover)" }}
         >
-          {actions.length}
+          {visible.length}
         </span>
         <span className="flex-1 border-t" style={{ borderColor: "var(--border-subtle)" }} />
       </div>
@@ -182,7 +191,7 @@ export function ActionsSection({
         className="grid gap-2.5"
         style={{ gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))" }}
       >
-        {actions.map((action, i) => (
+        {visible.map(({ action, i }) => (
           <ActionCard
             key={keys[i]}
             dragProps={cardProps(keys[i])}
@@ -209,7 +218,7 @@ export function ActionsSection({
           + New action
         </button>
       </div>
-      {modal !== undefined && <ActionModal index={modal} onClose={() => setModal(undefined)} />}
+      {modal !== undefined && <ActionModal index={modal} defaultProject={project} onClose={() => setModal(undefined)} />}
     </section>
   );
 }

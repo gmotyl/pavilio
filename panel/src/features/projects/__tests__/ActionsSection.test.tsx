@@ -40,7 +40,7 @@ import Dashboard from "../Dashboard";
 import { ActionsSection } from "../ActionsSection";
 import { alerts } from "../../alerts/store";
 import { preferences } from "../../../preferences/declarations";
-import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
+import { __resetPreferenceStoreForTests, readPreference, writePreference } from "../../../preferences/store";
 
 function mount() {
   return render(
@@ -190,5 +190,55 @@ describe("ActionsSection", () => {
     expect(screen.queryByText("project missing")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Run Process meetings" }));
     await waitFor(() => expect(launches.fn).toHaveBeenCalledTimes(1));
+  });
+
+  describe("project filter", () => {
+    const LIST = [
+      { label: "Harvest", runner: "claude", text: "x", project: "workspace" },
+      { label: "Pull", runner: "shell", text: "git pull", project: "metro" },
+      { label: "Notes", runner: "claude", text: "y", project: "workspace" },
+    ];
+    const mountFor = (project: string) => {
+      writePreference(preferences.homeActions, LIST);
+      return render(
+        <MemoryRouter>
+          <ActionsSection project={project} />
+        </MemoryRouter>,
+      );
+    };
+
+    it("shows only the cards of that project, keeping their real index in the test ids", () => {
+      mountFor("workspace");
+      expect(screen.getByText("Harvest")).toBeTruthy();
+      expect(screen.getByText("Notes")).toBeTruthy();
+      expect(screen.queryByText("Pull")).toBeNull();
+      expect(screen.getByTestId("action-card-2")).toBeTruthy();
+      expect(screen.queryByTestId("action-card-1")).toBeNull();
+      expect(screen.getByTestId("actions-section-head").textContent).toContain("2");
+    });
+
+    it("renders nothing when the project has no actions", () => {
+      mountFor("gitara");
+      expect(screen.queryByTestId("actions-section")).toBeNull();
+    });
+
+    it("Edit and Delete act on the real entry of the full list", () => {
+      mountFor("workspace");
+      fireEvent.click(screen.getByRole("button", { name: "Edit Notes" }));
+      expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Notes");
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+      expect(readPreference(preferences.homeActions).map((a) => a.label)).toEqual(["Harvest", "Pull"]);
+    });
+
+    it("+ New action defaults the project to this one", () => {
+      mountFor("metro");
+      fireEvent.click(screen.getByText("+ New action"));
+      expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("metro");
+    });
+
+    it("has no drag grip", () => {
+      mountFor("workspace");
+      expect(screen.queryByTestId("action-grip")).toBeNull();
+    });
   });
 });
