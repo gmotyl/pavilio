@@ -1,5 +1,5 @@
 import { readdirSync, existsSync, readFileSync, statSync, realpathSync } from "fs";
-import { join, relative, isAbsolute } from "path";
+import { join, relative, isAbsolute, sep } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { isProjectDir } from "./project-dir.js";
@@ -151,12 +151,18 @@ function isProjectName(name: string): boolean {
  */
 export function resolvesInsideProjectsDir(projectsDir: string, dir: string): boolean {
   try {
-    const realRoot = realpathSync(projectsDir);
-    const rel = relative(realRoot, realpathSync(dir));
-    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+    return isContainedPath(relative(realpathSync(projectsDir), realpathSync(dir)));
   } catch {
     return false;
   }
+}
+
+/**
+ * True when `rel` (from `relative(root, target)`) names a path strictly inside
+ * root. `..` counts only as a whole parent segment: a project may be named `..notes`.
+ */
+export function isContainedPath(rel: string): boolean {
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /**

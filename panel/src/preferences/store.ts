@@ -446,6 +446,21 @@ function queuePatch(key: string): void {
   patchTimer = setTimeout(flushPatch, PREFERENCE_PATCH_DEBOUNCE_MS);
 }
 
+/**
+ * The keys a non-2xx PATCH response says the server refused, restricted to the
+ * ones this batch sent; `undefined` when the response names none (a proxy
+ * error, an older server) and the whole batch must be treated as lost.
+ */
+async function refusedKeys(res: Response, sent: string[]): Promise<string[] | undefined> {
+  try {
+    const body = (await res.json()) as { failedKeys?: unknown };
+    if (!Array.isArray(body.failedKeys)) return undefined;
+    return body.failedKeys.filter((k): k is string => typeof k === "string" && sent.includes(k));
+  } catch {
+    return undefined;
+  }
+}
+
 function flushPatch(): void {
   patchTimer = null;
   if (pendingKeys.size === 0) return;
@@ -472,14 +487,20 @@ function flushPatch(): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    .then(async (res) => {
+      // A refusal that names its keys is partial: the server applied the rest.
+      const refused = res.ok ? [] : await refusedKeys(res, keys);
+      if (!refused) throw new Error(`HTTP ${res.status}`);
       // One tick for the whole batch: the server applied it as one PATCH.
       ackClock += 1;
       for (const key of keys) {
         inFlightKeys.delete(key);
-        ackedAt.set(key, ackClock);
+        if (refused.includes(key)) pendingKeys.add(key);
+        else ackedAt.set(key, ackClock);
       }
+      // Like a network failure, a refused key stays dirty and rides along with
+      // the next flush; no timer is armed (an automatic retry is a follow-up).
+      if (refused.length > 0) console.warn(`[preferences] server refused ${refused.join(", ")}; kept pending`);
     })
     .catch((err: unknown) => {
       // No rollback: the in-memory value is what the user asked for, and

@@ -326,3 +326,47 @@ describe("a failed PATCH", () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+describe("a PATCH the server partly refuses", () => {
+  it("keeps only the refused keys pending and re-sends them with the next flush", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const patched: Array<Record<string, unknown>> = [];
+      let refuse = true;
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          patched.push(body);
+          if (refuse && "test.width" in body) {
+            return new Response(JSON.stringify({ ok: false, failedKeys: ["test.width"] }), { status: 503 });
+          }
+          return new Response('{"ok":true}', { status: 200 });
+        }),
+      );
+
+      writePreference(portableWidth, 512);
+      writePreference(portableFlag, false);
+      await vi.advanceTimersByTimeAsync(PREFERENCE_PATCH_DEBOUNCE_MS + 10);
+      expect(patched).toEqual([{ "test.width": 512, "test.flag": false }]);
+
+      // Once the 503 is handled no timer is left armed, at any delay: the
+      // refused key waits for the next write.
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(patched).toHaveLength(1);
+
+      // The accepted key is not dragged along; the refused one is.
+      refuse = false;
+      const other = definePreference({ key: "test.other", scope: "global", default: 0, codec: num, portable: true });
+      writePreference(other, 7);
+      await vi.advanceTimersByTimeAsync(PREFERENCE_PATCH_DEBOUNCE_MS + 10);
+      expect(patched.at(-1)).toEqual({ "test.width": 512, "test.other": 7 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+

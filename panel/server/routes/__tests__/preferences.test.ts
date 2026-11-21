@@ -35,6 +35,15 @@ vi.mock("../../lib/trackedFiles.js", () => ({
   trackedFileNames: vi.fn(async () => machines.tracked),
 }));
 
+// Identity writes go to a project's identity.json; the store is covered in
+// lib/__tests__/project-identity.test.ts. Here only the outcome matters.
+const identity = vi.hoisted(() => ({ result: "missing" as "ok" | "missing" | "failed" }));
+vi.mock("../../lib/project-identity.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/project-identity.js")>()),
+  writeIdentity: () => identity.result,
+  readAllIdentities: () => ({}),
+}));
+
 import preferencesRouter from "../preferences.js";
 import {
   flushPreferences,
@@ -288,6 +297,28 @@ describe("PATCH /api/preferences", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, persisted: true });
+  });
+
+  it("a project identity write that fails answers 503 so the client retries", async () => {
+    loadFile({ version: 1 });
+    const app = makeApp(preferencesRouter);
+    try {
+      identity.result = "failed";
+      const failed = await request(app)
+        .patch("/api/preferences")
+        .send({ "project.mark@alpha": "", theme: "dark" });
+      expect(failed.status).toBe(503);
+      // Only the refused key is named; `theme` was applied.
+      expect(failed.body).toMatchObject({ ok: false, persisted: false, failedKeys: ["project.mark@alpha"] });
+      expect(getPreferences().theme).toBe("dark");
+
+      identity.result = "ok";
+      const retried = await request(app).patch("/api/preferences").send({ "project.mark@alpha": "" });
+      expect(retried.status).toBe(200);
+      expect(retried.body).toEqual({ ok: true, persisted: true });
+    } finally {
+      identity.result = "missing";
+    }
   });
 
   it("an empty PATCH still reports persisted", async () => {

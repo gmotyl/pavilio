@@ -29,6 +29,7 @@ import {
   getPreferences,
   getPreferencesPath,
   isReadOnly,
+  lastPatchFailedKeys,
   patchPreferences,
   readDoc,
   replacePreferences,
@@ -136,6 +137,15 @@ preferencesRouter.patch("/preferences", (req, res) => {
   // Every other open panel tab holds the same document in memory; this is how
   // they learn which keys to re-read.
   broadcast({ type: "preferences-change", keys });
+  // A project identity.json that refused the write would lose the change on
+  // reload. Every other key was applied; `failedKeys` tells the client to
+  // re-send only these, so a refused key never drags a stale neighbour along.
+  const failedKeys = lastPatchFailedKeys();
+  if (failedKeys.length > 0) {
+    return res
+      .status(503)
+      .json({ ok: false, persisted: false, failedKeys, error: "project identity.json write failed" });
+  }
   res.json({ ok: true, persisted: !isReadOnly() });
 });
 

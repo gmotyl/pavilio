@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { identityKey, isIdentityKey, parseIdentityKey, readAllIdentities, writeIdentity } from "./project-identity.js";
 
 export interface PreferencesDoc {
   /** Format marker. This panel writes — and only writes — `CURRENT_VERSION`. */
@@ -47,6 +48,9 @@ let dirty = false;
 let tmpSeq = 0;
 let refusalLogged = false;
 const unstorableWarned = new Set<string>();
+/** Identity keys whose identity.json write failed — kept in the machine file. */
+const identityFallback = new Set<string>();
+let identityWriteFailed: string[] = [];
 
 /**
  * Read the document at `path` into memory. Boot-time and synchronous; never
@@ -146,6 +150,7 @@ export async function replacePreferences(next: Record<string, unknown>): Promise
   }
   while (inFlight) await inFlight;
   doc = { ...next, version: normalizeVersion(next.version) };
+  adoptProjectIdentity();
   dirty = false;
   refusalLogged = false;
   unstorableWarned.clear();
@@ -176,10 +181,11 @@ export async function replacePreferences(next: Record<string, unknown>): Promise
  */
 export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc {
   const next: PreferencesDoc = { ...doc, version: doc.version };
+  identityWriteFailed = [];
   for (const [key, value] of Object.entries(patch)) {
     if (key === "version") continue;
     if (value === null) {
-      delete next[key];
+      if (routeIdentity(key, null)) delete next[key];
       continue;
     }
     // `undefined` is what `{ theme: getTheme() }` produces in ordinary TS when
@@ -191,11 +197,75 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
       warnUnstorable(key, value);
       continue;
     }
-    next[key] = value;
+    if (routeIdentity(key, value)) next[key] = value;
   }
   doc = next;
   scheduleWrite();
   return doc;
+}
+
+/**
+ * Identity keys live in `<project>/identity.json`, not the machine file. An
+ * empty string is a removal (the Appearance editor clears a mark with `""`).
+ * A write that fails for an existing project is refused: it returns false so
+ * the caller leaves the doc untouched (a value retained for a later boot
+ * migration stays intact), and the key is recorded in `identityWriteFailed`
+ * so the route answers with an error and the client keeps it pending. A
+ * missing project is memory-only by design and is not a failure. Non-identity
+ * keys always return true.
+ */
+function routeIdentity(key: string, value: unknown): boolean {
+  const parsed = parseIdentityKey(key);
+  if (!parsed) return true;
+  if (value !== null && typeof value !== "string") return true;
+  const result = writeIdentity(parsed.project, { [parsed.field]: value === "" ? null : value });
+  if (result === "failed") {
+    identityWriteFailed.push(key);
+    return false;
+  }
+  identityFallback.delete(key);
+  return true;
+}
+
+/**
+ * The identity keys the latest `patchPreferences` could not write to their
+ * project's identity.json, so those changes will not survive a reload. Every
+ * other key of that patch was applied normally.
+ */
+export function lastPatchFailedKeys(): string[] {
+  return [...identityWriteFailed];
+}
+
+/**
+ * Reconcile the in-memory doc with the per-project identity files: identity.json
+ * wins over a machine value; a machine-only identity value migrates into
+ * identity.json (first machine to boot wins). Values stay in memory so reads
+ * work; `serialize` keeps them out of the machine file, and a doc that carried
+ * them is flushed once so the file drops them.
+ */
+export function adoptProjectIdentity(): void {
+  const hadLegacy = Object.keys(doc).some(isIdentityKey);
+  const identities = readAllIdentities();
+  for (const key of Object.keys(doc)) {
+    const parsed = parseIdentityKey(key);
+    const value = doc[key];
+    if (!parsed || typeof value !== "string") continue;
+    if (identities[parsed.project]?.[parsed.field] === undefined) {
+      // A failed migration to an existing project keeps the legacy value in the
+      // machine file so a later boot retries it. identity.json lacks the field
+      // here, so a retained value never conflicts with a shared one. A missing
+      // project (archived, other machine) stays memory-only and is dropped.
+      if (writeIdentity(parsed.project, { [parsed.field]: value }) === "failed") identityFallback.add(key);
+      else identityFallback.delete(key);
+    } else identityFallback.delete(key);
+  }
+  for (const [project, id] of Object.entries(identities)) {
+    for (const field of ["color", "mark"] as const) {
+      const v = id[field];
+      if (v !== undefined) doc[identityKey(field, project)] = v;
+    }
+  }
+  if (hadLegacy) scheduleWrite();
 }
 
 /**
@@ -243,6 +313,8 @@ export function _resetPreferencesForTests(): void {
   targetPath = "";
   refusalLogged = false;
   unstorableWarned.clear();
+  identityFallback.clear();
+  identityWriteFailed = [];
 }
 
 /**
@@ -333,7 +405,7 @@ function warnUnstorable(key: string, value: unknown): void {
 function serialize(d: PreferencesDoc): string {
   const lines = [`  "version": ${JSON.stringify(d.version)}`];
   for (const key of Object.keys(d)
-    .filter((k) => k !== "version")
+    .filter((k) => k !== "version" && (!isIdentityKey(k) || identityFallback.has(k)))
     .sort()) {
     // Belt and braces: `patchPreferences` already ignores unstorable values, so
     // this only fires for a doc assembled some other way. Emitting the line
