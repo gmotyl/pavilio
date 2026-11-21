@@ -90,11 +90,13 @@ describe("ActionsSection", () => {
     expect(within(agent).getByText("▶")).toBeTruthy();
     expect(within(agent).getByText("Harvest")).toBeTruthy();
     expect(within(agent).getByText("claude")).toBeTruthy();
-    expect(within(agent).getByText("workspace")).toBeTruthy();
+    // The project is not printed on the card (it is in the run tooltip).
+    expect(within(agent).queryByText("workspace")).toBeNull();
+    expect(screen.getByTestId("action-run-0").title).toContain("workspace");
     const shell = screen.getByTestId("action-card-1");
     expect(within(shell).getByText("$_")).toBeTruthy();
     expect(within(shell).getByText("sh")).toBeTruthy();
-    expect(within(shell).getByText("metro")).toBeTruthy();
+    expect(within(shell).queryByText("metro")).toBeNull();
     fireEvent.click(within(shell).getByRole("button", { name: "Edit Pull" }));
     expect(onEdit).toHaveBeenCalledWith(1);
     const grid = screen.getByTestId("actions-grid");
@@ -102,6 +104,70 @@ describe("ActionsSection", () => {
     expect(last.textContent).toContain("+ New action");
     fireEvent.click(last);
     expect(onNew).toHaveBeenCalled();
+  });
+
+  it("shows the whole label and an icon-only Edit revealed on hover", () => {
+    mount();
+    const label = screen.getByText("Knowledge harvest");
+    expect(label.className).not.toContain("truncate");
+    // A single long word must be able to shrink the 1fr track.
+    expect(label.className).toContain("wrap-anywhere");
+    const edit = screen.getByTestId("action-edit-0");
+    expect(edit.textContent).toBe("");
+    expect(edit.querySelector("svg")).toBeTruthy();
+    expect(edit.className).toContain("opacity-0");
+    expect(edit.className).toContain("group-hover:opacity-100");
+    expect(edit.className).toContain("focus-visible:opacity-100");
+    // Touch-capable devices see it without hover, even when a trackpad is primary.
+    expect(edit.className).toContain("[@media(hover:none)]:opacity-100");
+    expect(edit.className).toContain("[@media(any-pointer:coarse)]:opacity-100");
+  });
+
+  it("names the project only on cards whose label and runner repeat across projects", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Pull", runner: "shell", text: "git pull", project: "workspace" },
+      { label: "Pull", runner: "shell", text: "git pull", project: "metro" },
+      { label: "Pull", runner: "claude", text: "x", project: "gitara" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-2")).queryByText("gitara")).toBeNull();
+  });
+
+  it("treats labels that render alike (collapsed whitespace) as the same look", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Sync docs", runner: "shell", text: "x", project: "workspace" },
+      { label: "Sync  docs", runner: "shell", text: "y", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
+  });
+
+  it("treats a non-breaking space like an ordinary one", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Sync docs", runner: "shell", text: "x", project: "workspace" },
+      { label: "Sync\u00a0docs", runner: "shell", text: "y", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
+  });
+
+  it("keeps full-width spaces distinct (the browser does not collapse them)", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Sync docs", runner: "shell", text: "x", project: "workspace" },
+      { label: "Sync\u3000\u3000docs", runner: "shell", text: "y", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).queryByText("workspace")).toBeNull();
+    expect(within(screen.getByTestId("action-card-1")).queryByText("metro")).toBeNull();
+  });
+
+  it("the run button highlights on hover unless blocked", () => {
+    mount();
+    expect(screen.getByTestId("action-run-0").className).toMatch(/hover:bg-/);
   });
 
   it("Edit and + New action have hover and focus styles", () => {
@@ -129,7 +195,6 @@ describe("ActionsSection", () => {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(screen.getAllByText("claude")).toHaveLength(2);
-    expect(screen.getAllByText("workspace").length).toBeGreaterThanOrEqual(2);
   });
 
   it("clicking a card runs its line in its project", async () => {
@@ -161,6 +226,7 @@ describe("ActionsSection", () => {
     expect(within(card).getByText("project missing")).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Run Ghost" }));
     expect(launches.fn).not.toHaveBeenCalled();
+    expect(screen.getByTestId("action-run-0").className).not.toMatch(/hover:bg-/);
     expect((within(card).getByRole("button", { name: "Edit Ghost" }) as HTMLButtonElement).disabled).toBe(false);
   });
 

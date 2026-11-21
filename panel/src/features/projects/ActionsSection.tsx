@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pencil } from "lucide-react";
 import { ActionModal } from "./ActionModal";
 import { usePreference } from "../../preferences/usePreference";
 import { preferences, type HomeAction } from "../../preferences/declarations";
@@ -20,6 +21,7 @@ function ActionCard({
   index,
   blocker,
   line,
+  showProject,
   onEdit,
   dragProps,
 }: {
@@ -27,6 +29,8 @@ function ActionCard({
   index: number;
   blocker: string | null;
   line: string | null;
+  /** Print the project: another visible card shares this label and runner. */
+  showProject: boolean;
   onEdit: (index: number) => void;
   dragProps: ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
 }) {
@@ -47,7 +51,7 @@ function ActionCard({
     <div
       data-testid={`action-card-${index}`}
       {...dragProps.card}
-      className="flex items-stretch rounded-[10px] border"
+      className="group flex items-stretch rounded-[10px] border"
       style={{
         background: "var(--bg-surface)",
         borderColor: "var(--border-subtle)",
@@ -71,11 +75,13 @@ function ActionCard({
       <button
         data-testid={`action-run-${index}`}
         type="button"
-        title={`Run ${action.label}`}
+        title={`Run ${action.label} (${action.project})`}
         aria-label={`Run ${action.label}`}
         aria-disabled={blocker !== null}
         onClick={run}
-        className="flex-1 min-w-0 grid items-center text-left px-3 py-2.5"
+        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-1 py-2.5 rounded-[10px] transition-colors ${
+          blocker !== null ? "" : "hover:bg-[var(--bg-hover)]"
+        } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]`}
         style={{
           gridTemplateColumns: "16px 1fr auto",
           gap: "2px 8px",
@@ -93,7 +99,7 @@ function ActionCard({
         >
           {isShell ? "$_" : "▶"}
         </span>
-        <span className="font-semibold text-[14px] truncate">
+        <span className="font-semibold text-[14px] wrap-anywhere">
           {action.label}
         </span>
         <span
@@ -102,12 +108,14 @@ function ActionCard({
         >
           {runnerPill(action)}
         </span>
-        <span
-          className="text-[12px]"
-          style={{ gridColumn: "2 / -1", color: "var(--text-muted)" }}
-        >
-          {action.project}
-        </span>
+        {showProject && (
+          <span
+            className="text-[12px]"
+            style={{ gridColumn: "2 / -1", color: "var(--text-muted)" }}
+          >
+            {action.project}
+          </span>
+        )}
         {blocker !== null && (
           <span
             className="text-[12px]"
@@ -123,10 +131,9 @@ function ActionCard({
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
         onClick={() => onEdit(index)}
-        className="text-sm px-3 border-l rounded-r-[10px] cursor-pointer transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
-        style={{ borderColor: "var(--border-subtle)" }}
+        className="flex items-center px-2 rounded-[10px] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
-        Edit
+        <Pencil size={14} aria-hidden="true" />
       </button>
     </div>
   );
@@ -200,6 +207,25 @@ export function ActionsSection({
     />
   );
   const hideCards = project !== undefined && visible.length === 0;
+  // Cards that would look identical (same label and runner) in different
+  // projects name their project; everywhere else it is redundant.
+  // The label is compared as rendered: HTML collapses runs of ASCII
+  // whitespace only (a full-width space stays visible), and a single
+  // non-breaking space looks like an ordinary one (runs of it do not collapse).
+  const lookOf = (a: HomeAction) =>
+    `${a.label
+      .replace(/[ \t\r\n\f]+/g, " ")
+      .replace(/^ | $/g, "")
+      .replace(/\u00a0/g, " ")}|${a.runner}`;
+  const projectsByLook = new Map<string, Set<string>>();
+  for (const { action } of visible) {
+    const look = lookOf(action);
+    const set = projectsByLook.get(look) ?? new Set<string>();
+    set.add(action.project);
+    projectsByLook.set(look, set);
+  }
+  const ambiguous = (a: HomeAction) =>
+    (projectsByLook.get(lookOf(a))?.size ?? 0) > 1;
 
   // The modal is a sibling of the section (not inside it) so hiding the cards
   // never remounts it.
@@ -240,6 +266,7 @@ export function ActionsSection({
                 index={i}
                 blocker={actionBlocker(action, launchers, names)}
                 line={actionRunLine(action, launchers)}
+                showProject={ambiguous(action)}
                 onEdit={(i) => {
                   setModal(i);
                   onEdit(i);
