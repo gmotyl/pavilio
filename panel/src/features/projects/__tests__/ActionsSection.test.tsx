@@ -74,7 +74,7 @@ describe("ActionsSection", () => {
     expect(head.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("card shows glyph, label, runner pill, project and Edit; + New action is last", () => {
+  it("card shows glyph, label and Edit, no runner pill; + New action is last", () => {
     writePreference(preferences.homeActions, [
       { label: "Harvest", runner: "claude", text: "x", project: "workspace" },
       { label: "Pull", runner: "shell", text: "git pull", project: "metro" },
@@ -89,13 +89,14 @@ describe("ActionsSection", () => {
     const agent = screen.getByTestId("action-card-0");
     expect(within(agent).getByText("▶")).toBeTruthy();
     expect(within(agent).getByText("Harvest")).toBeTruthy();
-    expect(within(agent).getByText("claude")).toBeTruthy();
+    // No runner pill: the glyph alone tells shell from agent.
+    expect(within(agent).queryByText("claude")).toBeNull();
     // The project is not printed on the card (it is in the run tooltip).
     expect(within(agent).queryByText("workspace")).toBeNull();
     expect(screen.getByTestId("action-run-0").title).toContain("workspace");
     const shell = screen.getByTestId("action-card-1");
     expect(within(shell).getByText("$_")).toBeTruthy();
-    expect(within(shell).getByText("sh")).toBeTruthy();
+    expect(within(shell).queryByText("sh")).toBeNull();
     expect(within(shell).queryByText("metro")).toBeNull();
     fireEvent.click(within(shell).getByRole("button", { name: "Edit Pull" }));
     expect(onEdit).toHaveBeenCalledWith(1);
@@ -118,9 +119,18 @@ describe("ActionsSection", () => {
     expect(edit.className).toContain("opacity-0");
     expect(edit.className).toContain("group-hover:opacity-100");
     expect(edit.className).toContain("focus-visible:opacity-100");
-    // Touch-capable devices see it without hover, even when a trackpad is primary.
+    // Only devices that cannot hover at all see it without hover; a touch-capable
+    // laptop with a mouse keeps it hidden until hover.
     expect(edit.className).toContain("[@media(hover:none)]:opacity-100");
-    expect(edit.className).toContain("[@media(any-pointer:coarse)]:opacity-100");
+    expect(edit.className).not.toContain("any-pointer:coarse");
+    // A corner overlay: it takes no width from the label.
+    expect(edit.className).toContain("absolute");
+    expect(edit.className).toContain("top-1");
+    expect(edit.className).toContain("right-1");
+    expect(screen.getByTestId("action-card-0").className).toContain("relative");
+    // Shorter card than the old py-2.5.
+    expect(screen.getByTestId("action-run-0").className).toContain("py-2");
+    expect(screen.getByTestId("action-run-0").className).not.toContain("py-2.5");
   });
 
   it("names the project only on cards whose label and runner repeat across projects", () => {
@@ -133,6 +143,69 @@ describe("ActionsSection", () => {
     expect(within(screen.getByTestId("action-card-0")).getByText("workspace")).toBeTruthy();
     expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
     expect(within(screen.getByTestId("action-card-2")).queryByText("gitara")).toBeNull();
+  });
+
+  it("names the agent when same-label agent cards differ only by runner", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Review", runner: "claude", text: "x", project: "workspace" },
+      { label: "Review", runner: "codex", text: "x", project: "metro" },
+      { label: "Lint", runner: "claude", text: "x", project: "metro" },
+      { label: "Lint", runner: "codex", text: "x", project: "metro" },
+    ]);
+    mount();
+    // Different project and runner: both are named.
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace · claude")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro · codex")).toBeTruthy();
+    // Same project: only the runner tells them apart.
+    expect(within(screen.getByTestId("action-card-2")).getByText("claude")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-3")).getByText("codex")).toBeTruthy();
+    expect(screen.getByTestId("action-run-3").title).toContain("codex");
+  });
+
+  it("hidden Edit takes no clicks; phones reserve room for it", () => {
+    mount();
+    const edit = screen.getByTestId("action-edit-0");
+    expect(edit.className).toContain("pointer-events-none");
+    expect(edit.className).toContain("group-hover:pointer-events-auto");
+    expect(edit.className).toContain("focus-visible:pointer-events-auto");
+    expect(edit.className).toContain("[@media(hover:none)]:pointer-events-auto");
+    // Where Edit is always shown, the label must not run under it.
+    expect(screen.getByTestId("action-run-0").className).toContain("[@media(hover:none)]:pr-8");
+  });
+
+  it("shows Edit while touch is the active input, hides it again on mouse", () => {
+    mount();
+    const edit = () => screen.getByTestId("action-edit-0");
+    expect(edit().className).toContain("opacity-0");
+    act(() => {
+      document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", bubbles: true }));
+    });
+    expect(edit().className).not.toContain("opacity-0");
+    expect(edit().className).not.toContain("pointer-events-none");
+    // Layout is identical across input modes (no padding switch on mode change).
+    const before = screen.getByTestId("action-run-0").className;
+    act(() => {
+      document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true }));
+    });
+    expect(edit().className).toContain("opacity-0");
+    expect(screen.getByTestId("action-run-0").className).toBe(before);
+  });
+
+  it("the look-alike hint wraps like the label", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Review", runner: "claude", text: "x", project: "metro" },
+      { label: "Review", runner: "codex", text: "x", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-1")).getByText("codex").className).toContain("wrap-anywhere");
+  });
+
+  it("+ New action does not force the row taller than the compact cards", () => {
+    mount();
+    const last = screen.getByTestId("actions-grid").lastElementChild as HTMLElement;
+    expect(last.style.minHeight).toBe("");
+    expect(last.className).toContain("py-2");
+    expect(last.className).not.toContain("py-2.5");
   });
 
   it("treats labels that render alike (collapsed whitespace) as the same look", () => {
@@ -194,7 +267,9 @@ describe("ActionsSection", () => {
     for (const label of ["Process meetings", "Knowledge harvest"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
-    expect(screen.getAllByText("claude")).toHaveLength(2);
+    // Both defaults are agent actions: the ▶ glyph, no runner pill.
+    expect(screen.getAllByText("▶")).toHaveLength(2);
+    expect(screen.queryByText("claude")).toBeNull();
   });
 
   it("clicking a card runs its line in its project", async () => {
