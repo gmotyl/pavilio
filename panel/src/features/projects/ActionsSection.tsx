@@ -21,6 +21,7 @@ function ActionCard({
   index,
   blocker,
   line,
+  showProject,
   onEdit,
   dragProps,
 }: {
@@ -28,6 +29,8 @@ function ActionCard({
   index: number;
   blocker: string | null;
   line: string | null;
+  /** Print the project: another visible card shares this label and runner. */
+  showProject: boolean;
   onEdit: (index: number) => void;
   dragProps: ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
 }) {
@@ -96,7 +99,7 @@ function ActionCard({
         >
           {isShell ? "$_" : "▶"}
         </span>
-        <span className="font-semibold text-[14px] break-words">
+        <span className="font-semibold text-[14px] wrap-anywhere">
           {action.label}
         </span>
         <span
@@ -105,6 +108,14 @@ function ActionCard({
         >
           {runnerPill(action)}
         </span>
+        {showProject && (
+          <span
+            className="text-[12px]"
+            style={{ gridColumn: "2 / -1", color: "var(--text-muted)" }}
+          >
+            {action.project}
+          </span>
+        )}
         {blocker !== null && (
           <span
             className="text-[12px]"
@@ -120,7 +131,7 @@ function ActionCard({
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
         onClick={() => onEdit(index)}
-        className="flex items-center px-2 rounded-[10px] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
+        className="flex items-center px-2 rounded-[10px] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
         <Pencil size={14} aria-hidden="true" />
       </button>
@@ -196,6 +207,17 @@ export function ActionsSection({
     />
   );
   const hideCards = project !== undefined && visible.length === 0;
+  // Cards that would look identical (same label and runner) in different
+  // projects name their project; everywhere else it is redundant.
+  const projectsByLook = new Map<string, Set<string>>();
+  for (const { action } of visible) {
+    const look = `${action.label}|${action.runner}`;
+    const set = projectsByLook.get(look) ?? new Set<string>();
+    set.add(action.project);
+    projectsByLook.set(look, set);
+  }
+  const ambiguous = (a: HomeAction) =>
+    (projectsByLook.get(`${a.label}|${a.runner}`)?.size ?? 0) > 1;
 
   // The modal is a sibling of the section (not inside it) so hiding the cards
   // never remounts it.
@@ -236,6 +258,7 @@ export function ActionsSection({
                 index={i}
                 blocker={actionBlocker(action, launchers, names)}
                 line={actionRunLine(action, launchers)}
+                showProject={ambiguous(action)}
                 onEdit={(i) => {
                   setModal(i);
                   onEdit(i);

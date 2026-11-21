@@ -110,12 +110,29 @@ describe("ActionsSection", () => {
     mount();
     const label = screen.getByText("Knowledge harvest");
     expect(label.className).not.toContain("truncate");
+    // A single long word must be able to shrink the 1fr track.
+    expect(label.className).toContain("wrap-anywhere");
     const edit = screen.getByTestId("action-edit-0");
     expect(edit.textContent).toBe("");
     expect(edit.querySelector("svg")).toBeTruthy();
     expect(edit.className).toContain("opacity-0");
     expect(edit.className).toContain("group-hover:opacity-100");
     expect(edit.className).toContain("focus-visible:opacity-100");
+    // Touch-capable devices see it without hover, even when a trackpad is primary.
+    expect(edit.className).toContain("[@media(hover:none)]:opacity-100");
+    expect(edit.className).toContain("[@media(any-pointer:coarse)]:opacity-100");
+  });
+
+  it("names the project only on cards whose label and runner repeat across projects", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Pull", runner: "shell", text: "git pull", project: "workspace" },
+      { label: "Pull", runner: "shell", text: "git pull", project: "metro" },
+      { label: "Pull", runner: "claude", text: "x", project: "gitara" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-2")).queryByText("gitara")).toBeNull();
   });
 
   it("the run button highlights on hover unless blocked", () => {
@@ -179,6 +196,7 @@ describe("ActionsSection", () => {
     expect(within(card).getByText("project missing")).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Run Ghost" }));
     expect(launches.fn).not.toHaveBeenCalled();
+    expect(screen.getByTestId("action-run-0").className).not.toMatch(/hover:bg-/);
     expect((within(card).getByRole("button", { name: "Edit Ghost" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
