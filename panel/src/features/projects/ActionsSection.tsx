@@ -11,11 +11,6 @@ import { useCardDrag } from "./useCardDrag";
 import { dropStyle } from "../shell/useSidebarDrag";
 import { useIsMobile } from "../shell/useIsMobile";
 
-/** The runner pill text: a shell action reads `sh`, an agent action its launcher name. */
-function runnerPill(a: HomeAction): string {
-  return a.runner === "shell" ? "sh" : a.runner;
-}
-
 function ActionCard({
   action,
   index,
@@ -51,7 +46,7 @@ function ActionCard({
     <div
       data-testid={`action-card-${index}`}
       {...dragProps.card}
-      className="group flex items-stretch rounded-[10px] border"
+      className="group relative flex items-stretch rounded-[10px] border"
       style={{
         background: "var(--bg-surface)",
         borderColor: "var(--border-subtle)",
@@ -79,11 +74,11 @@ function ActionCard({
         aria-label={`Run ${action.label}`}
         aria-disabled={blocker !== null}
         onClick={run}
-        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-1 py-2.5 rounded-[10px] transition-colors ${
+        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-3 py-2 rounded-[10px] transition-colors ${
           blocker !== null ? "" : "hover:bg-[var(--bg-hover)]"
         } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]`}
         style={{
-          gridTemplateColumns: "16px 1fr auto",
+          gridTemplateColumns: "16px 1fr",
           gap: "2px 8px",
           cursor: blocker !== null ? "not-allowed" : "pointer",
           opacity: blocker !== null ? 0.7 : 1,
@@ -101,12 +96,6 @@ function ActionCard({
         </span>
         <span className="font-semibold text-[14px] wrap-anywhere">
           {action.label}
-        </span>
-        <span
-          className="font-mono text-[10px] px-1.5 rounded-full"
-          style={{ background: "var(--bg-hover)", color: "var(--text-muted)" }}
-        >
-          {runnerPill(action)}
         </span>
         {showProject && (
           <span
@@ -131,9 +120,9 @@ function ActionCard({
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
         onClick={() => onEdit(index)}
-        className="flex items-center px-2 rounded-[10px] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
+        className="absolute top-1 right-1 grid place-items-center w-[22px] h-[22px] rounded-[6px] border border-[var(--border-strong)] bg-[var(--bg-surface)] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
-        <Pencil size={14} aria-hidden="true" />
+        <Pencil size={12} aria-hidden="true" />
       </button>
     </div>
   );
