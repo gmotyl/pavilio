@@ -269,6 +269,46 @@ export const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
 ];
 
 /**
+ * One home-page action: a labelled button that starts a `runner` (a launcher
+ * name, or `"shell"`) with `text` in `project`.
+ */
+export interface HomeAction {
+  label: string;
+  runner: string;
+  text: string;
+  project: string;
+}
+
+/** A stored action rebuilt from its four fields, or `null`: all must be non-blank strings. */
+function toHomeAction(value: unknown): HomeAction | null {
+  if (
+    !isRecord(value) ||
+    !isFilled(value.label) ||
+    !isFilled(value.runner) ||
+    !isFilled(value.text) ||
+    !isFilled(value.project)
+  ) {
+    return null;
+  }
+  return { label: value.label, runner: value.runner, text: value.text, project: value.project };
+}
+
+/**
+ * The actions an empty workspace opens the home page with. Treat it as
+ * frozen, like `DEFAULT_COMPOSER_SHORTCUTS`: `readPreference` hands it back BY
+ * REFERENCE when nothing is stored.
+ */
+export const DEFAULT_HOME_ACTIONS: HomeAction[] = [
+  { label: "Process meetings", runner: "claude", text: "pavilio-note-batch", project: "workspace" },
+  {
+    label: "Knowledge harvest",
+    runner: "claude",
+    text: "pavilio-wiki-ingest-knowledge",
+    project: "workspace",
+  },
+];
+
+/**
  * The objective a task run hands its agent when neither the workspace nor the
  * project has written one. The OBJECTIVE only: no `/goal` and no quotes, which
  * belong to the launcher's run loop. `{change}`, `{path}` and `{project}` are
@@ -571,6 +611,46 @@ export const preferences = {
     scope: "global",
     default: {},
     codec: groupCollapsedCodec,
+    portable: true,
+  }),
+  /** Actions on the home page, edited in a modal. Habits of their owner, so portable. */
+  homeActions: definePreference<HomeAction[]>({
+    key: "home.actions", // was: nothing — new with home actions
+    scope: "global",
+    default: DEFAULT_HOME_ACTIONS,
+    codec: listOf(toHomeAction),
+    portable: true,
+  }),
+  /** The project group the home page is filtered to; `null` shows every group. */
+  homeGroupFilter: definePreference<string | null>({
+    key: "home.groupFilter", // was: nothing — new with home groups
+    scope: "global",
+    default: null,
+    codec: optionalStr,
+    portable: true,
+  }),
+  /** Drag order of the starred section's projects; merged with favorites at render time. */
+  starredOrder: definePreference<string[]>({
+    key: "shell.starredOrder", // was: nothing — new with the starred section
+    scope: "global",
+    default: [],
+    codec: listOf((v) => (typeof v === "string" ? v : null)),
+    portable: true,
+  }),
+  /** Whether the sidebar's starred section is folded. */
+  starredCollapsed: definePreference({
+    key: "shell.starredCollapsed", // was: nothing — new with the starred section
+    scope: "global",
+    default: false,
+    codec: bool,
+    portable: true,
+  }),
+  /** Whether the sidebar's projects section is folded. */
+  projectsCollapsed: definePreference({
+    key: "shell.projectsCollapsed", // was: nothing — new with section folds
+    scope: "global",
+    default: false,
+    codec: bool,
     portable: true,
   }),
   repoSearchScope: definePreference<RepoSearchScope>({

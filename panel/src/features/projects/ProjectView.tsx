@@ -32,6 +32,7 @@ import { useCommitsOpenMap } from "./useCommitsOpenMap";
 import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectGroupStrip from "./ProjectGroupStrip";
+import { ActionsSection } from "./ActionsSection";
 import ProjectSettingsCard from "./ProjectSettingsCard";
 import { BELOW_BREADCRUMBS, useBreadcrumbActions } from "../shell/Breadcrumbs";
 import { PageSpeechRowHost } from "../speech/PageSpeechRowHost";
@@ -530,6 +531,7 @@ export default function ProjectView() {
       {/* Overview */}
       {!section && (
         <>
+          {name && isListed && <ActionsSection key={name} project={name} />}
           {(absolutePath || scripts.length > 0) && (
             <div className="flex flex-wrap gap-2 mb-4 items-center">
               {absolutePath && (

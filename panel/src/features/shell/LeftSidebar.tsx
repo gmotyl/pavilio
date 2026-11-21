@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Archive as ArchiveIcon,
@@ -16,11 +16,13 @@ import {
   Star,
   Terminal as TerminalIcon,
   Wifi,
+  Home as HomeIcon,
 } from "lucide-react";
 import { HamburgerSlot } from "./SidebarHamburger";
 import { SidebarGroupRow } from "./SidebarGroupRow";
 import { useSidebarRowMenu } from "./SidebarRowMenu";
 import { groupMap, ownFlag } from "./sidebarOrder";
+import { orderStarred } from "./starredOrder";
 import { dropStyle, useSidebarDrag, type SidebarRowDragProps } from "./useSidebarDrag";
 import { useIsMobile } from "./useIsMobile";
 import { useSidebarState } from "./useSidebarState";
@@ -62,17 +64,10 @@ import {
   matchProjectFromViewPath,
 } from "../projects/matchProjectFromPath";
 
-/**
- * `leading` is the slot the corner hamburger occupies — passed to whichever
- * header renders FIRST, because that is the row the fixed button lands on. It
- * is a reserved box rather than the button itself: `.sidebar` is
- * `overflow: hidden` and `.sidebar-collapsed` is `pointer-events: none`, so the
- * control cannot live in this tree. See `SidebarHamburger`.
- */
+/** A section heading, optionally a ▾/▸ fold toggle with a count and a new button. */
 function SectionHeader({
   icon: Icon,
   label,
-  leading,
   collapse,
   count,
   testId,
@@ -80,7 +75,6 @@ function SectionHeader({
 }: {
   icon: typeof FolderOpen;
   label: string;
-  leading?: ReactNode;
   /** Makes the header a ▾/▸ toggle for its section. */
   collapse?: { collapsed: boolean; onToggle: () => void };
   /** Row count shown after the label; stays visible while collapsed. */
@@ -105,7 +99,6 @@ function SectionHeader({
     const Chevron = collapse.collapsed ? ChevronRight : ChevronDown;
     return (
       <div className="flex items-center gap-2 mb-2 px-1">
-        {leading}
         <button
           type="button"
           data-testid={testId ? `${testId}-toggle` : undefined}
@@ -137,7 +130,6 @@ function SectionHeader({
   }
   return (
     <div className="flex items-center gap-2 mb-2 px-1">
-      {leading}
       <Icon size={12} style={{ color: "var(--text-tertiary)" }} />
       <h2
         className="text-[11px] font-semibold uppercase tracking-widest"
@@ -399,6 +391,12 @@ export default function LeftSidebar() {
   const [researchCollapsed, setResearchCollapsed] = usePreference(
     preferences.researchSectionCollapsed,
   );
+  const [starredCollapsed, setStarredCollapsed] = usePreference(
+    preferences.starredCollapsed,
+  );
+  const [projectsCollapsed, setProjectsCollapsed] = usePreference(
+    preferences.projectsCollapsed,
+  );
 
   // Starred keeps every kind; the rest split by kind — `project` into
   // Projects, `research` and `knowledge` into Research. A row with no kind
@@ -434,6 +432,46 @@ export default function LeftSidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobileMenuOpen, revealIsResearch]);
   const researchHidden = researchCollapsed && !researchRevealed;
+
+  // Starred and Projects get the same in-memory reveal, decided when the menu
+  // opens and never written to the preference.
+  const revealInStarred =
+    revealProject !== null && starredProjects.some((p) => p.name === revealProject);
+  const revealInProjects =
+    revealProject !== null && otherProjects.some((p) => p.name === revealProject);
+  const [starredRevealed, setStarredRevealed] = useState(false);
+  useEffect(() => {
+    setStarredRevealed(mobileMenuOpen && revealInStarred && starredCollapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealInStarred]);
+  const [projectsRevealed, setProjectsRevealed] = useState(false);
+  useEffect(() => {
+    setProjectsRevealed(mobileMenuOpen && revealInProjects && projectsCollapsed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealInProjects]);
+  // The group holding the current project is revealed the same way, so a
+  // collapsed group does not hide it inside an open Projects section.
+  const revealGroup =
+    revealProject === null
+      ? null
+      : (otherProjects.find((p) => p.name === revealProject)?.group ?? null);
+  const [revealedGroup, setRevealedGroup] = useState<string | null>(null);
+  useEffect(() => {
+    setRevealedGroup(mobileMenuOpen && revealGroup ? revealGroup : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileMenuOpen, revealGroup]);
+  const starredHidden = starredCollapsed && !starredRevealed;
+  const projectsHidden = projectsCollapsed && !projectsRevealed;
+  const toggleStarred = () => {
+    setStarredRevealed(false);
+    if (starredHidden) setStarredCollapsed(false);
+    else if (!starredCollapsed) setStarredCollapsed(true);
+  };
+  const toggleProjects = () => {
+    setProjectsRevealed(false);
+    if (projectsHidden) setProjectsCollapsed(false);
+    else if (!projectsCollapsed) setProjectsCollapsed(true);
+  };
   // Any explicit tap ends the reveal and flips what the user sees, in one tap.
   // The stored preference is written only when it differs from the new state:
   // folding a revealed section stores nothing, as storage already says
@@ -465,7 +503,43 @@ export default function LeftSidebar() {
     setOrder: setSidebarOrder,
     isMobile,
   });
+  // Starred has its own order: the same drag, a separate scope, and its own
+  // preference. The hook's order is the fully explicit `orderStarred` result, so
+  // the tree it merges keeps that order instead of re-sorting newcomers.
+  const [starredOrder, setStarredOrder] = usePreference(preferences.starredOrder);
+  const orderedStarredNames = useMemo(
+    () =>
+      orderStarred(
+        starredOrder,
+        starredProjects.map((p) => String(p.name)),
+      ),
+    [starredOrder, starredProjects],
+  );
+  const starredDragProjects = useMemo(
+    () => orderedStarredNames.map((name) => ({ name, group: null })),
+    [orderedStarredNames],
+  );
+  const starredDragOrder = useMemo(
+    () => ({ top: orderedStarredNames.map((n) => `p:${n}`), groups: groupMap<string[]>() }),
+    [orderedStarredNames],
+  );
+  const { tree: starredTree, rowProps: starredRowProps } = useSidebarDrag({
+    projects: starredDragProjects,
+    order: starredDragOrder,
+    setOrder: (o) => setStarredOrder(o.top.map((k) => k.slice(2))),
+    isMobile,
+    scope: "starred",
+  });
+  const starredByName = new Map<string, SidebarProject>(
+    starredProjects.map((p) => [String(p.name), p]),
+  );
   const toggleGroup = (name: string) => {
+    // Folding a revealed group only ends the reveal; storage already says collapsed.
+    if (revealedGroup === name && ownFlag(groupCollapsed, name)) {
+      setRevealedGroup(null);
+      return;
+    }
+    if (revealedGroup === name) setRevealedGroup(null);
     const next = Object.assign(groupMap<boolean>(), groupCollapsed);
     if (ownFlag(next, name)) delete next[name];
     else next[name] = true;
@@ -565,6 +639,22 @@ export default function LeftSidebar() {
             ...dropStyle(drag["data-drop"], drag["data-dragging"] === "true"),
           }}
         >
+          {/* Starred only: a grip on Projects rows would push them out of line
+              with their group rows, which have no leading slot for it. */}
+          {drag["data-drag-scope"] === "starred" && (
+            <span
+              data-drag-grip=""
+              aria-hidden="true"
+              className="w-2 shrink-0 text-[11px] leading-none opacity-0 group-hover:opacity-100 select-none"
+              style={{
+                color: "var(--text-tertiary)",
+                opacity: drag["data-dragging"] === "true" ? 1 : undefined,
+                cursor: "grab",
+              }}
+            >
+              ⋮⋮
+            </span>
+          )}
           <button
             type="button"
             data-testid={`sidebar-project-expand-${project.name}`}
@@ -736,13 +826,8 @@ export default function LeftSidebar() {
     );
   };
 
-  // Which header row reserves the hamburger's box, decided ONCE. It belongs to
-  // the first row on screen, which is Starred when there is one and Projects
-  // otherwise — an invariant, and one that two independent `leading` ternaries
-  // could disagree about. Two slots would double-indent, none would put the
-  // heading under the button, and both are a single edit away when the answer
-  // lives in two places.
-  const starredIsFirst = starredProjects.length > 0;
+  // The hamburger's box is the leading item of the first row, which is always
+  // the Home row — Starred and Projects no longer take turns holding it.
   const hamburgerSlot = <HamburgerSlot />;
 
   return (
@@ -761,58 +846,97 @@ export default function LeftSidebar() {
     // of this scrollport and away from the list it heads, which is a bigger
     // change than the misalignment earns.
     <div className="p-3 overflow-auto h-full flex flex-col gap-5">
-      {starredIsFirst && (
+      <div className="flex items-center gap-2 px-1" data-testid="sidebar-first-row">
+        {hamburgerSlot}
+        <NavLink
+          to="/"
+          end
+          data-testid="sidebar-home-link"
+          className="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px] font-semibold"
+          style={({ isActive }) => ({
+            color: "var(--text-primary)",
+            background: isActive ? "var(--bg-active)" : "transparent",
+            boxShadow: isActive ? "inset 2px 0 0 var(--accent)" : "none",
+          })}
+        >
+          <HomeIcon size={13} aria-hidden="true" />
+          <span>Home</span>
+        </NavLink>
+      </div>
+      {starredProjects.length > 0 && (
         <section data-testid="sidebar-section-starred">
-          <SectionHeader icon={Star} label="Starred" leading={hamburgerSlot} />
-          <ul className="space-y-0.5">
-            {starredProjects.map((p) => renderProjectRow(p))}
-          </ul>
+          <SectionHeader
+            icon={Star}
+            label="Starred"
+            testId="sidebar-section-starred"
+            count={starredProjects.length}
+            collapse={{
+              collapsed: starredHidden,
+              onToggle: toggleStarred,
+            }}
+          />
+          {!starredHidden && (
+            <ul className="space-y-0.5">
+              {starredTree.map((node) => {
+                const p = starredByName.get(node.name);
+                return p
+                  ? renderProjectRow(p, starredRowProps(`p:${node.name}`, null))
+                  : null;
+              })}
+            </ul>
+          )}
         </section>
       )}
       <section data-testid="sidebar-section-projects">
         <SectionHeader
           icon={FolderOpen}
           label="Projects"
-          leading={starredIsFirst ? undefined : hamburgerSlot}
           testId="sidebar-section-projects"
+          count={otherProjects.length}
+          collapse={{
+            collapsed: projectsHidden,
+            onToggle: toggleProjects,
+          }}
           onNew={() => setNewKind("project")}
         />
-        <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
-          {projectTree.map((node) => {
-            if (node.kind === "project") {
-              const p = projectsByName.get(node.name);
-              return p
-                ? renderProjectRow(p, dragRowProps(`p:${node.name}`, null))
-                : null;
-            }
-            const members = node.members
-              .map((m) => projectsByName.get(m))
-              .filter((p) => p !== undefined);
-            return (
-              <SidebarGroupRow
-                key={`g:${node.name}`}
-                name={node.name}
-                members={members.map((p) => p.name)}
-                sessionIds={members.flatMap((p) =>
-                  (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
-                )}
-                collapsed={ownFlag(groupCollapsed, node.name)}
-                onToggle={() => toggleGroup(node.name)}
-                isMobile={isMobile}
-                dragProps={dragRowProps(`g:${node.name}`, null)}
-                onContextMenu={(e) =>
-                  rowMenu.onGroupContextMenu(e, node.name, () =>
-                    toggleGroup(node.name),
-                  )
-                }
-              >
-                {members.map((p) =>
-                  renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
-                )}
-              </SidebarGroupRow>
-            );
-          })}
-        </ul>
+        {!projectsHidden && (
+          <ul className="space-y-0.5" data-testid="sidebar-projects-tree">
+            {projectTree.map((node) => {
+              if (node.kind === "project") {
+                const p = projectsByName.get(node.name);
+                return p
+                  ? renderProjectRow(p, dragRowProps(`p:${node.name}`, null))
+                  : null;
+              }
+              const members = node.members
+                .map((m) => projectsByName.get(m))
+                .filter((p) => p !== undefined);
+              return (
+                <SidebarGroupRow
+                  key={`g:${node.name}`}
+                  name={node.name}
+                  members={members.map((p) => p.name)}
+                  sessionIds={members.flatMap((p) =>
+                    (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
+                  )}
+                  collapsed={ownFlag(groupCollapsed, node.name) && revealedGroup !== node.name}
+                  onToggle={() => toggleGroup(node.name)}
+                  isMobile={isMobile}
+                  dragProps={dragRowProps(`g:${node.name}`, null)}
+                  onContextMenu={(e) =>
+                    rowMenu.onGroupContextMenu(e, node.name, () =>
+                      toggleGroup(node.name),
+                    )
+                  }
+                >
+                  {members.map((p) =>
+                    renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
+                  )}
+                </SidebarGroupRow>
+              );
+            })}
+          </ul>
+        )}
       </section>
       <section data-testid="sidebar-section-research">
         <SectionHeader

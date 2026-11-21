@@ -87,6 +87,13 @@ const FIXTURES: Record<string, Fixture> = {
   "projects.favorites": { value: ["pavilio", "vector"] },
   "shell.sidebarOrder": { value: { top: ["g:InfoPoly", "p:pavilio"], groups: { InfoPoly: ["anytts"] } } },
   "shell.groupCollapsed": { value: { InfoPoly: true } },
+  "home.actions": {
+    value: [{ label: "Go", runner: "shell", text: "ls", project: "pavilio" }],
+  },
+  "home.groupFilter": { value: "InfoPoly" },
+  "shell.starredOrder": { value: ["pavilio", "anytts"] },
+  "shell.starredCollapsed": { value: true },
+  "shell.projectsCollapsed": { value: true },
   "repos.searchScope": { value: "commits" },
   "search.includeArchived": { value: false },
 
@@ -266,8 +273,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(63);
-    expect(portable.length).toBe(49);
+    expect(ALL_PREFERENCES.length).toBe(68);
+    expect(portable.length).toBe(54);
     expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

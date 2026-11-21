@@ -954,6 +954,62 @@ describe("LeftSidebar.mobileMenu", () => {
     expect(readPreference(preferences.researchSectionCollapsed)).toBe(true);
   });
 
+  it("opening the sidebar on mobile reveals the current project in a collapsed Projects section, without writing it", () => {
+    writePreference(preferences.projectsCollapsed, true);
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+
+    openMenu();
+
+    expect(screen.getByTestId("sidebar-project-row-vector")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-session-s1")).toBeInTheDocument();
+    expect(readPreference(preferences.projectsCollapsed)).toBe(true);
+
+    // Folding the revealed section hides it again and still writes nothing.
+    fireEvent.click(screen.getByTestId("sidebar-section-projects-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+    expect(readPreference(preferences.projectsCollapsed)).toBe(true);
+  });
+
+  it("opening the sidebar on mobile reveals the current project's collapsed group, without writing it", () => {
+    shell.projects = () => [
+      { name: "vector", repos: [], group: "alokai" },
+      { name: "atlas", repos: [], group: "alokai" },
+    ];
+    writePreference(preferences.groupCollapsed, { alokai: true });
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+
+    openMenu();
+
+    expect(screen.getByTestId("sidebar-project-row-vector")).toBeInTheDocument();
+    expect(readPreference(preferences.groupCollapsed)).toEqual({ alokai: true });
+
+    // Folding the revealed group hides it again and still writes nothing.
+    fireEvent.click(screen.getByTestId("sidebar-group-toggle-alokai"));
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+    expect(readPreference(preferences.groupCollapsed)).toEqual({ alokai: true });
+  });
+
+  it("opening the sidebar on mobile reveals the current project in a collapsed Starred section, without writing it", () => {
+    shell.starred = new Set(["vector"]);
+    writePreference(preferences.starredCollapsed, true);
+    installMatchMedia({ mobile: true });
+    setupAt("/project/vector/iterm");
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+
+    openMenu();
+
+    expect(screen.getByTestId("sidebar-project-row-vector")).toBeInTheDocument();
+    expect(readPreference(preferences.starredCollapsed)).toBe(true);
+
+    fireEvent.click(screen.getByTestId("sidebar-section-starred-toggle"));
+    expect(screen.queryByTestId("sidebar-project-row-vector")).not.toBeInTheDocument();
+    expect(readPreference(preferences.starredCollapsed)).toBe(true);
+  });
+
   it("opening the sidebar on mobile over an expanded Research section, one tap collapses it and stores that", () => {
     withResearchProject();
     installMatchMedia({ mobile: true });

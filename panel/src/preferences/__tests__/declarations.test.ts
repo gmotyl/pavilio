@@ -21,6 +21,8 @@ const PORTABLE = [
   "git.branchDiff.open",
   "git.commitsOpen",
   "git.viewMode",
+  "home.actions",
+  "home.groupFilter",
   "git.worktree.expanded",
   "layout.focus",
   "plans.runBanner.expanded",
@@ -42,7 +44,10 @@ const PORTABLE = [
   "shell.rightSidebar.expanded",
   "shell.rightSidebar.section.expanded",
   "shell.rightSidebar.width",
+  "shell.projectsCollapsed",
   "shell.sidebarOrder",
+  "shell.starredCollapsed",
+  "shell.starredOrder",
   "speech.answerComposer.on",
   "speech.answerPane.autoOpen",
   "speech.answerPane.opacityBottom",
@@ -175,6 +180,18 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["shell.rightSidebar.width", 264, "global"],
   ["shell.sidebarOrder", { top: [], groups: {} }, "global"],
   ["shell.groupCollapsed", {}, "global"],
+  [
+    "home.actions",
+    [
+      { label: "Process meetings", runner: "claude", text: "pavilio-note-batch", project: "workspace" },
+      { label: "Knowledge harvest", runner: "claude", text: "pavilio-wiki-ingest-knowledge", project: "workspace" },
+    ],
+    "global",
+  ],
+  ["home.groupFilter", null, "global"],
+  ["shell.starredOrder", [], "global"],
+  ["shell.starredCollapsed", false, "global"],
+  ["shell.projectsCollapsed", false, "global"],
   // Per project, both of them: how much of a cell you hand to the answer is a
   // fact about the work, not a habit the whole panel shares.
   ["speech.answerComposer.height", 62, "project"],

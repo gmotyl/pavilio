@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import ProjectView from "../ProjectView";
 import { mockFetchResponses } from "../../../test-utils";
+import { preferences } from "../../../preferences/declarations";
+import { __resetPreferenceStoreForTests, writePreference } from "../../../preferences/store";
 
 const PROJECT_MD = [
   "# Pavilio",
@@ -72,6 +74,85 @@ describe("ProjectView — Overview", () => {
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(follows(actions, md)).toBe(true);
     expect(follows(md, settings)).toBe(true);
+  });
+
+  it("shows the project's own actions at the top, and nothing for a project without any", async () => {
+    __resetPreferenceStoreForTests();
+    writePreference(preferences.homeActions, [
+      { label: "Process meetings", runner: "claude", text: "x", project: "workspace" },
+      { label: "Other", runner: "claude", text: "y", project: "metro" },
+    ]);
+    mockFetchResponses({
+      "/api/projects": [
+        { name: "workspace", path: "/w", repos: [], group: "Core" },
+        { name: "pavilio", path: "/p", repos: [], group: "Core" },
+      ],
+      "/api/files/read/": { content: PROJECT_MD, absolutePath: "/x/PROJECT.md" },
+      "/api/scripts": { scripts: [] },
+      "/api/files/index": [],
+    });
+    const view = (name: string) => (
+      <MemoryRouter initialEntries={[`/project/${name}`]}>
+        <Routes>
+          <Route path="/project/:name" element={<ProjectView />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const first = render(view("workspace"));
+    const section = await screen.findByTestId("actions-section");
+    expect(within(section).getByText("Process meetings")).toBeInTheDocument();
+    expect(within(section).queryByText("Other")).toBeNull();
+    const md = await screen.findByTestId("project-md");
+    expect(section.compareDocumentPosition(md) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const strip = await screen.findByRole("navigation", { name: "Project group" });
+    expect(section.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    first.unmount();
+    render(view("pavilio"));
+    await screen.findByTestId("project-md");
+    expect(screen.queryByTestId("actions-section")).toBeNull();
+    __resetPreferenceStoreForTests();
+  });
+
+  it("mounts no Actions for a project that is not in the live list (archived)", async () => {
+    __resetPreferenceStoreForTests();
+    writePreference(preferences.homeActions, [
+      { label: "Old job", runner: "claude", text: "x", project: "ghost" },
+    ]);
+    const base = mockFetchResponses({
+      "/api/projects/ghost": { name: "ghost", archived: true },
+      "/api/projects": [{ name: "pavilio", path: "/p", repos: [] }],
+      "/api/files/read/": { content: PROJECT_MD, absolutePath: "/x/PROJECT.md" },
+      "/api/scripts": { scripts: [] },
+      "/api/files/index": [],
+    });
+    // Hold the project-detail response open so the pending window is observable.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes("/api/projects/ghost")) await gate;
+        return base(input);
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/project/ghost"]}>
+        <Routes>
+          <Route path="/project/:name" element={<ProjectView />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    // Detail pending: the project is neither listed nor confirmed live.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId("archived-banner")).toBeNull();
+    expect(screen.queryByTestId("actions-section")).toBeNull();
+    release();
+    await screen.findByTestId("archived-banner");
+    expect(screen.queryByTestId("actions-section")).toBeNull();
+    __resetPreferenceStoreForTests();
   });
 
   it("PROJECT.md starts collapsed with a one-line peek", async () => {
