@@ -145,6 +145,16 @@ describe("ActionsSection", () => {
     expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
   });
 
+  it("keeps full-width spaces distinct (the browser does not collapse them)", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Sync docs", runner: "shell", text: "x", project: "workspace" },
+      { label: "Sync\u3000\u3000docs", runner: "shell", text: "y", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).queryByText("workspace")).toBeNull();
+    expect(within(screen.getByTestId("action-card-1")).queryByText("metro")).toBeNull();
+  });
+
   it("the run button highlights on hover unless blocked", () => {
     mount();
     expect(screen.getByTestId("action-run-0").className).toMatch(/hover:bg-/);

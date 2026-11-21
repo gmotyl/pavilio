@@ -209,9 +209,10 @@ export function ActionsSection({
   const hideCards = project !== undefined && visible.length === 0;
   // Cards that would look identical (same label and runner) in different
   // projects name their project; everywhere else it is redundant.
-  // The label is compared as rendered: HTML collapses runs of whitespace.
+  // The label is compared as rendered: HTML collapses runs of ASCII
+  // whitespace only (a full-width space stays visible).
   const lookOf = (a: HomeAction) =>
-    `${a.label.trim().replace(/\s+/g, " ")}|${a.runner}`;
+    `${a.label.replace(/[ \t\r\n\f]+/g, " ").replace(/^ | $/g, "")}|${a.runner}`;
   const projectsByLook = new Map<string, Set<string>>();
   for (const { action } of visible) {
     const look = lookOf(action);
