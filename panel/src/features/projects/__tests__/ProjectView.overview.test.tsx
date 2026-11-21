@@ -84,8 +84,8 @@ describe("ProjectView — Overview", () => {
     ]);
     mockFetchResponses({
       "/api/projects": [
-        { name: "workspace", path: "/w", repos: [] },
-        { name: "pavilio", path: "/p", repos: [] },
+        { name: "workspace", path: "/w", repos: [], group: "Core" },
+        { name: "pavilio", path: "/p", repos: [], group: "Core" },
       ],
       "/api/files/read/": { content: PROJECT_MD, absolutePath: "/x/PROJECT.md" },
       "/api/scripts": { scripts: [] },
@@ -104,11 +104,35 @@ describe("ProjectView — Overview", () => {
     expect(within(section).queryByText("Other")).toBeNull();
     const md = await screen.findByTestId("project-md");
     expect(section.compareDocumentPosition(md) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const strip = screen.queryByTestId("project-group-strip");
-    if (strip) expect(section.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const strip = await screen.findByRole("navigation", { name: "Project group" });
+    expect(section.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     first.unmount();
     render(view("pavilio"));
     await screen.findByTestId("project-md");
+    expect(screen.queryByTestId("actions-section")).toBeNull();
+    __resetPreferenceStoreForTests();
+  });
+
+  it("mounts no Actions for a project that is not in the live list (archived)", async () => {
+    __resetPreferenceStoreForTests();
+    writePreference(preferences.homeActions, [
+      { label: "Old job", runner: "claude", text: "x", project: "ghost" },
+    ]);
+    mockFetchResponses({
+      "/api/projects/ghost": { name: "ghost", archived: true },
+      "/api/projects": [{ name: "pavilio", path: "/p", repos: [] }],
+      "/api/files/read/": { content: PROJECT_MD, absolutePath: "/x/PROJECT.md" },
+      "/api/scripts": { scripts: [] },
+      "/api/files/index": [],
+    });
+    render(
+      <MemoryRouter initialEntries={["/project/ghost"]}>
+        <Routes>
+          <Route path="/project/:name" element={<ProjectView />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId("actions-section")).toBeNull();
     __resetPreferenceStoreForTests();
   });

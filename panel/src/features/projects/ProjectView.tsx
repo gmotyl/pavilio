@@ -531,7 +531,7 @@ export default function ProjectView() {
       {/* Overview */}
       {!section && (
         <>
-          {name && <ActionsSection project={name} />}
+          {name && isListed && <ActionsSection key={name} project={name} />}
           {(absolutePath || scripts.length > 0) && (
             <div className="flex flex-wrap gap-2 mb-4 items-center">
               {absolutePath && (

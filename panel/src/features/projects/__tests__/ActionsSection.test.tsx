@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 const proj = (name: string, group: string | null = null) => ({
@@ -234,6 +234,39 @@ describe("ActionsSection", () => {
       mountFor("metro");
       fireEvent.click(screen.getByText("+ New action"));
       expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("metro");
+    });
+
+    it("the dashed New card's border is a class, not an inline style that shadows its hover", () => {
+      mountFor("workspace");
+      const btn = screen.getByTestId("actions-new");
+      expect(btn.style.borderColor).toBe("");
+      expect(btn.className).toContain("border-[var(--border-subtle)]");
+      expect(btn.className).toContain("hover:border-[var(--border-strong)]");
+    });
+
+    it("closes the modal when the project prop changes", () => {
+      writePreference(preferences.homeActions, LIST);
+      const ui = (project: string) => (
+        <MemoryRouter>
+          <ActionsSection project={project} />
+        </MemoryRouter>
+      );
+      const view = render(ui("workspace"));
+      fireEvent.click(screen.getByText("+ New action"));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      view.rerender(ui("metro"));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("keeps an open New modal (and its draft) when the last action disappears", () => {
+      mountFor("workspace");
+      fireEvent.click(screen.getByText("+ New action"));
+      fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Draft" } });
+      act(() => {
+        writePreference(preferences.homeActions, []);
+      });
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Draft");
     });
 
     it("has no drag grip", () => {
