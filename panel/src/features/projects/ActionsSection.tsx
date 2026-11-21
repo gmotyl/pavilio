@@ -16,7 +16,7 @@ function ActionCard({
   index,
   blocker,
   line,
-  showProject,
+  hint,
   onEdit,
   dragProps,
 }: {
@@ -24,8 +24,8 @@ function ActionCard({
   index: number;
   blocker: string | null;
   line: string | null;
-  /** Print the project: another visible card shares this label and runner. */
-  showProject: boolean;
+  /** What tells this card apart from a look-alike (project and/or agent), or null. */
+  hint: string | null;
   onEdit: (index: number) => void;
   dragProps: ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
 }) {
@@ -70,11 +70,11 @@ function ActionCard({
       <button
         data-testid={`action-run-${index}`}
         type="button"
-        title={`Run ${action.label} (${action.project})`}
+        title={`Run ${action.label} (${action.project} · ${action.runner})`}
         aria-label={`Run ${action.label}`}
         aria-disabled={blocker !== null}
         onClick={run}
-        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-3 py-2 rounded-[10px] transition-colors ${
+        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-3 [@media(hover:none)]:pr-8 py-2 rounded-[10px] transition-colors ${
           blocker !== null ? "" : "hover:bg-[var(--bg-hover)]"
         } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]`}
         style={{
@@ -97,12 +97,12 @@ function ActionCard({
         <span className="font-semibold text-[14px] wrap-anywhere">
           {action.label}
         </span>
-        {showProject && (
+        {hint !== null && (
           <span
             className="text-[12px]"
             style={{ gridColumn: "2 / -1", color: "var(--text-muted)" }}
           >
-            {action.project}
+            {hint}
           </span>
         )}
         {blocker !== null && (
@@ -120,7 +120,7 @@ function ActionCard({
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
         onClick={() => onEdit(index)}
-        className="absolute top-1 right-1 grid place-items-center w-[22px] h-[22px] rounded-[6px] border border-[var(--border-strong)] bg-[var(--bg-surface)] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
+        className="absolute top-1 right-1 grid place-items-center w-[22px] h-[22px] rounded-[6px] border border-[var(--border-strong)] bg-[var(--bg-surface)] cursor-pointer transition-[opacity,background-color,color] opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
         <Pencil size={12} aria-hidden="true" />
       </button>
@@ -196,8 +196,9 @@ export function ActionsSection({
     />
   );
   const hideCards = project !== undefined && visible.length === 0;
-  // Cards that would look identical (same label and runner) in different
-  // projects name their project; everywhere else it is redundant.
+  // Cards that would look identical (same label and glyph: shell vs agent)
+  // name what tells them apart — the project and/or the agent; everywhere
+  // else that is redundant.
   // The label is compared as rendered: HTML collapses runs of ASCII
   // whitespace only (a full-width space stays visible), and a single
   // non-breaking space looks like an ordinary one (runs of it do not collapse).
@@ -205,16 +206,24 @@ export function ActionsSection({
     `${a.label
       .replace(/[ \t\r\n\f]+/g, " ")
       .replace(/^ | $/g, "")
-      .replace(/\u00a0/g, " ")}|${a.runner}`;
-  const projectsByLook = new Map<string, Set<string>>();
+      .replace(/\u00a0/g, " ")}|${a.runner === "shell" ? "shell" : "agent"}`;
+  const byLook = new Map<string, { projects: Set<string>; runners: Set<string> }>();
   for (const { action } of visible) {
     const look = lookOf(action);
-    const set = projectsByLook.get(look) ?? new Set<string>();
-    set.add(action.project);
-    projectsByLook.set(look, set);
+    const g = byLook.get(look) ?? { projects: new Set(), runners: new Set() };
+    g.projects.add(action.project);
+    g.runners.add(action.runner);
+    byLook.set(look, g);
   }
-  const ambiguous = (a: HomeAction) =>
-    (projectsByLook.get(lookOf(a))?.size ?? 0) > 1;
+  const hintOf = (a: HomeAction): string | null => {
+    const g = byLook.get(lookOf(a));
+    if (!g) return null;
+    const parts = [
+      g.projects.size > 1 ? a.project : null,
+      g.runners.size > 1 ? a.runner : null,
+    ].filter((p): p is string => p !== null);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  };
 
   // The modal is a sibling of the section (not inside it) so hiding the cards
   // never remounts it.
@@ -255,7 +264,7 @@ export function ActionsSection({
                 index={i}
                 blocker={actionBlocker(action, launchers, names)}
                 line={actionRunLine(action, launchers)}
-                showProject={ambiguous(action)}
+                hint={hintOf(action)}
                 onEdit={(i) => {
                   setModal(i);
                   onEdit(i);
@@ -269,8 +278,7 @@ export function ActionsSection({
                 setModal(null);
                 onNew();
               }}
-              className="rounded-[10px] border border-dashed border-[var(--border-subtle)] text-sm px-3 py-2.5 cursor-pointer transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
-              style={{ minHeight: 58 }}
+              className="rounded-[10px] border border-dashed border-[var(--border-subtle)] text-sm px-3 py-2 cursor-pointer transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
             >
               + New action
             </button>

@@ -145,6 +145,42 @@ describe("ActionsSection", () => {
     expect(within(screen.getByTestId("action-card-2")).queryByText("gitara")).toBeNull();
   });
 
+  it("names the agent when same-label agent cards differ only by runner", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Review", runner: "claude", text: "x", project: "workspace" },
+      { label: "Review", runner: "codex", text: "x", project: "metro" },
+      { label: "Lint", runner: "claude", text: "x", project: "metro" },
+      { label: "Lint", runner: "codex", text: "x", project: "metro" },
+    ]);
+    mount();
+    // Different project and runner: both are named.
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace · claude")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro · codex")).toBeTruthy();
+    // Same project: only the runner tells them apart.
+    expect(within(screen.getByTestId("action-card-2")).getByText("claude")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-3")).getByText("codex")).toBeTruthy();
+    expect(screen.getByTestId("action-run-3").title).toContain("codex");
+  });
+
+  it("hidden Edit takes no clicks; phones reserve room for it", () => {
+    mount();
+    const edit = screen.getByTestId("action-edit-0");
+    expect(edit.className).toContain("pointer-events-none");
+    expect(edit.className).toContain("group-hover:pointer-events-auto");
+    expect(edit.className).toContain("focus-visible:pointer-events-auto");
+    expect(edit.className).toContain("[@media(hover:none)]:pointer-events-auto");
+    // Where Edit is always shown, the label must not run under it.
+    expect(screen.getByTestId("action-run-0").className).toContain("[@media(hover:none)]:pr-8");
+  });
+
+  it("+ New action does not force the row taller than the compact cards", () => {
+    mount();
+    const last = screen.getByTestId("actions-grid").lastElementChild as HTMLElement;
+    expect(last.style.minHeight).toBe("");
+    expect(last.className).toContain("py-2");
+    expect(last.className).not.toContain("py-2.5");
+  });
+
   it("treats labels that render alike (collapsed whitespace) as the same look", () => {
     writePreference(preferences.homeActions, [
       { label: "Sync docs", runner: "shell", text: "x", project: "workspace" },
