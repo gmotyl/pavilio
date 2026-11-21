@@ -28,7 +28,8 @@ function ActionCard({
   line: string | null;
   /** What tells this card apart from a look-alike (project and/or agent), or null. */
   hint: string | null;
-  /** Touch is the active input: Edit is always shown, as on a phone. */
+  /** Touch is the active input: Edit is shown (an overlay, like on hover — the
+   *  layout never changes between input modes, so a press cannot move a card). */
   touch: boolean;
   onEdit: (index: number) => void;
   dragProps: ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
@@ -78,7 +79,7 @@ function ActionCard({
         aria-label={`Run ${action.label}`}
         aria-disabled={blocker !== null}
         onClick={run}
-        className={`flex-1 min-w-0 grid items-center text-left pl-3 ${touch ? "pr-8" : "pr-3 [@media(hover:none)]:pr-8"} py-2 rounded-[10px] transition-colors ${
+        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-3 [@media(hover:none)]:pr-8 py-2 rounded-[10px] transition-colors ${
           blocker !== null ? "" : "hover:bg-[var(--bg-hover)]"
         } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]`}
         style={{

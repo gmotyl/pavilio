@@ -182,12 +182,13 @@ describe("ActionsSection", () => {
     });
     expect(edit().className).not.toContain("opacity-0");
     expect(edit().className).not.toContain("pointer-events-none");
-    // With Edit shown, the label leaves it room.
-    expect(screen.getByTestId("action-run-0").className).toContain(" pr-8");
+    // Layout is identical across input modes (no padding switch on mode change).
+    const before = screen.getByTestId("action-run-0").className;
     act(() => {
       document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true }));
     });
     expect(edit().className).toContain("opacity-0");
+    expect(screen.getByTestId("action-run-0").className).toBe(before);
   });
 
   it("the look-alike hint wraps like the label", () => {
