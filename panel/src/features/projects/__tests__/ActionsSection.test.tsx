@@ -135,6 +135,16 @@ describe("ActionsSection", () => {
     expect(within(screen.getByTestId("action-card-2")).queryByText("gitara")).toBeNull();
   });
 
+  it("treats labels that render alike (collapsed whitespace) as the same look", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Sync docs", runner: "shell", text: "x", project: "workspace" },
+      { label: "Sync  docs", runner: "shell", text: "y", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-0")).getByText("workspace")).toBeTruthy();
+    expect(within(screen.getByTestId("action-card-1")).getByText("metro")).toBeTruthy();
+  });
+
   it("the run button highlights on hover unless blocked", () => {
     mount();
     expect(screen.getByTestId("action-run-0").className).toMatch(/hover:bg-/);

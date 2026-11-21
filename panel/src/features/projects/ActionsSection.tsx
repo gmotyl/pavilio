@@ -209,15 +209,18 @@ export function ActionsSection({
   const hideCards = project !== undefined && visible.length === 0;
   // Cards that would look identical (same label and runner) in different
   // projects name their project; everywhere else it is redundant.
+  // The label is compared as rendered: HTML collapses runs of whitespace.
+  const lookOf = (a: HomeAction) =>
+    `${a.label.trim().replace(/\s+/g, " ")}|${a.runner}`;
   const projectsByLook = new Map<string, Set<string>>();
   for (const { action } of visible) {
-    const look = `${action.label}|${action.runner}`;
+    const look = lookOf(action);
     const set = projectsByLook.get(look) ?? new Set<string>();
     set.add(action.project);
     projectsByLook.set(look, set);
   }
   const ambiguous = (a: HomeAction) =>
-    (projectsByLook.get(`${a.label}|${a.runner}`)?.size ?? 0) > 1;
+    (projectsByLook.get(lookOf(a))?.size ?? 0) > 1;
 
   // The modal is a sibling of the section (not inside it) so hiding the cards
   // never remounts it.
