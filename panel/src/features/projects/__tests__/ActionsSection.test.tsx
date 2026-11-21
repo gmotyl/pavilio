@@ -173,6 +173,32 @@ describe("ActionsSection", () => {
     expect(screen.getByTestId("action-run-0").className).toContain("[@media(hover:none)]:pr-8");
   });
 
+  it("shows Edit while touch is the active input, hides it again on mouse", () => {
+    mount();
+    const edit = () => screen.getByTestId("action-edit-0");
+    expect(edit().className).toContain("opacity-0");
+    act(() => {
+      document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", bubbles: true }));
+    });
+    expect(edit().className).not.toContain("opacity-0");
+    expect(edit().className).not.toContain("pointer-events-none");
+    // With Edit shown, the label leaves it room.
+    expect(screen.getByTestId("action-run-0").className).toContain(" pr-8");
+    act(() => {
+      document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true }));
+    });
+    expect(edit().className).toContain("opacity-0");
+  });
+
+  it("the look-alike hint wraps like the label", () => {
+    writePreference(preferences.homeActions, [
+      { label: "Review", runner: "claude", text: "x", project: "metro" },
+      { label: "Review", runner: "codex", text: "x", project: "metro" },
+    ]);
+    mount();
+    expect(within(screen.getByTestId("action-card-1")).getByText("codex").className).toContain("wrap-anywhere");
+  });
+
   it("+ New action does not force the row taller than the compact cards", () => {
     mount();
     const last = screen.getByTestId("actions-grid").lastElementChild as HTMLElement;
