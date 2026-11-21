@@ -36,14 +36,31 @@ describe("ProjectView — Actions block across navigation", () => {
         </Routes>
       </MemoryRouter>,
     );
+    // Each hop waits for its destination to render, then counts Actions
+    // blocks there: one on Workspace's overview, none anywhere else.
+    const settle = async (project: string, overview: boolean) => {
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(project),
+      );
+      if (overview) await screen.findByTestId("project-md");
+      else await screen.findByTestId("context-tab-count");
+    };
+    await settle("workspace", true);
     await screen.findByTestId("actions-section");
-    for (const hop of ["ctx", "ov", "pav", "ov", "ov", "ctx", "ov"]) {
-      fireEvent.click(screen.getByText(hop));
-      await new Promise((r) => setTimeout(r, 30));
+    const hops: [string, string, boolean, number][] = [
+      ["ctx", "workspace", false, 0],
+      ["ov", "workspace", true, 1],
+      ["pav", "pavilio", true, 0],
+      ["ov", "workspace", true, 1],
+      ["ctx", "workspace", false, 0],
+      ["ov", "workspace", true, 1],
+    ];
+    for (const [link, project, overview, count] of hops) {
+      fireEvent.click(screen.getByText(link));
+      await settle(project, overview);
+      if (count === 1) await screen.findByTestId("actions-section");
+      expect(screen.queryAllByTestId("actions-section")).toHaveLength(count);
     }
-    await waitFor(() => expect(screen.getAllByTestId("actions-section")).toHaveLength(1));
-    await new Promise((r) => setTimeout(r, 200));
-    expect(screen.getAllByTestId("actions-section")).toHaveLength(1);
     expect(screen.getAllByText("Process meetings")).toHaveLength(1);
   });
 });
