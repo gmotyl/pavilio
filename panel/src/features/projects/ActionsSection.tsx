@@ -210,9 +210,13 @@ export function ActionsSection({
   // Cards that would look identical (same label and runner) in different
   // projects name their project; everywhere else it is redundant.
   // The label is compared as rendered: HTML collapses runs of ASCII
-  // whitespace only (a full-width space stays visible).
+  // whitespace only (a full-width space stays visible), and a single
+  // non-breaking space looks like an ordinary one (runs of it do not collapse).
   const lookOf = (a: HomeAction) =>
-    `${a.label.replace(/[ \t\r\n\f]+/g, " ").replace(/^ | $/g, "")}|${a.runner}`;
+    `${a.label
+      .replace(/[ \t\r\n\f]+/g, " ")
+      .replace(/^ | $/g, "")
+      .replace(/\u00a0/g, " ")}|${a.runner}`;
   const projectsByLook = new Map<string, Set<string>>();
   for (const { action } of visible) {
     const look = lookOf(action);
