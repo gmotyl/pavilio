@@ -47,6 +47,14 @@ describe("ActionModal", () => {
     __resetPreferenceStoreForTests();
   });
 
+  it("Delete's base border is a class, so its hover border is not shadowed by an inline style", () => {
+    render(<ActionModal index={0} onClose={() => {}} />);
+    const del = screen.getByRole("button", { name: "Delete" });
+    expect(del.style.borderColor).toBe("");
+    expect(del.className).toContain("border-[#5a2a2a]");
+    expect(del.className).toContain("hover:border-[#8a3a3a]");
+  });
+
   it("edit opens filled with Delete", () => {
     render(<ActionModal index={0} onClose={() => {}} />);
     const dialog = screen.getByRole("dialog");

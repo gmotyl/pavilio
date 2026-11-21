@@ -249,8 +249,8 @@ export function ActionModal({
               data-testid="action-modal-delete"
               type="button"
               onClick={remove}
-              className={`${btn} hover:bg-[#3a1c1c] hover:border-[#8a3a3a]`}
-              style={{ color: "#ff8a8a", borderColor: "#5a2a2a" }}
+              className={`${btn} border-[#5a2a2a] hover:bg-[#3a1c1c] hover:border-[#8a3a3a]`}
+              style={{ color: "#ff8a8a" }}
             >
               Delete
             </button>
