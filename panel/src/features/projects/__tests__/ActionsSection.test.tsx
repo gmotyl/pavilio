@@ -90,11 +90,13 @@ describe("ActionsSection", () => {
     expect(within(agent).getByText("▶")).toBeTruthy();
     expect(within(agent).getByText("Harvest")).toBeTruthy();
     expect(within(agent).getByText("claude")).toBeTruthy();
-    expect(within(agent).getByText("workspace")).toBeTruthy();
+    // The project is not printed on the card (it is in the run tooltip).
+    expect(within(agent).queryByText("workspace")).toBeNull();
+    expect(screen.getByTestId("action-run-0").title).toContain("workspace");
     const shell = screen.getByTestId("action-card-1");
     expect(within(shell).getByText("$_")).toBeTruthy();
     expect(within(shell).getByText("sh")).toBeTruthy();
-    expect(within(shell).getByText("metro")).toBeTruthy();
+    expect(within(shell).queryByText("metro")).toBeNull();
     fireEvent.click(within(shell).getByRole("button", { name: "Edit Pull" }));
     expect(onEdit).toHaveBeenCalledWith(1);
     const grid = screen.getByTestId("actions-grid");
@@ -102,6 +104,23 @@ describe("ActionsSection", () => {
     expect(last.textContent).toContain("+ New action");
     fireEvent.click(last);
     expect(onNew).toHaveBeenCalled();
+  });
+
+  it("shows the whole label and an icon-only Edit revealed on hover", () => {
+    mount();
+    const label = screen.getByText("Knowledge harvest");
+    expect(label.className).not.toContain("truncate");
+    const edit = screen.getByTestId("action-edit-0");
+    expect(edit.textContent).toBe("");
+    expect(edit.querySelector("svg")).toBeTruthy();
+    expect(edit.className).toContain("opacity-0");
+    expect(edit.className).toContain("group-hover:opacity-100");
+    expect(edit.className).toContain("focus-visible:opacity-100");
+  });
+
+  it("the run button highlights on hover unless blocked", () => {
+    mount();
+    expect(screen.getByTestId("action-run-0").className).toMatch(/hover:bg-/);
   });
 
   it("Edit and + New action have hover and focus styles", () => {
@@ -129,7 +148,6 @@ describe("ActionsSection", () => {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(screen.getAllByText("claude")).toHaveLength(2);
-    expect(screen.getAllByText("workspace").length).toBeGreaterThanOrEqual(2);
   });
 
   it("clicking a card runs its line in its project", async () => {

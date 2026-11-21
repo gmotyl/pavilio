@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pencil } from "lucide-react";
 import { ActionModal } from "./ActionModal";
 import { usePreference } from "../../preferences/usePreference";
 import { preferences, type HomeAction } from "../../preferences/declarations";
@@ -47,7 +48,7 @@ function ActionCard({
     <div
       data-testid={`action-card-${index}`}
       {...dragProps.card}
-      className="flex items-stretch rounded-[10px] border"
+      className="group flex items-stretch rounded-[10px] border"
       style={{
         background: "var(--bg-surface)",
         borderColor: "var(--border-subtle)",
@@ -71,11 +72,13 @@ function ActionCard({
       <button
         data-testid={`action-run-${index}`}
         type="button"
-        title={`Run ${action.label}`}
+        title={`Run ${action.label} (${action.project})`}
         aria-label={`Run ${action.label}`}
         aria-disabled={blocker !== null}
         onClick={run}
-        className="flex-1 min-w-0 grid items-center text-left px-3 py-2.5"
+        className={`flex-1 min-w-0 grid items-center text-left pl-3 pr-1 py-2.5 rounded-[10px] transition-colors ${
+          blocker !== null ? "" : "hover:bg-[var(--bg-hover)]"
+        } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]`}
         style={{
           gridTemplateColumns: "16px 1fr auto",
           gap: "2px 8px",
@@ -93,7 +96,7 @@ function ActionCard({
         >
           {isShell ? "$_" : "▶"}
         </span>
-        <span className="font-semibold text-[14px] truncate">
+        <span className="font-semibold text-[14px] break-words">
           {action.label}
         </span>
         <span
@@ -101,12 +104,6 @@ function ActionCard({
           style={{ background: "var(--bg-hover)", color: "var(--text-muted)" }}
         >
           {runnerPill(action)}
-        </span>
-        <span
-          className="text-[12px]"
-          style={{ gridColumn: "2 / -1", color: "var(--text-muted)" }}
-        >
-          {action.project}
         </span>
         {blocker !== null && (
           <span
@@ -123,10 +120,9 @@ function ActionCard({
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
         onClick={() => onEdit(index)}
-        className="text-sm px-3 border-l rounded-r-[10px] cursor-pointer transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
-        style={{ borderColor: "var(--border-subtle)" }}
+        className="flex items-center px-2 rounded-[10px] cursor-pointer transition-[opacity,background-color,color] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
       >
-        Edit
+        <Pencil size={14} aria-hidden="true" />
       </button>
     </div>
   );
