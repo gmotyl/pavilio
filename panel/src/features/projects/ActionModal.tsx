@@ -132,7 +132,8 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
     onClose();
   };
 
-  const btn = "rounded-md border px-2.5 py-0.5 text-[12px]";
+  const btn =
+    "rounded-md border px-3 py-1 text-sm cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]";
 
   return (
     <div
@@ -157,24 +158,24 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
           color: "var(--text-primary)",
         }}
       >
-        <h2 id="action-modal-title" className="text-[15px] font-semibold mb-3">
+        <h2 id="action-modal-title" className="text-[17px] font-semibold mb-3">
           {isNew ? "New action" : "Edit action"}
         </h2>
         <div
           className="grid gap-x-2.5 gap-y-2 rounded-lg p-2.5 mb-2.5 grid-cols-1 sm:grid-cols-[auto_1fr]"
           style={{ border: "1px solid var(--border-subtle)" }}
         >
-          <label htmlFor="action-label" className="text-[12px] self-center" style={{ color: "var(--text-muted)" }}>
+          <label htmlFor="action-label" className="text-sm self-center text-[var(--text-secondary)]">
             Label
           </label>
           <input
             id="action-label"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            className="rounded-md px-2 py-1 text-[13px] min-w-0 w-full"
+            className="rounded-md px-2 py-1 text-[15px] min-w-0 w-full"
             style={FIELD_STYLE}
           />
-          <span className="text-[12px] self-center" style={{ color: "var(--text-muted)" }}>
+          <span className="text-sm self-center text-[var(--text-secondary)]">
             Runs with
           </span>
           <div
@@ -190,34 +191,34 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
                 type="button"
                 aria-pressed={runner === r}
                 onClick={() => setPickedRunner(r)}
-                className="px-2.5 py-0.5 text-[12px]"
-                style={{
-                  background: runner === r ? "var(--bg-hover)" : "transparent",
-                  color: runner === r ? "var(--text-primary)" : "var(--text-muted)",
-                }}
+                className={`px-3 py-1 text-sm cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:-outline-offset-2 ${
+                  runner === r
+                    ? "bg-[var(--bg-hover)] text-[var(--text-primary)] hover:bg-[var(--bg-active)]"
+                    : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                }`}
               >
                 {r}
               </button>
             ))}
           </div>
-          <label htmlFor="action-text" className="text-[12px] self-center" style={{ color: "var(--text-muted)" }}>
+          <label htmlFor="action-text" className="text-sm self-center text-[var(--text-secondary)]">
             {isShell ? "Command" : "Prompt"}
           </label>
           <input
             id="action-text"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="rounded-md px-2 py-1 text-[12px] font-mono min-w-0 w-full"
+            className="rounded-md px-2 py-1 text-sm font-mono min-w-0 w-full"
             style={FIELD_STYLE}
           />
-          <label htmlFor="action-project" className="text-[12px] self-center" style={{ color: "var(--text-muted)" }}>
+          <label htmlFor="action-project" className="text-sm self-center text-[var(--text-secondary)]">
             Project
           </label>
           <select
             id="action-project"
             value={project}
             onChange={(e) => setPickedProject(e.target.value)}
-            className="rounded-md px-2 py-1 text-[13px] min-w-0 w-full"
+            className="rounded-md px-2 py-1 text-[15px] min-w-0 w-full"
             style={FIELD_STYLE}
           >
             {projectOptions.map((p) => (
@@ -238,7 +239,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
               data-testid="action-modal-delete"
               type="button"
               onClick={remove}
-              className={btn}
+              className={`${btn} hover:bg-[#3a1c1c] hover:border-[#8a3a3a]`}
               style={{ color: "#ff8a8a", borderColor: "#5a2a2a" }}
             >
               Delete
@@ -249,8 +250,7 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
             data-testid="action-modal-cancel"
             type="button"
             onClick={close}
-            className={btn}
-            style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)" }}
+            className={`${btn} text-[var(--text-primary)] border-[var(--border-default)] hover:bg-[var(--bg-hover)]`}
           >
             Cancel
           </button>
@@ -259,10 +259,10 @@ export function ActionModal({ index, onClose }: { index: number | null; onClose:
             type="button"
             disabled={!canSave}
             onClick={save}
-            className={btn}
+            className={`${btn} bg-[var(--bg-hover)] border-[var(--border-default)] text-[var(--text-primary)] ${
+              canSave ? "hover:bg-[var(--bg-active)]" : ""
+            }`}
             style={{
-              background: "var(--bg-hover)",
-              borderColor: "var(--border-subtle)",
               opacity: canSave ? 1 : 0.5,
               cursor: canSave ? "pointer" : "not-allowed",
             }}

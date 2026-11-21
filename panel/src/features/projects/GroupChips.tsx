@@ -38,9 +38,11 @@ export function GroupChips({
             type="button"
             aria-pressed={pressed}
             onClick={() => onSelect(c.key)}
-            className="rounded-full px-3 py-1 text-[13px] border"
+            className={`rounded-full px-3 py-1 text-sm border cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] ${
+              pressed ? "hover:brightness-110" : "bg-[var(--bg-hover)] hover:bg-[var(--bg-active)]"
+            }`}
             style={{
-              background: pressed ? "var(--accent)" : "var(--bg-hover)",
+              background: pressed ? "var(--accent)" : undefined,
               borderColor: pressed ? "var(--accent)" : "var(--border-subtle)",
               color: pressed ? "var(--bg-base, #0b1020)" : "var(--text-primary)",
               fontWeight: pressed ? 600 : 400,

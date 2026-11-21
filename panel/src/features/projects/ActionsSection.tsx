@@ -111,8 +111,8 @@ function ActionCard({
         title={`Edit ${action.label}`}
         aria-label={`Edit ${action.label}`}
         onClick={() => onEdit(index)}
-        className="text-[12px] px-2.5 border-l"
-        style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)" }}
+        className="text-sm px-3 border-l rounded-r-[10px] cursor-pointer transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]"
+        style={{ borderColor: "var(--border-subtle)" }}
       >
         Edit
       </button>
@@ -203,8 +203,8 @@ export function ActionsSection({
             setModal(null);
             onNew();
           }}
-          className="rounded-[10px] border border-dashed text-[13px] px-3 py-2.5"
-          style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)", minHeight: 58 }}
+          className="rounded-[10px] border border-dashed text-sm px-3 py-2.5 cursor-pointer transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+          style={{ borderColor: "var(--border-subtle)", minHeight: 58 }}
         >
           + New action
         </button>

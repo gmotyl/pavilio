@@ -68,6 +68,26 @@ describe("ActionModal", () => {
     expect(dialog.className).toContain("max-w-[min(440px,calc(100vw-32px))]");
   });
 
+  it("uses readable text and hover/focus styles (no muted-on-elevated, no inert buttons)", () => {
+    render(<ActionModal index={0} onClose={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    for (const l of Array.from(dialog.querySelectorAll("label"))) {
+      expect(l.className).toContain("text-sm");
+      expect(l.getAttribute("style") ?? "").not.toContain("--text-muted");
+    }
+    const ids = ["action-modal-save", "action-modal-delete", "action-modal-cancel", "action-modal-runner-claude", "action-modal-runner-codex"];
+    for (const id of ids) {
+      const b = screen.getByTestId(id);
+      expect(b.className).toMatch(/hover:bg-/);
+      expect(b.className).toContain("focus-visible:");
+      expect(b.getAttribute("style") ?? "").not.toContain("--text-muted");
+    }
+    // The hint keeps its original muted 12px look.
+    const hint = screen.getByTestId("action-modal-hint");
+    expect(hint.className).toContain("text-[12px]");
+    expect(hint.getAttribute("style")).toContain("--text-muted");
+  });
+
   it("shell runner relabels the field Command", () => {
     render(<ActionModal index={0} onClose={() => {}} />);
     expect(screen.queryByLabelText("Command")).toBeNull();

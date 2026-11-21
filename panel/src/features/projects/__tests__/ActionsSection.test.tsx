@@ -104,6 +104,14 @@ describe("ActionsSection", () => {
     expect(onNew).toHaveBeenCalled();
   });
 
+  it("Edit and + New action have hover and focus styles", () => {
+    mount();
+    for (const el of [screen.getByTestId("action-edit-0"), screen.getByTestId("actions-new")]) {
+      expect(el.className).toMatch(/hover:bg-/);
+      expect(el.className).toContain("focus-visible:");
+    }
+  });
+
   it("Edit and + New action open the action modal", () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Edit Knowledge harvest" }));
