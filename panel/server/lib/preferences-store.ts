@@ -185,8 +185,7 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
   for (const [key, value] of Object.entries(patch)) {
     if (key === "version") continue;
     if (value === null) {
-      delete next[key];
-      routeIdentity(key, null);
+      if (routeIdentity(key, null)) delete next[key];
       continue;
     }
     // `undefined` is what `{ theme: getTheme() }` produces in ordinary TS when
@@ -198,8 +197,7 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
       warnUnstorable(key, value);
       continue;
     }
-    next[key] = value;
-    routeIdentity(key, value);
+    if (routeIdentity(key, value)) next[key] = value;
   }
   doc = next;
   scheduleWrite();
@@ -209,17 +207,24 @@ export function patchPreferences(patch: Record<string, unknown>): PreferencesDoc
 /**
  * Identity keys live in `<project>/identity.json`, not the machine file. An
  * empty string is a removal (the Appearance editor clears a mark with `""`).
- * A write that fails for an existing project is recorded in
- * `identityWriteFailed` so the route can answer with an error the client
- * retries; a missing project is memory-only by design and is not a failure.
+ * A write that fails for an existing project is refused: it returns false so
+ * the caller leaves the doc untouched (a value retained for a later boot
+ * migration stays intact), and the key is recorded in `identityWriteFailed`
+ * so the route answers with an error and the client keeps it pending. A
+ * missing project is memory-only by design and is not a failure. Non-identity
+ * keys always return true.
  */
-function routeIdentity(key: string, value: unknown): void {
+function routeIdentity(key: string, value: unknown): boolean {
   const parsed = parseIdentityKey(key);
-  if (!parsed) return;
-  if (value !== null && typeof value !== "string") return;
+  if (!parsed) return true;
+  if (value !== null && typeof value !== "string") return true;
   const result = writeIdentity(parsed.project, { [parsed.field]: value === "" ? null : value });
-  if (result === "failed") identityWriteFailed.push(key);
-  else identityFallback.delete(key);
+  if (result === "failed") {
+    identityWriteFailed.push(key);
+    return false;
+  }
+  identityFallback.delete(key);
+  return true;
 }
 
 /**

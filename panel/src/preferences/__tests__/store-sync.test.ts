@@ -3,7 +3,6 @@ import { bool, num } from "../codecs";
 import { definePreference } from "../types";
 import {
   PREFERENCE_PATCH_DEBOUNCE_MS,
-  PREFERENCE_RETRY_DELAYS_MS,
   __resetPreferenceStoreForTests,
   readPreference,
   subscribePreference,
@@ -329,61 +328,38 @@ describe("a failed PATCH", () => {
 });
 
 describe("a PATCH the server partly refuses", () => {
-  it("re-sends only the refused keys, on its own, with a bounded backoff", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.spyOn(console, "warn").mockImplementation(() => {});
-      const patched: Array<Record<string, unknown>> = [];
-      let refuse = 2;
+  it("keeps only the refused keys pending and re-sends them with the next flush", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const patched: Array<Record<string, unknown>> = [];
+    let refuse = true;
 
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (_url: string, init?: RequestInit) => {
-          const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-          patched.push(body);
-          if (refuse > 0 && "test.width" in body) {
-            refuse -= 1;
-            return new Response(JSON.stringify({ ok: false, failedKeys: ["test.width"] }), { status: 503 });
-          }
-          return new Response('{"ok":true}', { status: 200 });
-        }),
-      );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        patched.push(body);
+        if (refuse && "test.width" in body) {
+          return new Response(JSON.stringify({ ok: false, failedKeys: ["test.width"] }), { status: 503 });
+        }
+        return new Response('{"ok":true}', { status: 200 });
+      }),
+    );
 
-      writePreference(portableWidth, 512);
-      writePreference(portableFlag, false);
-      await vi.advanceTimersByTimeAsync(PREFERENCE_PATCH_DEBOUNCE_MS + 10);
-      expect(patched).toEqual([{ "test.width": 512, "test.flag": false }]);
+    writePreference(portableWidth, 512);
+    writePreference(portableFlag, false);
+    await afterDebounce();
+    expect(patched).toEqual([{ "test.width": 512, "test.flag": false }]);
 
-      // No further write: the store retries the refused key alone.
-      await vi.advanceTimersByTimeAsync(PREFERENCE_RETRY_DELAYS_MS[0] + 10);
-      expect(patched.at(-1)).toEqual({ "test.width": 512 });
-      await vi.advanceTimersByTimeAsync(PREFERENCE_RETRY_DELAYS_MS[1] + 10);
-      expect(patched.at(-1)).toEqual({ "test.width": 512 });
-      expect(patched).toHaveLength(3);
+    // No timer is armed: nothing is sent until the next write.
+    await afterDebounce();
+    expect(patched).toHaveLength(1);
 
-      // Accepted: nothing else is sent.
-      await vi.advanceTimersByTimeAsync(PREFERENCE_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0));
-      expect(patched).toHaveLength(3);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("gives up after the last backoff step", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.spyOn(console, "warn").mockImplementation(() => {});
-      const fetchMock = vi.fn(
-        async () => new Response(JSON.stringify({ ok: false, failedKeys: ["test.width"] }), { status: 503 }),
-      );
-      vi.stubGlobal("fetch", fetchMock);
-
-      writePreference(portableWidth, 512);
-      await vi.advanceTimersByTimeAsync(PREFERENCE_PATCH_DEBOUNCE_MS + 10);
-      await vi.advanceTimersByTimeAsync(PREFERENCE_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0) * 2);
-      expect(fetchMock).toHaveBeenCalledTimes(1 + PREFERENCE_RETRY_DELAYS_MS.length);
-    } finally {
-      vi.useRealTimers();
-    }
+    // The accepted key is not dragged along; the refused one is.
+    refuse = false;
+    const other = definePreference({ key: "test.other", scope: "global", default: 0, codec: num, portable: true });
+    writePreference(other, 7);
+    await afterDebounce();
+    expect(patched.at(-1)).toEqual({ "test.width": 512, "test.other": 7 });
   });
 });
+

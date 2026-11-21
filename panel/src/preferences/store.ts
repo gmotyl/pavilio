@@ -112,15 +112,6 @@ const inFlightKeys = new Set<string>();
 let ackClock = 0;
 const ackedAt = new Map<string, number>();
 let patchTimer: ReturnType<typeof setTimeout> | null = null;
-/**
- * Bounded retry for keys the server explicitly refused (a 5xx naming
- * `failedKeys`, e.g. a project identity.json it could not write). Unlike a
- * network failure, nothing else may ever re-flush such a key — Appearance
- * closes after Apply — so the store re-sends on its own, a few times, backing
- * off. Reset by any acknowledged PATCH.
- */
-export const PREFERENCE_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
-let refusedRetries = 0;
 let channelUnsubscribe: (() => void) | null = null;
 
 /**
@@ -507,15 +498,9 @@ function flushPatch(): void {
         if (refused.includes(key)) pendingKeys.add(key);
         else ackedAt.set(key, ackClock);
       }
-      if (refused.length === 0) {
-        refusedRetries = 0;
-        return;
-      }
-      console.warn(`[preferences] server refused ${refused.join(", ")}; retrying`);
-      const delay = PREFERENCE_RETRY_DELAYS_MS[refusedRetries];
-      if (delay === undefined || patchTimer) return;
-      refusedRetries += 1;
-      patchTimer = setTimeout(flushPatch, delay);
+      // Like a network failure, a refused key stays dirty and rides along with
+      // the next flush; no timer is armed (an automatic retry is a follow-up).
+      if (refused.length > 0) console.warn(`[preferences] server refused ${refused.join(", ")}; kept pending`);
     })
     .catch((err: unknown) => {
       // No rollback: the in-memory value is what the user asked for, and
@@ -636,7 +621,6 @@ export function __resetPreferenceStoreForTests(): void {
   inFlightKeys.clear();
   ackedAt.clear();
   ackClock = 0;
-  refusedRetries = 0;
   pendingNotifications.clear();
   // The machine-local warning is latched for the life of the tab, so without
   // this the first suite to hit a refusing store would silence every later

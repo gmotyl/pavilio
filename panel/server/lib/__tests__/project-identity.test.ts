@@ -206,7 +206,14 @@ describe("project identity", () => {
     adoptProjectIdentity();
     await flushPreferences();
     expect(machineText()).toContain('"project.color@loop": "#abcdef"');
-    patchPreferences({ "project.color@loop": "#fedcba" });
-    expect(lastPatchFailedKeys()).toEqual(["project.color@loop"]);
+    // A refused edit — set, clear or delete — leaves the retained value intact.
+    for (const value of ["#fedcba", "", null]) {
+      patchPreferences({ "project.color@loop": value, theme: "dark" });
+      expect(lastPatchFailedKeys()).toEqual(["project.color@loop"]);
+      expect(getPreferences()["project.color@loop"]).toBe("#abcdef");
+      await flushPreferences();
+      expect(machineText()).toContain('"project.color@loop": "#abcdef"');
+    }
+    expect(getPreferences().theme).toBe("dark");
   });
 });
