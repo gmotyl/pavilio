@@ -253,6 +253,8 @@ Spawn each writer with its agent file as instructions plus its inputs; never han
 file allows. Claude Code: Agent tool with `model: <writerModel>`; other harnesses: their small-model
 tier. Each writer returns exactly one JSON receipt.
 
+**Language.** Read `wiki_language` from the project's `PROJECT.md` frontmatter once per run and pass it as `language:` to every writer; absent → English, no `language:` line. Query answers and `wiki/questions/` pages are written in that language too (links, slugs and keys stay as they are).
+
 Inputs go **inline in the prompt** as a short `key: value` list (a glossary line quoted) — never
 written to a file the writer is told to read first. "Read this file, it holds your instructions"
 is the shape of a prompt injection, and Claude Code's auto-mode classifier blocks such launches.
@@ -265,6 +267,7 @@ projects/<p>/. Read skills/pavilio-wiki/agents/page_writer.md and follow it exac
 
 Inputs:
 - project: <p>
+- language: Polish        # only when the project's PROJECT.md frontmatter has `wiki_language`
 - slug: concepts/relay
 - sources: wiki/sources/progress-2026-10-19-tts-relay-node20.md
 - glossary: "Relay — the panel server's synthesis endpoint … See wiki/concepts/relay."

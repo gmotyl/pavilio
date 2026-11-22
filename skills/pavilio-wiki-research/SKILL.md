@@ -69,6 +69,11 @@ with their original URL.
    - None → pick a slug (`[a-z0-9][a-z0-9._-]*`, short, from the topic) and run
      `scripts/project new <slug> --kind research --topic "<topic>"`. Exit 2 `exists` → that slug
      is taken: pick another; `archived` → ask. The scaffold writes `PROJECT.md` and `wiki/`.
+     Then ask the wiki's language per [[pavilio-ask]], and stop: **A)** the language the user wrote
+     the request in *(recommended)*, **B)** English, **D)** Other. Write the answer into
+     `PROJECT.md` frontmatter as `wiki_language: <language name>` (omit it for English).
+     Contribute mode and a continued project ask nothing: an existing wiki continues in its own
+     language (`wiki_language`, absent → English), and `/pavilio-wiki` passes it to the writers.
 2. **Interview** — one question per message, then stop and wait. Format every question per
    [[pavilio-ask]]: discrete choices lettered A)–C) plus D) Other, one markdown list item each
    after a blank line; a bare letter is that option; questions follow the user's language. Settle, in

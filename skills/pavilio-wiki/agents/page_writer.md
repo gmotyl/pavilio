@@ -12,6 +12,7 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `sources` — project-root paths (`wiki/sources/<kind>-<stem>.md`) of the source pages naming the
   slug that the page does not cite yet (`scripts/wiki backlog`), at most 12
 - `glossary` — the slug's `CONTEXT.md` line, if it has one (passed in by the orchestrator, not read)
+- `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged
 
 The orchestrator passes these in the prompt; there is no input file to read.
 
