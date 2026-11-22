@@ -1,8 +1,9 @@
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Unavailable } from "../../../server/lib/prs/provider";
 import PrFilter from "./PrFilter";
-import PrRow, { prKey } from "./PrRow";
+import PrRow, { moveListFocus, prKey } from "./PrRow";
 import type { ReposViewProps } from "./types";
+import type { PrsState } from "./usePrs";
 import "./Prs.css";
 
 const RESTING: Record<Exclude<Unavailable, "failed">, ReactNode> = {
@@ -19,25 +20,46 @@ const RESTING: Record<Exclude<Unavailable, "failed">, ReactNode> = {
   ),
 };
 
-const NAV_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
-
-// Listbox arrow/Home/End move focus between options; Enter is handled by the row.
-function moveFocus(e: KeyboardEvent<HTMLUListElement>) {
-  if (!NAV_KEYS.includes(e.key)) return;
-  const options = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
-  const at = options.indexOf(document.activeElement as HTMLElement);
-  const last = options.length - 1;
-  const to =
-    e.key === "Home" ? 0 : e.key === "End" ? last : e.key === "ArrowDown" ? Math.min(at + 1, last) : Math.max(at - 1, 0);
-  e.preventDefault();
-  options[to]?.focus();
+/** Per-repo resting lines and the unknown-identity note; shared by the PRs view and the Review switcher. */
+export function PrsNotices({ prs, testIdPrefix = "prs" }: { prs: PrsState; testIdPrefix?: string }) {
+  return (
+    <>
+      {prs.identityUnknown && (
+        <p className="prs-status" role="status" data-testid={`${testIdPrefix}-identity-unknown`}>
+          Couldn't tell who you are on GitHub, so Mine and Review requested are unavailable.
+        </p>
+      )}
+      {prs.unavailable.length > 0 && (
+        <ul className="prs-unavailable" aria-label="Unavailable repositories">
+          {prs.unavailable.map(({ repo, reason }) => (
+            <li key={repo}>
+              <span className="pr-repo">{repo}</span>
+              {reason === "failed" ? (
+                <>
+                  <span>Couldn't load pull requests</span>
+                  <button type="button" data-testid={`${testIdPrefix}-retry-${repo}`} onClick={prs.reload}>
+                    Retry
+                  </button>
+                </>
+              ) : (
+                <span>{RESTING[reason]}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
 }
 
 /** Full-width list of the project's open PRs under the remembered filter; no context switcher. */
 export default function PrsView({ project, prs, filter, setFilter, params, setParams }: ReposViewProps) {
   const current = params.get("pr");
-  const showingAll = filter.preset === "all" && filter.author === null;
+  const showingAll = (filter.preset === "all" || prs.identityUnknown) && filter.author === null;
   const [focused, setFocused] = useState<string | null>(null);
+  const { revalidate } = prs;
+  // The tab stays mounted: entering the view is when a remote change should show up.
+  useEffect(() => revalidate(), [revalidate]);
 
   if (prs.error) {
     return (
@@ -57,7 +79,7 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
   if (prs.loading && prs.me === null) body = <p className="prs-status">Loading pull requests…</p>;
   else if (prs.prs.length > 0)
     body = (
-      <ul className="pr-list" role="listbox" aria-label="Open pull requests" onKeyDown={moveFocus}>
+      <ul className="pr-list" role="listbox" aria-label="Open pull requests" onKeyDown={moveListFocus}>
         {prs.prs.map((p) => (
           <PrRow
             key={prKey(p)}
@@ -66,7 +88,8 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
             selected={prKey(p) === current}
             tabbable={prKey(p) === active}
             onFocus={() => setFocused(prKey(p))}
-            onOpen={(open) => setParams({ view: "review", pr: prKey(open) })}
+            // file/line belong to whatever was open before; the new PR starts at its first change.
+            onOpen={(open) => setParams({ view: "review", pr: prKey(open), file: null, line: null })}
           />
         ))}
       </ul>
@@ -96,26 +119,9 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
         setFilter={setFilter}
         counts={prs.counts}
         authors={prs.authors}
+        identityUnknown={prs.identityUnknown}
       />
-      {prs.unavailable.length > 0 && (
-        <ul className="prs-unavailable" aria-label="Unavailable repositories">
-          {prs.unavailable.map(({ repo, reason }) => (
-            <li key={repo}>
-              <span className="pr-repo">{repo}</span>
-              {reason === "failed" ? (
-                <>
-                  <span>Couldn't load pull requests</span>
-                  <button type="button" data-testid={`prs-retry-${repo}`} onClick={prs.reload}>
-                    Retry
-                  </button>
-                </>
-              ) : (
-                <span>{RESTING[reason]}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <PrsNotices prs={prs} />
       {body}
     </div>
   );

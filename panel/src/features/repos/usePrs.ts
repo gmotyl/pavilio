@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PrFilter, PrFilterPreset } from "../../preferences/declarations";
 import type { PullRequest, Unavailable } from "../../../server/lib/prs/provider";
 
@@ -33,8 +33,13 @@ export function filterPrs(prs: PullRequest[], me: string, filter: PrFilter): { p
   };
 }
 
+/** A view entry refetches only past this age; the server caches lists for a minute anyway. */
+const FRESH_MS = 15_000;
+
 export interface PrsState {
   me: string | null;
+  /** The list loaded but the login lookup failed: Mine / Review requested can't be told apart from zero. */
+  identityUnknown: boolean;
   /** Every open PR, unfiltered. */
   all: PullRequest[];
   /** The PRs `filter` selects. */
@@ -48,6 +53,8 @@ export interface PrsState {
   loading: boolean;
   error: string | null;
   reload: () => void;
+  /** Refetch unless the last request is younger than FRESH_MS; for view entry and opening a picker. */
+  revalidate: () => void;
 }
 
 export function usePrs(project: string, filter: PrFilter): PrsState {
@@ -57,9 +64,11 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const startedAt = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    startedAt.current = Date.now();
     setLoading(true);
     setError(null);
     fetch(`/api/prs?project=${encodeURIComponent(project)}`)
@@ -82,17 +91,24 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
   }, [project, attempt]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  const revalidate = useCallback(() => {
+    if (Date.now() - startedAt.current >= FRESH_MS) reload();
+  }, [reload]);
 
   const data = loaded?.project === project ? loaded.body : null;
 
   const me = data?.me ?? null;
+  const identityUnknown = !!data && !data.me;
   const all = useMemo(() => data?.prs ?? [], [data]);
-  const filtered = useMemo(() => filterPrs(all, me ?? "", filter), [all, me, filter]);
+  // Without a login, Mine / Review requested would match nothing and read as "none": list everything instead.
+  const effective = useMemo<PrFilter>(() => (identityUnknown ? { ...filter, preset: "all" } : filter), [identityUnknown, filter]);
+  const filtered = useMemo(() => filterPrs(all, me ?? "", effective), [all, me, effective]);
   const reviewRequested = useMemo(() => (me ? all.filter((p) => p.reviewers.includes(me)).length : 0), [all, me]);
   const authors = useMemo(() => [...new Set(all.map((p) => p.author))].sort(), [all]);
 
   return {
     me,
+    identityUnknown,
     all,
     prs: filtered.prs,
     counts: filtered.counts,
@@ -102,5 +118,6 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
     loading,
     error,
     reload,
+    revalidate,
   };
 }

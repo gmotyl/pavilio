@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from "react";
 import type { ChecksState } from "../../../server/lib/prs/provider";
 import type { PullRequest } from "./usePrs";
 import "./Prs.css";
@@ -14,6 +15,20 @@ interface Props {
 
 /** `pr=` value in the URL; the Review view resolves the repo name back to its path. */
 export const prKey = (pr: Pick<PullRequest, "repo" | "number">) => `${pr.repo}#${pr.number}`;
+
+const NAV_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
+
+/** Listbox Arrow/Home/End move focus between options; Enter is handled by the row. */
+export function moveListFocus(e: KeyboardEvent<HTMLElement>) {
+  if (!NAV_KEYS.includes(e.key)) return;
+  const options = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
+  const at = options.indexOf(document.activeElement as HTMLElement);
+  const last = options.length - 1;
+  const to =
+    e.key === "Home" ? 0 : e.key === "End" ? last : e.key === "ArrowDown" ? Math.min(at + 1, last) : Math.max(at - 1, 0);
+  e.preventDefault();
+  options[to]?.focus();
+}
 
 export function updatedAgo(iso: string, now = Date.now()): string {
   const mins = Math.floor((now - new Date(iso).getTime()) / 60_000);

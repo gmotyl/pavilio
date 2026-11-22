@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../../../test-utils";
 import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
@@ -14,10 +14,10 @@ function Search() {
   return <output data-testid="search">{useLocation().search}</output>;
 }
 
-function renderPrs(body: PrsResponse = { me: ME, prs: PRS, unavailable: [] }, project = "pavilio") {
+function renderPrs(body: PrsResponse = { me: ME, prs: PRS, unavailable: [] }, project = "pavilio", search = "?view=prs") {
   stubFetch({ "/api/prs": body });
   return render(
-    <MemoryRouter initialEntries={[`/project/${project}/repos?view=prs`]}>
+    <MemoryRouter initialEntries={[`/project/${project}/repos${search}`]}>
       <Routes>
         <Route
           path="/project/:name/:section"
@@ -41,6 +41,11 @@ const rowNumbers = () => rows().map((r) => r.getAttribute("data-number"));
 beforeEach(() => {
   writePreference(preferences.reposPrFilter, { preset: "all", author: null }, "pavilio");
 });
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const prsCalls = () => (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(([u]) => String(u).startsWith("/api/prs?"));
 
 describe("PrsView", () => {
   it("filter row shows preset chips with counts, author select and the remembered note", async () => {
@@ -190,5 +195,41 @@ describe("PrsView", () => {
     const before = fetch.mock.calls.length;
     fireEvent.click(within(lines[3]).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(fetch.mock.calls.length).toBe(before + 1));
+  });
+
+  it("opening a PR drops the file and line left from another view", async () => {
+    renderPrs(undefined, "pavilio", `?view=prs&pr=pavilio%231&file=${encodeURIComponent("src/x.ts")}&line=42`);
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    fireEvent.click(rows()[2]);
+    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+    expect(search.get("pr")).toBe("pavilio#3");
+    expect(search.has("file")).toBe(false);
+    expect(search.has("line")).toBe(false);
+  });
+
+  it("entering the PRs view refetches a list that is no longer fresh", async () => {
+    renderPrs(undefined, "pavilio", "?view=review");
+    await waitFor(() => expect(prsCalls()).toHaveLength(1));
+    const later = Date.now() + 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    fireEvent.click(screen.getByTestId("repos-view-prs"));
+    await waitFor(() => expect(prsCalls()).toHaveLength(2));
+    // Fresh again: a quick hop back and forth doesn't refetch.
+    fireEvent.click(screen.getByTestId("repos-view-code"));
+    fireEvent.click(screen.getByTestId("repos-view-prs"));
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    expect(prsCalls()).toHaveLength(2);
+  });
+
+  it("an unknown login disables the personal presets instead of counting zero", async () => {
+    writePreference(preferences.reposPrFilter, { preset: "review", author: null }, "pavilio");
+    renderPrs({ me: "", prs: PRS, unavailable: [] });
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    expect(screen.getByTestId("prs-identity-unknown")).toHaveTextContent("Couldn't tell who you are");
+    expect(chip(/^Review requested/)).toBeDisabled();
+    expect(chip(/^Review requested/)).toHaveTextContent("Review requested?");
+    expect(chip(/^Mine/)).toBeDisabled();
+    expect(chip(/^All/)).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("No open pull requests match.")).toBeNull();
   });
 });

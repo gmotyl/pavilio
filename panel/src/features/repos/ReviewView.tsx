@@ -300,6 +300,11 @@ export default function ReviewView({ project, prs, filter, setFilter, params, se
   const pr = key ? prs.all.find((p) => prKey(p) === key) : undefined;
 
   const pick = (picked: PullRequest) => setParams({ pr: prKey(picked), file: null, line: null });
+  const { revalidate, loading } = prs;
+  // A PR opened since the list loaded: refetch rather than call it gone.
+  useEffect(() => {
+    if (key && !pr && !loading) revalidate();
+  }, [key, pr, loading, revalidate]);
 
   let body: ReactNode;
   if (!key) body = <p className="rv-msg">Pick a pull request from the switcher above.</p>;

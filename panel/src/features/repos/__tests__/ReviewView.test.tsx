@@ -73,15 +73,16 @@ interface Setup {
   changed?: FetchHandler;
   tree?: FetchHandler;
   file?: FetchHandler;
+  list?: FetchHandler;
 }
 
 const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts", "+++ /dev/null", "@@ -1,3 +0,0 @@", "-one", "-two", "-three"].join("\n");
 
-function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file }: Setup = {}) {
+function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
     "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40) })),
-    "/api/prs": { me: ME, prs, unavailable: [] },
+    "/api/prs": list ?? { me: ME, prs, unavailable: [] },
     "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
     "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
     "/api/git/diff-ref": (url: string) => text(url.includes("gone.ts") ? GONE_DIFF : DIFF),
@@ -394,4 +395,69 @@ describe("ReviewView", () => {
     expect(screen.queryByText(/too large to display/)).toBeNull();
   });
 
+
+  it("switcher shows unavailable repos and retries a failed list", async () => {
+    let fail = true;
+    renderReview({
+      search: "?view=review",
+      list: () =>
+        fail
+          ? jsonResponse({ error: "boom" }, { status: 500 })
+          : jsonResponse({ me: ME, prs: PRS, unavailable: [{ repo: "api", reason: "failed" }] }),
+    });
+    fireEvent.click(screen.getByTestId("pr-switcher"));
+    const pop = screen.getByRole("dialog", { name: "Pick a pull request" });
+    const alert = await within(pop).findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load pull requests");
+    fail = false;
+    fireEvent.click(within(alert).getByTestId("pr-switcher-retry"));
+    await waitFor(() => expect(within(within(pop).getByRole("listbox")).getAllByRole("option")).toHaveLength(2));
+    const lines = within(within(pop).getByRole("list", { name: "Unavailable repositories" })).getAllByRole("listitem");
+    expect(lines.map((l) => l.textContent)).toEqual(["apiCouldn't load pull requestsRetry"]);
+  });
+
+  it("switcher list has one tab stop, arrow navigation and returns focus to its trigger", async () => {
+    renderReview({ search: "?view=review&pr=pavilio%232" });
+    const trigger = screen.getByTestId("pr-switcher");
+    fireEvent.click(trigger);
+    const pop = screen.getByRole("dialog", { name: "Pick a pull request" });
+    const options = () => within(within(pop).getByRole("listbox")).getAllByRole("option");
+    await waitFor(() => expect(options()).toHaveLength(2));
+    // The open PR is the list's single tab stop.
+    expect(options().map((o) => o.tabIndex)).toEqual([-1, 0]);
+    options()[1].focus();
+    fireEvent.keyDown(options()[1], { key: "Home" });
+    expect(options()[0]).toHaveFocus();
+    fireEvent.keyDown(options()[0], { key: "ArrowDown" });
+    expect(options()[1]).toHaveFocus();
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Pick a pull request" })).toBeNull();
+    expect(trigger).toHaveFocus();
+
+    fireEvent.click(trigger);
+    const again = await waitFor(() => within(screen.getByRole("listbox", { name: "Open pull requests" })).getAllByRole("option"));
+    again[0].focus();
+    fireEvent.keyDown(again[0], { key: "Enter" });
+    expect(screen.getByTestId("search").textContent).toContain("pr=pavilio%231");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("switcher popover is pulled back inside a narrow Repos tab", async () => {
+    const rect = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 0, height: 0, x: left, y: 0, toJSON() {} }) as DOMRect;
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("rt")) return rect(0, 600);
+      // Hung off a trigger 300px in, 560px wide: 260px past the tab's edge until shifted.
+      if (this.classList.contains("rv-sw-pop")) return rect(300 + (parseFloat(this.style.left) || 0), 560);
+      return real.call(this);
+    });
+    renderReview({ search: "?view=review" });
+    fireEvent.click(screen.getByTestId("pr-switcher"));
+    const pop = screen.getByRole("dialog", { name: "Pick a pull request" });
+    expect(pop.style.maxWidth).toBe("584px");
+    // right edge 860 → 592 (600 minus the 8px gutter)
+    expect(pop.style.left).toBe("-268px");
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockRestore();
+  });
 });

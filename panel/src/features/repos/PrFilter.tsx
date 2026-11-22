@@ -10,6 +10,8 @@ interface Props {
   setFilter: PreferenceSetter<PrFilterValue>;
   counts: PresetCounts;
   authors: string[];
+  /** Login lookup failed: the personal presets can't be counted, only All works. */
+  identityUnknown?: boolean;
 }
 
 const PRESETS: { preset: PrFilterPreset; label: string }[] = [
@@ -19,22 +21,28 @@ const PRESETS: { preset: PrFilterPreset; label: string }[] = [
 ];
 
 /** Preset chips + author select; the value is the project's remembered `repos.prFilter`. */
-export default function PrFilter({ project, me, filter, setFilter, counts, authors }: Props) {
+export default function PrFilter({ project, me, filter, setFilter, counts, authors, identityUnknown = false }: Props) {
   return (
     <div className="prf" role="group" aria-label="Filter pull requests">
-      {PRESETS.map(({ preset, label }) => (
-        <button
-          key={preset}
-          type="button"
-          className="prf-chip"
-          data-testid={`pr-filter-${preset}`}
-          aria-pressed={filter.preset === preset}
-          onClick={() => setFilter((prev) => ({ ...prev, preset }))}
-        >
-          {label}
-          <span className="prf-n">{counts[preset]}</span>
-        </button>
-      ))}
+      {PRESETS.map(({ preset, label }) => {
+        const personal = preset !== "all";
+        const off = identityUnknown && personal;
+        return (
+          <button
+            key={preset}
+            type="button"
+            className="prf-chip"
+            data-testid={`pr-filter-${preset}`}
+            aria-pressed={identityUnknown ? !personal : filter.preset === preset}
+            disabled={off}
+            title={off ? "Couldn't tell who you are on GitHub" : undefined}
+            onClick={() => setFilter((prev) => ({ ...prev, preset }))}
+          >
+            {label}
+            <span className="prf-n">{off ? "?" : counts[preset]}</span>
+          </button>
+        );
+      })}
       <select
         className="prf-author"
         aria-label="Author"
