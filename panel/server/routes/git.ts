@@ -232,7 +232,8 @@ async function mergeBase(base: string, head: string, root: string): Promise<stri
 /** Repo-relative POSIX path, or 400 when absolute, escaping the repo, or inside `.git`. */
 function repoRelativePath(raw: string): string {
   if (raw.includes("\0") || isAbsolute(raw) || posix.isAbsolute(raw)) throw new GitInputError("path must be repo-relative");
-  const norm = posix.normalize(raw.replace(/\\/g, "/"));
+  // A backslash is a separator only on Windows; on POSIX it is a filename character.
+  const norm = posix.normalize(sep === "\\" ? raw.replace(/\\/g, "/") : raw);
   if (norm === "." || norm === ".." || norm.startsWith("../")) throw new GitInputError("path escapes the repo");
   // Case-insensitive: `.GIT` is the same dir on macOS/Windows filesystems.
   if (norm.split("/").some((seg) => seg.toLowerCase() === ".git")) throw new GitInputError("path is inside .git");
@@ -287,14 +288,23 @@ type TreeStatus = "M" | "A" | "D" | "R" | "?" | null;
 
 function porcelainStatus(xy: string): TreeStatus {
   if (xy === "??") return "?";
+  // Unmerged (UD/DU/AU/UA/UU/AA) keeps a copy on disk; only DD is gone from both sides.
+  if (xy === "DD") return "D";
+  if (xy.includes("U") || xy === "AA") return "M";
   if (xy.includes("D")) return "D";
   if (xy.includes("R")) return "R";
   if (xy.includes("A")) return "A";
   return xy.trim() ? "M" : null;
 }
 
-// git's well-known empty tree: the base for a repo with no commits yet.
-const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+// git's well-known empty tree per object format: the base for a repo with no commits yet.
+const EMPTY_TREE_SHA1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const EMPTY_TREE_SHA256 = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
+
+async function emptyTree(root: string): Promise<string> {
+  const format = (await gitArgv(["rev-parse", "--show-object-format"], root)).toString("utf-8").trim();
+  return format === "sha256" ? EMPTY_TREE_SHA256 : EMPTY_TREE_SHA1;
+}
 
 /** HEAD's commit, or the empty tree while HEAD is unborn. */
 async function headOrEmptyTree(root: string): Promise<string> {
@@ -302,7 +312,7 @@ async function headOrEmptyTree(root: string): Promise<string> {
     return (await gitArgv(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], root)).toString("utf-8").trim();
   } catch (e) {
     if (!gitExitedNonZero(e)) throw e;
-    return EMPTY_TREE;
+    return emptyTree(root);
   }
 }
 
@@ -313,7 +323,8 @@ function parseNumstat(buf: Buffer): Map<string, Counts> {
   const counts = new Map<string, Counts>();
   const num = splitZ(buf);
   for (let i = 0; i < num.length; ) {
-    const [add, del, path] = num[i++].split("\t");
+    // Only the first two tabs separate fields; the path may itself hold tabs.
+    const [, add, del, path] = /^([^\t]*)\t([^\t]*)\t([\s\S]*)$/.exec(num[i++]) ?? [];
     // Rename: empty path field, then source and destination entries.
     const key = path === "" ? (i++, num[i++]) : path;
     counts.set(key, { add: Number(add) || 0, del: Number(del) || 0 });
@@ -452,12 +463,38 @@ router.get("/diff-ref", async (req, res) => {
     const base = await resolveCommit(requireQuery(req.query.base, "base"), root);
     const head = await resolveCommit(requireQuery(req.query.head, "head"), root);
     const from = await mergeBase(base, head, root);
-    const diff = await gitArgv(["diff", "--no-color", "--no-ext-diff", from, head, "--", path], root);
-    res.type("text/plain; charset=utf-8").send(diff.toString("utf-8"));
+    res.type("text/plain; charset=utf-8").send(await pathDiff(root, path, [from, head]));
   } catch (e: any) {
     sendGitError(res, e);
   }
 });
+
+/** Where `path` was renamed from in `git diff -M <revs>`, if it was. */
+async function renameSource(root: string, path: string, revs: string[]): Promise<string | undefined> {
+  const ns = splitZ(await gitArgv(["diff", "-z", "-M", "--name-status", ...revs], root));
+  for (let i = 0; i < ns.length; ) {
+    const code = ns[i++].charAt(0);
+    if (code !== "R" && code !== "C") {
+      i++;
+      continue;
+    }
+    const [src, dst] = [ns[i++], ns[i++]];
+    if (code === "R" && dst === path) return src;
+  }
+  return undefined;
+}
+
+/**
+ * Unified diff of one path over `revs`. A pathspec of just the destination hides
+ * a rename's source from detection, so an added file is retried with its source.
+ */
+async function pathDiff(root: string, path: string, revs: string[]): Promise<string> {
+  const base = ["diff", "--no-color", "--no-ext-diff", "-M", ...revs, "--"];
+  const diff = (await gitArgv([...base, path], root)).toString("utf-8");
+  if (!/^new file mode /m.test(diff)) return diff;
+  const src = await renameSource(root, path, revs);
+  return src ? (await gitArgv([...base, src, path], root)).toString("utf-8") : diff;
+}
 
 // Changed files base...head with name-status and numstat (binary counts as 0/0)
 router.get("/changed", async (req, res) => {
@@ -486,19 +523,21 @@ router.get("/changed", async (req, res) => {
 });
 
 // Git status
-router.get("/status", (req, res) => {
+router.get("/status", async (req, res) => {
   try {
-    const repo = req.query.repo as string | undefined;
+    const cwd = getRepoRoot(req.query.repo as string | undefined);
+    assertRepoDirectory(cwd);
     // -uall expands untracked directories into their individual files;
-    // without it a new dir arrives as a single "?? dir/" entry.
-    const status = git("status --porcelain -uall", repo);
-    const files = status
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => ({
-        status: line.slice(0, 2).trim(),
-        path: line.slice(3),
-      }));
+    // without it a new dir arrives as a single "?? dir/" entry. -z gives
+    // literal (unquoted) paths and the rename source as its own entry.
+    const entries = splitZ(await gitArgv(["status", "--porcelain=v1", "-z", "-uall"], cwd));
+    const files: { status: string; path: string; from?: string }[] = [];
+    for (let i = 0; i < entries.length; i++) {
+      const xy = entries[i].slice(0, 2);
+      const file: { status: string; path: string; from?: string } = { status: xy.trim(), path: entries[i].slice(3) };
+      if (xy.includes("R") || xy.includes("C")) file.from = entries[++i];
+      files.push(file);
+    }
     res.json(files);
   } catch (e: any) {
     sendGitError(res, e);
@@ -515,9 +554,10 @@ async function diffAgainstHead(file: string, repo?: string): Promise<HeadDiff> {
   const path = repoRelativePath(file);
   const root = await repoToplevel(repo);
   const base = await headOrEmptyTree(root);
-  const diff = (await gitArgv(["diff", "--no-color", "--no-ext-diff", base, "--", path], root)).toString("utf-8");
+  const diff = await pathDiff(root, path, [base]);
   if (diff.trim()) return { diff };
-  const status = (await gitArgv(["status", "--porcelain=v1", "-z", "--", path], root)).toString("utf-8");
+  // -uall: listing forces it too, so status.showUntrackedFiles=no must not hide the file here.
+  const status = (await gitArgv(["status", "--porcelain=v1", "-z", "-uall", "--", path], root)).toString("utf-8");
   if (!status.startsWith("??")) return { diff };
   const real = realInRepo(root, path);
   const st = statSync(real);
@@ -528,13 +568,19 @@ async function diffAgainstHead(file: string, repo?: string): Promise<HeadDiff> {
   return { diff: synthesizeAddDiff(path, buf.toString("utf-8")) };
 }
 
-/** A commit's first parent (merges diff against it), or the empty tree for a root commit. */
+/**
+ * A commit's first parent (merges diff against it), or the empty tree for a root
+ * commit. A shallow boundary has a parent that is just not here: 409, never "added everything".
+ */
 async function commitParent(sha: string, root: string): Promise<string> {
   try {
     return (await gitArgv(["rev-parse", "--verify", "--quiet", `${sha}^1`], root)).toString("utf-8").trim();
   } catch (e) {
     if (!gitExitedNonZero(e)) throw e;
-    return EMPTY_TREE;
+    const raw = (await gitArgv(["cat-file", "commit", sha], root)).toString("utf-8");
+    const header = raw.slice(0, raw.indexOf("\n\n"));
+    if (/^parent /m.test(header)) throw new GitInputError(`parent of ${sha} is not in this shallow clone`, 409);
+    return emptyTree(root);
   }
 }
 
@@ -591,15 +637,10 @@ router.get("/commit-files", async (req, res) => {
     const root = await repoToplevel(repo);
     const sha = await resolveCommit(requireQuery(req.query.sha, "sha"), root);
     // Against the first parent, as /diff does: a merge lists what it brought in, not nothing.
-    const raw = (await gitArgv(["diff-tree", "-r", "--name-status", await commitParent(sha, root), sha], root)).toString("utf-8");
-    const files = raw
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [status, ...pathParts] = line.split("\t");
-        return { status: status.charAt(0), path: pathParts.join("\t") };
-      });
+    // -z: literal paths, not core.quotePath-escaped ones the blob/diff reads cannot open.
+    const ns = splitZ(await gitArgv(["diff-tree", "-z", "-r", "--name-status", await commitParent(sha, root), sha], root));
+    const files: { status: string; path: string }[] = [];
+    for (let i = 0; i + 1 < ns.length; i += 2) files.push({ status: ns[i].charAt(0), path: ns[i + 1] });
     res.json(files);
   } catch (e: any) {
     sendGitError(res, e);

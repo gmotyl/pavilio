@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isAbsolute, posix, resolve } from "path";
+import { isAbsolute, posix, resolve, sep } from "path";
 import { discoverProjects } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
 import { createTsNav, type TsNav } from "../lib/ts-nav.js";
@@ -15,7 +15,8 @@ function isLinkedRepo(target: string): boolean {
 /** Repo-relative POSIX path, or null when absolute or escaping the repo. */
 function repoRelativePath(raw: string): string | null {
   if (raw.includes("\0") || isAbsolute(raw) || posix.isAbsolute(raw)) return null;
-  const norm = posix.normalize(raw.replace(/\\/g, "/"));
+  // A backslash is a separator only on Windows; on POSIX it is a filename character.
+  const norm = posix.normalize(sep === "\\" ? raw.replace(/\\/g, "/") : raw);
   return norm === "." || norm === ".." || norm.startsWith("../") ? null : norm;
 }
 

@@ -48,4 +48,11 @@ describe("/api/code/definition", () => {
     }
     expect(nav.definition).not.toHaveBeenCalled();
   });
+
+  it.skipIf(process.platform === "win32")("passes a POSIX backslash filename through literally", async () => {
+    const { repo, nav, app } = setup();
+    const res = await request(app).get("/api/code/definition").query({ repo, path: "src/a\\b.ts", line: "1", col: "1" });
+    expect(res.status).toBe(200);
+    expect(nav.definition).toHaveBeenCalledWith(repo, "src/a\\b.ts", 1, 1);
+  });
 });

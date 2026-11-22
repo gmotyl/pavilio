@@ -401,3 +401,124 @@ describe("ref-based git reads", () => {
     expect(existsSync(marker)).toBe(false);
   });
 });
+
+/** A clean repo with one commit of `files`, made the current `repoDir`. */
+function freshRepo(name: string, files: Record<string, string>, init = "init -q"): string {
+  repoDir = join(tmp, name);
+  mkdirSync(repoDir);
+  sh(init);
+  sh("symbolic-ref HEAD refs/heads/main");
+  for (const [p, c] of Object.entries(files)) writeFileSync(join(repoDir, p), c);
+  sh("add -A");
+  sh("commit -q -m base");
+  return repoDir;
+}
+
+const TEN = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n") + "\n";
+
+describe("ref-based git reads: path and status edge cases", () => {
+  it("diffs a renamed file as a rename, between refs and against HEAD", async () => {
+    freshRepo("ren", { "old.txt": TEN });
+    sh("checkout -q -b r");
+    sh("mv old.txt new.txt");
+    writeFileSync(join(repoDir, "new.txt"), TEN.replace("line 3", "LINE 3"));
+    sh("add -A");
+    sh("commit -q -m r");
+    sh("checkout -q main");
+    const ref = await get("diff-ref", { base: "main", head: "r", path: "new.txt" });
+    expect(ref.status).toBe(200);
+    expect(ref.text).toContain("rename from old.txt");
+    expect(ref.text).not.toContain("+line 0");
+
+    sh("mv old.txt staged.txt");
+    const wt = await get("diff", { file: "staged.txt", against: "HEAD" });
+    expect(wt.status).toBe(200);
+    expect(wt.body.diff).toContain("rename from old.txt");
+  });
+
+  it("returns literal non-ASCII paths from status and commit-files, rename source separately", async () => {
+    freshRepo("utf", { "é.txt": "e\n", "src.txt": TEN });
+    writeFileSync(join(repoDir, "é.txt"), "E\n");
+    sh("commit -q -am edit");
+    const files = await get("commit-files", { sha: "HEAD" });
+    expect(files.body).toEqual([{ status: "M", path: "é.txt" }]);
+    sh("mv src.txt dst.txt");
+    writeFileSync(join(repoDir, "ü.txt"), "u\n");
+    const status = await get("status", {});
+    expect(status.body).toEqual(
+      expect.arrayContaining([
+        { status: "R", path: "dst.txt", from: "src.txt" },
+        { status: "??", path: "ü.txt" },
+      ]),
+    );
+  });
+
+  it.skipIf(process.platform === "win32")("keeps a backslash in a POSIX filename literal", async () => {
+    freshRepo("bs", { "a\\b.txt": "literal\n" });
+    mkdirSync(join(repoDir, "a"));
+    writeFileSync(join(repoDir, "a", "b.txt"), "split\n");
+    const disk = await get("file", { path: "a\\b.txt" });
+    expect(disk.text).toBe("literal\n");
+    const atRef = await get("file", { path: "a\\b.txt", ref: "HEAD" });
+    expect(atRef.text).toBe("literal\n");
+  });
+
+  it.skipIf(process.platform === "win32")("counts a changed file whose name has a tab", async () => {
+    freshRepo("tab", { "t\tab.txt": "a\n" });
+    sh("checkout -q -b t");
+    writeFileSync(join(repoDir, "t\tab.txt"), "a\nb\n");
+    sh("commit -q -am t");
+    const res = await get("changed", { base: "main", head: "t" });
+    expect(res.body).toEqual([{ path: "t\tab.txt", status: "M", add: 1, del: 0 }]);
+  });
+
+  it("keeps the surviving copy of a modify/delete conflict openable", async () => {
+    freshRepo("ud", { "f.txt": "base\n" });
+    sh("checkout -q -b del");
+    sh("rm -q f.txt");
+    sh("commit -q -m del");
+    sh("checkout -q main");
+    writeFileSync(join(repoDir, "f.txt"), "changed\n");
+    sh("commit -q -am mod");
+    try {
+      sh("merge -q del");
+    } catch {
+      /* conflict expected */
+    }
+    const tree = await get("tree", {});
+    expect(tree.body.files.find((f: { path: string }) => f.path === "f.txt")?.status).toBe("M");
+  });
+
+  it("synthesizes an untracked diff even when status hides untracked files", async () => {
+    sh("config status.showUntrackedFiles no");
+    const res = await get("diff", { file: "u.txt", against: "HEAD" });
+    expect(res.body.diff).toContain("+untracked");
+  });
+
+  it("refuses to diff a shallow boundary commit as if it added the whole tree", async () => {
+    const src = repoDir;
+    sh("commit -q --allow-empty -m second");
+    repoDir = join(tmp, "shallow");
+    execSync(`git clone -q --depth 1 "file://${src}" "${repoDir}"`, { stdio: "pipe", env: gitSafeEnv() });
+    const files = await get("commit-files", { sha: "HEAD" });
+    expect(files.status).toBe(409);
+    expect(files.body.error).toMatch(/shallow/);
+    const diff = await get("diff", { sha: "HEAD", file: "a.txt" });
+    expect(diff.status).toBe(409);
+  });
+
+  it("diffs the first changes of a SHA-256 repository", async () => {
+    repoDir = join(tmp, "sha256");
+    mkdirSync(repoDir);
+    sh("init -q --object-format=sha256");
+    writeFileSync(join(repoDir, "n.txt"), "new\n");
+    sh("add n.txt");
+    const unborn = await get("diff", { file: "n.txt", against: "HEAD" });
+    expect(unborn.status).toBe(200);
+    expect(unborn.body.diff).toContain("+new");
+    sh("commit -q -m first");
+    const first = await get("diff", { sha: "HEAD", file: "n.txt" });
+    expect(first.status).toBe(200);
+    expect(first.body.diff).toContain("+new");
+  });
+});
