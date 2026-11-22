@@ -135,10 +135,15 @@ export default function QuickFinder() {
     }
   }, [selectedIndex]);
 
+  // Read by the window handler, which is bound once.
+  const openRef = useRef(open);
+  openRef.current = open;
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "p") {
-        if (isFileShortcutClaimed()) return;
+        // An open finder outranks a claim: the claimant's input sits underneath it.
+        if (isFileShortcutClaimed() && !openRef.current) return;
         e.preventDefault();
         setOpen((p) => !p);
       }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import QuickFinder from "../../search/QuickFinder";
@@ -58,5 +58,17 @@ describe("Repos tab search shortcut", () => {
     fireEvent.keyDown(window, { key: "p", ctrlKey: true, repeat: true });
     fireEvent.keyDown(window, { key: "p", ctrlKey: true, isComposing: true });
     expect(pill("PRs")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("Ctrl+P while the quick finder is open belongs to the finder, not the Code search beneath", async () => {
+    render(<Shell repos />);
+    act(() => {
+      window.dispatchEvent(new Event("pavilio:open-quick-finder"));
+    });
+    await screen.findByRole("dialog", { name: "Quick finder" });
+    expect(fireEvent.keyDown(window, { key: "p", ctrlKey: true })).toBe(false);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Quick finder" })).toBeNull());
+    expect(pill("PRs")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("combobox", { name: "Go to file" })).toBeNull();
   });
 });
