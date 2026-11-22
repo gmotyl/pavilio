@@ -27,7 +27,8 @@ interface Props {
 }
 
 const isChanged = (f: TreeFile) => !!f.status;
-const byName = (a: { name: string }, b: { name: string }) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+const byName = (a: { name: string }, b: { name: string }) =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 
 // Maps while building: whole-repo trees reach tens of thousands of files.
 function buildTree(files: TreeFile[]): DirNode {
@@ -97,6 +98,7 @@ export default function FileTree({ files, selected, onSelect, changedOnly = fals
           type="button"
           className="ft-row ft-dir"
           style={indent}
+          data-testid={`ft-dir-${d.path}`}
           data-name={d.name}
           aria-expanded={isOpen}
           onClick={() => toggle(d.path)}
@@ -105,7 +107,15 @@ export default function FileTree({ files, selected, onSelect, changedOnly = fals
             {isOpen ? "▾" : "▸"}
           </span>
           <span className="ft-nm">{d.name}</span>
-          {!isOpen && d.changed && <span className="ft-dot" title="Contains changes" />}
+          {/* In changedOnly every folder holds changes, so the dot would say nothing. */}
+          {!isOpen && d.changed && !changedOnly && (
+            <>
+              {" "}
+              <span className="ft-dot" title="Contains changes">
+                <span className="sr-only">contains changes</span>
+              </span>
+            </>
+          )}
         </button>,
       );
       if (isOpen) rows.push(...renderDir(d, depth + 1));
@@ -119,6 +129,7 @@ export default function FileTree({ files, selected, onSelect, changedOnly = fals
           type="button"
           className={`ft-row ft-file${st ? "" : " unchanged"}`}
           style={indent}
+          data-testid={`ft-file-${file.path}`}
           data-name={name}
           aria-current={current ? "true" : undefined}
           title={st ? `${file.path} (${STATUS_LABEL[st]})` : file.path}

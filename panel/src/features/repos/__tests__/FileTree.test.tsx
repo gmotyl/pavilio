@@ -47,12 +47,31 @@ describe("FileTree", () => {
 
     fireEvent.click(a);
     expect(onSelect).toHaveBeenCalledWith("src/a.ts");
+
+    fireEvent.click(folder("lib"));
+    const deep = screen.getByRole("button", { name: /deep\.ts/ });
+    expect(deep).toHaveTextContent("A");
+    expect(deep).toHaveTextContent("+5 −0");
+  });
+
+  it("sorts case-insensitively and numerically", () => {
+    const files: TreeFile[] = ["b10.ts", "B2.ts", "a.ts", "b1.ts"].map((path) => ({ path }));
+    render(<FileTree files={files} onSelect={() => {}} />);
+    expect(rowNames()).toEqual(["a.ts", "b1.ts", "B2.ts", "b10.ts"]);
+  });
+
+  it("gives every row a test id", () => {
+    render(<FileTree files={FILES} onSelect={() => {}} />);
+    expect(screen.getByTestId("ft-dir-src")).toBe(folder("src"));
+    expect(screen.getByTestId("ft-file-README.md")).toHaveAttribute("data-name", "README.md");
   });
 
   it("dots a collapsed folder that hides changes", () => {
     render(<FileTree files={FILES} onSelect={() => {}} />);
     expect(folder("src").querySelector(".ft-dot")).not.toBeNull();
+    expect(folder("src")).toHaveAccessibleName("src contains changes");
     expect(folder("docs").querySelector(".ft-dot")).toBeNull();
+    expect(folder("docs")).toHaveAccessibleName("docs");
 
     fireEvent.click(folder("src"));
     expect(folder("src").querySelector(".ft-dot")).toBeNull();
@@ -71,8 +90,19 @@ describe("FileTree", () => {
     expect(screen.getByRole("button", { name: /a\.ts/ })).not.toHaveAttribute("aria-current");
   });
 
+  it("keeps a folder the user collapsed closed while the selection is unchanged", () => {
+    const { rerender } = render(<FileTree files={FILES} selected="src/lib/deep.ts" onSelect={() => {}} />);
+    fireEvent.click(folder("lib"));
+    expect(folder("lib")).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<FileTree files={FILES} selected="src/lib/deep.ts" onSelect={() => {}} />);
+    expect(folder("lib")).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("changedOnly hides unchanged files", () => {
     render(<FileTree files={FILES} changedOnly selected="src/a.ts" onSelect={() => {}} />);
     expect(rowNames()).toEqual(["src", "lib", "a.ts", "z.ts"]);
+    // Every folder holds changes here, so the dot says nothing.
+    expect(document.querySelector(".ft-dot")).toBeNull();
   });
 });
