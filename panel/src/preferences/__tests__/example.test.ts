@@ -77,7 +77,7 @@ describe("the shipped example preferences file", () => {
       expect(() => def.codec.parse(toRaw(value)), `"${storageKey}" is not a valid value`).not.toThrow();
     }
 
-    // The shapes the example exists to demonstrate.
-    expect([...scopes].sort()).toEqual(["global", "project", "repo"]);
+    // The shapes the example exists to demonstrate; no repo-scoped declaration ships.
+    expect([...scopes].sort()).toEqual(["global", "project"]);
   });
 });

@@ -17,10 +17,8 @@ let unscopedInstances = 0;
  * nameless projects can never meet on one key even if something later did
  * write.
  *
- * This mirrors `useOptionalScopePreference` in `features/git/GitBranchDiff`
- * rather than importing it: that one is private to the git surface and
- * repo-scoped, and a feature reaching across into another feature's component
- * module for a hook is the coupling neither wants.
+ * Kept local to the time feature: a shared optional-scope hook would couple
+ * unrelated features through one component module.
  */
 export function useProjectScopePreference<T>(
   def: PreferenceDef<T>,

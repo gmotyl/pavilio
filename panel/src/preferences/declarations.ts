@@ -29,7 +29,6 @@ import { definePreference, type PreferenceCodec, type PreferenceDef } from "./ty
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
 import type { SidebarOrder } from "../features/shell/sidebarOrder";
-import type { RepoSearchScope } from "../features/projects/useRepoSearch";
 import type { GitViewMode } from "../features/git/useGitViewMode";
 import type { DrawerSide } from "../features/terminal/useTerminalDrawer";
 import type { TileLayout } from "../features/terminal/tileLayout";
@@ -682,13 +681,6 @@ export const preferences = {
     codec: bool,
     portable: true,
   }),
-  repoSearchScope: definePreference<RepoSearchScope>({
-    key: "repos.searchScope", // was: panel-repo-search-scope
-    scope: "global",
-    default: "changed",
-    codec: oneOf<RepoSearchScope>(["changed", "branch-diff", "commits"]),
-    portable: true,
-  }),
   searchIncludeArchived: definePreference({
     key: "search.includeArchived", // was: panel-search-include-archived
     scope: "global",
@@ -761,24 +753,6 @@ export const preferences = {
     portable: true,
   }),
   /**
-   * One key per repository, not the hook's single JSON blob. A blob's inner
-   * keys can never run through `normalizeRepoScope`, so `~/git/prv/pavilio`
-   * and `/root/git/prv/pavilio` would stay two entries with opposite values —
-   * the exact collision repo scope exists to close, and the reason this is
-   * symmetric with `git.branchDiff.open` rather than shaped like the hook.
-   *
-   * Default `true`: `useCommitsOpenMap.isOpen` reads `map[repoPath] !== false`,
-   * so a repo with no entry is OPEN today. (Absent ≠ closed — the map merely
-   * starts `{}`.)
-   */
-  commitsOpen: definePreference({
-    key: "git.commitsOpen", // was: panel-commits-open (one blob keyed by repo path)
-    scope: "repo",
-    default: true,
-    codec: bool,
-    portable: true,
-  }),
-  /**
    * The width of every repo file tree — the changed-path list the git views
    * render beside a diff. One of those trees did store a width before: the
    * history tree, under the git-history-only `git.history.paneWidth`. The two
@@ -807,28 +781,6 @@ export const preferences = {
     scope: "global",
     default: 280,
     codec: num,
-    portable: true,
-  }),
-  /** Empty means "nothing chosen yet" — the view then picks main/master/develop. */
-  branchDiffBase: definePreference({
-    key: "git.branchDiff.base", // was: panel-branch-diff-base-<repo>
-    scope: "repo",
-    default: "",
-    codec: str,
-    portable: true,
-  }),
-  branchDiffOpen: definePreference({
-    key: "git.branchDiff.open", // was: panel-branch-diff-open-<repo>
-    scope: "repo",
-    default: true,
-    codec: bool,
-    portable: true,
-  }),
-  worktreeExpanded: definePreference({
-    key: "git.worktree.expanded", // was: panel-worktree-expanded-<worktree path>
-    scope: "repo",
-    default: false,
-    codec: bool,
     portable: true,
   }),
 

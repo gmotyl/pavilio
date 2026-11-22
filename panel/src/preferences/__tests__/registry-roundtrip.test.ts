@@ -38,9 +38,6 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "fileList.sidebarCollapsed": [true, false],
   "wiki.sessionStartIngest": [true, false],
   "search.includeArchived": [true, false],
-  "git.commitsOpen": [true, false],
-  "git.branchDiff.open": [true, false],
-  "git.worktree.expanded": [true, false],
   "terminal.drawer.open": [true, false],
   "terminal.maximized": [true, false],
   "speech.answerPane.autoOpen": [true, false],
@@ -64,7 +61,6 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "speech.answerPane.opacityBottom": [100, 0, 5, 40, 99.5],
 
   // ── str: the values that would round-trip WRONG through a JSON re-parse ──
-  "git.branchDiff.base": ["", "main", "true", "240", "null", "{}", "[]", "release/1.0"],
   "speech.engine": ["edge", "", "true", "240", "null"],
   "speech.route": ["auto", "server", "", "true", "240", "null"],
   "speech.voice": [
@@ -80,7 +76,6 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "plans.runBanner.launcher": [null, "codex", "true", "240", "null", "{}"],
 
   // ── oneOf ───────────────────────────────────────────────────────────────
-  "repos.searchScope": ["changed", "branch-diff", "commits"],
   "repos.view": ["review", "code", "prs"],
   "fileViewer.diffLayout": ["split", "unified"],
   "git.viewMode": ["flat", "tree"],
@@ -160,7 +155,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 71;
+const DECLARATION_COUNT = 66;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

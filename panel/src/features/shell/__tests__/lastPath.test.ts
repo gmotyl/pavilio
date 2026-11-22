@@ -32,8 +32,7 @@ describe("an unresolved scope does not throw", () => {
    * typed `string`, so on paper none of this can happen — and it has happened
    * twice already, both times from a `name ?? ""` / `projectName` chain that
    * TypeScript sees as `string` while the runtime value is `undefined`. Once
-   * it crashed a render (`GitBranchDiff`), once it silently emptied a result
-   * list (`useRepoSearch`).
+   * it crashed a render, once it silently emptied a result list.
    *
    * No live bug at these sites: every caller guards with `!project` first.
    * These pin the shape anyway — a third regression costs more than two tests.

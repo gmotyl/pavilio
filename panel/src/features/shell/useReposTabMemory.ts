@@ -3,8 +3,8 @@ import { writeLastReposQuery } from "./lastPath";
 
 /**
  * Persists the full URL query string whenever the user is on the repos tab,
- * so returning to the tab later can restore exact state (repo, file, scope,
- * highlight, branchfile, sha, gitfile).
+ * so returning to the tab later can restore exact state (view, repo, wt, file,
+ * line, cmp).
  */
 export function useReposTabMemory(
   project: string | undefined,

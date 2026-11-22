@@ -11,7 +11,7 @@ import { isPreferenceScope } from "../../preferences/types";
  * not a fact about this machine, so it travels in the workspace file.
  *
  * Local state seeded from `readPreference`, written only on a real toggle —
- * `GitBranchDiff`'s shape rather than `usePreference`'s, for two reasons the
+ * not `usePreference`'s shape, for two reasons the
  * hook cannot cover. `ProjectView` renders `projectName={name || ""}`, so a
  * BLANK project reaches this hook on a real route, and `storageKey` throws on a
  * blank scope rather than letting every project share one key; an unresolved

@@ -38,8 +38,7 @@ const rail = () => screen.getByTestId("pane-resize-git-changes");
 /**
  * Wiring only. The rail itself — separator semantics, drag, clamp, the hidden
  * rail on a phone — is owned by `useResizablePane.test.tsx` and
- * `PaneResizer.test.tsx`; the shared width and the inner scroller of all three
- * trees by `GitBranchDiff.resize.test.tsx`.
+ * `PaneResizer.test.tsx`.
  */
 describe("resizing the git-changes tree", () => {
   beforeEach(() => {
