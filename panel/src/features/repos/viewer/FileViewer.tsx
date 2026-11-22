@@ -46,6 +46,8 @@ const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
 
 /** Highlight `lines` as one text so multi-line tokens (comments, template strings) stay right, then split back per line. */
 function highlightLines(lines: string[], lang: string | undefined): string[] {
+  // An empty text still highlights to one (empty) line; keep the counts equal.
+  if (lines.length === 0) return [];
   const text = lines.join("\n");
   if (!lang || text.length > MAX_HIGHLIGHT_CHARS) return lines.map(escapeHtml);
   let html: string;
@@ -206,6 +208,9 @@ function scrollRowIntoHost(root: HTMLElement, row: Element): void {
 
 // git prints this in place of hunks when either side is binary.
 const BINARY_DIFF_RE = /^Binary files .* differ$/m;
+const MODE_CHANGE_RE = /^old mode (\d+)\nnew mode (\d+)$/m;
+// Rows mounted at once; a file of many short lines passes the byte cap yet would mount a huge table.
+const ROW_PAGE = 5000;
 
 const MARK_TITLE: Record<GutterMark, string> = { added: "Added", changed: "Changed", removed: "Lines removed above" };
 const STATUS_TEXT = { M: "modified", A: "new file", D: "deleted" } as const;
@@ -231,10 +236,12 @@ export default function FileViewer({
   // `seq` alternates the animation name so a repeat flash on the same row restarts it.
   const [flash, setFlash] = useState<{ line: number; seq: number } | null>(null);
   const [pending, setPending] = useState<number | undefined>(undefined);
+  const [limit, setLimit] = useState(ROW_PAGE);
 
   const parsed = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);
   const changed = isChanged(parsed);
   const binary = !changed && !!diff && BINARY_DIFF_RE.test(diff);
+  const modeChange = diff ? MODE_CHANGE_RE.exec(diff) : null;
   const rows = useMemo(() => (content != null && changed ? fillGaps(parsed, content) : parsed), [parsed, content, changed]);
   const codeLines = useMemo(
     () => (content != null ? splitLines(content) : changed && status !== "D" ? newSide(parsed) : null),
@@ -245,6 +252,7 @@ export default function FileViewer({
   const [expansion, setExpansion] = useState<{ rows: Row[]; ids: Set<number> }>({ rows, ids: new Set() });
   const expanded = useMemo(() => (expansion.rows === rows ? expansion.ids : new Set<number>()), [expansion, rows]);
   const expand = useCallback((id: number) => setExpansion({ rows, ids: new Set([...expanded, id]) }), [rows, expanded]);
+  const visible = useMemo(() => expandFolds(items, expanded), [items, expanded]);
 
   const narrow = width !== null && width < SPLIT_MIN_WIDTH;
   const shownMode = changed ? mode : "code";
@@ -283,8 +291,11 @@ export default function FileViewer({
 
   const codeHtml = useMemo(() => {
     if (shownMode !== "code" || !codeLines) return null;
-    return highlightLines(codeLines, lang).map((h, i) => lineHtml(h, codeLines[i], { term, symbols }));
-  }, [shownMode, codeLines, lang, term, symbols]);
+    // Highlighted whole (multi-line tokens), decorated only as far as is mounted.
+    return highlightLines(codeLines, lang)
+      .slice(0, limit)
+      .map((h, i) => lineHtml(h, codeLines[i], { term, symbols }));
+  }, [shownMode, codeLines, lang, term, symbols, limit]);
 
   const marks = useMemo(() => (changed ? gutterMarks(rows) : new Map<number, GutterMark>()), [changed, rows]);
 
@@ -301,13 +312,21 @@ export default function FileViewer({
       setPending(undefined);
       return;
     }
+    // Past the mounted page: mount up to the page holding the target, then retry.
+    const at =
+      shownMode === "code"
+        ? codeLines && pending <= codeLines.length
+          ? pending - 1
+          : -1
+        : visible.findIndex((it) => (it.kind === "ctx" || it.kind === "add") && it.new === pending);
+    if (at >= limit) return setLimit(Math.ceil((at + 1) / ROW_PAGE) * ROW_PAGE);
     if (shownMode === "diff") {
       const fold = items.find((it) => it.kind === "fold" && it.rows.some((r) => (r.kind === "ctx" || r.kind === "add") && r.new === pending));
       if (fold && fold.kind === "fold" && !expanded.has(fold.id)) return expand(fold.id);
       if (codeLines) return setMode("code");
     }
     setPending(undefined);
-  }, [pending, shownMode, items, codeLines, expanded, expand]);
+  }, [pending, shownMode, items, codeLines, expanded, expand, visible, limit]);
 
   useEffect(() => {
     if (flash == null) return;
@@ -345,7 +364,9 @@ export default function FileViewer({
     r && r.kind !== "gap" ? <td className={`fv-cd fv-s-${side}`} dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} /> : <td className="fv-cd fv-s-empty" />;
 
   let body: ReactNode;
+  let totalRows = 0;
   if (shownMode === "code") {
+    totalRows = codeLines?.length ?? 0;
     body = codeHtml ? (
       <table className="fv-table fv-code">
         <colgroup>
@@ -373,7 +394,7 @@ export default function FileViewer({
       </p>
     );
   } else {
-    const visible = expandFolds(items, expanded);
+    totalRows = visible.length;
     if (shownLayout === "unified") {
       body = (
         <table className="fv-table fv-unified">
@@ -384,7 +405,7 @@ export default function FileViewer({
             <col />
           </colgroup>
           <tbody>
-            {visible.map((it, i) => {
+            {visible.slice(0, limit).map((it, i) => {
               if (it.kind === "fold") return foldRow(it);
               if (it.kind === "gap") return gapRow(it, `g${i}`);
               const n = it.kind === "del" ? undefined : it.new;
@@ -410,7 +431,7 @@ export default function FileViewer({
             <col />
           </colgroup>
           <tbody>
-            {pairRows(visible).map((p, i) => {
+            {pairRows(visible.slice(0, limit)).map((p, i) => {
               if (p.kind === "fold") return foldRow(p);
               if (p.kind === "gap") return gapRow(p, `g${i}`);
               if (p.kind === "ctx") {
@@ -452,6 +473,11 @@ export default function FileViewer({
           <span className="fv-stat">
             <span className="fv-pa">+{total.add}</span> <span className="fv-pd">−{total.del}</span>
             {uncommitted && <span className="fv-muted"> · {STATUS_TEXT[status ?? "M"]}, uncommitted</span>}
+          </span>
+        )}
+        {modeChange && (
+          <span className="fv-muted" data-testid="file-viewer-mode-change">
+            mode {modeChange[1]} → {modeChange[2]}
           </span>
         )}
         <span className="fv-spacer" />
@@ -502,6 +528,11 @@ export default function FileViewer({
       </div>
       <div ref={bodyRef} className="fv-body" data-testid="file-viewer-body" onClick={onBodyClick}>
         {body}
+        {totalRows > limit && (
+          <button type="button" className="fv-more" data-testid="file-viewer-more" onClick={() => setLimit((n) => n + ROW_PAGE)}>
+            Show {Math.min(ROW_PAGE, totalRows - limit).toLocaleString()} more of {(totalRows - limit).toLocaleString()} remaining lines
+          </button>
+        )}
       </div>
     </div>
   );

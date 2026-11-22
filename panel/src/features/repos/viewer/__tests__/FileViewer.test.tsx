@@ -253,4 +253,36 @@ describe("FileViewer", () => {
     render(<FileViewer path="logo.png" diff={diff} status="D" defaultMode="diff" />);
     expect(screen.getByTestId("file-viewer-body")).toHaveTextContent("Binary file — no text diff");
   });
+
+  it("an empty script with identifier links and a search term renders without crashing", () => {
+    render(<FileViewer path="src/empty.ts" content="" defaultMode="code" highlight="x" onIdentifierClick={vi.fn()} />);
+    expect(screen.getByTestId("file-viewer-body").querySelectorAll("tr[data-line]")).toHaveLength(0);
+  });
+
+  it("a mode-only change shows the old and new mode", () => {
+    const diff = "diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n";
+    render(<FileViewer path="run.sh" diff={diff} content={"echo hi\n"} status="M" uncommitted defaultMode="diff" />);
+    expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("mode 100644 → 100755");
+  });
+
+  it("without the whole file, Code is unavailable instead of showing a diff's first hunk as the file", () => {
+    const diff = "--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1,4 +1,4 @@\n-a\n+b\n c\n d\n e";
+    render(<FileViewer path="src/x.ts" diff={diff} status="M" defaultMode="code" />);
+    expect(screen.getByTestId("file-viewer-body")).toHaveTextContent("File content is not loaded.");
+    fireEvent.click(screen.getByTestId("file-viewer-mode-diff"));
+    expect(screen.getByTestId("file-viewer-mode-diff")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("file-viewer-body")).not.toHaveTextContent("File content is not loaded.");
+  });
+
+  it("mounts long files in pages and grows to reach a jump target", () => {
+    const content = Array.from({ length: 12_000 }, (_, i) => `l${i + 1}`).join("\n");
+    const { rerender } = render(<FileViewer path="big.txt" content={content} defaultMode="code" />);
+    const rows = () => screen.getByTestId("file-viewer-body").querySelectorAll("tr[data-line]").length;
+    expect(rows()).toBe(5000);
+    fireEvent.click(screen.getByTestId("file-viewer-more"));
+    expect(rows()).toBe(10_000);
+    rerender(<FileViewer path="big.txt" content={content} defaultMode="code" scrollToLine={11_500} scrollKey={1} />);
+    expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="11500"]')).not.toBeNull();
+    expect(screen.queryByTestId("file-viewer-more")).toBeNull();
+  });
 });

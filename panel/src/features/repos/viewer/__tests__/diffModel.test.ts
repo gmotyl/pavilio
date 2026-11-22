@@ -42,7 +42,9 @@ describe("diffModel", () => {
     const later = parseDiff("@@ -10,2 +10,2 @@\n-a\n+b\n c");
     expect(later[0]).toEqual({ kind: "gap", count: 9, old: 1, new: 1 });
     expect(newSide(later)).toBeNull();
-    expect(newSide(parseDiff(DIFF))).toEqual(['import x from "x";', "const a = 2;", "const b = 3;", "export { a };", "// end"]);
+    // A hunk at line 1 may still omit an unchanged tail, so only a new file is known whole.
+    expect(newSide(parseDiff(DIFF))).toBeNull();
+    expect(newSide(parseDiff("--- /dev/null\n+++ b/n.ts\n@@ -0,0 +1,2 @@\n+one\n+two"))).toEqual(["one", "two"]);
     // The file's content fills the gap and the tail.
     const filled = fillGaps(later, Array.from({ length: 12 }, (_, i) => `l${i + 1}`).join("\n"));
     expect(filled.filter((r) => r.kind === "gap")).toEqual([]);
@@ -85,5 +87,27 @@ describe("diffModel", () => {
       ["@@ -1,6 +1,6 @@", " a", "-b", "+B", "+new", " c", "-d", " e", " f"].join("\n"),
     );
     expect(Object.fromEntries(gutterMarks(rows))).toEqual({ 2: "changed", 3: "added", 5: "removed" });
+  });
+
+  it("numbers zero-context insertions and deletions after the named line", () => {
+    // `git diff -U0`: insert new line 4 after old line 3; then delete old line 8 (after new line 8).
+    const rows = parseDiff(["@@ -3,0 +4 @@", "+inserted", "@@ -8 +8,0 @@", "-dropped"].join("\n"));
+    expect(rows).toEqual([
+      { kind: "gap", count: 3, old: 1, new: 1 },
+      { kind: "add", new: 4, text: "inserted" },
+      { kind: "gap", count: 4, old: 4, new: 5 },
+      { kind: "del", old: 8, text: "dropped" },
+    ]);
+    const content = ["l1", "l2", "l3", "inserted", "l4", "l5", "l6", "l7", "l9"].join("\n");
+    const filled = fillGaps(rows, content);
+    expect(filled.find((r) => r.kind === "ctx" && r.text === "l3")).toEqual({ kind: "ctx", old: 3, new: 3, text: "l3" });
+    expect(filled.find((r) => r.kind === "ctx" && r.text === "l7")).toEqual({ kind: "ctx", old: 7, new: 8, text: "l7" });
+    expect(filled.at(-1)).toEqual({ kind: "ctx", old: 9, new: 9, text: "l9" });
+  });
+
+  it("word marks never split a surrogate pair", () => {
+    const { del, add } = wordMarks("ok 😀 done", "ok 😁 done");
+    expect(del).toEqual([[3, 5]]);
+    expect(add).toEqual([[3, 5]]);
   });
 });

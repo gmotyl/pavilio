@@ -41,12 +41,10 @@ export function parseDiff(diff: string): Row[] {
   for (const line of diff.split("\n")) {
     const h = HUNK_RE.exec(line);
     if (h) {
-      old = Number(h[1]);
-      nu = Number(h[3]);
-      // `-0,0` / `+0,0` name an empty side; its first line is still 1.
-      const startOld = Math.max(old, 1);
-      const startNew = Math.max(nu, 1);
-      if (Number(h[2] ?? 1) > 0 && startOld > nextOld) {
+      // An empty range (`-3,0`, `+0,0`) names the line before it, so its cursor starts one past.
+      const startOld = Number(h[1]) + (h[2] === "0" ? 1 : 0);
+      const startNew = Number(h[3]) + (h[4] === "0" ? 1 : 0);
+      if (startOld > nextOld) {
         rows.push({ kind: "gap", count: startOld - nextOld, old: nextOld, new: nextNew });
       }
       old = startOld;
@@ -101,10 +99,13 @@ export function splitLines(content: string): string[] {
   return lines;
 }
 
-/** The new side's lines, when the rows cover the whole file (no gaps); else null. */
+/**
+ * The new side's lines when the diff is known to carry the whole file: only a new file's
+ * (all additions). Any other diff may omit an unchanged tail, which nothing in it reveals.
+ */
 export function newSide(rows: Row[]): string[] | null {
-  if (rows.some((r) => r.kind === "gap")) return null;
-  return rows.flatMap((r) => (r.kind === "ctx" || r.kind === "add" ? [r.text] : []));
+  if (rows.length === 0 || rows.some((r) => r.kind !== "add")) return null;
+  return rows.map((r) => (r as Extract<Row, { kind: "add" }>).text);
 }
 
 export function countChanges(rows: Row[]): { add: number; del: number } {
@@ -207,7 +208,8 @@ export function rowWordMarks(rows: Row[]): Map<Row, Range[]> {
   return marks;
 }
 
-const TOKEN_RE = /[A-Za-z0-9_$]+|\s+|[^A-Za-z0-9_$\s]/g;
+// `u`: a lone symbol is a whole code point, so a mark never splits a surrogate pair.
+const TOKEN_RE = /[A-Za-z0-9_$]+|\s+|[^A-Za-z0-9_$\s]/gu;
 // Token LCS is quadratic; past this the line just stays a whole-line change.
 const MAX_CELLS = 40_000;
 

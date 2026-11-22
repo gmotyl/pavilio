@@ -204,3 +204,12 @@ td.fv-s-empty {
     background-color: var(--accent-dim);
   }
 }
+.fv-more {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--accent);
+  font-size: 12px;
+}
+.fv-more:hover { background: var(--bg-hover); }
