@@ -22,8 +22,8 @@ export interface TsNav {
 
 export interface TsNavOptions {
   idleMs?: number;
-  /** The TypeScript to run for `root`; defaults to the repo's own, else the panel's. */
-  loadTypeScript?: (root: string) => typeof ts;
+  /** The TypeScript to run; `tsPath` is the repo's own install serving the file, undefined for the panel's. */
+  loadTypeScript?: (root: string, tsPath: string | undefined) => typeof ts;
   /** Live services kept at once; the least recently used goes first. */
   maxServices?: number;
 }
@@ -56,34 +56,49 @@ const isContainedPath = (rel: string): boolean =>
 
 export const isNavigable = (path: string): boolean => SOURCE_EXT.has(extname(path).toLowerCase());
 
-/** The repo's own `typescript` when installed inside it, so its version and lib match; else the panel's. */
-export function loadRepoTypeScript(root: string): typeof ts {
+/**
+ * The `typescript` a file in `fromDir` would load, when installed inside `realRoot`: resolved from
+ * the file's dir, so a workspace package's own install wins over the root's.
+ */
+export function repoTypeScriptPath(realRoot: string, fromDir: string): string | undefined {
   try {
-    const req = createRequire(join(root, "package.json"));
-    // Runs the linked repo's own compiler in-process: linked repos are trusted code.
-    if (isContainedPath(relative(root, req.resolve("typescript")))) return req("typescript");
+    const path = createRequire(join(fromDir, "package.json")).resolve("typescript");
+    return isContainedPath(relative(realRoot, path)) ? path : undefined;
   } catch {
     // Not installed in the repo.
+    return undefined;
   }
-  return panelTypeScript();
 }
 
+// Runs the linked repo's own compiler in-process: linked repos are trusted code.
+const loadRepoTypeScript = (_root: string, tsPath: string | undefined): typeof ts =>
+  tsPath ? panelRequire(tsPath) : panelTypeScript();
+
 interface Config {
+  /** mtime of the tsconfig file when parsed; a change re-parses it. */
+  mtimeMs: number;
   options: ts.CompilerOptions;
   fileNames: string[];
   references: string[];
+  projectReferences: readonly ts.ProjectReference[] | undefined;
 }
 
 /** One language service per (root, tsconfig); `configPath` is "" for the no-tsconfig fallback. */
 interface Entry {
   root: string;
+  state: RootState;
+  /** The parsed config the service was built from; a re-parse replaces the service. */
+  config: Config | undefined;
   service: ts.LanguageService;
   timer: ReturnType<typeof setTimeout> | undefined;
   fileNames: string[];
 }
 
-/** Per-root state shared by that root's services. */
+/** Per-(root, compiler) state shared by its services. */
 interface RootState {
+  key: string;
+  /** The repo's own compiler module, dropped from the require cache with the state. */
+  tsPath: string | undefined;
   ts: typeof ts;
   /** Parsed tsconfig files by path. */
   configs: Map<string, Config>;
@@ -99,9 +114,15 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
   const entries = new Map<string, Entry>();
   const roots = new Map<string, RootState>();
 
-  const keyOf = (root: string, configPath: string): string => `${root}\0${configPath}`;
+  const keyOf = (state: RootState, configPath: string): string => `${state.key}\0${configPath}`;
 
-  function disposeKey(key: string): void {
+  function dropState(state: RootState): void {
+    roots.delete(state.key);
+    // Node caches modules independently: without this an upgraded compiler never reloads.
+    if (state.tsPath && ![...roots.values()].some((r) => r.tsPath === state.tsPath)) delete panelRequire.cache[state.tsPath];
+  }
+
+  function disposeKey(key: string, keepState = false): void {
     const e = entries.get(key);
     if (!e) return;
     entries.delete(key);
@@ -111,8 +132,8 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
     } catch {
       // Already broken; dropping it is all that matters.
     }
-    // Parsed configs go with the root's last service, so a later visit sees tsconfig edits.
-    if (![...entries.values()].some((x) => x.root === e.root)) roots.delete(e.root);
+    // The state goes with its last service.
+    if (!keepState && ![...entries.values()].some((x) => x.state === e.state)) dropState(e.state);
   }
 
   function touch(key: string, e: Entry): void {
@@ -123,16 +144,19 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
     e.timer.unref?.();
   }
 
-  function rootState(root: string): RootState {
-    let r = roots.get(root);
+  function rootState(root: string, tsPath: string | undefined): RootState {
+    const key = `${root}\0${tsPath ?? ""}`;
+    let r = roots.get(key);
     if (!r) {
-      r = { ts: loadTypeScript(root), configs: new Map() };
-      roots.set(root, r);
+      r = { key, tsPath, ts: loadTypeScript(root, tsPath), configs: new Map() };
+      roots.set(key, r);
     }
     return r;
   }
 
-  function create(root: string, tsx: typeof ts, options: ts.CompilerOptions, fileNames: string[]): Entry {
+  function create(root: string, state: RootState, config: Config | undefined): Entry {
+    const tsx = state.ts;
+    const options = config?.options ?? fallbackOptions(tsx);
     const version = (f: string): string => {
       try {
         return String(statSync(f).mtimeMs);
@@ -140,9 +164,20 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
         return "0";
       }
     };
-    const entry: Entry = { root, service: undefined as unknown as ts.LanguageService, timer: undefined, fileNames };
-    const host: ts.LanguageServiceHost = {
+    const entry: Entry = {
+      root,
+      state,
+      config,
+      service: undefined as unknown as ts.LanguageService,
+      timer: undefined,
+      fileNames: [...(config?.fileNames ?? [])],
+    };
+    // useSourceOfProjectReferenceRedirect is tsserver's (untyped) hook: referenced projects resolve
+    // to their sources, so an unbuilt composite project still navigates.
+    const host: ts.LanguageServiceHost & { useSourceOfProjectReferenceRedirect(): boolean } = {
       getCompilationSettings: () => options,
+      getProjectReferences: () => config?.projectReferences,
+      useSourceOfProjectReferenceRedirect: () => true,
       getScriptFileNames: () => entry.fileNames,
       // Working tree only: the file's mtime is its version.
       getScriptVersion: version,
@@ -161,16 +196,19 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
   }
 
   function readConfig(state: RootState, path: string): Config | undefined {
+    const mtimeMs = statSync(path, { throwIfNoEntry: false })?.mtimeMs;
+    if (mtimeMs === undefined) return undefined;
     let cfg = state.configs.get(path);
-    if (cfg) return cfg;
-    if (!existsSync(path)) return undefined;
+    if (cfg && cfg.mtimeMs === mtimeMs) return cfg;
     const tsx = state.ts;
     const read = tsx.readConfigFile(path, tsx.sys.readFile);
     const parsed = tsx.parseJsonConfigFileContent(read.config ?? {}, tsx.sys, dirname(path), undefined, path);
     cfg = {
+      mtimeMs,
       options: parsed.options,
       fileNames: parsed.fileNames.map((f) => resolve(f)),
       references: (parsed.projectReferences ?? []).map((r) => resolve(tsx.resolveProjectReferencePath(r))),
+      projectReferences: parsed.projectReferences,
     };
     state.configs.set(path, cfg);
     return cfg;
@@ -191,18 +229,26 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
     return undefined;
   }
 
-  /** The tsconfig governing `file`: the nearest one from its dir up to the repo root, or a referenced one listing it; "" when none. */
+  /**
+   * The tsconfig governing `file`: the nearest one from its dir up to the repo root that lists it
+   * (directly or through references), else the nearest one; "" when none.
+   */
   function configPathFor(state: RootState, root: string, file: string): string {
     let dir = dirname(file);
+    let nearest = "";
     for (;;) {
       const candidate = join(dir, "tsconfig.json");
-      if (existsSync(candidate)) return owningConfig(state, candidate, file, 0, new Set()) ?? candidate;
+      if (existsSync(candidate)) {
+        const owner = owningConfig(state, candidate, file, 0, new Set());
+        if (owner) return owner;
+        nearest ||= candidate;
+      }
       if (dir === root) break;
       const up = dirname(dir);
       if (up === dir) break;
       dir = up;
     }
-    return "";
+    return nearest;
   }
 
   /** 0-based offset of a 1-based line/col, or -1 when it lies outside the text. */
@@ -229,15 +275,20 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
     }
 
     let key: string | undefined;
+    let state: RootState | undefined;
     try {
-      const state = rootState(root);
+      state = rootState(root, repoTypeScriptPath(realRoot, dirname(realpathSync(file))));
       const configPath = configPathFor(state, root, file);
-      key = keyOf(root, configPath);
+      key = keyOf(state, configPath);
+      const cfg = configPath ? readConfig(state, configPath) : undefined;
       let entry = entries.get(key);
+      // A tsconfig edit re-parsed the config: rebuild the service on it.
+      if (entry && entry.config !== cfg) {
+        disposeKey(key, true);
+        entry = undefined;
+      }
       if (!entry) {
-        const cfg = configPath ? readConfig(state, configPath) : undefined;
-        const options = cfg?.options ?? fallbackOptions(state.ts);
-        entry = create(root, state.ts, options, [...(cfg?.fileNames ?? [])]);
+        entry = create(root, state, cfg);
         entries.set(key, entry);
         for (const old of [...entries.keys()].slice(0, Math.max(0, entries.size - maxServices))) disposeKey(old);
       }
@@ -273,8 +324,8 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
     } catch (e) {
       // A broken service is dropped; the next request starts a fresh one.
       console.warn(`[ts-nav] ${root}: ${e instanceof Error ? e.message : String(e)}`);
-      if (key) disposeKey(key);
-      else roots.delete(root);
+      if (key && entries.has(key)) disposeKey(key);
+      else if (state && ![...entries.values()].some((x) => x.state === state)) dropState(state);
       return [];
     }
   }
@@ -284,7 +335,7 @@ export function createTsNav(opts: TsNavOptions = {}): TsNav {
     activeRoots: () => [...new Set([...entries.values()].map((e) => e.root))],
     dispose: () => {
       for (const key of [...entries.keys()]) disposeKey(key);
-      roots.clear();
+      for (const state of [...roots.values()]) dropState(state);
     },
   };
 }
