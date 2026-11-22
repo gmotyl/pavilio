@@ -69,6 +69,15 @@ describe("readProject repo presence", () => {
     ]);
   });
 
+  it("normalises the path before checking presence", () => {
+    mkdirSync(join(scratch, "spikes"));
+    // `old` does not exist, so the raw spelling cannot be stat'ed; the
+    // normalised path (the one git routes run in) can.
+    const spelled = join(scratch, "old") + "/../spikes";
+    writeRepos([{ name: "spikes", path: spelled }]);
+    expect(repos()).toEqual([{ name: "spikes", path: spelled, present: true }]);
+  });
+
   it("treats a path that names a file as not present", () => {
     const file = join(scratch, "file.txt");
     writeFileSync(file, "x\n");

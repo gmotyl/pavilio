@@ -1,5 +1,5 @@
 import { readdirSync, existsSync, readFileSync, statSync, realpathSync } from "fs";
-import { join, relative, isAbsolute, sep } from "path";
+import { join, relative, isAbsolute, sep, resolve } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { expandHome } from "./paths.js";
@@ -47,11 +47,13 @@ function latestWikiLogDate(dir: string): string | null {
 /**
  * Whether a repos.json `path` names a directory on this machine. Any stat failure
  * (ENOENT, but also ELOOP, EACCES, ...) means "not present": a well-formed entry is
- * never dropped just because its path cannot be inspected here.
+ * never dropped just because its path cannot be inspected here. The path is
+ * normalised first, exactly as the git routes resolve a repo root, so a spelling
+ * like `/work/old/../spikes` is judged by the directory git would run in.
  */
 export function isDirectoryOnThisMachine(path: string): boolean {
   try {
-    return statSync(expandHome(path), { throwIfNoEntry: false })?.isDirectory() ?? false;
+    return statSync(resolve(expandHome(path)), { throwIfNoEntry: false })?.isDirectory() ?? false;
   } catch {
     return false;
   }

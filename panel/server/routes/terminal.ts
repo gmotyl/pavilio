@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { lstatSync, readFileSync } from "fs";
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
-import { homedir, tmpdir, userInfo } from "os";
+import { tmpdir, userInfo } from "os";
 import {
   createSession,
   listSessions,
@@ -18,11 +18,15 @@ import { listOsUsers } from "../lib/os-users.js";
 import { getDefaultUser } from "../lib/project-default-user.js";
 import { isProjectDir } from "../lib/project-dir.js";
 import { isDirectoryOnThisMachine } from "../lib/discovery.js";
+import { expandHome } from "../lib/paths.js";
 
+/**
+ * The single expansion used for a requested directory: the presence check, the
+ * path handed back to the client and the session cwd all go through it, so they
+ * can never disagree (e.g. `~//repo`).
+ */
 function expandPath(p: string): string {
-  if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
-  if (p === "~") return homedir();
-  return p;
+  return resolve(expandHome(p));
 }
 
 const router = Router();
@@ -170,8 +174,9 @@ router.get("/start-dirs", (req, res) => {
       }>;
       for (const repo of repos) {
         // A linked repo that is not on this machine is no place to start a shell.
-        if (!isDirectoryOnThisMachine(repo.path)) continue;
-        dirs.push({ label: repo.name, path: expandPath(repo.path) });
+        const path = expandPath(repo.path);
+        if (!isDirectoryOnThisMachine(path)) continue;
+        dirs.push({ label: repo.name, path });
       }
     } catch {
       // repos.json optional

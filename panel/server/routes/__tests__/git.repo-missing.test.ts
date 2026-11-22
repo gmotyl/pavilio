@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { execSync } from "child_process";
-import { mkdtempSync, rmSync, mkdirSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { configMock, makeApp } from "../../test-kit";
@@ -139,6 +139,28 @@ describe("git routes and a repo missing on this machine", () => {
     );
     expect(noBase.status).toBe(400);
     expect(noBase.body).toEqual({ error: "base parameter required" });
+  });
+
+  it("a stat error other than not-found is not reported as repo-missing", async () => {
+    // A symlink loop makes stat fail with ELOOP (EACCES cannot be produced as root).
+    const a = join(tmp, "loop-a");
+    const b = join(tmp, "loop-b");
+    symlinkSync(b, a);
+    symlinkSync(a, b);
+    const res = await request(app()).get(
+      `/api/git/log?repo=${encodeURIComponent(a)}`,
+    );
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBeUndefined();
+    expect(res.body.error).toContain("ELOOP");
+  });
+
+  it("stage with an empty batch still answers repo-missing", async () => {
+    const missing = join(tmp, "does-not-exist");
+    const res = await request(app())
+      .post("/api/git/stage")
+      .send({ files: [], repo: missing });
+    expectRepoMissing(res, missing);
   });
 
   it("a bare ~ repo runs in the home directory", async () => {

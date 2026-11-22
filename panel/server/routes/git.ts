@@ -32,18 +32,27 @@ function getRepoRoot(customRepo?: string): string {
   return resolve(projectsDir, "..");
 }
 
-function isDirectory(path: string): boolean {
+/**
+ * Throw RepoMissingError when `path` is not a directory on this machine. Only
+ * "nothing there" (ENOENT, ENOTDIR, or an entry that is not a directory) counts
+ * as missing; any other stat failure (EACCES, ELOOP, ...) is rethrown so it
+ * surfaces as a plain 500 with its real message.
+ */
+function assertRepoDirectory(path: string): void {
+  let isDir: boolean;
   try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
+    isDir = statSync(path).isDirectory();
+  } catch (e: any) {
+    if (e?.code === "ENOENT" || e?.code === "ENOTDIR") throw new RepoMissingError(path);
+    throw e;
   }
+  if (!isDir) throw new RepoMissingError(path);
 }
 
 function git(cmd: string, repoPath?: string): string {
   const cwd = getRepoRoot(repoPath);
   // Check before spawning: execSync with a missing cwd fails as an opaque ENOENT.
-  if (!isDirectory(cwd)) throw new RepoMissingError(cwd);
+  assertRepoDirectory(cwd);
   return execSync(`git ${cmd}`, {
     cwd,
     // Without this an inherited GIT_DIR would win over cwd and these reads would
@@ -237,6 +246,9 @@ router.post("/stage", (req, res) => {
     const { files, repo } = req.body;
     if (!Array.isArray(files))
       return res.status(400).json({ error: "files array required" });
+    // Checked once up front: an empty batch spawns no git, yet a missing repo
+    // must still answer repo-missing rather than "staged: 0".
+    assertRepoDirectory(getRepoRoot(repo));
     for (const f of files) {
       git(`add "${f}"`, repo);
     }

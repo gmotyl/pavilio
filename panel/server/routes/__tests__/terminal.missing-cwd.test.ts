@@ -31,6 +31,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -101,5 +102,35 @@ describe("terminal routes and directories missing on this machine", () => {
       { label: "Home", path: process.env.HOME || "/tmp" },
       { label: "present", path: present },
     ]);
+  });
+  it("checks and returns the same expanded path for start dirs", async () => {
+    const home = join(root, "home");
+    mkdirSync(join(home, "x"), { recursive: true });
+    vi.stubEnv("HOME", home);
+    mkdirSync(join(projectsDir, "alpha"));
+    // `~//x` must expand once: the listed path is the directory that was
+    // checked, not a different spelling that lands outside $HOME.
+    writeFileSync(
+      join(projectsDir, "alpha", "repos.json"),
+      JSON.stringify([{ name: "x", path: "~//x" }]),
+    );
+    const app = makeApp(terminalRouter, "/api/terminal");
+
+    const res = await request(app)
+      .get("/api/terminal/start-dirs")
+      .query({ project: "alpha" });
+
+    expect(res.status).toBe(200);
+    const listed = res.body.find((d: { label: string }) => d.label === "x");
+    expect(listed).toEqual({ label: "x", path: join(home, "x") });
+
+    // A session started from that entry runs in the same directory.
+    const session = await request(app)
+      .post("/api/terminal/sessions")
+      .send({ cwd: "~//x", project: "alpha" });
+    expect(session.status).toBe(201);
+    expect(createSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cwd: join(home, "x") }),
+    );
   });
 });
