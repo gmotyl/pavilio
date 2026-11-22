@@ -185,7 +185,11 @@ describe("ReviewView", () => {
     expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
     expect(within(tree).getByTestId("ft-file-src/a.ts")).toHaveAttribute("aria-current", "true");
 
-    const r = await waitFor(() => rail()!);
+    const r = await waitFor(() => {
+      const el = rail()!;
+      expect(within(el).getAllByRole("button")).toHaveLength(2);
+      return el;
+    });
     expect(within(r).getAllByRole("button").map((b) => b.textContent)).toEqual(["L15+2 −1", "L30−1"]);
   });
 
@@ -223,7 +227,12 @@ describe("ReviewView", () => {
   it("rail entry scrolls the viewer to its line", async () => {
     renderReview();
     await loaded();
-    const r = await waitFor(() => rail()!);
+    // The rail mounts before the file's diff arrives; wait for its entries, not just the rail.
+    const r = await waitFor(() => {
+      const el = rail()!;
+      within(el).getByRole("button", { name: /^L30/ });
+      return el;
+    });
     const scroll = vi.mocked(Element.prototype.scrollTo);
     const outer = vi.mocked(HTMLElement.prototype.scrollIntoView);
     scroll.mockClear();
@@ -289,9 +298,12 @@ describe("ReviewView", () => {
     fireEvent.click(screen.getByTestId("pr-switcher"));
     fireEvent.click(await waitFor(() => screen.getByTestId("pr-row-pavilio#2")));
     await loaded();
+    // Settle the late answer itself rather than sleeping for a guessed interval.
+    const lateAnswer = fetch.mock.results[fetch.mock.calls.findIndex(([u]) => String(u).includes("/api/prs/open"))].value as Promise<Response>;
     await act(async () => {
       release();
-      await new Promise((r) => setTimeout(r, 20));
+      await lateAnswer;
+      await new Promise((r) => setTimeout(r, 0));
     });
     expect(calls(fetch, "/api/git/changed").map(([u]) => u)).toEqual([expect.stringContaining("head=head2")]);
     expect(screen.getByTestId("search").textContent).toContain("pr=pavilio%232");

@@ -71,7 +71,10 @@ describe("ChangesPanel", () => {
 
     const msg = within(p).getByRole("textbox", { name: "Commit message" });
     fireEvent.change(msg, { target: { value: "fix: area" } });
-    fireEvent.click(within(p).getByTestId("changes-commit"));
+    // Commit stays disabled until the stage round-trip settles.
+    const commit = within(p).getByTestId("changes-commit");
+    await waitFor(() => expect(commit).toBeEnabled());
+    fireEvent.click(commit);
     await waitFor(() => expect(posts(fetch, "/api/git/commit")).toEqual([{ message: "fix: area", repo: MAIN }]));
 
     await waitFor(() => expect(within(p).queryByTestId("changes-file-src/a.ts")).toBeNull());
@@ -87,7 +90,9 @@ describe("ChangesPanel", () => {
     await waitFor(() => expect(msg).toHaveValue("chore: tweak a"));
     expect(calls(fetch, `/api/git/suggest-message?repo=${encodeURIComponent(MAIN)}`).length).toBeGreaterThan(0);
 
-    fireEvent.click(within(p).getByTestId("changes-commit-push"));
+    const commitPush = within(p).getByTestId("changes-commit-push");
+    await waitFor(() => expect(commitPush).toBeEnabled());
+    fireEvent.click(commitPush);
     await waitFor(() => expect(posts(fetch, "/api/git/push")).toEqual([{ repo: MAIN }]));
     expect(posts(fetch, "/api/git/commit")).toEqual([{ message: "chore: tweak a", repo: MAIN }]);
 
