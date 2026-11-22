@@ -209,14 +209,19 @@ export default function CodeView({ repos, params, setParams, contextSlot, search
   const worktrees = useWorktrees(repos);
   const named = params.get("repo");
   const repo = (named ? repos.find((r) => r.name === named) : undefined) ?? repos.find((r) => r.present);
-  const wt = params.get("wt");
-  const root = repo?.present ? (wt ?? repo.path) : null;
+  const asked = params.get("wt");
+  const listed = repo ? worktrees[repo.name] : undefined;
+  // The URL is untrusted: only a listed worktree of this repo is ever read.
+  const wt = asked && listed?.some((w) => w.path === asked) ? asked : null;
+  const waiting = !!asked && !!repo?.present && !listed;
+  const root = repo?.present && !waiting ? (wt ?? repo.path) : null;
 
   const pick = (name: string, path: string | null) => setParams({ repo: name, wt: path, file: null, line: null });
 
   let body: ReactNode;
   if (repos.length === 0) body = <p className="cv-msg">This project has no linked repositories.</p>;
   else if (!repo) body = <p className="cv-msg">None of this project's linked repositories are on this machine.</p>;
+  else if (waiting) body = <p className="cv-msg">Listing worktrees…</p>;
   else if (!root) body = <p className="cv-msg">{repo.name} is not on this machine. Pick another repository above.</p>;
   else
     body = (

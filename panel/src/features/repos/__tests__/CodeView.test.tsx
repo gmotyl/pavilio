@@ -61,6 +61,21 @@ describe("CodeView", () => {
     await waitFor(() => expect(calls(fetch, `/api/git/file?repo=${encodeURIComponent(FEAT)}&path=src%2Ffeat.ts`)).toHaveLength(1));
   });
 
+  it("a wt param outside the repo's worktrees falls back to the main checkout", async () => {
+    const { fetch } = renderCode("?view=code&wt=%2Felsewhere&file=README.md");
+    await screen.findByTestId("ft-file-README.md");
+    await screen.findByTestId("file-viewer");
+    expect(calls(fetch, `/api/git/tree?repo=${encodeURIComponent(MAIN)}`)).toHaveLength(1);
+    expect(fetch.mock.calls.some(([u]) => decodeURIComponent(String(u)).includes("/elsewhere"))).toBe(false);
+  });
+
+  it("a listed wt param opens that worktree once the listing arrives", async () => {
+    const { fetch } = renderCode(`?view=code&wt=${encodeURIComponent(FEAT)}`);
+    fireEvent.click(await screen.findByTestId("ft-dir-src"));
+    await screen.findByTestId("ft-file-src/feat.ts");
+    expect(calls(fetch, "/api/git/tree")).toEqual([`/api/git/tree?repo=${encodeURIComponent(FEAT)}`]);
+  });
+
   it("renders search, tree, Back bar, viewer in Code and outline", async () => {
     renderCode("?view=code&file=src/b.ts");
     const view = screen.getByTestId("code-view");
