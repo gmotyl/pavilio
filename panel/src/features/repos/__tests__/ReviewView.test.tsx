@@ -72,11 +72,12 @@ interface Setup {
   open?: FetchHandler;
   changed?: FetchHandler;
   tree?: FetchHandler;
+  file?: FetchHandler;
 }
 
 const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts", "+++ /dev/null", "@@ -1,3 +0,0 @@", "-one", "-two", "-three"].join("\n");
 
-function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree }: Setup = {}) {
+function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
     "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40) })),
@@ -84,12 +85,12 @@ function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open,
     "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
     "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
     "/api/git/diff-ref": (url: string) => text(url.includes("gone.ts") ? GONE_DIFF : DIFF),
-    "/api/git/file": (url: string) =>
+    "/api/git/file": file ?? ((url: string) =>
       url.includes("logo.png")
         ? jsonResponse({ error: "binary file", binary: true }, { status: 415 })
         : url.includes("huge.json")
           ? jsonResponse({ error: "file too large", tooLarge: true, size: 2.5 * 1024 * 1024 }, { status: 413 })
-          : text(CONTENT),
+          : text(CONTENT)),
   });
   render(
     <MemoryRouter initialEntries={[`/project/pavilio/repos${search}`]}>
@@ -199,7 +200,7 @@ describe("ReviewView", () => {
     fireEvent.click(within(treeArea()).getByRole("checkbox", { name: "Changed files only" }));
     await waitFor(() => expect(screen.getByTestId("ft-file-README.md")).toBeInTheDocument());
     expect(calls(fetch, "/api/git/tree")[0][0]).toBe(
-      `/api/git/tree?repo=${encodeURIComponent(REPO_PATH)}&ref=${encodeURIComponent("refs/pavilio/pr/1")}`,
+      `/api/git/tree?repo=${encodeURIComponent(REPO_PATH)}&ref=${"h".repeat(40)}`,
     );
     expect(screen.getByTestId("ft-file-src/a.ts")).toHaveAttribute("title", "src/a.ts (modified)");
     expect(screen.getByTestId("ft-file-src/b.ts")).toHaveClass("unchanged");
@@ -215,7 +216,7 @@ describe("ReviewView", () => {
     // Line 40 sits past the diff's last hunk: only the file at head carries it.
     await waitFor(() => expect(viewer.querySelector('tr[data-line="40"]')).toHaveTextContent("line 40"));
     expect(calls(fetch, "/api/git/file").map(([u]) => u)).toContain(
-      `/api/git/file?repo=${encodeURIComponent(REPO_PATH)}&ref=${encodeURIComponent("refs/pavilio/pr/1")}&path=${encodeURIComponent("src/a.ts")}`,
+      `/api/git/file?repo=${encodeURIComponent(REPO_PATH)}&ref=${"h".repeat(40)}&path=${encodeURIComponent("src/a.ts")}`,
     );
   });
 
@@ -245,6 +246,8 @@ describe("ReviewView", () => {
     expect(scroll.mock.contexts[0]).toHaveClass("rv-main");
     expect(outer).not.toHaveBeenCalled();
     expect(screen.getByTestId("search").textContent).toContain("line=30");
+    // The default file is written with the line, so the link survives a change of first file.
+    expect(screen.getByTestId("search").textContent).toContain(`file=${encodeURIComponent("src/a.ts")}`);
 
     fireEvent.click(within(r).getByRole("button", { name: /^L30/ }));
     await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
@@ -380,4 +383,15 @@ describe("ReviewView", () => {
     expect(within(treeArea()).queryByText(/Couldn't list the repo/)).toBeNull();
     expect(status).not.toBeInTheDocument();
   });
+
+  it("a changed file too large to read whole keeps its patch", async () => {
+    renderReview({ file: () => jsonResponse({ error: "file too large", tooLarge: true, size: 9 * 1024 * 1024 }, { status: 413 }) });
+    await loaded();
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    expect(viewer).toHaveTextContent("const area = width * height;");
+    expect(screen.getByTestId("review-code-note")).toHaveTextContent("too large to load");
+    expect(screen.queryByText(/too large to display/)).toBeNull();
+  });
+
 });

@@ -28,7 +28,7 @@ type Opened =
   | { status: "ready"; head: string; base: string; changed: ChangedFile[] };
 
 type Loaded = { path: string } & (
-  | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string }
+  | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string; codeNote?: string }
   | { binary: true; tooLarge?: false }
   | { tooLarge: true; size?: number; binary?: false }
 );
@@ -50,7 +50,6 @@ async function request(url: string, init?: RequestInit): Promise<Response> {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const q = encodeURIComponent;
-const prRef = (n: number) => `refs/pavilio/pr/${n}`;
 
 const CHECKS: Partial<Record<ChecksState, [string, string]>> = {
   pass: ["✓", "Checks passed"],
@@ -98,9 +97,11 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   const [changedOnly, setChangedOnly] = useState(true);
   const [whole, setWhole] = useState<TreeFile[] | { error: string } | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [scroll, setScroll] = useState<{ line: number; key: number } | null>(() => {
+  // Bound to its file: a line is meaningless on another one. A link without
+  // `file` (null) targets whichever file opens first.
+  const [scroll, setScroll] = useState<{ line: number; key: number; file: string | null } | null>(() => {
     const line = Number(params.get("line"));
-    return line > 0 ? { line, key: 0 } : null;
+    return line > 0 ? { line, key: 0, file: params.get("file") } : null;
   });
   const [bodyRef, width] = useWidth<HTMLDivElement>();
 
@@ -133,14 +134,16 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   useEffect(() => {
     if (changedOnly || !ready || whole) return;
     let cancelled = false;
-    request(`/api/git/tree?repo=${q(pr.repoPath)}&ref=${q(prRef(pr.number))}`)
+    // The SHA `open` resolved, not the PR ref: another tab re-opening the PR
+    // moves the ref, and the review must stay on one revision.
+    request(`/api/git/tree?repo=${q(pr.repoPath)}&ref=${q(ready.head)}`)
       .then(async (res) => ((await res.json()) as { files: TreeFile[] }).files)
       .then((files) => !cancelled && setWhole(files))
       .catch((e: unknown) => !cancelled && setWhole({ error: message(e) }));
     return () => {
       cancelled = true;
     };
-  }, [changedOnly, ready, whole, pr.repoPath, pr.number]);
+  }, [changedOnly, ready, whole, pr.repoPath]);
 
   const changedByPath = useMemo(() => new Map((ready?.changed ?? []).map((f) => [f.path, f])), [ready]);
 
@@ -169,11 +172,17 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
         : undefined;
       if (change?.status === "D") return { path, diff };
       try {
-        const content = await (await request(`/api/git/file?repo=${q(pr.repoPath)}&ref=${q(prRef(pr.number))}&path=${q(path)}`)).text();
+        const content = await (await request(`/api/git/file?repo=${q(pr.repoPath)}&ref=${q(ready.head)}&path=${q(path)}`)).text();
         return { path, diff, content };
       } catch (e) {
-        if (e instanceof HttpError && e.status === 415) return { path, binary: true };
-        if (e instanceof HttpError && e.status === 413) return { path, tooLarge: true, size: await tooLargeSize(e.res) };
+        if (!(e instanceof HttpError)) throw e;
+        if (e.status === 415) return { path, binary: true };
+        // A patch already in hand outranks the whole file (huge file, submodule pointer): only Code mode is lost.
+        if (diff && (e.status === 413 || e.status === 404)) {
+          const why = e.status === 413 ? "too large to load" : "not a readable file at the PR head";
+          return { path, diff, codeNote: `The whole file is ${why}; Code mode shows only the changed lines.` };
+        }
+        if (e.status === 413) return { path, tooLarge: true, size: await tooLargeSize(e.res) };
         throw e;
       }
     })()
@@ -182,26 +191,29 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
     return () => {
       cancelled = true;
     };
-  }, [ready, selected, change, pr.repoPath, pr.number]);
+  }, [ready, selected, change, pr.repoPath]);
 
   const select = (path: string) => {
     setScroll(null);
     setParams({ file: path, line: null });
   };
   const jump = (line: number) => {
-    setScroll((s) => ({ line, key: (s?.key ?? 0) + 1 }));
-    setParams({ line: String(line) });
+    if (!selected) return;
+    setScroll((s) => ({ line, key: (s?.key ?? 0) + 1, file: selected }));
+    // The file too: a line alone would land on whatever file opens first later.
+    setParams({ file: selected, line: String(line) });
   };
 
   const showRail = width === null || width >= RAIL_MIN_WIDTH;
   const stack = width !== null && width < STACK_MAX_WIDTH;
   const current = loaded && loaded.path === selected ? loaded : null;
+  const scrollHere = scroll && (scroll.file === null || scroll.file === selected) ? scroll : null;
 
   let tree: ReactNode;
   if (opened.status === "error")
     tree = (
       <div className="rv-msg" role="alert">
-        {opened.stage === "open" ? "Couldn't fetch this PR's branch." : "Couldn't load this PR's changes."}{" "}
+        {opened.stage === "open" ? "Couldn't fetch this PR's branch" : "Couldn't load this PR's changes"} ({opened.error}).{" "}
         <button type="button" data-testid="review-retry" onClick={() => setAttempt((n) => n + 1)}>
           Retry
         </button>
@@ -232,17 +244,24 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   else if (current.error) viewer = <p className="fv-empty" role="alert">Couldn't load {selected} ({current.error}).</p>;
   else
     viewer = (
-      <FileViewer
-        key={current.path}
-        path={current.path}
-        diff={current.diff}
-        content={current.content}
-        status={change?.status === "R" ? "M" : change?.status}
-        counts={change ? { add: change.add, del: change.del } : undefined}
-        defaultMode={change ? "diff" : "code"}
-        scrollToLine={scroll?.line}
-        scrollKey={scroll?.key}
-      />
+      <>
+        {current.codeNote && (
+          <p className="rv-msg" role="status" data-testid="review-code-note">
+            {current.codeNote}
+          </p>
+        )}
+        <FileViewer
+          key={current.path}
+          path={current.path}
+          diff={current.diff}
+          content={current.content}
+          status={change?.status === "R" ? "M" : change?.status}
+          counts={change ? { add: change.add, del: change.del } : undefined}
+          defaultMode={change ? "diff" : "code"}
+          scrollToLine={scrollHere?.line}
+          scrollKey={scrollHere?.key}
+        />
+      </>
     );
 
   return (
