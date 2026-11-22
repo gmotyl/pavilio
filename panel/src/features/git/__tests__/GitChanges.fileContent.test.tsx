@@ -9,6 +9,8 @@ const files = [
   { status: "M", path: "logo.png" },
   { status: "M", path: "huge.log" },
   { status: "D", path: "gone.ts" },
+  { status: "??", path: "new.png" },
+  { status: "??", path: "dump.sql" },
 ];
 
 const WHOLE = Array.from({ length: 30 }, (_, i) => (i === 19 ? "new" : `line ${i + 1}`)).join("\n") + "\n";
@@ -36,10 +38,15 @@ beforeEach(() => {
     "/api/git/diff?file=src%2Fapp.ts": { diff: APP_DIFF },
     "/api/git/diff?file=logo.png": { diff: BINARY_DIFF },
     "/api/git/diff?file=huge.log": { diff: "--- a/huge.log\n+++ b/huge.log\n@@ -5,1 +5,1 @@\n-a\n+b" },
+    // Untracked: the legacy endpoint synthesizes an add-diff from the bytes read as text.
+    "/api/git/diff?file=new.png": { diff: "--- /dev/null\n+++ b/new.png\n@@ -0,0 +1,1 @@\n+\uFFFDPNG\u0001JUNK" },
+    "/api/git/diff?file=dump.sql": { diff: "--- /dev/null\n+++ b/dump.sql\n@@ -0,0 +1,1 @@\n+INSERT HUGE" },
     "/api/git/diff?file=gone.ts": { diff: "--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-bye" },
     "/api/git/file": (url: string) => {
       fileCalls.push(url);
       if (url.includes("path=src%2Fapp.ts")) return new Response(WHOLE, { status: 200 });
+      if (url.includes("path=new.png")) return jsonResponse({ error: "binary file", binary: true }, { status: 415 });
+      if (url.includes("path=dump.sql")) return jsonResponse({ error: "file too large", tooLarge: true, size: 9 * 1024 * 1024 }, { status: 413 });
       if (url.includes("path=logo.png")) return jsonResponse({ error: "binary file", binary: true }, { status: 415 });
       if (url.includes("path=huge.log")) return jsonResponse({ error: "file too large", tooLarge: true, size: 9e6 }, { status: 413 });
       return jsonResponse({ error: "not found" }, { status: 404 });
@@ -65,6 +72,22 @@ describe("GitChanges file content", () => {
     renderWithRouter(<GitChanges repo="/r" />);
     await user.click(await screen.findByText("logo.png"));
     expect(await screen.findByText("Binary file — no text diff")).toBeInTheDocument();
+  });
+
+  it("an untracked binary file shows a notice, not its bytes as text", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<GitChanges repo="/r" />);
+    await user.click(await screen.findByText("new.png"));
+    expect(await screen.findByTestId("git-changes-notice")).toHaveTextContent("new.png is a binary file and can't be shown.");
+    expect(screen.queryByText(/JUNK/)).toBeNull();
+  });
+
+  it("an untracked file over the read cap shows its size, not a synthesized diff", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<GitChanges repo="/r" />);
+    await user.click(await screen.findByText("dump.sql"));
+    expect(await screen.findByTestId("git-changes-notice")).toHaveTextContent("This file is too large to display (9.0 MB).");
+    expect(screen.queryByText(/INSERT HUGE/)).toBeNull();
   });
 
   it("a file too large to read still shows its diff", async () => {

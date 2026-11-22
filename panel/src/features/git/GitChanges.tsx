@@ -12,6 +12,7 @@ import {
   Folder,
 } from "lucide-react";
 import FileViewer, { type FileViewerProps } from "../repos/viewer/FileViewer";
+import { tooLargeMessage, tooLargeSize } from "../repos/tooLarge";
 import BranchPicker from "./BranchPicker";
 import CopyIconButton from "../shell/CopyIconButton";
 import FileChangeList from "./FileChangeList";
@@ -108,6 +109,8 @@ export default function GitChanges({
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
   const [fileContent, setFileContent] = useState<string | undefined>(undefined);
+  // Set when the whole-file read refused the file and the diff can't stand in for it.
+  const [notice, setNotice] = useState<string | null>(null);
   const openSeq = useRef(0);
   const [diffLoading, setDiffLoading] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -124,22 +127,38 @@ export default function GitChanges({
     onOpenFileChange?.(path);
     setDiffLoading(true);
     const repoQ = repo ? `&repo=${encodeURIComponent(repo)}` : "";
-    const deleted = viewerStatus(files.find((f) => f.path === path)?.status) === "D";
-    const [diff, content] = await Promise.all([
+    const status = files.find((f) => f.path === path)?.status;
+    const deleted = viewerStatus(status) === "D";
+    type Read = { content?: string; refused?: { status: number; size?: number } };
+    const [diff, read] = await Promise.all([
       fetch(`/api/git/diff?file=${encodeURIComponent(path)}${repoQ}`)
         .then(async (res) => (res.ok ? ((await res.json()).diff as string) : ""))
         .catch(() => ""),
       // The whole file feeds Code mode; binary (415) and oversized (413) files fall back to the diff alone.
       deleted
-        ? undefined
+        ? ({} as Read)
         : fetch(`/api/git/file?path=${encodeURIComponent(path)}${repoQ}`)
-            .then((res) => (res.ok ? res.text() : undefined))
-            .catch(() => undefined),
+            .then(async (res): Promise<Read> => {
+              if (res.ok) return { content: await res.text() };
+              if (res.status === 413) return { refused: { status: 413, size: await tooLargeSize(res) } };
+              return res.status === 415 ? { refused: { status: 415 } } : {};
+            })
+            .catch((): Read => ({})),
     ]);
     // A later click wins over a slower earlier response.
     if (seq !== openSeq.current) return;
-    setDiffContent(diff);
-    setFileContent(content);
+    // An untracked file's "diff" is the file itself read as text: once the read
+    // refused it as binary or oversized, that diff is junk (or huge) too.
+    const untracked = status === "??";
+    const refused = read.refused;
+    if (refused && (refused.status === 415 ? !/^Binary files /m.test(diff) : untracked)) {
+      setNotice(refused.status === 415 ? `${path} is a binary file and can't be shown.` : tooLargeMessage(refused.size));
+      setDiffContent("");
+    } else {
+      setNotice(null);
+      setDiffContent(diff);
+    }
+    setFileContent(read.content);
     setDiffLoading(false);
   };
 
@@ -475,6 +494,10 @@ export default function GitChanges({
         {diffLoading ? (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Loading diff...
+          </p>
+        ) : notice ? (
+          <p className="text-sm" data-testid="git-changes-notice" style={{ color: "var(--text-muted)" }}>
+            {notice}
           </p>
         ) : (
           <FileViewer
