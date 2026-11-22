@@ -214,6 +214,8 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
         return { path, diff, content };
       } catch (e) {
         if (e instanceof HttpError && e.status === 415) return { path, binary: true };
+        // A patch in hand outranks the whole file (huge file, submodule pointer): Diff still shows it.
+        if (diff && e instanceof HttpError && (e.status === 413 || e.status === 404)) return { path, diff };
         if (e instanceof HttpError && e.status === 413) return { path, tooLarge: true, size: await tooLargeSize(e.res) };
         throw e;
       }
@@ -242,7 +244,8 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     },
     [setParams, commitList],
   );
-  const openAt = useCallback((path: string, line: number) => open(path, { line }), [open]);
+  // Definition jumps and Back carry working-tree coordinates: land in the working tree.
+  const openAt = useCallback((path: string, line: number) => open(path, { line, working: true }), [open]);
   const nav = useDefinitionNav({ root, file: selected, open: openAt });
   const jump = (line: number) => {
     setScroll((s) => ({ line, key: (s?.key ?? 0) + 1 }));
@@ -313,7 +316,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
         content={current.content}
         status={viewerStatus(status)}
         uncommitted={src === "work" && !!status}
-        defaultMode={src !== "work" && status ? "diff" : "code"}
+        defaultMode={(src !== "work" && status) || (current.content == null && current.diff) ? "diff" : "code"}
         highlight={highlight}
         // Lookups read the working tree, so a commit's or HEAD's lines would resolve the wrong spot.
         onIdentifierClick={src === "work" ? nav.onIdentifierClick : undefined}

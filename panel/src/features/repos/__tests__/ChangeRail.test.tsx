@@ -34,6 +34,13 @@ describe("ChangeRail", () => {
     expect(onJump).toHaveBeenLastCalledWith(5, "new");
   });
 
+  it("a removal is labelled with the old-side line it jumps to", () => {
+    const diff = ["--- a/x.ts", "+++ b/x.ts", "@@ -28,3 +29,2 @@", " line 29", "-removed 29", " line 30", ""].join("\n");
+    render(<ChangeRail diff={diff} onJump={vi.fn()} />);
+    const [removal] = within(screen.getByRole("complementary", { name: "Changes in this file" })).getAllByRole("button");
+    expect(removal).toHaveTextContent("L29");
+  });
+
   it("an emptied file's removal targets old line 1", () => {
     const onJump = vi.fn();
     render(<ChangeRail diff={EMPTIED} onJump={onJump} />);

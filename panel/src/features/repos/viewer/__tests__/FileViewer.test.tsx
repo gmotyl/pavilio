@@ -308,4 +308,22 @@ describe("FileViewer", () => {
     expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="11500"]')).not.toBeNull();
     expect(screen.queryByTestId("file-viewer-more")).toBeNull();
   });
+
+  it("split view pages paired rows, so a replaced block never shows false blanks", () => {
+    const n = 3000;
+    const diff = [
+      "--- a/big.txt",
+      "+++ b/big.txt",
+      `@@ -1,${n} +1,${n} @@`,
+      ...Array.from({ length: n }, (_, i) => `-old${i + 1}`),
+      ...Array.from({ length: n }, (_, i) => `+new${i + 1}`),
+    ].join("\n");
+    const { container } = render(<FileViewer path="big.txt" diff={diff} defaultMode="diff" />);
+    act(() => DrivenResizeObserver.resize(1000));
+    expect(container.querySelector("table.fv-split")).not.toBeNull();
+    // Every mounted row pairs a removal with its replacement.
+    expect(container.querySelectorAll("td.fv-s-empty")).toHaveLength(0);
+    expect(container.querySelectorAll("tr.fv-r-change")).toHaveLength(n);
+    expect(screen.queryByTestId("file-viewer-more")).toBeNull();
+  });
 });

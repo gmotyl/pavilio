@@ -54,6 +54,40 @@ describe("useDefinitionNav", () => {
     expect(back()).toBeDisabled();
   });
 
+  it("Back and a late answer after entering Compare return to the working tree they came from", async () => {
+    let release = () => {};
+    let late = false;
+    const A15 = { locations: [{ path: "src/a.ts", line: 15, col: 7 }] };
+    renderCode("?view=code&file=src/b.ts", {
+      "/api/git/branches": () => jsonResponse({ current: "feat/x", branches: ["main", "feat/x"] }),
+      "/api/code/definition": () => (late ? new Promise<Response>((r) => (release = () => r(jsonResponse(A15)))) : jsonResponse(A15)),
+    });
+    const compareWithMain = async () => {
+      fireEvent.click(screen.getByTestId("repo-switcher"));
+      const pop = await screen.findByRole("dialog", { name: "Pick a repository or worktree" });
+      fireEvent.click(within(pop).getByTestId("compare-with-toggle"));
+      fireEvent.click(await within(pop).findByTestId("compare-with-option-main"));
+      await waitFor(() => expect(search().get("cmp")).toBe("main"));
+    };
+    await waitFor(() => expect(sym(3, "inner")).not.toBeNull());
+
+    fireEvent.click(sym(3, "inner")!);
+    await waitFor(() => expect(header()).toHaveTextContent("src/a.ts"));
+    await compareWithMain();
+    fireEvent.click(back());
+    await waitFor(() => expect(search().get("file")).toBe("src/b.ts"));
+    expect(search().get("cmp")).toBeNull();
+
+    // A lookup started in the working tree answers after Compare began.
+    await waitFor(() => expect(sym(3, "inner")).not.toBeNull());
+    late = true;
+    fireEvent.click(sym(3, "inner")!);
+    await compareWithMain();
+    await act(async () => release());
+    await waitFor(() => expect(search().get("file")).toBe("src/a.ts"));
+    expect(search().get("cmp")).toBeNull();
+  });
+
   it("multiple locations show a chooser", async () => {
     const { fetch } = await openB(at({ path: "src/a.ts", line: 15, col: 7 }, { path: "src/b.ts", line: 6, col: 6 }));
     fireEvent.click(sym(3, "inner")!);

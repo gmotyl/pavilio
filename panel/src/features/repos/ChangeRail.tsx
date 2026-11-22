@@ -60,7 +60,7 @@ export default function ChangeRail({ diff, deleted = false, onJump }: Props) {
         runs.map((r, i) => (
           <button key={`${r.line}-${i}`} type="button" data-testid={`review-rail-${r.line}`} onClick={() => (r.oldLine === undefined ? onJump(r.line, "new") : onJump(r.oldLine, "old"))}>
             <i className={r.add === 0 ? "rv-k-del" : r.del === 0 ? "rv-k-add" : "rv-k-mod"} aria-hidden="true" />
-            <span className="rv-ln">L{r.line}</span>
+            <span className="rv-ln">L{r.oldLine ?? r.line}</span>
             <span className="rv-sum">
               {r.add > 0 && <span className="rv-add">+{r.add}</span>}
               {r.add > 0 && r.del > 0 && " "}

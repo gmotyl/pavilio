@@ -164,6 +164,15 @@ describe("CodeView", () => {
     expect(await screen.findByText("This file is too large to display (3.0 MB).")).toBeInTheDocument();
   });
 
+  it("a changed file over the read cap keeps its patch in Diff", async () => {
+    renderCode("?view=code&file=src/a.ts", {
+      "/api/git/file": () => jsonResponse({ error: "file too large", tooLarge: true, size: 3 * 1024 * 1024 }, { status: 413 }),
+    });
+    const viewer = await screen.findByTestId("file-viewer");
+    expect(within(viewer).getByTestId("file-viewer-mode-diff")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText(/too large to display/)).toBeNull();
+  });
+
   it("an untracked file too large to diff is never read whole", async () => {
     const { fetch } = renderCode("?view=code&file=src/a.ts", {
       "/api/git/diff": () => jsonResponse({ diff: "", tooLarge: true, size: 1.5 * 1024 * 1024 }),

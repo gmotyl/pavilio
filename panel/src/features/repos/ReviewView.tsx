@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChecksState } from "../../../server/lib/prs/provider";
 import ChangeRail from "./ChangeRail";
@@ -182,7 +182,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
         // A patch already in hand outranks the whole file (huge file, submodule pointer): only Code mode is lost.
         if (diff && (e.status === 413 || e.status === 404)) {
           const why = e.status === 413 ? "too large to load" : "not a readable file at the PR head";
-          return { path, diff, codeNote: `The whole file is ${why}; Code mode shows only the changed lines.` };
+          return { path, diff, codeNote: `The whole file is ${why}; Diff shows the changes.` };
         }
         if (e.status === 413) return { path, tooLarge: true, size: await tooLargeSize(e.res) };
         throw e;
@@ -314,10 +314,15 @@ export default function ReviewView({ project, prs, filter, setFilter, params, se
 
   const pick = (picked: PullRequest) => setParams({ pr: prKey(picked), file: null, line: null });
   const { revalidate, loading } = prs;
-  // A PR opened since the list loaded: refetch rather than call it gone.
+  // A PR opened since the list loaded: refetch rather than call it gone. Once per
+  // project + PR, so a slow list for a closed PR can't loop; Retry stays manual.
+  const revalidated = useRef<string | null>(null);
   useEffect(() => {
-    if (key && !pr && !loading) revalidate();
-  }, [key, pr, loading, revalidate]);
+    const once = `${project}\0${key}`;
+    if (!key || pr || loading || revalidated.current === once) return;
+    revalidated.current = once;
+    revalidate();
+  }, [project, key, pr, loading, revalidate]);
 
   let body: ReactNode;
   if (!key) body = <p className="rv-msg">Pick a pull request from the switcher above.</p>;

@@ -153,6 +153,17 @@ describe("ReviewView", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ repo: REPO_PATH, number: 4 });
   });
 
+  it("a missing PR refetches the list once, even when each request outlasts the freshness window", async () => {
+    // Every request looks older than the 15s freshness window by the time it completes.
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 20_000));
+    const fetch = renderReview({ search: "?view=review&pr=pavilio%23999" });
+    await screen.findByText(/is not an open pull request/);
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(calls(fetch, "/api/prs?project=")).toHaveLength(2);
+    vi.mocked(Date.now).mockRestore();
+  });
+
   it("header shows state, branches, checks and the GitHub link", async () => {
     renderReview({
       search: "?view=review&pr=pavilio%237",
@@ -192,7 +203,7 @@ describe("ReviewView", () => {
       expect(within(el).getAllByRole("button")).toHaveLength(2);
       return el;
     });
-    expect(within(r).getAllByRole("button").map((b) => b.textContent)).toEqual(["L15+2 −1", "L30−1"]);
+    expect(within(r).getAllByRole("button").map((b) => b.textContent)).toEqual(["L15+2 −1", "L29−1"]);
   });
 
   it("unticking changed-only lists the whole repo at the PR head", async () => {
@@ -232,14 +243,14 @@ describe("ReviewView", () => {
     // The rail mounts before the file's diff arrives; wait for its entries, not just the rail.
     const r = await waitFor(() => {
       const el = rail()!;
-      within(el).getByRole("button", { name: /^L30/ });
+      within(el).getByRole("button", { name: /^L29/ });
       return el;
     });
     const scroll = vi.mocked(Element.prototype.scrollTo);
     const outer = vi.mocked(HTMLElement.prototype.scrollIntoView);
     scroll.mockClear();
     outer.mockClear();
-    fireEvent.click(within(r).getByRole("button", { name: /^L30/ }));
+    fireEvent.click(within(r).getByRole("button", { name: /^L29/ }));
     // A pure removal lands on the removed row itself, not the line after it.
     const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-old-line="29"]')!;
     expect(row).toHaveTextContent("removed 29");
@@ -253,7 +264,7 @@ describe("ReviewView", () => {
     // The default file is written with the line, so the link survives a change of first file.
     expect(screen.getByTestId("search").textContent).toContain(`file=${encodeURIComponent("src/a.ts")}`);
 
-    fireEvent.click(within(r).getByRole("button", { name: /^L30/ }));
+    fireEvent.click(within(r).getByRole("button", { name: /^L29/ }));
     await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
   });
 
@@ -410,6 +421,9 @@ describe("ReviewView", () => {
     expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
     expect(viewer).toHaveTextContent("const area = width * height;");
     expect(screen.getByTestId("review-code-note")).toHaveTextContent("too large to load");
+    // A modified file can't be rebuilt from its hunks: never promise Code will show it.
+    expect(screen.getByTestId("review-code-note")).not.toHaveTextContent(/Code mode shows/);
+    expect(screen.getByTestId("review-code-note")).toHaveTextContent("Diff shows the changes");
     expect(screen.queryByText(/too large to display/)).toBeNull();
   });
 

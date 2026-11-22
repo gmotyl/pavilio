@@ -260,6 +260,8 @@ export default function FileViewer({
   const narrow = width !== null && width < SPLIT_MIN_WIDTH;
   const shownMode = changed ? mode : "code";
   const shownLayout = narrow ? "unified" : layout;
+  // Split pages count paired rows: slicing raw rows first would cut a del/add block and pair it with blanks.
+  const pairs = useMemo(() => (shownMode === "diff" && shownLayout === "split" ? pairRows(visible) : null), [shownMode, shownLayout, visible]);
   const total = counts ?? countChanges(parsed);
   const lang = detectLang(path);
   const term = highlight ?? "";
@@ -324,7 +326,14 @@ export default function FileViewer({
     }
     const hit = (r: Row) => (old ? (r.kind === "ctx" || r.kind === "del") && r.old === line : (r.kind === "ctx" || r.kind === "add") && r.new === line);
     // Past the mounted page: mount up to the page holding the target, then retry.
-    const at = shownMode === "code" ? (codeLines && line <= codeLines.length ? line - 1 : -1) : visible.findIndex((it) => it.kind !== "fold" && hit(it));
+    const at =
+      shownMode === "code"
+        ? codeLines && line <= codeLines.length
+          ? line - 1
+          : -1
+        : pairs
+          ? pairs.findIndex((p) => (p.kind === "ctx" ? hit(p.right as Row) : p.kind === "change" && ((!!p.del && hit(p.del)) || (!!p.add && hit(p.add)))))
+          : visible.findIndex((it) => it.kind !== "fold" && hit(it));
     if (at >= limit) return setLimit(Math.ceil((at + 1) / ROW_PAGE) * ROW_PAGE);
     if (shownMode === "diff") {
       const fold = items.find((it) => it.kind === "fold" && it.rows.some(hit));
@@ -332,7 +341,7 @@ export default function FileViewer({
       if (codeLines && !old) return setMode("code");
     }
     setPending(undefined);
-  }, [pending, shownMode, changed, items, codeLines, expanded, expand, visible, limit]);
+  }, [pending, shownMode, changed, items, codeLines, expanded, expand, visible, pairs, limit]);
 
   useEffect(() => {
     if (flash == null) return;
@@ -403,8 +412,8 @@ export default function FileViewer({
       </p>
     );
   } else {
-    totalRows = visible.length;
-    if (shownLayout === "unified") {
+    totalRows = pairs ? pairs.length : visible.length;
+    if (!pairs) {
       body = (
         <table className="fv-table fv-unified">
           <colgroup>
@@ -441,7 +450,7 @@ export default function FileViewer({
             <col />
           </colgroup>
           <tbody>
-            {pairRows(visible.slice(0, limit)).map((p, i) => {
+            {pairs.slice(0, limit).map((p, i) => {
               if (p.kind === "fold") return foldRow(p);
               if (p.kind === "gap") return gapRow(p, `g${i}`);
               if (p.kind === "ctx") {
