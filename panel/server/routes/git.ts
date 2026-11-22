@@ -613,22 +613,39 @@ router.get("/diff", async (req, res) => {
     if (sha === undefined) return res.json({ diff: getWorkingTreeDiff(file, repo) });
     const root = await repoToplevel(repo);
     const commit = await resolveCommit(sha, root);
-    const diff = await gitArgv(["diff", await commitParent(commit, root), commit, "--", file], root);
-    res.json({ diff: diff.toString("utf-8") });
+    // Rename-aware, like /diff-ref: a renamed file is not shown as wholly added.
+    res.json({ diff: await pathDiff(root, file, [await commitParent(commit, root), commit]) });
   } catch (e: any) {
     sendGitError(res, e);
   }
 });
 
 // Commit log
+/** A git repository whose HEAD names no commit yet (before the first commit). */
+function unbornHead(repo?: string): boolean {
+  const ok = (cmd: string) => {
+    try {
+      git(cmd, repo);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return ok("rev-parse --git-dir") && !ok("rev-parse --verify -q HEAD");
+}
+
 router.get("/log", (req, res) => {
   try {
     const repo = req.query.repo as string | undefined;
     const limit = parseInt(req.query.limit as string) || 30;
-    const raw = git(
-      `log --format="%H%x1f%h%x1f%s%x1f%an%x1f%ai" -n ${limit}`,
-      repo,
-    );
+    let raw: string;
+    try {
+      raw = git(`log --format="%H%x1f%h%x1f%s%x1f%an%x1f%ai" -n ${limit}`, repo);
+    } catch (e) {
+      // Before the first commit HEAD is unborn: that's an empty history, not a failure.
+      if (e instanceof RepoMissingError || !unbornHead(repo)) throw e;
+      raw = "";
+    }
     const commits = raw
       .trim()
       .split("\n")
@@ -727,12 +744,12 @@ router.get("/grep", async (req, res) => {
     const repo = req.query.repo as string | undefined;
     const filesParam = queryString(req.query.files); // comma-separated paths
     if (!q) return res.status(400).json({ error: "q parameter required" });
-    const cwd = getRepoRoot(repo);
-    assertRepoDirectory(cwd);
+    // Top-level, like /tree and /file: hit paths must open the same file for a subdirectory link.
+    const cwd = await repoToplevel(repo);
     const files = filesParam ? filesParam.split(",").filter(Boolean) : [];
     // argv: `-e` keeps a leading `-` a pattern, `--` keeps names paths; no shell sees either.
     // --untracked: the tree lists non-ignored untracked files, so search them too (.gitignore honoured).
-    const args = ["grep", "-rn", "--untracked", "--color=never", "-e", q, ...(files.length ? ["--", ...files] : [])];
+    const args = ["grep", "-rn", "-z", "--untracked", "--color=never", "-e", q, ...(files.length ? ["--", ...files] : [])];
     let raw = "";
     try {
       raw = (await gitArgv(args, cwd)).toString("utf-8");
@@ -744,12 +761,12 @@ router.get("/grep", async (req, res) => {
       }
       throw e;
     }
-    // Parse: file:line:text
+    // -z: `path\0line\0text`, path verbatim (no quoting, colons stay literal).
     const byFile = new Map<string, { line: number; text: string }[]>();
     for (const line of raw.split("\n").filter(Boolean)) {
-      const m = line.match(/^(.+?):(\d+):(.*)$/);
-      if (!m) continue;
-      const [, path, lineNum, text] = m;
+      const [path, lineNum, ...rest] = line.split("\0");
+      if (!path || !/^\d+$/.test(lineNum ?? "")) continue;
+      const text = rest.join("\0");
       if (!byFile.has(path)) byFile.set(path, []);
       const matches = byFile.get(path)!;
       if (matches.length < 3)

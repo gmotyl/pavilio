@@ -5,11 +5,14 @@ import { expandHome } from "../lib/paths.js";
 import { createTsNav, type TsNav } from "../lib/ts-nav.js";
 import { listRepoWorktrees } from "../lib/worktrees.js";
 
-/** A present linked repo or one of its worktrees: a language service may only start where the panel already browses. */
+/**
+ * A present linked repo or any checkout of it, main included (Code offers the main row when a
+ * secondary worktree is linked): a language service may only start where the panel already browses.
+ */
 function isLinkedRepo(target: string): boolean {
   const roots = linkedRepos().filter((r) => r.present).map((r) => resolve(expandHome(r.path)));
   if (roots.includes(target)) return true;
-  return roots.some((root) => listRepoWorktrees(root).some((w) => resolve(w.path) === target));
+  return roots.some((root) => listRepoWorktrees(root, { includeMain: true }).some((w) => resolve(w.path) === target));
 }
 
 /** Repo-relative POSIX path, or null when absolute or escaping the repo. */

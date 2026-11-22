@@ -328,11 +328,37 @@ describe("ref-based git reads", () => {
     expect((await get("resolve", {})).status).toBe(400);
   });
 
+  it("an unborn repository logs no commits rather than failing", async () => {
+    const fresh = join(tmp, "fresh");
+    mkdirSync(fresh);
+    execSync("git init -q", { cwd: fresh, stdio: "pipe", env: gitSafeEnv() });
+    const res = await request(app()).get(`/api/git/log?repo=${encodeURIComponent(fresh)}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
   it("greps untracked files too, never ignored ones", async () => {
     writeFileSync(join(repoDir, "ignored.log"), "untracked\n");
     const res = await get("grep", { q: "untracked" });
     expect(res.status).toBe(200);
     expect(res.body.map((r: { relativePath: string }) => r.relativePath)).toEqual(["u.txt"]);
+  });
+
+  it("greps with root-relative paths when repo is a subdirectory, like /tree and /file", async () => {
+    writeFileSync(join(repoDir, "dir", "keep.txt"), "kept too\n");
+    const qs = new URLSearchParams({ repo: join(repoDir, "dir"), q: "kept" }).toString();
+    const res = await request(app()).get(`/api/git/grep?${qs}`);
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { relativePath: string }) => r.relativePath).sort()).toEqual(["dir/keep.txt", "keep.txt"]);
+  });
+
+  it("greps a filename holding a colon-number-colon sequence or non-ASCII literally", async () => {
+    writeFileSync(join(repoDir, "a:12:b.txt"), "needle\n");
+    writeFileSync(join(repoDir, "zażółć.txt"), "needle\n");
+    const res = await get("grep", { q: "needle" });
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { relativePath: string }) => r.relativePath).sort()).toEqual(["a:12:b.txt", "zażółć.txt"]);
+    expect(res.body[0].matches).toEqual([{ line: 1, text: "needle" }]);
   });
 
   it("answers 400 when base and head share no history", async () => {
@@ -453,6 +479,12 @@ describe("ref-based git reads: path and status edge cases", () => {
     const wt = await get("diff", { file: "staged.txt", against: "HEAD" });
     expect(wt.status).toBe(200);
     expect(wt.body.diff).toContain("rename from old.txt");
+
+    // A commit's own diff (History) too.
+    const commit = await get("diff", { file: "new.txt", sha: sh("rev-parse r").trim() });
+    expect(commit.status).toBe(200);
+    expect(commit.body.diff).toContain("rename from old.txt");
+    expect(commit.body.diff).not.toContain("+line 0");
   });
 
   it("returns literal non-ASCII paths from status and commit-files, rename source separately", async () => {
