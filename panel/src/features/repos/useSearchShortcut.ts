@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { claimFileShortcut } from "../search/shortcutClaim";
 
 export type SearchMode = "files" | "text";
 
@@ -9,6 +10,7 @@ export interface SearchRequest {
 }
 
 function modeOf(e: KeyboardEvent): SearchMode | null {
+  if (e.repeat || e.isComposing || e.defaultPrevented) return null;
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
   const key = e.key.toLowerCase();
   if (key === "p" && !e.shiftKey) return "files";
@@ -32,7 +34,11 @@ export function useSearchShortcut(onPress: () => void) {
       setRequest((r) => ({ mode, seq: (r?.seq ?? 0) + 1 }));
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const release = claimFileShortcut();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      release();
+    };
   }, []);
 
   const clear = useCallback(() => setRequest(null), []);

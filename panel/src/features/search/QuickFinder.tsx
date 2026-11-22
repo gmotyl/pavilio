@@ -5,6 +5,7 @@ import { Search, FileText } from "lucide-react";
 import { useFileIndex } from "../explorer/useFileIndex";
 import type { GrepResult } from "./grep";
 import GrepResultRow from "./GrepResultRow";
+import { isFileShortcutClaimed } from "./shortcutClaim";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 
@@ -137,6 +138,7 @@ export default function QuickFinder() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        if (isFileShortcutClaimed()) return;
         e.preventDefault();
         setOpen((p) => !p);
       }
