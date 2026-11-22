@@ -182,6 +182,31 @@ describe("ref-based git reads", () => {
     }
   });
 
+  it("refuses .git internals reached through a symlink", async () => {
+    symlinkSync(".git/config", join(repoDir, "cfg"));
+    symlinkSync(".git", join(repoDir, "gitdir"));
+    for (const path of ["cfg", "gitdir/HEAD"]) {
+      const res = await get("file", { path });
+      expect(res.status, path).toBe(400);
+      expect(res.text).not.toContain("[core]");
+    }
+  });
+
+  it("answers 500, not 400/404, when git cannot run", async () => {
+    const path = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      for (const [route, params] of [
+        ["tree", {}],
+        ["file", { path: "a.txt", ref: "main" }],
+      ] as const) {
+        expect((await get(route, params)).status, route).toBe(500);
+      }
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+
   it("treats paths literally, not as pathspec magic", async () => {
     const glob = await get("diff-ref", { base: "main", head: PR_REF, path: "*.txt" });
     expect(glob.status).toBe(200);

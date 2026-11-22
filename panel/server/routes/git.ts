@@ -2,7 +2,7 @@ import { Router, type Response } from "express";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import { readFileSync, realpathSync, statSync } from "fs";
-import { isAbsolute, join, posix, resolve, sep } from "path";
+import { isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
@@ -201,13 +201,19 @@ async function gitArgv(args: string[], cwd: string): Promise<Buffer> {
   return stdout;
 }
 
+/** git ran and exited non-zero; timeouts, maxBuffer overflow and spawn failures (no git) are not that. */
+function gitExitedNonZero(e: any): boolean {
+  return !e?.killed && typeof e?.code === "number";
+}
+
 /** The repo's top-level dir; every path below is relative to it, whatever subdir `repo` named. */
 async function repoToplevel(repo?: string): Promise<string> {
   const dir = getRepoRoot(repo);
   assertRepoDirectory(dir);
   try {
     return (await gitArgv(["rev-parse", "--show-toplevel"], dir)).toString("utf-8").trim();
-  } catch {
+  } catch (e) {
+    if (!gitExitedNonZero(e)) throw e;
     throw new GitInputError(`not a git working tree: ${dir}`);
   }
 }
@@ -227,7 +233,8 @@ async function resolveCommit(ref: string, root: string): Promise<string> {
   if (ref.startsWith("-") || ref.includes("\0")) throw new GitInputError(`invalid ref: ${ref}`);
   try {
     return (await gitArgv(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], root)).toString("utf-8").trim();
-  } catch {
+  } catch (e) {
+    if (!gitExitedNonZero(e)) throw e;
     throw new GitInputError(`unknown ref: ${ref}`);
   }
 }
@@ -325,7 +332,8 @@ router.get("/file", async (req, res) => {
       try {
         // cat-file blob: raw bytes (no textconv), and a tree is not a blob.
         buf = await gitArgv(["cat-file", "blob", `${sha}:${path}`], root);
-      } catch {
+      } catch (e) {
+        if (!gitExitedNonZero(e)) throw e;
         throw new GitInputError(`${path} not found at ${ref}`, 404);
       }
       return sendText(res, buf);
@@ -339,6 +347,10 @@ router.get("/file", async (req, res) => {
     // A symlink inside the repo may still point outside it.
     const realRoot = realpathSync(root);
     if (!real.startsWith(realRoot + sep)) throw new GitInputError("path escapes the repo");
+    // A committed symlink can still land inside .git.
+    if (relative(realRoot, real).split(sep).some((seg) => seg.toLowerCase() === ".git")) {
+      throw new GitInputError("path is inside .git");
+    }
     if (!statSync(real).isFile()) throw new GitInputError(`${path} is not a file`, 404);
     sendText(res, readFileSync(real));
   } catch (e: any) {
