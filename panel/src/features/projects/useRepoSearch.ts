@@ -33,6 +33,10 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
   // must re-run the search even though no path changed.
   const repoPathsKey =
     repos?.map((r) => `${r.path}:${r.present ? 1 : 0}`).join(",") ?? "";
+  // The paths a search may name right now. Joined with a NUL so it can serve as
+  // a dependency key and be split back without colliding with path characters.
+  const presentPathsKey =
+    repos?.filter((r) => r.present).map((r) => r.path).join("\0") ?? "";
 
   useEffect(() => {
     // A repo missing on this machine has nothing to search; every git call
@@ -40,8 +44,23 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
     const list = repos?.filter((r) => r.present) ?? [];
     if (!active || !list.length) {
       setFiles([]);
+      setGrepResults([]);
       return;
     }
+    // Drop what a now-missing repo contributed right away, instead of leaving
+    // it on screen until the surviving repos' refetch lands. Unchanged state is
+    // returned as-is so a plain refetch does not re-trigger the grep.
+    const presentPaths = new Set(list.map((r) => r.path));
+    setFiles((prev) =>
+      prev.every((f) => presentPaths.has(f.repo))
+        ? prev
+        : prev.filter((f) => presentPaths.has(f.repo)),
+    );
+    setGrepResults((prev) =>
+      prev.every((r) => presentPaths.has(r.project))
+        ? prev
+        : prev.filter((r) => presentPaths.has(r.project)),
+    );
     let cancelled = false;
     (async () => {
       const all: RepoFile[] = [];
@@ -71,14 +90,14 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
             // declaration — so both sides normalize the repo path the same
             // way. A repo with no path is not a scope; the store refuses one.
             //
-            // The guard first, and the read inside a `try`. `server/lib/
-            // discovery.ts` does no runtime validation, so a `repos.json` entry
-            // without a `path` arrives here as `undefined` — and a bare
-            // `repo.path.trim()` would sit in the same un-wrapped position the
-            // old `localStorage.getItem` did: a TypeError here rejects the
-            // whole `Promise.all`, `setFiles(all)` never runs, and ONE
-            // malformed entry blanks the search for every healthy repository
-            // beside it.
+            // The guard first, and the read inside a `try`. Discovery skips
+            // `repos.json` entries without a string `path`, so this is
+            // defensive against synthetic or unvalidated input: were a pathless
+            // entry to reach here, a bare `repo.path.trim()` would sit in the
+            // same un-wrapped position the old `localStorage.getItem` did — a
+            // TypeError rejects the whole `Promise.all`, `setFiles(all)` never
+            // runs, and ONE malformed entry blanks the search for every healthy
+            // repository beside it.
             let base = "";
             try {
               if (isPreferenceScope(repo.path)) {
@@ -117,6 +136,9 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
               if (logRes.ok) {
                 const commits: { sha: string; message: string }[] =
                   await logRes.json();
+                // The repo set changed (e.g. this repo went missing) while the
+                // log was in flight: fan out no further requests for it.
+                if (cancelled) return;
                 const seen = new Set<string>();
                 await Promise.all(
                   commits.map(async (c) => {
@@ -162,8 +184,12 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
   useEffect(() => {
     if (!active || query.length < 2 || files.length === 0) {
       setGrepResults([]);
+      // An earlier grep may have been cancelled mid-flight (e.g. the last repo
+      // went missing); its own cleanup never resets the indicator.
+      setGrepLoading(false);
       return;
     }
+    const presentPaths = new Set(presentPathsKey.split("\0"));
     setGrepLoading(true);
     const abort = new AbortController();
     const timer = setTimeout(async () => {
@@ -171,6 +197,8 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
         const allResults: GrepResult[] = [];
         const byRepo = new Map<string, string[]>();
         for (const f of files) {
+          // `files` can still hold a repo that just went missing; never grep it.
+          if (!presentPaths.has(f.repo)) continue;
           if (!byRepo.has(f.repo)) byRepo.set(f.repo, []);
           byRepo.get(f.repo)!.push(f.path);
         }
@@ -197,7 +225,7 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [active, query, files]);
+  }, [active, query, files, presentPathsKey]);
 
   return { scope, setScope, files, grepResults, grepLoading };
 }
