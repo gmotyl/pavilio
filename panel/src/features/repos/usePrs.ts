@@ -51,7 +51,9 @@ export interface PrsState {
 }
 
 export function usePrs(project: string, filter: PrFilter): PrsState {
-  const [data, setData] = useState<PrsResponse | null>(null);
+  // Tagged with its project: the tab stays mounted across project switches, so an
+  // untagged body would show the previous project's PRs until (or unless) the next arrives.
+  const [loaded, setLoaded] = useState<{ project: string; body: PrsResponse } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -66,7 +68,7 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
         return (await res.json()) as PrsResponse;
       })
       .then((body) => {
-        if (!cancelled) setData(body);
+        if (!cancelled) setLoaded({ project, body });
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -80,6 +82,8 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
   }, [project, attempt]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
+
+  const data = loaded?.project === project ? loaded.body : null;
 
   const me = data?.me ?? null;
   const all = useMemo(() => data?.prs ?? [], [data]);
