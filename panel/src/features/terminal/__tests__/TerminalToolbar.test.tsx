@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TerminalToolbar } from "../TerminalToolbar";
 import { getLayoutPresets } from "../tileLayout";
 import type { SessionMeta } from "../useTerminalSessions";
@@ -528,5 +529,45 @@ describe("TerminalToolbar — projectless session", () => {
     const session = makeSession({ id: "np", name: "bare", project: "" });
     renderToolbar({ sessions: [session], focusedId: session.id, currentProject: "" });
     expect(screen.getByText("bare")).toBeInTheDocument();
+  });
+});
+
+describe("TerminalToolbar — missing linked repos", () => {
+  const repos = [
+    { name: "here", path: "/srv/here", present: true },
+    { name: "gone", path: "/srv/gone", present: false },
+  ];
+
+  function openRepoMenu() {
+    fireEvent.click(screen.getByTestId("terminal-toolbar-repo-menu"));
+  }
+
+  it("lists a missing repo as a disabled Not on this machine item", () => {
+    renderToolbar({ repos });
+    openRepoMenu();
+
+    const missing = screen.getByTestId("terminal-toolbar-new-repo-/srv/gone");
+    const present = screen.getByTestId("terminal-toolbar-new-repo-/srv/here");
+    expect(missing).toBeDisabled();
+    expect(within(missing).getByText("Not on this machine")).toBeInTheDocument();
+    expect(present).toBeEnabled();
+    expect(within(present).queryByText("Not on this machine")).toBeNull();
+  });
+
+  it("clicking a missing repo creates no terminal and keeps the menu open", async () => {
+    const user = userEvent.setup();
+    const props = renderToolbar({ repos });
+    openRepoMenu();
+
+    const missing = screen.getByTestId("terminal-toolbar-new-repo-/srv/gone");
+    fireEvent.click(missing);
+    // Both a synthetic click and a real-pointer click must be swallowed.
+    await user.pointer({ keys: "[MouseLeft]", target: missing });
+    expect(props.onCreate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("terminal-toolbar-new-repo-/srv/gone")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("terminal-toolbar-new-repo-/srv/here"));
+    expect(props.onCreate).toHaveBeenCalledWith({ cwd: "/srv/here", name: expect.any(String) });
+    expect(screen.queryByTestId("terminal-toolbar-new-repo-/srv/gone")).toBeNull();
   });
 });
