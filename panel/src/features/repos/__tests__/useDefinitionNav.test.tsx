@@ -129,21 +129,32 @@ describe("useDefinitionNav", () => {
   });
 
   it("a repeat failure restarts the notice timer and a jump clears it", async () => {
-    let answer: "none" | "hit" = "none";
-    await openB(() => jsonResponse({ locations: answer === "none" ? [] : [{ path: "src/b.ts", line: 6, col: 6 }] }));
-    fireEvent.click(sym(3, "inner")!);
-    await screen.findByText("No definition found");
-    await new Promise((r) => setTimeout(r, 1200));
-    fireEvent.click(sym(3, "inner")!);
-    await new Promise((r) => setTimeout(r, 1200));
-    // 2.4 s after the first failure, 1.2 s after the second.
-    expect(screen.getByText("No definition found")).toBeInTheDocument();
+    let answer: "fail" | "hit" = "fail";
+    // A failed lookup never reads the body, so fake timers can flush it.
+    await openB(() =>
+      answer === "fail" ? jsonResponse({ error: "boom" }, { status: 500 }) : jsonResponse({ locations: [{ path: "src/b.ts", line: 6, col: 6 }] }),
+    );
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(sym(3, "inner")!);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText("No definition found")).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(1200));
+      fireEvent.click(sym(3, "inner")!);
+      // Settle the lookup before the first notice's timer is due.
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      await act(() => vi.advanceTimersByTimeAsync(1200));
+      // 2.4 s after the first failure, 1.2 s after the second.
+      expect(screen.getByText("No definition found")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
 
     answer = "hit";
     fireEvent.click(sym(3, "inner")!);
     await waitFor(() => expect(search().get("line")).toBe("6"));
     expect(screen.queryByText("No definition found")).toBeNull();
-  }, 8000);
+  });
 
   it("Back never stacks a duplicate of the current location", async () => {
     await openB(at({ path: "src/b.ts", line: 6, col: 6 }));
