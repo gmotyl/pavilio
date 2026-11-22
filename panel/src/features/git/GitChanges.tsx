@@ -805,15 +805,16 @@ export default function GitChanges({
                     {loading}...
                   </p>
                 )}
-                {actionError && (
-                  <p role="alert" className="text-xs mt-2" style={{ color: "var(--red)" }}>
-                    {actionError}
-                  </p>
-                )}
               </div>
             </>
           )}
         </>
+      )}
+      {/* Outside the list: a push rejected after committing the last file still shows. */}
+      {actionError && (
+        <p role="alert" className="text-xs mt-2" style={{ color: "var(--red)" }}>
+          {actionError}
+        </p>
       )}
     </div>
   );
