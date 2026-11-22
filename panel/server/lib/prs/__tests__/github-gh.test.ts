@@ -11,6 +11,7 @@ interface Call {
   cmd: string;
   args: string[];
   cwd: string;
+  env?: Record<string, string>;
 }
 
 type Responder = (cmd: string, args: string[]) => RunResult | Error;
@@ -18,7 +19,7 @@ type Responder = (cmd: string, args: string[]) => RunResult | Error;
 function fakeRunner(respond: Responder): { run: Runner; calls: Call[] } {
   const calls: Call[] = [];
   const run: Runner = async (cmd, args, opts) => {
-    calls.push({ cmd, args, cwd: opts.cwd });
+    calls.push({ cmd, args, cwd: opts.cwd, env: opts.env });
     const r = respond(cmd, args);
     if (r instanceof Error) throw r;
     return r;
@@ -38,7 +39,8 @@ describe("GitHubGhProvider", () => {
 
     const ghCall = calls.find((c) => c.cmd === "gh")!;
     expect(ghCall.cwd).toBe(REPO);
-    expect(ghCall.args.slice(0, 6)).toEqual(["pr", "list", "--state", "open", "--limit", "100"]);
+    // --repo pins gh to origin: in a fork clone gh would otherwise default to upstream.
+    expect(ghCall.args.slice(0, 8)).toEqual(["pr", "list", "--repo", "o/r", "--state", "open", "--limit", "100"]);
 
     expect(prs).toHaveLength(4);
     expect(prs[0]).toEqual({
@@ -77,6 +79,10 @@ describe("GitHubGhProvider", () => {
     expect(rollupChecks([run("IN_PROGRESS", ""), run("COMPLETED", "FAILURE")])).toBe("fail");
     expect(rollupChecks([ctx("ERROR"), ctx("PENDING")])).toBe("fail");
     expect(rollupChecks([run("COMPLETED", "TIMED_OUT")])).toBe("fail");
+    expect(rollupChecks([run("COMPLETED", "CANCELLED")])).toBe("fail");
+    expect(rollupChecks([run("COMPLETED", "ACTION_REQUIRED")])).toBe("fail");
+    expect(rollupChecks([run("COMPLETED", "NEUTRAL")])).toBe("pass");
+    expect(rollupChecks([run("COMPLETED", "SKIPPED")])).toBe("pass");
   });
 
   it("rejects a non-GitHub origin without calling gh", async () => {
@@ -136,6 +142,29 @@ describe("GitHubGhProvider", () => {
     expect(apiCalls).toHaveLength(1);
   });
 
+  it("does not cache a failed gh login", async () => {
+    let attempt = 0;
+    const { run } = fakeRunner(() => (++attempt === 1 ? { code: 4, stdout: "", stderr: "" } : ok("gmotyl\n")));
+    const provider = createGitHubGhProvider({ run });
+    await expect(provider.whoami()).rejects.toBeInstanceOf(PrUnavailableError);
+    expect(await provider.whoami()).toBe("gmotyl");
+  });
+
+  it("derives owner/repo from origin and passes it to gh", async () => {
+    for (const [url, slug] of [
+      ["git@github.com:me/fork.git", "me/fork"],
+      ["https://github.com/me/fork", "me/fork"],
+      ["https://user@github.com/me/fork.git/", "me/fork"],
+      ["ssh://git@github.com/me/fork.git", "me/fork"],
+    ]) {
+      const origin = originIs(url);
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
+      await createGitHubGhProvider({ run }).listOpen(REPO);
+      const gh = calls.find((c) => c.cmd === "gh")!;
+      expect(gh.args[gh.args.indexOf("--repo") + 1]).toBe(slug);
+    }
+  });
+
   it("openPr fetches the PR head into refs/pavilio/pr/<n>", async () => {
     const origin = originIs("git@github.com:o/r.git");
     const { run, calls } = fakeRunner((cmd, args) => {
@@ -156,5 +185,11 @@ describe("GitHubGhProvider", () => {
     expect(fetch.args).toContain("origin");
     expect(fetch.args.some((a) => a.endsWith("pull/231/head:refs/pavilio/pr/231"))).toBe(true);
     expect(fetch.args.some((a) => a.endsWith("refs/heads/release:refs/remotes/origin/release"))).toBe(true);
+    // A credential prompt must never hang the request.
+    expect(fetch.env?.GIT_TERMINAL_PROMPT).toBe("0");
+    expect(calls.filter((c) => c.cmd === "git").every((c) => c.env?.GIT_TERMINAL_PROMPT === "0")).toBe(true);
+
+    const view = calls.find((c) => c.cmd === "gh" && c.args[1] === "view")!;
+    expect(view.args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "o/r"]);
   });
 });

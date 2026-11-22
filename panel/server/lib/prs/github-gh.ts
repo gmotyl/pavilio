@@ -10,7 +10,11 @@ export interface RunResult {
 }
 
 /** Resolves with the exit code for any exit; rejects only when the process could not start (e.g. ENOENT). */
-export type Runner = (cmd: string, args: string[], opts: { cwd: string }) => Promise<RunResult>;
+export type Runner = (
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; env?: Record<string, string> },
+) => Promise<RunResult>;
 
 const TIMEOUT_MS = 30_000;
 const PR_FIELDS =
@@ -19,13 +23,13 @@ const PR_FIELDS =
 const GH_AUTH_EXIT = 4;
 const AUTH_ERROR = /gh auth login|not logged in|authentication required|HTTP 401|bad credentials/i;
 
-export const defaultRunner: Runner = (cmd, args, { cwd }) =>
+export const defaultRunner: Runner = (cmd, args, { cwd, env }) =>
   new Promise((resolve, reject) => {
     // gitSafeEnv: an inherited GIT_DIR would retarget git (and gh's git calls) away from `cwd`.
     execFile(
       cmd,
       args,
-      { cwd, env: gitSafeEnv(), timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: "utf-8" },
+      { cwd, env: { ...gitSafeEnv(), ...env }, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: "utf-8" },
       (err, stdout, stderr) => {
         if (err && typeof err.code === "string") return reject(err);
         const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
@@ -103,6 +107,17 @@ export function remoteHost(url: string): string | null {
   return scp ? scp[1].toLowerCase() : null;
 }
 
+/** `owner/repo` of a GitHub remote URL, `.git` suffix dropped. */
+export function remoteRepo(url: string): string | null {
+  const u = url.trim();
+  const path = /^[a-z][a-z0-9+.-]*:\/\/[^/]+\/(.+)$/i.exec(u)?.[1] ?? /^(?:[^@/]+@)?[^/:]+:(?!\/\/)(.+)$/.exec(u)?.[1];
+  const m = path ? /^\/*([^/]+)\/([^/]+?)(?:\.git)?\/*$/.exec(path) : null;
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+// A credential prompt would hang the request until the timeout; fail fast instead.
+const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" };
+
 export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider {
   const run = deps.run ?? defaultRunner;
   let login: Promise<string> | null = null;
@@ -125,7 +140,7 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
   async function git(args: string[], cwd: string): Promise<string> {
     let r: RunResult;
     try {
-      r = await run("git", args, { cwd });
+      r = await run("git", args, { cwd, env: GIT_ENV });
     } catch (err) {
       throw new PrUnavailableError("failed", (err as Error).message);
     }
@@ -133,7 +148,8 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
     return r.stdout;
   }
 
-  async function assertGitHub(repoPath: string): Promise<void> {
+  /** Returns `owner/repo` of origin; gh gets it via --repo, since in a fork clone gh defaults to upstream. */
+  async function assertGitHub(repoPath: string): Promise<string> {
     let url: string;
     try {
       url = await git(["remote", "get-url", "origin"], repoPath);
@@ -142,6 +158,9 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
       throw new PrUnavailableError("not-github", "no origin remote");
     }
     if (remoteHost(url) !== "github.com") throw new PrUnavailableError("not-github", `origin is ${url.trim()}`);
+    const slug = remoteRepo(url);
+    if (!slug) throw new PrUnavailableError("not-github", `cannot parse owner/repo from ${url.trim()}`);
+    return slug;
   }
 
   return {
@@ -155,8 +174,11 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
     },
 
     async listOpen(repoPath) {
-      await assertGitHub(repoPath);
-      const out = await gh(["pr", "list", "--state", "open", "--limit", "100", "--json", PR_FIELDS], repoPath);
+      const slug = await assertGitHub(repoPath);
+      const out = await gh(
+        ["pr", "list", "--repo", slug, "--state", "open", "--limit", "100", "--json", PR_FIELDS],
+        repoPath,
+      );
       let raw: RawPr[];
       try {
         raw = JSON.parse(out) as RawPr[];
@@ -189,8 +211,10 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
 
     async openPr(repoPath, n) {
       if (!Number.isInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      await assertGitHub(repoPath);
-      const base = (await gh(["pr", "view", String(n), "--json", "baseRefName", "--jq", ".baseRefName"], repoPath)).trim();
+      const slug = await assertGitHub(repoPath);
+      const base = (
+        await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName", "--jq", ".baseRefName"], repoPath)
+      ).trim();
       if (!base) throw new PrUnavailableError("failed", `PR #${n} has no base branch`);
       const headRef = `refs/pavilio/pr/${n}`;
       const baseRef = `refs/remotes/origin/${base}`;
