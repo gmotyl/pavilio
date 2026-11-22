@@ -1,6 +1,6 @@
 import { act, render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { jsonResponse, stubFetch } from "../../../test-utils";
+import { jsonResponse, stubFetch, type FetchHandler } from "../../../test-utils";
 import ReposTab from "../ReposTab";
 
 export const MAIN = "/root/pavilio";
@@ -79,8 +79,9 @@ export const GREP = [
 
 const text = (body: string) => new Response(body, { status: 200, headers: { "Content-Type": "text/plain" } });
 
-export function codeFetch() {
-  return stubFetch({}, (url: string) => {
+/** `routes` answer before the defaults: URL fragment → handler. */
+export function codeFetch(routes: Record<string, FetchHandler> = {}) {
+  return stubFetch(routes, (url: string) => {
     const u = new URL(url, "http://x");
     const repo = u.searchParams.get("repo") ?? "";
     if (u.pathname === "/api/prs") return jsonResponse({ me: "me", prs: [], unavailable: [] });
@@ -101,8 +102,8 @@ function Search() {
   return <output data-testid="search">{useLocation().search}</output>;
 }
 
-export function renderCode(search = "?view=code") {
-  const fetch = codeFetch();
+export function renderCode(search = "?view=code", routes: Record<string, FetchHandler> = {}) {
+  const fetch = codeFetch(routes);
   const utils = render(
     <MemoryRouter initialEntries={[`/project/pavilio/repos${search}`]}>
       <Routes>

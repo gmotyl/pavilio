@@ -5,6 +5,7 @@ import FileTree, { type TreeFile } from "./FileTree";
 import Outline, { OUTLINE_FILE, outlineOf } from "./Outline";
 import RefSwitcher, { useWorktrees } from "./RefSwitcher";
 import type { ParamsPatch, ReposViewProps } from "./types";
+import { useDefinitionNav } from "./useDefinitionNav";
 import type { SearchRequest } from "./useSearchShortcut";
 import { useWidth } from "./useWidth";
 import FileViewer from "./viewer/FileViewer";
@@ -106,6 +107,8 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     },
     [setParams],
   );
+  const openAt = useCallback((path: string, line: number) => open(path, { line }), [open]);
+  const nav = useDefinitionNav({ root, file: selected, open: openAt });
   const jump = (line: number) => {
     setScroll((s) => ({ line, key: (s?.key ?? 0) + 1 }));
     setParams({ line: String(line) });
@@ -149,6 +152,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
         uncommitted={!!status}
         defaultMode="code"
         highlight={highlight}
+        onIdentifierClick={nav.onIdentifierClick}
         scrollToLine={scroll?.line}
         scrollKey={scroll?.key}
       />
@@ -161,11 +165,36 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
         <div className="cv-tree">{tree}</div>
       </div>
       <div className="cv-main">
-        <div className="cv-backbar">
-          {/* The back stack arrives with go-to-definition. */}
-          <button type="button" data-testid="code-back" disabled>
+        <div className="cv-backbar" data-testid="code-backbar">
+          <button type="button" data-testid="code-back" disabled={!nav.canBack} onClick={nav.back}>
             ← Back
           </button>
+          {nav.notice && (
+            <span className="cv-notice" role="status">
+              No definition found
+            </span>
+          )}
+          {nav.choices && (
+            <div className="cv-defs">
+              <div role="listbox" aria-label="Definitions">
+                {nav.choices.map((d) => (
+                  <button
+                    key={`${d.path}:${d.line}:${d.col}`}
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    data-testid={`code-def-${d.path}:${d.line}:${d.col}`}
+                    onClick={() => nav.choose(d)}
+                  >
+                    {d.path}:{d.line}
+                  </button>
+                ))}
+              </div>
+              <button type="button" data-testid="code-defs-close" aria-label="Close definitions" onClick={nav.dismiss}>
+                ×
+              </button>
+            </div>
+          )}
         </div>
         <div className="cv-viewer">{viewer}</div>
       </div>
