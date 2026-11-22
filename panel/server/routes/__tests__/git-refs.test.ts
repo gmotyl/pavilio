@@ -266,4 +266,19 @@ describe("ref-based git reads", () => {
       expect(res.body.error, route).toMatch(/merge base/);
     }
   });
+
+  it("lists and diffs the files of the root commit", async () => {
+    const root = sh("rev-parse main").trim();
+    const files = await get("commit-files", { sha: root });
+    expect(files.status).toBe(200);
+    expect(files.body).toEqual(
+      expect.arrayContaining([
+        { status: "A", path: "a.txt" },
+        { status: "A", path: "dir/b.txt" },
+      ]),
+    );
+    const diff = await get("diff", { sha: root, file: "a.txt" });
+    expect(diff.status).toBe(200);
+    expect(diff.body.diff).toContain("+one");
+  });
 });

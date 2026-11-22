@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from "react-dom";
 import FileSearch, { type OpenRequest } from "./FileSearch";
 import FileTree, { type TreeFile } from "./FileTree";
+import { useCommitFiles, type Commit } from "../git/useGitHistory";
+import ChangesPanel from "./ChangesPanel";
+import HistoryPanel from "./HistoryPanel";
 import Outline, { OUTLINE_FILE, outlineOf } from "./Outline";
 import RefSwitcher, { useWorktrees } from "./RefSwitcher";
 import type { ParamsPatch, ReposViewProps } from "./types";
@@ -83,21 +86,32 @@ interface RootProps {
   onSearchHandled: () => void;
 }
 
+type Panel = "outline" | "changes" | "history";
+type Listing = TreeFile[] | { error: string } | null;
+
+// Commit-file and compare statuses onto the tree's letters; copies and type changes read as modified.
+const treeStatus = (s: string): TreeFile["status"] => (s === "A" || s === "D" || s === "R" ? s : "M");
+
 /** One checkout's code; keyed by root so a switch drops stale state and responses. */
 function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: RootProps) {
   const [attempt, setAttempt] = useState(0);
-  const [files, setFiles] = useState<TreeFile[] | { error: string } | null>(null);
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [files, setFiles] = useState<Listing>(null);
+  const [compared, setCompared] = useState<{ base: string; files: Listing } | null>(null);
+  const [loaded, setLoaded] = useState<(Loaded & { src: string }) | null>(null);
+  const [panel, setPanel] = useState<Panel>("outline");
+  const [commit, setCommit] = useState<Commit | null>(null);
   const [highlight, setHighlight] = useState<string | undefined>(undefined);
   const [scroll, setScroll] = useState<{ line: number; key: number } | null>(() => {
     const line = Number(params.get("line"));
     return line > 0 ? { line, key: 0 } : null;
   });
   const [bodyRef, width] = useWidth<HTMLDivElement>();
+  const cmp = commit ? null : params.get("cmp");
+  const { files: commitFiles, loading: commitLoading } = useCommitFiles(root, commit?.sha ?? null);
 
   useEffect(() => {
     let cancelled = false;
-    setFiles(null);
+    // No reset to null here: a refresh after a commit keeps the tree in place.
     request(`/api/git/tree?repo=${q(root)}`)
       .then(async (res) => ((await res.json()) as { files?: TreeFile[] } | null)?.files ?? [])
       .then((list) => !cancelled && setFiles(list))
@@ -107,7 +121,41 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     };
   }, [root, attempt]);
 
-  const list = Array.isArray(files) ? files : null;
+  useEffect(() => {
+    if (!cmp) return;
+    let cancelled = false;
+    const base = cmp;
+    // HEAD's files with base...HEAD statuses; deletions are absent at HEAD so they are appended.
+    Promise.all([
+      request(`/api/git/tree?repo=${q(root)}&ref=HEAD`).then(async (res) => ((await res.json()) as { files?: TreeFile[] } | null)?.files ?? []),
+      request(`/api/git/changed?repo=${q(root)}&base=${q(base)}&head=HEAD`).then(
+        async (res) => ((await res.json()) as { path: string; status: string; add: number; del: number }[] | null) ?? [],
+      ),
+    ])
+      .then(([atHead, changed]) => {
+        const byPath = new Map(changed.map((c) => [c.path, { ...c, status: treeStatus(c.status) }]));
+        const merged: TreeFile[] = atHead.map((f) => byPath.get(f.path) ?? { path: f.path, status: null });
+        const seen = new Set(atHead.map((f) => f.path));
+        return [...merged, ...[...byPath.values()].filter((c) => !seen.has(c.path))];
+      })
+      .then((list) => !cancelled && setCompared({ base, files: list }))
+      .catch((e: unknown) => !cancelled && setCompared({ base, files: { error: message(e) } }));
+    return () => {
+      cancelled = true;
+    };
+  }, [root, cmp, attempt]);
+
+  const commitList = useMemo<TreeFile[] | null>(
+    () => (commit && !commitLoading ? commitFiles.map((f) => ({ path: f.path, status: treeStatus(f.status) })) : null),
+    [commit, commitLoading, commitFiles],
+  );
+  const working = Array.isArray(files) ? files : null;
+  const changedCount = working ? working.filter((f) => f.status).length : 0;
+  const shown: Listing = commit ? commitList : cmp ? (compared?.base === cmp ? compared.files : null) : files;
+  const list = Array.isArray(shown) ? shown : null;
+  // Identifies where reads come from, so a mode switch never shows the previous mode's answer.
+  const src = commit ? `commit:${commit.sha}` : cmp ? `cmp:${cmp}` : "work";
+
   const byPath = useMemo(() => new Map((list ?? []).map((f) => [f.path, f])), [list]);
   const paths = useMemo(() => (list ?? []).map((f) => f.path), [list]);
   const selected = params.get("file");
@@ -119,26 +167,30 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     if (!list || !selected) return;
     let cancelled = false;
     const path = selected;
+    const ref = commit ? commit.sha : cmp ? "HEAD" : null;
     (async (): Promise<Loaded> => {
+      let diff: string | undefined;
+      if (commit) diff = ((await (await request(`/api/git/diff?sha=${commit.sha}&file=${q(path)}&repo=${q(root)}`)).json()) as { diff?: string } | null)?.diff;
+      else if (cmp && status) diff = await (await request(`/api/git/diff-ref?repo=${q(root)}&base=${q(cmp)}&head=HEAD&path=${q(path)}`)).text();
       // Against HEAD so staged edits count as uncommitted too.
-      const diff = status
-        ? ((await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}&against=HEAD`)).json()) as { diff?: string } | null)?.diff
-        : undefined;
+      else if (status) diff = ((await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}&against=HEAD`)).json()) as { diff?: string } | null)?.diff;
       if (status === "D") return { path, diff };
       try {
-        const content = await (await request(`/api/git/file?repo=${q(root)}&path=${q(path)}`)).text();
+        const content = await (await request(`/api/git/file?repo=${q(root)}${ref ? `&ref=${q(ref)}` : ""}&path=${q(path)}`)).text();
         return { path, diff, content };
       } catch (e) {
         if (e instanceof HttpError && e.status === 415) return { path, binary: true };
         throw e;
       }
     })()
-      .then((l) => !cancelled && setLoaded(l))
-      .catch((e: unknown) => !cancelled && setLoaded({ path, error: message(e) }));
+      .then((l) => !cancelled && setLoaded({ ...l, src }))
+      .catch((e: unknown) => !cancelled && setLoaded({ path, error: message(e), src }));
     return () => {
       cancelled = true;
     };
-  }, [list, selected, status, root]);
+    // `src` names commit/cmp; listing them too would refetch on identity alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, selected, status, root, src]);
 
   const open = useCallback(
     (path: string, at: OpenRequest = {}) => {
@@ -155,9 +207,29 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     setParams({ line: String(line) });
   };
 
-  const showRail = width === null || width >= RAIL_MIN_WIDTH;
+  // A picked commit opens its first file once the listing lands.
+  useEffect(() => {
+    if (!commitList?.length || commitList.some((f) => f.path === selected)) return;
+    open(commitList[0].path);
+  }, [commitList, selected, open]);
+
+  const leaveCommit = () => {
+    setCommit(null);
+    setParams({ file: null, line: null });
+  };
+  const togglePanel = (next: Panel) => {
+    const to = panel === next ? "outline" : next;
+    if (to !== "history" && commit) leaveCommit();
+    setPanel(to);
+  };
+  const pickCommit = (c: Commit) => {
+    setCommit(c);
+    setParams({ cmp: null, file: null, line: null });
+  };
+
+  const showRail = panel !== "outline" || width === null || width >= RAIL_MIN_WIDTH;
   const stack = width !== null && width < STACK_MAX_WIDTH;
-  const current = loaded && loaded.path === selected ? loaded : null;
+  const current = loaded && loaded.path === selected && loaded.src === src ? loaded : null;
   const content = current && !current.binary && !current.error ? current.content : undefined;
   const outline = useMemo(
     () => (selected && content != null && OUTLINE_FILE.test(selected) ? outlineOf(content) : null),
@@ -165,11 +237,18 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   );
 
   let tree: ReactNode;
-  if (files && !Array.isArray(files))
+  if (shown && !Array.isArray(shown))
     tree = (
       <p className="cv-msg" role="alert">
-        Couldn't list files ({files.error}).{" "}
-        <button type="button" data-testid="code-tree-retry" onClick={() => setAttempt((n) => n + 1)}>
+        Couldn't list files ({shown.error}).{" "}
+        <button
+          type="button"
+          data-testid="code-tree-retry"
+          onClick={() => {
+            if (!cmp) setFiles(null);
+            setAttempt((n) => n + 1);
+          }}
+        >
           Retry
         </button>
       </p>
@@ -185,13 +264,13 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   else
     viewer = (
       <FileViewer
-        key={current.path}
+        key={`${src}:${current.path}`}
         path={current.path}
         diff={current.diff}
         content={current.content}
         status={viewerStatus(status)}
-        uncommitted={!!status}
-        defaultMode="code"
+        uncommitted={src === "work" && !!status}
+        defaultMode={src !== "work" && status ? "diff" : "code"}
         highlight={highlight}
         onIdentifierClick={nav.onIdentifierClick}
         scrollToLine={scroll?.line}
@@ -199,8 +278,18 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
       />
     );
 
+  let rail: ReactNode = null;
+  if (panel === "changes")
+    rail = <ChangesPanel root={root} selected={selected} onOpen={(p) => open(p)} onChanged={() => setAttempt((n) => n + 1)} />;
+  else if (panel === "history") rail = <HistoryPanel root={root} sha={commit?.sha ?? null} onPick={pickCommit} />;
+  else if (showRail) rail = <Outline items={outline} onJump={jump} />;
+
   return (
-    <div ref={bodyRef} className={`cv-body${showRail ? "" : " cv-norail"}${stack ? " cv-stack" : ""}`} data-testid="code-body">
+    <div
+      ref={bodyRef}
+      className={`cv-body${showRail ? "" : " cv-norail"}${panel !== "outline" ? " cv-widerail" : ""}${stack ? " cv-stack" : ""}`}
+      data-testid="code-body"
+    >
       <div className="cv-side">
         <FileSearch root={root} paths={paths} request={searchRequest} onRequestHandled={onSearchHandled} onOpen={open} />
         <div className="cv-tree">{tree}</div>
@@ -216,10 +305,34 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
             </span>
           )}
           {nav.choices && <DefinitionChooser choices={nav.choices} onChoose={nav.choose} onDismiss={nav.dismiss} />}
+          {commit && (
+            <span className="cv-mode" data-testid="code-commit-indicator">
+              Commit <code>{commit.shortSha}</code> {commit.message}
+              <button type="button" data-testid="code-commit-exit" onClick={leaveCommit}>
+                Exit
+              </button>
+            </span>
+          )}
+          {cmp && (
+            <span className="cv-mode" data-testid="code-compare-indicator">
+              Comparing with {cmp}
+              <button type="button" data-testid="code-compare-exit" onClick={() => setParams({ cmp: null })}>
+                Exit compare
+              </button>
+            </span>
+          )}
+          <span className="cv-tools">
+            <button type="button" data-testid="code-changes-toggle" aria-pressed={panel === "changes"} onClick={() => togglePanel("changes")}>
+              Changes {changedCount}
+            </button>
+            <button type="button" data-testid="code-history-toggle" aria-pressed={panel === "history"} onClick={() => togglePanel("history")}>
+              History
+            </button>
+          </span>
         </div>
         <div className="cv-viewer">{viewer}</div>
       </div>
-      {showRail && <Outline items={outline} onJump={jump} />}
+      {rail}
     </div>
   );
 }
@@ -236,7 +349,7 @@ export default function CodeView({ repos, params, setParams, contextSlot, search
   const waiting = !!asked && !!repo?.present && !listed;
   const root = repo?.present && !waiting ? (wt ?? repo.path) : null;
 
-  const pick = (name: string, path: string | null) => setParams({ repo: name, wt: path, file: null, line: null });
+  const pick = (name: string, path: string | null) => setParams({ repo: name, wt: path, file: null, line: null, cmp: null });
 
   let body: ReactNode;
   if (repos.length === 0) body = <p className="cv-msg">This project has no linked repositories.</p>;
@@ -259,7 +372,16 @@ export default function CodeView({ repos, params, setParams, contextSlot, search
     <div className="cv" data-testid="code-view">
       {contextSlot &&
         createPortal(
-          <RefSwitcher repos={repos} worktrees={worktrees} repo={repo?.name ?? null} wt={wt} onPick={pick} />,
+          <RefSwitcher
+            repos={repos}
+            worktrees={worktrees}
+            repo={repo?.name ?? null}
+            wt={wt}
+            onPick={pick}
+            root={root}
+            compare={params.get("cmp")}
+            onCompare={(ref) => setParams({ cmp: ref })}
+          />,
           contextSlot,
         )}
       {body}

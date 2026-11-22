@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import BranchPicker from "../git/BranchPicker";
 import type { RepoEntry } from "../projects/useProjects";
 import "./Code.css";
 
@@ -51,13 +52,19 @@ interface Props {
   repo: string | null;
   wt: string | null;
   onPick: (repo: string, wt: string | null) => void;
+  /** Directory the open checkout reads from; null hides Compare with…. */
+  root?: string | null;
+  /** Ref the tree is compared against, if any. */
+  compare?: string | null;
+  onCompare?: (ref: string) => void;
 }
 
 const branchLabel = (w: Worktree | undefined) => (w ? (w.branch ?? `detached ${w.head.slice(0, 7)}`) : null);
 
 /** Context-slot button + popover: repos grouped, each with its main checkout then its worktrees. */
-export default function RefSwitcher({ repos, worktrees, repo, wt, onPick }: Props) {
+export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare }: Props) {
   const [open, setOpen] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
   const [dirty, setDirty] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +102,21 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick }: Prop
       cancelled = true;
     };
   }, [pathsKey]);
+
+  // Refs to compare against, listed per open like the counts above.
+  useEffect(() => {
+    if (!open || !root || !onCompare) return;
+    let cancelled = false;
+    fetch(`/api/git/branches?repo=${q(root)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { branches?: unknown } | null) => {
+        if (!cancelled && Array.isArray(data?.branches)) setBranches(data.branches.filter((b): b is string => typeof b === "string"));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, root, onCompare]);
 
   const list = repo ? worktrees[repo] : undefined;
   const current = list ? (wt ? list.find((w) => w.path === wt) : list[0]) : undefined;
@@ -161,6 +183,24 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick }: Prop
               )}
             </div>
           ))}
+          {root && onCompare && (
+            <div className="cv-sw-group cv-sw-compare">
+              <BranchPicker
+                branches={branches}
+                value={compare ?? ""}
+                placeholder="Compare with…"
+                align="left"
+                testIdPrefix="compare-with"
+                triggerClassName="cv-sw-row"
+                triggerStyle={{}}
+                trigger={<>{compare ? `Comparing with ${compare} — change…` : "Compare with…"}</>}
+                onChange={(ref) => {
+                  setOpen(false);
+                  onCompare(ref);
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

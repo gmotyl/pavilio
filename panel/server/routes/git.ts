@@ -490,6 +490,16 @@ async function diffAgainstHead(file: string, repo?: string): Promise<string> {
   return synthesizeAddDiff(path, readFileSync(real, "utf-8"));
 }
 
+/** A commit's first parent, or the empty tree for a root commit. */
+function commitParent(sha: string, repo?: string): string {
+  try {
+    git(`rev-parse --verify --quiet ${sha}^`, repo);
+    return `${sha}^`;
+  } catch {
+    return EMPTY_TREE;
+  }
+}
+
 // Diff for a specific file (working tree or specific commit); against=HEAD includes staged changes
 router.get("/diff", async (req, res) => {
   try {
@@ -505,7 +515,7 @@ router.get("/diff", async (req, res) => {
     }
     const quotedFile = quoteShellArg(file);
     const diff = sha
-      ? git(`diff ${sha}^..${sha} -- ${quotedFile}`, repo)
+      ? git(`diff ${commitParent(sha, repo)} ${sha} -- ${quotedFile}`, repo)
       : getWorkingTreeDiff(file, repo);
     res.json({ diff });
   } catch (e: any) {
@@ -542,7 +552,7 @@ router.get("/commit-files", (req, res) => {
     const sha = req.query.sha as string;
     const repo = req.query.repo as string | undefined;
     if (!sha) return res.status(400).json({ error: "sha parameter required" });
-    const raw = git(`diff-tree --no-commit-id -r --name-status ${sha}`, repo);
+    const raw = git(`diff-tree --root --no-commit-id -r --name-status ${sha}`, repo);
     const files = raw
       .trim()
       .split("\n")
