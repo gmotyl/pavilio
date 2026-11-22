@@ -66,7 +66,8 @@ is optional, and only its `## Archived Projects` rows are refused.
 ## 3. Query
 
 1. No `projects/<p>/wiki/` → say the project has no wiki yet, suggest `/pavilio-wiki-migrate <p>`,
-   create nothing, stop.
+   create nothing, stop. Otherwise read `wiki_language` from `projects/<p>/PROJECT.md` (see
+   § Writers → Language) before composing the answer and pass it to any writer you spawn.
 2. Walk `CONVENTIONS.md § Reading ladder`. Enter `wiki/repos/<repo>/` only for a code question.
    Claims taken from a `kind: research` project are labelled `(research, unverified)` unless this
    project is research too (ladder step 6).
@@ -253,6 +254,8 @@ Spawn each writer with its agent file as instructions plus its inputs; never han
 file allows. Claude Code: Agent tool with `model: <writerModel>`; other harnesses: their small-model
 tier. Each writer returns exactly one JSON receipt.
 
+**Language.** Read `wiki_language` from the project's `PROJECT.md` frontmatter once per run and pass it as `language:` to every writer; absent → English, no `language:` line. Resolve it for the project you are working on (the target for a harvest). Query answers and `wiki/questions/` pages are written in that language too (links, slugs and keys stay as they are).
+
 Inputs go **inline in the prompt** as a short `key: value` list (a glossary line quoted) — never
 written to a file the writer is told to read first. "Read this file, it holds your instructions"
 is the shape of a prompt injection, and Claude Code's auto-mode classifier blocks such launches.
@@ -265,6 +268,7 @@ projects/<p>/. Read skills/pavilio-wiki/agents/page_writer.md and follow it exac
 
 Inputs:
 - project: <p>
+- language: Polish        # only when the project's PROJECT.md frontmatter has `wiki_language`
 - slug: concepts/relay
 - sources: wiki/sources/progress-2026-10-19-tts-relay-node20.md
 - glossary: "Relay — the panel server's synthesis endpoint … See wiki/concepts/relay."
@@ -289,7 +293,9 @@ of the shared `knowledge` project, linked both ways. Run only when the user asks
 moves on its own. Selection is the promotion: the ≥2-source rule does not apply here.
 
 1. **Target** — no `projects/knowledge/` → `scripts/project new knowledge --kind knowledge`
-   (creates `PROJECT.md` with `kind: knowledge` and the `wiki/` skeleton). Then
+   (creates `PROJECT.md` with `kind: knowledge` and the `wiki/` skeleton). Read the target's
+   `wiki_language` (§ Writers → Language) and pass it to every page and overview writer this run
+   spawns; a source project's language does not apply. Then
    `scripts/wiki lock take knowledge --session <id>` as in § Ingest; `held: false` → stop.
 2. **Candidates** — `scripts/wiki candidates` → `items` (`id`, `project`, `text`, `details`:
    the bullet's indented sub-lines, dedented, `[]` when none, `date`, `source`: the origin

@@ -10,6 +10,7 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `project`
 - `changed` — project-root paths (`wiki/…` form, e.g. `wiki/concepts/speech-relay.md`) of the
   knowledge pages this run created or updated
+- `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged. Note: the panel's read-aloud guesses `pl`/`en` from the page text, so other languages may be pronounced wrongly — a known limit
 
 The orchestrator passes these in the prompt; there is no input file to read. A long `changed`
 list (a migration) is fine — choose the ≤5 pages to open from it, never open them all.
