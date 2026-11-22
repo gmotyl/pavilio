@@ -44,6 +44,19 @@ function latestWikiLogDate(dir: string): string | null {
   return latest;
 }
 
+/**
+ * Whether a repos.json `path` names a directory on this machine. Any stat failure
+ * (ENOENT, but also ELOOP, EACCES, ...) means "not present": a well-formed entry is
+ * never dropped just because its path cannot be inspected here.
+ */
+function isDirectoryOnThisMachine(path: string): boolean {
+  try {
+    return statSync(expandHome(path), { throwIfNoEntry: false })?.isDirectory() ?? false;
+  } catch {
+    return false;
+  }
+}
+
 export function discoverProjects(): Project[] {
   const { projectsDir } = getConfig();
   const entries = readdirSync(projectsDir, { withFileTypes: true });
@@ -93,15 +106,14 @@ export function readProject(root: string, name: string): Project {
             // drop every other repo in the array — skip just that entry.
             if (typeof r?.name !== "string" || typeof r?.path !== "string") {
               console.warn(
-                `[discovery] ${name}/repos.json: skipping repo entry without a string name and path:`,
+                `[discovery] ${name}/repos.json: skipping repo entry without a string name or path:`,
                 JSON.stringify(r),
               );
               return [];
             }
+            const present = isDirectoryOnThisMachine(r.path);
             try {
               const openspec = parseOpenSpecConfig(r);
-              const present =
-                statSync(expandHome(r.path), { throwIfNoEntry: false })?.isDirectory() ?? false;
               const entry: RepoEntry = { name: r.name, path: r.path, present };
               if (openspec) entry.openspec = openspec;
               return [entry];

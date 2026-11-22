@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -102,8 +102,21 @@ describe("readProject repo presence", () => {
       { name: "missing", path: join(scratch, "missing"), present: false },
     ]);
     const malformedWarnings = warn.mock.calls.filter((c) =>
-      String(c[0]).includes(PROJECT) && !String(c[0]).includes("openspec"),
+      String(c[0]).includes("skipping repo entry"),
     );
     expect(malformedWarnings).toHaveLength(4);
+  });
+
+  it("keeps an entry whose path cannot be stat'ed as not present", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // A symlink loop makes stat throw ELOOP rather than return "no entry".
+    const a = join(scratch, "a");
+    const b = join(scratch, "b");
+    symlinkSync(b, a);
+    symlinkSync(a, b);
+    writeRepos([{ name: "loop", path: a }]);
+    expect(repos()).toEqual([{ name: "loop", path: a, present: false }]);
+    const openspecWarnings = warn.mock.calls.filter((c) => String(c[0]).includes("openspec"));
+    expect(openspecWarnings).toHaveLength(0);
   });
 });
