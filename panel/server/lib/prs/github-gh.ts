@@ -60,7 +60,8 @@ interface RawPr {
 }
 
 const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
-const PENDING_STATES = new Set(["PENDING", "EXPECTED"]);
+// Only these count as passed; STALE or any unknown value is not green.
+const PASSED = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
 
 type CheckOutcome = "fail" | "pending" | "ok";
 
@@ -68,12 +69,11 @@ function checkOutcome(c: RawCheck): CheckOutcome {
   // StatusContext carries `state`; CheckRun carries `status` + `conclusion`.
   if (c.__typename === "StatusContext" || (c.state !== undefined && c.status === undefined)) {
     const s = (c.state ?? "").toUpperCase();
-    if (FAILED.has(s)) return "fail";
-    if (PENDING_STATES.has(s)) return "pending";
-    return "ok";
+    return FAILED.has(s) ? "fail" : PASSED.has(s) ? "ok" : "pending";
   }
   if ((c.status ?? "").toUpperCase() !== "COMPLETED") return "pending";
-  return FAILED.has((c.conclusion ?? "").toUpperCase()) ? "fail" : "ok";
+  const conclusion = (c.conclusion ?? "").toUpperCase();
+  return FAILED.has(conclusion) ? "fail" : PASSED.has(conclusion) ? "ok" : "pending";
 }
 
 /** Any failure → fail, else any pending → running, else pass; no checks → none. */
@@ -117,10 +117,16 @@ export function remoteRepo(url: string): string | null {
 
 // A credential prompt would hang the request until the timeout; fail fast instead.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" };
+const GITHUB_HOST = "github.com";
+// GitHub's SSH-over-443 endpoint is the same github.com.
+const GITHUB_REMOTE_HOSTS = new Set([GITHUB_HOST, "ssh.github.com"]);
+// Re-read so `gh auth switch` shows up without a restart.
+const LOGIN_TTL_MS = 5 * 60_000;
 
-export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider {
+export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number } = {}): PrProvider {
   const run = deps.run ?? defaultRunner;
-  let login: Promise<string> | null = null;
+  const now = deps.now ?? Date.now;
+  let login: { at: number; value: Promise<string> } | null = null;
 
   async function gh(args: string[], cwd: string): Promise<string> {
     let r: RunResult;
@@ -148,7 +154,10 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
     return r.stdout;
   }
 
-  /** Returns `owner/repo` of origin; gh gets it via --repo, since in a fork clone gh defaults to upstream. */
+  /**
+   * Returns `github.com/owner/repo` of origin for gh's --repo: in a fork clone gh defaults
+   * to upstream, and an unqualified slug would resolve against GH_HOST.
+   */
   async function assertGitHub(repoPath: string): Promise<string> {
     let url: string;
     try {
@@ -157,20 +166,25 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
       // No origin at all is just as un-GitHub as a foreign host.
       throw new PrUnavailableError("not-github", "no origin remote");
     }
-    if (remoteHost(url) !== "github.com") throw new PrUnavailableError("not-github", `origin is ${url.trim()}`);
+    if (!GITHUB_REMOTE_HOSTS.has(remoteHost(url) ?? "")) throw new PrUnavailableError("not-github", `origin is ${url.trim()}`);
     const slug = remoteRepo(url);
     if (!slug) throw new PrUnavailableError("not-github", `cannot parse owner/repo from ${url.trim()}`);
-    return slug;
+    return `${GITHUB_HOST}/${slug}`;
   }
 
   return {
     whoami() {
-      login ??= gh(["api", "user", "--jq", ".login"], process.cwd()).then((s) => s.trim());
+      if (login && now() - login.at < LOGIN_TTL_MS) return login.value;
+      const entry = {
+        at: now(),
+        value: gh(["api", "user", "--hostname", GITHUB_HOST, "--jq", ".login"], process.cwd()).then((s) => s.trim()),
+      };
+      login = entry;
       // A failed lookup must not poison the cache (e.g. user runs `gh auth login` later).
-      login.catch(() => {
-        login = null;
+      entry.value.catch(() => {
+        if (login === entry) login = null;
       });
-      return login;
+      return entry.value;
     },
 
     async listOpen(repoPath) {
@@ -217,9 +231,22 @@ export function createGitHubGhProvider(deps: { run?: Runner } = {}): PrProvider 
       ).trim();
       if (!base) throw new PrUnavailableError("failed", `PR #${n} has no base branch`);
       const headRef = `refs/pavilio/pr/${n}`;
-      const baseRef = `refs/remotes/origin/${base}`;
-      // `+`: PR heads are force-pushed routinely; a stale local ref must not block the update.
-      await git(["fetch", "--no-tags", "origin", `+pull/${n}/head:${headRef}`, `+refs/heads/${base}:${baseRef}`], repoPath);
+      const baseRef = `refs/pavilio/pr-base/${n}`;
+      // Touch only refs/pavilio/: --refmap= skips the opportunistic origin/* update,
+      // no FETCH_HEAD, no submodule fetches. `+`: PR heads are force-pushed routinely.
+      await git(
+        [
+          "fetch",
+          "--no-tags",
+          "--no-write-fetch-head",
+          "--recurse-submodules=no",
+          "--refmap=",
+          "origin",
+          `+pull/${n}/head:${headRef}`,
+          `+refs/heads/${base}:${baseRef}`,
+        ],
+        repoPath,
+      );
       const head = (await git(["rev-parse", "--verify", `${headRef}^{commit}`], repoPath)).trim();
       const baseSha = (await git(["rev-parse", "--verify", `${baseRef}^{commit}`], repoPath)).trim();
       return { head, base: baseSha };

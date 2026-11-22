@@ -24,11 +24,16 @@ export interface PrProvider {
   openPr(repoPath: string, n: number): Promise<{ head: string; base: string }>;
 }
 
+/** Strip `user:secret@` from any URL in `text`: git and gh echo the origin URL in errors. */
+export function redactUrlCredentials(text: string): string {
+  return text.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@'"]+@/gi, "$1***@");
+}
+
 export class PrUnavailableError extends Error {
   readonly reason: Unavailable;
 
   constructor(reason: Unavailable, message: string = reason) {
-    super(message);
+    super(redactUrlCredentials(message));
     this.name = "PrUnavailableError";
     this.reason = reason;
   }

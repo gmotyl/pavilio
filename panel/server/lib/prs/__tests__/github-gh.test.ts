@@ -40,7 +40,8 @@ describe("GitHubGhProvider", () => {
     const ghCall = calls.find((c) => c.cmd === "gh")!;
     expect(ghCall.cwd).toBe(REPO);
     // --repo pins gh to origin: in a fork clone gh would otherwise default to upstream.
-    expect(ghCall.args.slice(0, 8)).toEqual(["pr", "list", "--repo", "o/r", "--state", "open", "--limit", "100"]);
+    // github.com/ qualifies it: an unqualified slug would resolve against GH_HOST.
+    expect(ghCall.args.slice(0, 8)).toEqual(["pr", "list", "--repo", "github.com/o/r", "--state", "open", "--limit", "100"]);
 
     expect(prs).toHaveLength(4);
     expect(prs[0]).toEqual({
@@ -83,6 +84,10 @@ describe("GitHubGhProvider", () => {
     expect(rollupChecks([run("COMPLETED", "ACTION_REQUIRED")])).toBe("fail");
     expect(rollupChecks([run("COMPLETED", "NEUTRAL")])).toBe("pass");
     expect(rollupChecks([run("COMPLETED", "SKIPPED")])).toBe("pass");
+    // Only explicit successes pass; a stale or unknown conclusion is not green.
+    expect(rollupChecks([run("COMPLETED", "SUCCESS"), run("COMPLETED", "STALE")])).toBe("running");
+    expect(rollupChecks([run("COMPLETED", "WHATEVER")])).toBe("running");
+    expect(rollupChecks([ctx("UNKNOWN")])).toBe("running");
   });
 
   it("rejects a non-GitHub origin without calling gh", async () => {
@@ -105,6 +110,7 @@ describe("GitHubGhProvider", () => {
       "ssh://git@github.com/o/r.git",
       "git@github.com:o/r.git",
       "https://user@github.com/o/r",
+      "ssh://git@ssh.github.com:443/o/r.git",
     ]) {
       const origin = originIs(url);
       const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
@@ -142,6 +148,20 @@ describe("GitHubGhProvider", () => {
     expect(apiCalls).toHaveLength(1);
   });
 
+  it("asks github.com for the login and re-reads it after a while (gh auth switch)", async () => {
+    let t = 0;
+    let user = "first";
+    const { run, calls } = fakeRunner(() => ok(`${user}\n`));
+    const provider = createGitHubGhProvider({ run, now: () => t });
+    expect(await provider.whoami()).toBe("first");
+    expect(calls[0].args).toEqual(["api", "user", "--hostname", "github.com", "--jq", ".login"]);
+    user = "second";
+    t += 60_000;
+    expect(await provider.whoami()).toBe("first");
+    t += 10 * 60_000;
+    expect(await provider.whoami()).toBe("second");
+  });
+
   it("does not cache a failed gh login", async () => {
     let attempt = 0;
     const { run } = fakeRunner(() => (++attempt === 1 ? { code: 4, stdout: "", stderr: "" } : ok("gmotyl\n")));
@@ -161,7 +181,7 @@ describe("GitHubGhProvider", () => {
       const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
       await createGitHubGhProvider({ run }).listOpen(REPO);
       const gh = calls.find((c) => c.cmd === "gh")!;
-      expect(gh.args[gh.args.indexOf("--repo") + 1]).toBe(slug);
+      expect(gh.args[gh.args.indexOf("--repo") + 1]).toBe(`github.com/${slug}`);
     }
   });
 
@@ -173,7 +193,7 @@ describe("GitHubGhProvider", () => {
       if (cmd === "gh") return ok("release\n");
       if (args[0] === "fetch") return ok("");
       if (args[0] === "rev-parse" && args.some((a) => a.startsWith("refs/pavilio/pr/231"))) return ok("a".repeat(40) + "\n");
-      if (args[0] === "rev-parse" && args.some((a) => a.startsWith("refs/remotes/origin/release"))) return ok("b".repeat(40) + "\n");
+      if (args[0] === "rev-parse" && args.some((a) => a.startsWith("refs/pavilio/pr-base/231"))) return ok("b".repeat(40) + "\n");
       return new Error(`unexpected ${cmd} ${args.join(" ")}`);
     });
 
@@ -184,12 +204,15 @@ describe("GitHubGhProvider", () => {
     expect(fetch.cwd).toBe(REPO);
     expect(fetch.args).toContain("origin");
     expect(fetch.args.some((a) => a.endsWith("pull/231/head:refs/pavilio/pr/231"))).toBe(true);
-    expect(fetch.args.some((a) => a.endsWith("refs/heads/release:refs/remotes/origin/release"))).toBe(true);
+    // Both refs private: no remote-tracking update, no FETCH_HEAD, no submodule fetches.
+    expect(fetch.args.some((a) => a.endsWith("refs/heads/release:refs/pavilio/pr-base/231"))).toBe(true);
+    expect(fetch.args).toEqual(expect.arrayContaining(["--no-write-fetch-head", "--recurse-submodules=no", "--refmap="]));
+    expect(fetch.args.some((a) => a.includes("refs/remotes/"))).toBe(false);
     // A credential prompt must never hang the request.
     expect(fetch.env?.GIT_TERMINAL_PROMPT).toBe("0");
     expect(calls.filter((c) => c.cmd === "git").every((c) => c.env?.GIT_TERMINAL_PROMPT === "0")).toBe(true);
 
     const view = calls.find((c) => c.cmd === "gh" && c.args[1] === "view")!;
-    expect(view.args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "o/r"]);
+    expect(view.args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "github.com/o/r"]);
   });
 });

@@ -96,7 +96,26 @@ export function readProject(root: string, name: string): Project {
         : wikiLogDate
       : (latestProgressDate ?? wikiLogDate);
 
-  // Read repos.json if present
+  const repos = readRepos(dir, name);
+
+  return {
+    name,
+    path: dir,
+    hasIndex: existsSync(join(dir, "_index.json")),
+    hasNotes: existsSync(join(dir, "notes")),
+    hasProgress: existsSync(join(dir, "progress")),
+    hasPlans: existsSync(join(dir, "plans")),
+    hasWiki: statSync(join(dir, "wiki"), { throwIfNoEntry: false })?.isDirectory() ?? false,
+    latestProgressDate,
+    kind: projectKind(root, name),
+    group: projectGroup(root, name),
+    lastActivity,
+    repos,
+  };
+}
+
+/** `<dir>/repos.json` entries; a malformed file or entry is warned about and skipped. */
+export function readRepos(dir: string, name: string): RepoEntry[] {
   const reposPath = join(dir, "repos.json");
   let repos: RepoEntry[] = [];
   if (existsSync(reposPath)) {
@@ -138,21 +157,26 @@ export function readProject(root: string, name: string): Project {
       console.warn(`[discovery] ${name}/repos.json: invalid JSON:`, (err as Error).message);
     }
   }
+  return repos;
+}
 
-  return {
-    name,
-    path: dir,
-    hasIndex: existsSync(join(dir, "_index.json")),
-    hasNotes: existsSync(join(dir, "notes")),
-    hasProgress: existsSync(join(dir, "progress")),
-    hasPlans: existsSync(join(dir, "plans")),
-    hasWiki: statSync(join(dir, "wiki"), { throwIfNoEntry: false })?.isDirectory() ?? false,
-    latestProgressDate,
-    kind: projectKind(root, name),
-    group: projectGroup(root, name),
-    lastActivity,
-    repos,
-  };
+/**
+ * A live project by name: a project dir under projectsDir that, through any symlink,
+ * stays inside projectsDir — the rule GET /api/projects/:name applies.
+ */
+export function isLiveProject(projectsDir: string, name: string): boolean {
+  return isProjectName(name) && isProjectDir(projectsDir, name) && resolvesInsideProjectsDir(projectsDir, join(projectsDir, name));
+}
+
+/**
+ * Every live project's repos.json entries. Reads nothing else, so an unreadable
+ * file elsewhere in one project cannot fail a caller that only needs repo links.
+ */
+export function linkedRepos(): RepoEntry[] {
+  const { projectsDir } = getConfig();
+  return readdirSync(projectsDir)
+    .filter((name) => isLiveProject(projectsDir, name))
+    .flatMap((name) => readRepos(join(projectsDir, name), name));
 }
 
 /** Archived projects live in `<projectsDir>/archived/<name>`. */

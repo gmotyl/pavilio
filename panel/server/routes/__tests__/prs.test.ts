@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
-import { mkdirSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 import { PrUnavailableError, type PrProvider, type PullRequest } from "../../lib/prs/provider";
@@ -174,6 +174,51 @@ describe("/api/prs", () => {
     provider.openPr.mockRejectedValue(new PrUnavailableError("failed", "fetch failed"));
     const res = await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 });
     expect(res.status).toBe(502);
-    expect(res.body).toEqual({ error: "fetch failed" });
+    expect(res.body).toEqual({ error: "fetch failed", reason: "failed" });
+  });
+
+  it("never sends credentials from an upstream error to the browser", async () => {
+    const { gh, provider } = setup();
+    provider.openPr.mockRejectedValue(
+      new Error("fatal: unable to access 'https://user:s3cret@github.com/o/r.git/': 403"),
+    );
+    const res = await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 });
+    expect(res.status).toBe(502);
+    expect(JSON.stringify(res.body)).not.toContain("s3cret");
+    expect(res.body.reason).toBe("failed");
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "opens a PR although an unrelated project has an unreadable file",
+    async () => {
+      const { gh, provider } = setup();
+      const other = join(projects.dir(), "other");
+      mkdirSync(join(other, "wiki"), { recursive: true });
+      writeFileSync(join(other, "PROJECT.md"), "# other\n");
+      writeFileSync(join(other, "wiki", "log.md"), "## [2026-01-01]\n");
+      chmodSync(join(other, "wiki", "log.md"), 0);
+      const res = await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 });
+      expect(res.status).toBe(200);
+    },
+  );
+
+  it("treats a symlinked project the same for listing and opening", async () => {
+    const { gh, provider } = setup();
+    // Inside projectsDir: a project for both endpoints.
+    symlinkSync(join(projects.dir(), "proj"), join(projects.dir(), "alias"), "dir");
+    expect((await request(appFor(provider)).get("/api/prs?project=alias")).status).toBe(200);
+
+    // Outside projectsDir: a project for neither.
+    const outside = join(projects.root(), "outside");
+    const outRepo = join(projects.root(), "out-repo");
+    mkdirSync(outside);
+    mkdirSync(outRepo);
+    writeFileSync(join(outside, "PROJECT.md"), "# out\n");
+    writeFileSync(join(outside, "repos.json"), JSON.stringify([{ name: "out", path: outRepo }]));
+    symlinkSync(outside, join(projects.dir(), "evil"), "dir");
+    expect((await request(appFor(provider)).get("/api/prs?project=evil")).status).toBe(404);
+    const open = await request(appFor(provider)).post("/api/prs/open").send({ repo: outRepo, number: 3 });
+    expect(open.status).toBe(400);
+    expect((await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 })).status).toBe(200);
   });
 });

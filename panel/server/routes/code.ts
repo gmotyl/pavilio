@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { isAbsolute, posix, resolve, sep } from "path";
-import { discoverProjects } from "../lib/discovery.js";
+import { linkedRepos } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
 import { createTsNav, type TsNav } from "../lib/ts-nav.js";
 import { listRepoWorktrees } from "../lib/worktrees.js";
 
 /** A present linked repo or one of its worktrees: a language service may only start where the panel already browses. */
 function isLinkedRepo(target: string): boolean {
-  const roots = discoverProjects().flatMap((p) => p.repos.filter((r) => r.present).map((r) => resolve(expandHome(r.path))));
+  const roots = linkedRepos().filter((r) => r.present).map((r) => resolve(expandHome(r.path)));
   if (roots.includes(target)) return true;
   return roots.some((root) => listRepoWorktrees(root).some((w) => resolve(w.path) === target));
 }

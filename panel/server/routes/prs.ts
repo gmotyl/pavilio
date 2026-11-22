@@ -1,14 +1,14 @@
 import { Router } from "express";
-import { resolve } from "path";
+import { join, resolve } from "path";
 import { getConfig } from "../config.js";
-import { discoverProjects, readProject, type RepoEntry } from "../lib/discovery.js";
+import { isLiveProject, linkedRepos, readRepos, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
-import { isProjectDir } from "../lib/project-dir.js";
 import { createGitHubGhProvider } from "../lib/prs/github-gh.js";
 import {
   type PrProvider,
   PrUnavailableError,
   type PullRequest,
+  redactUrlCredentials,
   type Unavailable,
 } from "../lib/prs/provider.js";
 
@@ -47,10 +47,11 @@ export function createPrsRouter(
     const name = typeof req.query.project === "string" ? req.query.project : "";
     if (!name) return res.status(400).json({ error: "project parameter required" });
     const { projectsDir } = getConfig();
-    if (!isProjectDir(projectsDir, name)) return res.status(404).json({ error: "Project not found" });
+    // One membership rule with /open: a symlinked project must stay inside projectsDir.
+    if (!isLiveProject(projectsDir, name)) return res.status(404).json({ error: "Project not found" });
 
     // A repo missing on this machine is a resting state: never run anything there.
-    const repos = readProject(projectsDir, name).repos.filter((r) => r.present);
+    const repos = readRepos(join(projectsDir, name), name).filter((r) => r.present);
     const [me, results] = await Promise.all([
       provider.whoami().catch(() => ""),
       Promise.allSettled(repos.map((r) => listOpen(repoRoot(r)))),
@@ -79,13 +80,15 @@ export function createPrsRouter(
     }
     // Only a present linked repo may be fetched into: the path comes from the client.
     const target = resolve(expandHome(repo));
-    const linked = discoverProjects().some((p) => p.repos.some((r) => r.present && repoRoot(r) === target));
+    const linked = linkedRepos().some((r) => r.present && repoRoot(r) === target);
     if (!linked) return res.status(400).json({ error: "repo is not linked to any project" });
 
     try {
       res.json(await provider.openPr(target, number));
     } catch (e) {
-      res.status(502).json({ error: (e as Error)?.message ?? String(e) });
+      // Upstream text may echo an origin URL with embedded credentials.
+      const reason: Unavailable = e instanceof PrUnavailableError ? e.reason : "failed";
+      res.status(502).json({ error: redactUrlCredentials((e as Error)?.message ?? String(e)), reason });
     }
   });
 
