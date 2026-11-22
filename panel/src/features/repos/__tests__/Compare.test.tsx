@@ -14,6 +14,35 @@ beforeEach(() => {
 });
 
 describe("Compare with", () => {
+  it("Compare with sits outside the scrolling worktree list and its branches replace that list", async () => {
+    renderCode("?view=code", {
+      "/api/git/branches": () => jsonResponse({ current: "feat/x", branches: ["main", "feat/x", "release"] }),
+    });
+    fireEvent.click(await screen.findByTestId("repo-switcher"));
+    const pop = await screen.findByRole("dialog", { name: "Pick a repository or worktree" });
+    const list = within(pop).getByTestId("repo-switcher-list");
+    const toggle = within(pop).getByTestId("compare-with-toggle");
+    expect(list).not.toContainElement(toggle);
+    // Pinned above the list, so a long worktree list never pushes it out of view.
+    expect(toggle.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(within(pop).queryByTestId("repo-switcher-list")).toBeNull();
+    const branches = await within(pop).findByTestId("compare-with-list");
+    await waitFor(() => expect(within(branches).getAllByRole("option").map((o) => o.textContent)).toEqual(["main", "feat/x", "release"]));
+    fireEvent.change(within(pop).getByRole("searchbox", { name: "Filter branches" }), { target: { value: "rel" } });
+    expect(within(branches).getAllByRole("option").map((o) => o.textContent)).toEqual(["release"]);
+
+    fireEvent.click(within(pop).getByTestId("compare-with-back"));
+    expect(within(pop).getByTestId("repo-switcher-list")).toBeInTheDocument();
+    expect(within(pop).queryByTestId("compare-with-list")).toBeNull();
+
+    fireEvent.click(within(pop).getByTestId("compare-with-toggle"));
+    fireEvent.click(await within(pop).findByTestId("compare-with-option-release"));
+    expect(urlParams(screen.getByTestId("search")).get("cmp")).toBe("release");
+    expect(screen.queryByRole("dialog", { name: "Pick a repository or worktree" })).toBeNull();
+  });
+
   it("compare with main badges differing files and shows the three-dot diff", async () => {
     const { fetch } = renderCode("?view=code", {
       "/api/git/branches": () => jsonResponse({ current: "feat/x", branches: ["main", "feat/x"] }),

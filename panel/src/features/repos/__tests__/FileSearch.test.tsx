@@ -9,6 +9,7 @@ beforeEach(() => {
   DrivenResizeObserver.all = [];
   vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
   vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  vi.mocked(Element.prototype.scrollTo).mockClear();
 });
 
 describe("FileSearch", () => {
@@ -60,6 +61,6 @@ describe("FileSearch", () => {
     expect(search().get("file")).toBe("src/a.ts");
     expect(search().get("line")).toBe("15");
     await waitFor(() => expect(screen.getByTestId("file-viewer-body").querySelector("mark.fv-hl")).toHaveTextContent("area"));
-    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
+    await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
   });
 });

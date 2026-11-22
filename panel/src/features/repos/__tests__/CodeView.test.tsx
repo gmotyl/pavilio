@@ -10,6 +10,7 @@ beforeEach(() => {
   DrivenResizeObserver.all = [];
   vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
   vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  vi.mocked(Element.prototype.scrollTo).mockClear();
 });
 
 describe("CodeView", () => {
@@ -129,9 +130,10 @@ describe("CodeView", () => {
       "ƒomega10",
     ]);
     fireEvent.click(within(outline).getByRole("button", { name: /DELTA/ }));
-    await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
-    const target = vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts.at(-1) as HTMLElement;
-    expect(target.getAttribute("data-line")).toBe("7");
+    await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
+    expect(vi.mocked(Element.prototype.scrollTo).mock.contexts.at(-1)).toHaveClass("cv-viewer");
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="7"]')).toHaveClass("fv-flash"));
     expect(search().get("line")).toBe("7");
   });
 

@@ -224,12 +224,17 @@ describe("ReviewView", () => {
     renderReview();
     await loaded();
     const r = await waitFor(() => rail()!);
-    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    const scroll = vi.mocked(Element.prototype.scrollTo);
+    const outer = vi.mocked(HTMLElement.prototype.scrollIntoView);
     scroll.mockClear();
+    outer.mockClear();
     fireEvent.click(within(r).getByRole("button", { name: /^L30/ }));
     const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-line="30"]')!;
     await waitFor(() => expect(row).toHaveClass("fv-flash"));
+    // Only the viewer pane scrolls; the page around it stays put.
     expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toHaveClass("rv-main");
+    expect(outer).not.toHaveBeenCalled();
     expect(screen.getByTestId("search").textContent).toContain("line=30");
 
     fireEvent.click(within(r).getByRole("button", { name: /^L30/ }));

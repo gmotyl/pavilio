@@ -188,6 +188,22 @@ function sideHtml(rows: Row[], side: "old" | "new", lang: string | undefined): M
 const prefersReducedMotion = (): boolean =>
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** Gap kept between the sticky header and a jumped-to line. */
+const JUMP_MARGIN = 8;
+
+/**
+ * Scrolls the viewer's host box (its parent) so `row` lands just below the
+ * sticky header. scrollIntoView would also scroll every scrollable ancestor,
+ * sliding the page chrome under the sticky tab bar.
+ */
+function scrollRowIntoHost(root: HTMLElement, row: Element): void {
+  const box = root.parentElement;
+  if (!box) return;
+  const header = root.querySelector<HTMLElement>(".fv-header")?.offsetHeight ?? 0;
+  const top = box.scrollTop + row.getBoundingClientRect().top - box.getBoundingClientRect().top - header - JUMP_MARGIN;
+  box.scrollTo({ top: Math.max(0, top), behavior: prefersReducedMotion() ? "auto" : "smooth" });
+}
+
 // git prints this in place of hunks when either side is binary.
 const BINARY_DIFF_RE = /^Binary files .* differ$/m;
 
@@ -280,7 +296,7 @@ export default function FileViewer({
     if (pending == null) return;
     const el = bodyRef.current?.querySelector(`tr[data-line="${pending}"]`);
     if (el) {
-      el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      if (rootRef.current) scrollRowIntoHost(rootRef.current, el);
       setFlash((f) => ({ line: pending, seq: (f?.seq ?? 0) + 1 }));
       setPending(undefined);
       return;

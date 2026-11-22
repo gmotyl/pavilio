@@ -31,7 +31,9 @@
   z-index: 20;
   width: min(520px, 92vw);
   max-height: 420px;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 6px;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
@@ -40,21 +42,27 @@
 }
 .cv-sw-group + .cv-sw-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-subtle); }
 .cv-sw-head { padding: 4px 8px; font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+/* Only the list scrolls; the Compare entry above it stays in view. */
+.cv-sw-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .cv-sw-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   width: 100%;
+  min-width: 0;
   padding: 6px 8px;
   border-radius: 6px;
   text-align: left;
 }
+.cv-sw-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; white-space: nowrap; }
+.cv-sw-row .cv-sw-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-sw-row .cv-sw-main { flex: none; }
 .cv-sw-row:hover:not(:disabled) { background: var(--bg-hover); }
 .cv-sw-row[aria-current="true"] { background: var(--blue-dim); }
 .cv-sw-row:disabled { cursor: default; opacity: 0.6; }
 .cv-sw-main { font-size: 11px; color: var(--text-muted); }
-.cv-sw-dirty { margin-left: auto; font-size: 11.5px; color: var(--yellow); }
+.cv-sw-dirty { flex: none; margin-left: auto; font-size: 11.5px; color: var(--yellow); }
 .cv-sw-missing { margin-left: auto; font-size: 11.5px; color: var(--text-muted); }
 
 .cv-body {
@@ -83,7 +91,8 @@
   border-bottom: 1px solid var(--border-subtle);
   font-size: 12.5px;
 }
-.cv-backbar button { color: var(--accent); }
+.cv-backbar button { color: var(--accent); white-space: nowrap; flex: none; }
+.cv-backbar .cv-notice { flex: none; white-space: nowrap; }
 .cv-backbar button:disabled { color: var(--text-muted); cursor: default; }
 .cv-notice { color: var(--text-tertiary); }
 .cv-defs {
@@ -189,11 +198,11 @@
 }
 
 .cv-body.cv-widerail { grid-template-columns: 270px minmax(0, 1fr) 300px; }
-.cv-tools { margin-left: auto; display: flex; gap: 4px; }
+.cv-tools { flex: none; margin-left: auto; display: flex; gap: 4px; }
 .cv-tools button { padding: 2px 8px; border-radius: 6px; }
 .cv-tools button[aria-pressed="true"] { background: var(--bg-active); color: var(--text-primary); }
-.cv-mode { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); }
-.cv-mode code { font-family: var(--font-mono, monospace); }
+.cv-mode { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); }
+.cv-mode code { flex: none; font-family: var(--font-mono, monospace); }
 .cv-panel { overflow: auto; }
 .cv-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
 .cv-panel-head h4 { margin: 0; }
@@ -208,4 +217,18 @@
 .cv-rail .cv-panel-actions button:disabled { opacity: 0.4; cursor: default; }
 .cv-panel-msg { width: 100%; height: 64px; padding: 6px; resize: vertical; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-base); color: var(--text-primary); font: 12px var(--font-mono, monospace); }
 .cv-hist-sha { flex: none; font: 11px var(--font-mono, monospace); color: var(--accent); }
-.cv-sw-compare { border-top: 1px solid var(--border-subtle); padding-top: 4px; }
+.cv-sw-compare { flex: none; margin-bottom: 6px; border-bottom: 1px solid var(--border-subtle); border-radius: 6px 6px 0 0; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-sw-cmp { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.cv-sw-cmp-head { flex: none; display: flex; align-items: center; gap: 6px; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border-subtle); }
+.cv-sw-cmp-back { flex: none; padding: 3px 8px; border-radius: 6px; color: var(--text-secondary); white-space: nowrap; }
+.cv-sw-cmp-back:hover { background: var(--bg-hover); }
+.cv-sw-cmp-head input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: 12px var(--font-mono, monospace);
+}

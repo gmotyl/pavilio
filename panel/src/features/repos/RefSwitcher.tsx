@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import BranchPicker from "../git/BranchPicker";
 import type { RepoEntry } from "../projects/useProjects";
 import "./Code.css";
 
@@ -74,6 +73,9 @@ const branchLabel = (w: Worktree | undefined) => (w ? (w.branch ?? `detached ${w
 /** Context-slot button + popover: repos grouped, each with its main checkout then its worktrees. */
 export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare }: Props) {
   const [open, setOpen] = useState(false);
+  // Picking a ref to compare with: the branch list takes over the popover body.
+  const [picking, setPicking] = useState(false);
+  const [filter, setFilter] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [dirty, setDirty] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement>(null);
@@ -81,10 +83,10 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") close();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -130,6 +132,12 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
     };
   }, [open, root, canCompare]);
 
+  const close = () => {
+    setOpen(false);
+    setPicking(false);
+  };
+  const shown = filter ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())) : branches;
+
   const list = repo ? worktrees[repo] : undefined;
   const current = list ? (wt ? list.find((w) => w.path === wt) : list[0]) : undefined;
 
@@ -141,7 +149,7 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
         data-testid="repo-switcher"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
       >
         {repo ? (
           <>
@@ -158,59 +166,110 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
       </button>
       {open && (
         <div className="cv-sw-pop" role="dialog" aria-label="Pick a repository or worktree">
-          {repos.length === 0 && <p className="cv-msg">This project has no linked repositories.</p>}
-          {repos.map((r) => (
-            <div key={r.name} className="cv-sw-group" role="group" aria-label={r.name}>
-              <div className="cv-sw-head">{r.name}</div>
-              {!r.present ? (
-                <button type="button" className="cv-sw-row" data-testid={`repo-switcher-missing-${r.name}`} disabled>
-                  <span className="cv-sw-path">{r.path}</span>
-                  <span className="cv-sw-missing">Not on this machine</span>
+          {root && onCompare && !picking && (
+            // Pinned above the scrolling list so a long worktree list never hides it.
+            <button
+              type="button"
+              className="cv-sw-row cv-sw-compare"
+              data-testid="compare-with-toggle"
+              onClick={() => {
+                setFilter("");
+                setPicking(true);
+              }}
+            >
+              {compare ? `Comparing with ${compare} — change…` : "Compare with…"}
+            </button>
+          )}
+          {picking && root && onCompare ? (
+            <div className="cv-sw-cmp">
+              <div className="cv-sw-cmp-head">
+                <button type="button" className="cv-sw-cmp-back" data-testid="compare-with-back" onClick={() => setPicking(false)}>
+                  ← Worktrees
                 </button>
-              ) : !worktrees[r.name] ? (
-                <p className="cv-msg">Loading worktrees…</p>
-              ) : (
-                worktrees[r.name].map((w, i) => {
-                  const isCurrent = r.name === repo && (wt ? w.path === wt : i === 0);
-                  const n = dirty[w.path];
-                  return (
-                    <button
-                      key={w.path}
-                      type="button"
-                      className="cv-sw-row"
-                      data-testid={`repo-switcher-wt-${w.path}`}
-                      aria-current={isCurrent ? "true" : undefined}
-                      onClick={() => {
-                        setOpen(false);
-                        onPick(r.name, i === 0 ? null : w.path);
-                      }}
-                    >
-                      <span className="cv-sw-branch">{branchLabel(w)}</span>
-                      {i === 0 && <span className="cv-sw-main">main checkout</span>}
-                      <span className="cv-sw-path">{w.path}</span>
-                      {n ? <span className="cv-sw-dirty">{n} uncommitted</span> : null}
-                    </button>
-                  );
-                })
-              )}
+                <input
+                  type="search"
+                  aria-label="Filter branches"
+                  placeholder="Filter branches…"
+                  value={filter}
+                  autoFocus
+                  spellCheck={false}
+                  onChange={(e) => setFilter(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && shown[0]) {
+                      close();
+                      onCompare(shown[0]);
+                    }
+                  }}
+                />
+              </div>
+              <div className="cv-sw-list" role="listbox" aria-label="Compare with" data-testid="compare-with-list">
+                {shown.length === 0 && <p className="cv-msg">No matching branches</p>}
+                {shown.map((b) => (
+                  <button
+                    key={b}
+                    type="button"
+                    role="option"
+                    aria-selected={b === compare}
+                    className="cv-sw-row"
+                    data-testid={`compare-with-option-${b}`}
+                    title={b}
+                    onClick={() => {
+                      close();
+                      onCompare(b);
+                    }}
+                  >
+                    <span className="cv-sw-branch">{b}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          ))}
-          {root && onCompare && (
-            <div className="cv-sw-group cv-sw-compare">
-              <BranchPicker
-                branches={branches}
-                value={compare ?? ""}
-                placeholder="Compare with…"
-                align="left"
-                testIdPrefix="compare-with"
-                triggerClassName="cv-sw-row"
-                triggerStyle={{}}
-                trigger={<>{compare ? `Comparing with ${compare} — change…` : "Compare with…"}</>}
-                onChange={(ref) => {
-                  setOpen(false);
-                  onCompare(ref);
-                }}
-              />
+          ) : (
+            <div className="cv-sw-list" data-testid="repo-switcher-list">
+              {repos.length === 0 && <p className="cv-msg">This project has no linked repositories.</p>}
+              {repos.map((r) => (
+                <div key={r.name} className="cv-sw-group" role="group" aria-label={r.name}>
+                  <div className="cv-sw-head">{r.name}</div>
+                  {!r.present ? (
+                    <button type="button" className="cv-sw-row" data-testid={`repo-switcher-missing-${r.name}`} disabled>
+                      <span className="cv-sw-path" title={r.path}>
+                        {r.path}
+                      </span>
+                      <span className="cv-sw-missing">Not on this machine</span>
+                    </button>
+                  ) : !worktrees[r.name] ? (
+                    <p className="cv-msg">Loading worktrees…</p>
+                  ) : (
+                    worktrees[r.name].map((w, i) => {
+                      const isCurrent = r.name === repo && (wt ? w.path === wt : i === 0);
+                      const n = dirty[w.path];
+                      return (
+                        <button
+                          key={w.path}
+                          type="button"
+                          className="cv-sw-row"
+                          data-testid={`repo-switcher-wt-${w.path}`}
+                          aria-current={isCurrent ? "true" : undefined}
+                          onClick={() => {
+                            close();
+                            onPick(r.name, i === 0 ? null : w.path);
+                          }}
+                        >
+                          <span className="cv-sw-line">
+                            <span className="cv-sw-branch" title={branchLabel(w) ?? undefined}>
+                              {branchLabel(w)}
+                            </span>
+                            {i === 0 && <span className="cv-sw-main">main checkout</span>}
+                            {n ? <span className="cv-sw-dirty">{n} uncommitted</span> : null}
+                          </span>
+                          <span className="cv-sw-path" title={w.path}>
+                            {w.path}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

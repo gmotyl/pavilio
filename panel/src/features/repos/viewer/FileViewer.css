@@ -64,9 +64,16 @@
   cursor: not-allowed;
 }
 
+/* Code mode keeps the legend on the path's line: the path wraps within itself and the legend clips. */
+.fv-header:has(.fv-legend) { flex-wrap: nowrap; }
+.fv-header:has(.fv-legend) > .fv-seg { flex: none; }
 .fv-legend {
   display: inline-flex;
-  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 11.5px;
   color: var(--text-tertiary);
 }

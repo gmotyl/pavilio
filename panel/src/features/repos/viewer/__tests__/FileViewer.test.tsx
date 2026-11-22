@@ -136,18 +136,44 @@ describe("FileViewer", () => {
   it("scrollToLine flashes the target line", () => {
     vi.useFakeTimers();
     try {
-      const { rerender } = render(changed({ defaultMode: "code" }));
-      const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+      const { rerender, container } = render(changed({ defaultMode: "code" }));
+      const scroll = vi.mocked(Element.prototype.scrollTo);
       scroll.mockClear();
       rerender(changed({ defaultMode: "code", scrollToLine: 7 }));
       const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-line="7"]')!;
       expect(scroll).toHaveBeenCalled();
-      expect(scroll.mock.contexts.at(-1)).toBe(row);
+      expect(scroll.mock.contexts.at(-1)).toBe(container);
       expect(row).toHaveClass("fv-flash");
       act(() => vi.advanceTimersByTime(2000));
       expect(row).not.toHaveClass("fv-flash");
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("a jump scrolls only the host box, landing the line just below the sticky header", () => {
+    const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      return { top: this.matches('tr[data-line="7"]') ? 500 : 100 } as DOMRect;
+    });
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "file-viewer-header" ? 36 : 0;
+    });
+    try {
+      const { rerender, container } = render(changed({ defaultMode: "code" }));
+      Object.defineProperty(container, "scrollTop", { configurable: true, value: 40 });
+      const scroll = vi.mocked(Element.prototype.scrollTo);
+      const outer = vi.mocked(HTMLElement.prototype.scrollIntoView);
+      scroll.mockClear();
+      outer.mockClear();
+      rerender(changed({ defaultMode: "code", scrollToLine: 7 }));
+      expect(outer).not.toHaveBeenCalled();
+      expect(scroll).toHaveBeenCalledTimes(1);
+      expect(scroll.mock.contexts[0]).toBe(container);
+      // 40 scrolled + (500 − 100) offset − 36 header − 8 margin.
+      expect(scroll.mock.calls[0][0]).toMatchObject({ top: 396 });
+    } finally {
+      rect.mockRestore();
+      height.mockRestore();
     }
   });
 
@@ -167,31 +193,31 @@ describe("FileViewer", () => {
   });
 
   it("scrollToLine into a fold in Diff expands it and flashes the line", () => {
-    const { rerender } = render(changed());
+    const { rerender, container } = render(changed());
     const body = screen.getByTestId("file-viewer-body");
     expect(body.querySelector('tr[data-line="5"]')).toBeNull();
-    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    const scroll = vi.mocked(Element.prototype.scrollTo);
     scroll.mockClear();
     rerender(changed({ scrollToLine: 5 }));
     const row = body.querySelector('tr[data-line="5"]');
     expect(row).not.toBeNull();
     expect(screen.getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
-    expect(scroll.mock.contexts.at(-1)).toBe(row);
+    expect(scroll.mock.contexts.at(-1)).toBe(container);
     expect(row).toHaveClass("fv-flash");
   });
 
   it("re-requesting the same line with a new scrollKey flashes again", () => {
     vi.useFakeTimers();
     try {
-      const { rerender } = render(changed({ defaultMode: "code", scrollToLine: 7, scrollKey: 1 }));
+      const { rerender, container } = render(changed({ defaultMode: "code", scrollToLine: 7, scrollKey: 1 }));
       const row = () => screen.getByTestId("file-viewer-body").querySelector('tr[data-line="7"]')!;
       expect(row()).toHaveClass("fv-flash");
       act(() => vi.advanceTimersByTime(2000));
       expect(row()).not.toHaveClass("fv-flash");
-      const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+      const scroll = vi.mocked(Element.prototype.scrollTo);
       scroll.mockClear();
       rerender(changed({ defaultMode: "code", scrollToLine: 7, scrollKey: 2 }));
-      expect(scroll.mock.contexts.at(-1)).toBe(row());
+      expect(scroll.mock.contexts.at(-1)).toBe(container);
       expect(row()).toHaveClass("fv-flash");
       // A repeat while still flashing switches the animation so it restarts.
       const alt = row().classList.contains("fv-flash-alt");
