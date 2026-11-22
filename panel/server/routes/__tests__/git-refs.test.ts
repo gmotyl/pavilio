@@ -217,6 +217,36 @@ describe("ref-based git reads", () => {
     expect((await get("file", { ref: "main", path: "dir" })).status).toBe(404);
   });
 
+  it("diffs the working tree against HEAD when asked, staged changes included", async () => {
+    writeFileSync(join(repoDir, "a.txt"), "one\nTWO\nthree\n");
+    sh("add a.txt");
+    expect((await get("diff", { file: "a.txt" })).body.diff).toBe("");
+    const staged = (await get("diff", { file: "a.txt", against: "HEAD" })).body.diff;
+    expect(staged).toContain("-two");
+    expect(staged).toContain("+TWO");
+    expect((await get("diff", { file: "keep.txt", against: "HEAD" })).body.diff).toContain("+kept");
+    expect((await get("diff", { file: "u.txt", against: "HEAD" })).body.diff).toContain("+untracked");
+    expect((await get("diff", { file: "a.txt", against: "main" })).status).toBe(400);
+
+    writeFileSync(join(tmp, "secret.txt"), "secret\n");
+    symlinkSync(join(tmp, "secret.txt"), join(repoDir, "out.txt"));
+    const out = await get("diff", { file: "out.txt", against: "HEAD" });
+    expect(out.status).toBe(400);
+    expect(JSON.stringify(out.body)).not.toContain("secret\\n");
+  });
+
+  it("diffs against HEAD before the first commit", async () => {
+    const fresh = join(tmp, "fresh");
+    mkdirSync(fresh);
+    execSync("git init -q", { cwd: fresh, env: gitSafeEnv() });
+    writeFileSync(join(fresh, "n.txt"), "new\n");
+    execSync("git add n.txt", { cwd: fresh, env: gitSafeEnv() });
+    const qs = new URLSearchParams({ repo: fresh, file: "n.txt", against: "HEAD" }).toString();
+    const res = await request(app()).get(`/api/git/diff?${qs}`);
+    expect(res.status).toBe(200);
+    expect(res.body.diff).toContain("+new");
+  });
+
   it("answers 400 when base and head share no history", async () => {
     const emptyTree = sh("hash-object -t tree --stdin </dev/null").trim();
     sh(`update-ref refs/heads/lone ${sh(`commit-tree ${emptyTree} -m lone`).trim()}`);

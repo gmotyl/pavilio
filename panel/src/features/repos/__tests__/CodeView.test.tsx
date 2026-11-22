@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { calls, DrivenResizeObserver, FEAT, MAIN, MISSING, renderCode, urlParams } from "./codeHarness";
+import { jsonResponse } from "../../../test-utils";
+import { A_DIFF, calls, DrivenResizeObserver, FEAT, MAIN, MISSING, renderCode, urlParams } from "./codeHarness";
 
 const search = () => urlParams(screen.getByTestId("search"));
 const rail = () => screen.queryByRole("complementary", { name: "Outline" });
@@ -104,8 +105,20 @@ describe("CodeView", () => {
     const { fetch } = renderCode("?view=code&file=src/a.ts");
     const header = await screen.findByTestId("file-viewer-header");
     await waitFor(() => expect(header).toHaveTextContent("modified, uncommitted"));
-    expect(calls(fetch, `/api/git/diff?file=src%2Fa.ts&repo=${encodeURIComponent(MAIN)}`)).toHaveLength(1);
+    expect(calls(fetch, `/api/git/diff?file=src%2Fa.ts&repo=${encodeURIComponent(MAIN)}&against=HEAD`)).toHaveLength(1);
     expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="15"]')).toHaveAttribute("data-mark");
+  });
+
+  it("staged-only changes are diffed against HEAD and marked uncommitted", async () => {
+    // A plain `git diff` misses staged edits; only a HEAD diff carries them.
+    renderCode("?view=code&file=src/a.ts", {
+      "/api/git/diff": (url) => jsonResponse({ diff: new URL(url, "http://x").searchParams.get("against") === "HEAD" ? A_DIFF : "" }),
+    });
+    const header = await screen.findByTestId("file-viewer-header");
+    await waitFor(() => expect(header).toHaveTextContent("modified, uncommitted"));
+    await waitFor(() =>
+      expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="15"]')).toHaveAttribute("data-mark"),
+    );
   });
 
   it("rail hides below 1100px and columns stack below 860px", async () => {

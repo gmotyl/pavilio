@@ -80,8 +80,9 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     let cancelled = false;
     const path = selected;
     (async (): Promise<Loaded> => {
+      // Against HEAD so staged edits count as uncommitted too.
       const diff = status
-        ? ((await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}`)).json()) as { diff?: string } | null)?.diff
+        ? ((await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}&against=HEAD`)).json()) as { diff?: string } | null)?.diff
         : undefined;
       if (status === "D") return { path, diff };
       try {

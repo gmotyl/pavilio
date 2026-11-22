@@ -426,14 +426,42 @@ router.get("/status", (req, res) => {
   }
 });
 
-// Diff for a specific file (working tree or specific commit)
-router.get("/diff", (req, res) => {
+// git's well-known empty tree: the base for a repo with no commits yet.
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/** Working tree vs HEAD (staged + unstaged); untracked files as a synthesized add. */
+async function diffAgainstHead(file: string, repo?: string): Promise<string> {
+  const path = repoRelativePath(file);
+  const root = await repoToplevel(repo);
+  let base = EMPTY_TREE;
+  try {
+    base = (await gitArgv(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], root)).toString("utf-8").trim();
+  } catch (e) {
+    if (!gitExitedNonZero(e)) throw e;
+  }
+  const diff = (await gitArgv(["diff", "--no-color", "--no-ext-diff", base, "--", path], root)).toString("utf-8");
+  if (diff.trim()) return diff;
+  const status = (await gitArgv(["status", "--porcelain=v1", "-z", "--", path], root)).toString("utf-8");
+  if (!status.startsWith("??")) return diff;
+  // An untracked symlink may point outside the repo.
+  const real = realpathSync(join(root, path));
+  if (!real.startsWith(realpathSync(root) + sep)) throw new GitInputError("path escapes the repo");
+  return synthesizeAddDiff(path, readFileSync(real, "utf-8"));
+}
+
+// Diff for a specific file (working tree or specific commit); against=HEAD includes staged changes
+router.get("/diff", async (req, res) => {
   try {
     const file = req.query.file as string;
     const sha = req.query.sha as string | undefined;
     const repo = req.query.repo as string | undefined;
     if (!file)
       return res.status(400).json({ error: "file parameter required" });
+    const against = queryString(req.query.against);
+    if (against !== undefined) {
+      if (against !== "HEAD") throw new GitInputError("against must be HEAD");
+      return res.json({ diff: await diffAgainstHead(file, repo) });
+    }
     const quotedFile = quoteShellArg(file);
     const diff = sha
       ? git(`diff ${sha}^..${sha} -- ${quotedFile}`, repo)
