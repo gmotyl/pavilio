@@ -20,6 +20,9 @@ interface Options {
 }
 
 const NOTICE_MS = 2000;
+const STACK_MAX = 50;
+
+const same = (a: Entry | undefined, b: Entry) => !!a && a.file === b.file && a.line === b.line;
 const q = encodeURIComponent;
 
 /**
@@ -29,7 +32,8 @@ const q = encodeURIComponent;
 export function useDefinitionNav({ root, file, open }: Options) {
   const [stack, setStack] = useState<Entry[]>([]);
   const [choices, setChoices] = useState<{ from: Entry; locations: DefinitionLocation[] } | null>(null);
-  const [notice, setNotice] = useState(false);
+  // Bumped per failure so a repeat restarts the timer; 0 = hidden.
+  const [notice, setNotice] = useState(0);
   // Bumped on every lookup and every file change, so a late answer is dropped.
   const token = useRef(0);
 
@@ -40,14 +44,16 @@ export function useDefinitionNav({ root, file, open }: Options) {
 
   useEffect(() => {
     if (!notice) return;
-    const t = setTimeout(() => setNotice(false), NOTICE_MS);
+    const t = setTimeout(() => setNotice(0), NOTICE_MS);
     return () => clearTimeout(t);
   }, [notice]);
 
   const jump = useCallback(
     (from: Entry, to: DefinitionLocation) => {
       setChoices(null);
-      setStack((s) => [...s, from]);
+      setNotice(0);
+      // Landing where we stand, or re-pushing the top, would make Back a no-op.
+      if (!same(from, { file: to.path, line: to.line })) setStack((s) => (same(s.at(-1), from) ? s : [...s, from].slice(-STACK_MAX)));
       open(to.path, to.line);
     },
     [open],
@@ -67,7 +73,7 @@ export function useDefinitionNav({ root, file, open }: Options) {
         .catch(() => [] as DefinitionLocation[])
         .then((locations) => {
           if (token.current !== mine) return;
-          if (locations.length === 0) setNotice(true);
+          if (locations.length === 0) setNotice((n) => n + 1);
           else if (locations.length === 1) jump(from, locations[0]);
           else setChoices({ from, locations });
         });
@@ -82,13 +88,15 @@ export function useDefinitionNav({ root, file, open }: Options) {
     open(prev.file, prev.line);
   }, [stack, open]);
 
+  const dismiss = useCallback(() => setChoices(null), []);
+
   return {
     onIdentifierClick,
     canBack: stack.length > 0,
     back,
     choices: choices?.locations ?? null,
     choose: (to: DefinitionLocation) => choices && jump(choices.from, to),
-    dismiss: () => setChoices(null),
-    notice,
+    dismiss,
+    notice: notice > 0,
   };
 }

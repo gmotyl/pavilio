@@ -1,6 +1,7 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse, type FetchHandler } from "../../../test-utils";
+import { useDefinitionNav } from "../useDefinitionNav";
 import { calls, DrivenResizeObserver, MAIN, renderCode, urlParams } from "./codeHarness";
 
 const search = () => urlParams(screen.getByTestId("search"));
@@ -57,15 +58,15 @@ describe("useDefinitionNav", () => {
     const { fetch } = await openB(at({ path: "src/a.ts", line: 15, col: 7 }, { path: "src/b.ts", line: 6, col: 6 }));
     fireEvent.click(sym(3, "inner")!);
 
-    const chooser = await screen.findByRole("listbox", { name: "Definitions" });
-    const options = within(chooser).getAllByRole("option");
+    const chooser = await screen.findByRole("group", { name: "Definitions" });
+    const options = within(chooser).getAllByRole("button");
     expect(options.map((o) => o.textContent)).toEqual(["src/a.ts:15", "src/b.ts:6"]);
     expect(search().get("file")).toBe("src/b.ts");
     expect(back()).toBeDisabled();
 
     // Same-file pick only scrolls.
     fireEvent.click(options[1]);
-    expect(screen.queryByRole("listbox", { name: "Definitions" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Definitions" })).toBeNull();
     expect(search().get("file")).toBe("src/b.ts");
     expect(search().get("line")).toBe("6");
     await waitFor(() => expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="6"]')).toHaveClass("fv-flash"));
@@ -111,5 +112,78 @@ describe("useDefinitionNav", () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(search().get("file")).toBe("README.md");
     expect(back()).toBeDisabled();
+  });
+  it("the chooser takes focus and closes on Escape or an outside click", async () => {
+    await openB(at({ path: "src/a.ts", line: 15, col: 7 }, { path: "src/b.ts", line: 6, col: 6 }));
+    fireEvent.click(sym(3, "inner")!);
+    const chooser = await screen.findByRole("group", { name: "Definitions" });
+    await waitFor(() => expect(within(chooser).getAllByRole("button")[0]).toHaveFocus());
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Definitions" })).toBeNull();
+
+    fireEvent.click(sym(3, "inner")!);
+    await screen.findByRole("group", { name: "Definitions" });
+    fireEvent.mouseDown(screen.getByTestId("file-viewer-body"));
+    expect(screen.queryByRole("group", { name: "Definitions" })).toBeNull();
+    expect(search().get("file")).toBe("src/b.ts");
+  });
+
+  it("a repeat failure restarts the notice timer and a jump clears it", async () => {
+    let answer: "none" | "hit" = "none";
+    await openB(() => jsonResponse({ locations: answer === "none" ? [] : [{ path: "src/b.ts", line: 6, col: 6 }] }));
+    fireEvent.click(sym(3, "inner")!);
+    await screen.findByText("No definition found");
+    await new Promise((r) => setTimeout(r, 1200));
+    fireEvent.click(sym(3, "inner")!);
+    await new Promise((r) => setTimeout(r, 1200));
+    // 2.4 s after the first failure, 1.2 s after the second.
+    expect(screen.getByText("No definition found")).toBeInTheDocument();
+
+    answer = "hit";
+    fireEvent.click(sym(3, "inner")!);
+    await waitFor(() => expect(search().get("line")).toBe("6"));
+    expect(screen.queryByText("No definition found")).toBeNull();
+  }, 8000);
+
+  it("Back never stacks a duplicate of the current location", async () => {
+    await openB(at({ path: "src/b.ts", line: 6, col: 6 }));
+    fireEvent.click(sym(3, "inner")!);
+    await waitFor(() => expect(search().get("line")).toBe("6"));
+    fireEvent.click(sym(3, "inner")!);
+    await waitFor(() => expect(back()).toBeEnabled());
+    await new Promise((r) => setTimeout(r, 30));
+    fireEvent.click(back());
+    await waitFor(() => expect(search().get("line")).toBe("3"));
+    expect(back()).toBeDisabled();
+  });
+
+  it("a definition at the clicked location adds no Back entry", async () => {
+    await openB(at({ path: "src/b.ts", line: 3, col: 9 }));
+    fireEvent.click(sym(3, "inner")!);
+    await waitFor(() => expect(search().get("line")).toBe("3"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(back()).toBeDisabled();
+  });
+
+  it("the Back stack keeps the latest 50 entries", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ locations: [{ path: "far.ts", line: 1, col: 1 }] })));
+    const open = vi.fn();
+    const { result, rerender } = renderHook(({ file }) => useDefinitionNav({ root: MAIN, file, open }), {
+      initialProps: { file: "f0.ts" },
+    });
+    for (let i = 0; i < 60; i++) {
+      rerender({ file: `f${i}.ts` });
+      await act(async () => {
+        result.current.onIdentifierClick({ line: 1, col: 1 });
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+    let backs = 0;
+    while (result.current.canBack && backs < 100) {
+      act(() => result.current.back());
+      backs++;
+    }
+    expect(backs).toBe(50);
+    expect(open).toHaveBeenLastCalledWith("f10.ts", 1);
   });
 });

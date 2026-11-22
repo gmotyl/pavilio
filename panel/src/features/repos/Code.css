@@ -99,9 +99,9 @@
   border-radius: 6px;
   background: var(--bg-elevated);
 }
-.cv-defs [role="listbox"] { display: flex; flex-direction: column; }
-.cv-defs [role="option"] { padding: 3px 8px; text-align: left; font-family: var(--font-mono, monospace); }
-.cv-defs [role="option"]:hover { background: var(--bg-hover); }
+.cv-defs-list { display: flex; flex-direction: column; }
+.cv-defs-list button { padding: 3px 8px; text-align: left; font-family: var(--font-mono, monospace); }
+.cv-defs-list button:hover, .cv-defs-list button:focus-visible { background: var(--bg-hover); }
 .cv-viewer { flex: 1; min-height: 0; padding: 12px; overflow: auto; }
 .cv-msg { padding: 12px; font-size: 12.5px; color: var(--text-tertiary); }
 .cv-msg button { color: var(--accent); }

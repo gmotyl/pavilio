@@ -259,7 +259,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
           {tree}
         </div>
         <div className="rv-main">{viewer}</div>
-        {showRail && <ChangeRail diff={current && !current.binary ? current.diff : undefined} onJump={jump} />}
+        {showRail && <ChangeRail diff={current && !current.binary ? current.diff : undefined} deleted={change?.status === "D"} onJump={jump} />}
       </div>
     </>
   );
