@@ -43,6 +43,10 @@ const NEW_CONTENT = CONTENT.split("\n");
 NEW_CONTENT.splice(15, 0, "line 16");
 const FULL = NEW_CONTENT.slice(0, 20).join("\n");
 
+// Pure deletion: old lines 4-5 removed, line 6 becomes new line 4.
+const DELETE_DIFF = ["--- a/notes.ts", "+++ b/notes.ts", "@@ -3,4 +3,2 @@", " line 3", "-gone 4", "-gone 5", " line 6"].join("\n");
+const AFTER_DELETE = ["line 1", "line 2", "line 3", "line 6", "line 7"].join("\n");
+
 const changed = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
   <FileViewer path="src/geo/area.ts" diff={DIFF} content={FULL} status="M" counts={{ add: 2, del: 1 }} defaultMode="diff" {...extra} />
 );
@@ -160,5 +164,54 @@ describe("FileViewer", () => {
     const sym = [...container.querySelectorAll<HTMLElement>("[data-sym]")].find((s) => s.textContent === "height")!;
     fireEvent.click(sym);
     expect(onIdentifierClick).toHaveBeenCalledWith({ line: 15, col: 22 }, "height");
+  });
+
+  it("scrollToLine into a fold in Diff expands it and flashes the line", () => {
+    const { rerender } = render(changed());
+    const body = screen.getByTestId("file-viewer-body");
+    expect(body.querySelector('tr[data-line="5"]')).toBeNull();
+    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    scroll.mockClear();
+    rerender(changed({ scrollToLine: 5 }));
+    const row = body.querySelector('tr[data-line="5"]');
+    expect(row).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    expect(scroll.mock.contexts.at(-1)).toBe(row);
+    expect(row).toHaveClass("fv-flash");
+  });
+
+  it("re-requesting the same line with a new scrollKey flashes again", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(changed({ defaultMode: "code", scrollToLine: 7, scrollKey: 1 }));
+      const row = () => screen.getByTestId("file-viewer-body").querySelector('tr[data-line="7"]')!;
+      expect(row()).toHaveClass("fv-flash");
+      act(() => vi.advanceTimersByTime(2000));
+      expect(row()).not.toHaveClass("fv-flash");
+      const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+      scroll.mockClear();
+      rerender(changed({ defaultMode: "code", scrollToLine: 7, scrollKey: 2 }));
+      expect(scroll.mock.contexts.at(-1)).toBe(row());
+      expect(row()).toHaveClass("fv-flash");
+      // A repeat while still flashing switches the animation so it restarts.
+      const alt = row().classList.contains("fv-flash-alt");
+      rerender(changed({ defaultMode: "code", scrollToLine: 7, scrollKey: 3 }));
+      expect(row()).toHaveClass("fv-flash");
+      expect(row().classList.contains("fv-flash-alt")).toBe(!alt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks a pure deletion with a removed wedge on the following line in Code", () => {
+    render(<FileViewer path="notes.ts" diff={DELETE_DIFF} content={AFTER_DELETE} status="M" defaultMode="code" />);
+    const body = screen.getByTestId("file-viewer-body");
+    expect(body.querySelector('tr[data-line="4"]')).toHaveAttribute("data-mark", "removed");
+    expect(body.querySelector('tr[data-line="3"]')).not.toHaveAttribute("data-mark");
+  });
+
+  it("identifiers are not clickable in non-code files", () => {
+    const { container } = render(<FileViewer path="README.md" content={"# Title\nsome words here"} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect(container.querySelectorAll("[data-sym]")).toHaveLength(0);
   });
 });

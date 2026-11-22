@@ -1,11 +1,11 @@
 /* File viewer: diff (split/unified) and code modes. Colours come from the panel tokens. */
 .fv {
   --fv-add-bg: var(--green-dim);
-  --fv-add-no: rgba(74, 222, 128, 0.2);
-  --fv-add-mark: rgba(74, 222, 128, 0.38);
+  --fv-add-no: color-mix(in srgb, var(--green) 20%, transparent);
+  --fv-add-mark: color-mix(in srgb, var(--green) 38%, transparent);
   --fv-del-bg: var(--red-dim);
-  --fv-del-no: rgba(248, 113, 113, 0.2);
-  --fv-del-mark: rgba(248, 113, 113, 0.38);
+  --fv-del-no: color-mix(in srgb, var(--red) 20%, transparent);
+  --fv-del-mark: color-mix(in srgb, var(--red) 38%, transparent);
   min-width: 0;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
@@ -131,7 +131,7 @@ td.fv-no.fv-s-del { background: var(--fv-del-no); }
 td.fv-s-add { background: var(--fv-add-bg); }
 td.fv-no.fv-s-add { background: var(--fv-add-no); }
 td.fv-s-empty {
-  background: repeating-linear-gradient(135deg, transparent 0 5px, rgba(255, 255, 255, 0.025) 5px 10px);
+  background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--text-primary) 2.5%, transparent) 5px 10px);
 }
 
 .fv mark {
@@ -141,7 +141,7 @@ td.fv-s-empty {
 .fv-r-del mark.fv-word, td.fv-s-del mark.fv-word { background: var(--fv-del-mark); }
 .fv-r-add mark.fv-word, td.fv-s-add mark.fv-word { background: var(--fv-add-mark); }
 .fv mark.fv-hl {
-  background: #ca8a0460;
+  background: color-mix(in srgb, var(--yellow) 38%, transparent);
   color: var(--text-primary);
 }
 
@@ -155,7 +155,7 @@ td.fv-s-empty {
   font-size: 12px;
   border-block: 1px solid var(--border-subtle);
 }
-.fv-fold:hover { background: rgba(96, 165, 250, 0.2); }
+.fv-fold:hover { background: color-mix(in srgb, var(--blue) 20%, transparent); }
 .fv-gap-row td {
   padding: 3px 12px;
   font-size: 12px;
@@ -171,7 +171,7 @@ td.fv-s-empty {
 .fv-m-removed td.fv-gm {
   background: linear-gradient(to bottom right, var(--red) 0 50%, transparent 50%) top left / 7px 7px no-repeat;
 }
-.fv-m-added td.fv-cd, .fv-m-changed td.fv-cd { background: rgba(255, 255, 255, 0.025); }
+.fv-m-added td.fv-cd, .fv-m-changed td.fv-cd { background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); }
 
 .fv-sym { cursor: pointer; }
 .fv-sym:hover {
@@ -184,7 +184,13 @@ td.fv-s-empty {
   from { background-color: var(--accent-dim); }
   to { background-color: transparent; }
 }
+/* Identical twin: swapping the name restarts the animation on a repeat flash. */
+@keyframes fv-flash-alt {
+  from { background-color: var(--accent-dim); }
+  to { background-color: transparent; }
+}
 .fv-flash td { animation: fv-flash 1.3s ease-out; }
+.fv-flash.fv-flash-alt td { animation-name: fv-flash-alt; }
 @media (prefers-reduced-motion: reduce) {
   .fv-flash td {
     animation: none;

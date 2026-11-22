@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import hljs from "highlight.js";
 import { preferences } from "../../../preferences/declarations";
 import { usePreference } from "../../../preferences/usePreference";
@@ -19,6 +19,7 @@ import {
   type Range,
   type Row,
 } from "./diffModel";
+import { detectLang, escapeHtml } from "./highlight";
 import "./FileViewer.css";
 
 export interface FileViewerProps {
@@ -32,30 +33,16 @@ export interface FileViewerProps {
   highlight?: string;
   onIdentifierClick?: (pos: { line: number; col: number }, name: string) => void;
   scrollToLine?: number;
+  /** Changes on every request so asking for the same line again re-scrolls and re-flashes. */
+  scrollKey?: number | string;
 }
 
 const SPLIT_MIN_WIDTH = 720;
 const FLASH_MS = 1300;
 // highlight.js on a huge file stalls the tab; past this it renders plain.
 const MAX_HIGHLIGHT_CHARS = 500_000;
-
-const EXT_TO_LANG: Record<string, string> = {
-  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
-  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-  py: "python", rb: "ruby", go: "go", rs: "rust", java: "java", kt: "kotlin",
-  css: "css", scss: "scss", html: "xml", xml: "xml", vue: "xml", svelte: "xml",
-  json: "json", yaml: "yaml", yml: "yaml", toml: "ini",
-  md: "markdown", sh: "bash", zsh: "bash", bash: "bash",
-  sql: "sql", graphql: "graphql", dockerfile: "dockerfile",
-};
-
-function detectLang(path: string): string | undefined {
-  const name = path.split("/").pop()?.toLowerCase() ?? "";
-  if (name === "dockerfile") return "dockerfile";
-  return EXT_TO_LANG[name.split(".").pop() ?? ""];
-}
-
-const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// ts-nav only resolves these; elsewhere identifier links would lead nowhere.
+const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
 
 /** Highlight `lines` as one text so multi-line tokens (comments, template strings) stay right, then split back per line. */
 function highlightLines(lines: string[], lang: string | undefined): string[] {
@@ -215,13 +202,15 @@ export default function FileViewer({
   highlight,
   onIdentifierClick,
   scrollToLine,
+  scrollKey,
 }: FileViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState(defaultMode);
   const [layout, setLayout] = usePreference(preferences.fileViewerDiffLayout);
   const [width, setWidth] = useState<number | null>(null);
-  const [flash, setFlash] = useState<number | null>(null);
+  // `seq` alternates the animation name so a repeat flash on the same row restarts it.
+  const [flash, setFlash] = useState<{ line: number; seq: number } | null>(null);
   const [pending, setPending] = useState<number | undefined>(undefined);
 
   const parsed = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);
@@ -234,8 +223,8 @@ export default function FileViewer({
   const items = useMemo(() => foldRows(rows), [rows]);
   // Expanded folds belong to one row list; a new diff starts folded again.
   const [expansion, setExpansion] = useState<{ rows: Row[]; ids: Set<number> }>({ rows, ids: new Set() });
-  const expanded = expansion.rows === rows ? expansion.ids : new Set<number>();
-  const expand = (id: number) => setExpansion({ rows, ids: new Set([...expanded, id]) });
+  const expanded = useMemo(() => (expansion.rows === rows ? expansion.ids : new Set<number>()), [expansion, rows]);
+  const expand = useCallback((id: number) => setExpansion({ rows, ids: new Set([...expanded, id]) }), [rows, expanded]);
 
   const narrow = width !== null && width < SPLIT_MIN_WIDTH;
   const shownMode = changed ? mode : "code";
@@ -243,7 +232,7 @@ export default function FileViewer({
   const total = counts ?? countChanges(parsed);
   const lang = detectLang(path);
   const term = highlight ?? "";
-  const symbols = !!onIdentifierClick;
+  const symbols = !!onIdentifierClick && NAVIGABLE.test(path);
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -281,14 +270,14 @@ export default function FileViewer({
 
   useEffect(() => {
     if (scrollToLine != null) setPending(scrollToLine);
-  }, [scrollToLine]);
+  }, [scrollToLine, scrollKey]);
 
   useLayoutEffect(() => {
     if (pending == null) return;
     const el = bodyRef.current?.querySelector(`tr[data-line="${pending}"]`);
     if (el) {
       el.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-      setFlash(pending);
+      setFlash((f) => ({ line: pending, seq: (f?.seq ?? 0) + 1 }));
       setPending(undefined);
       return;
     }
@@ -298,9 +287,7 @@ export default function FileViewer({
       if (codeLines) return setMode("code");
     }
     setPending(undefined);
-    // `expanded`/`expand` follow `items`; listing them would re-run on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, shownMode, items, codeLines]);
+  }, [pending, shownMode, items, codeLines, expanded, expand]);
 
   useEffect(() => {
     if (flash == null) return;
@@ -317,7 +304,8 @@ export default function FileViewer({
   };
 
   const slash = path.lastIndexOf("/");
-  const flashCls = (n: number | undefined) => (n !== undefined && n === flash ? " fv-flash" : "");
+  const flashCls = (n: number | undefined) =>
+    n !== undefined && n === flash?.line ? ` fv-flash${flash.seq % 2 ? "" : " fv-flash-alt"}` : "";
 
   const foldRow = (it: Extract<Item, { kind: "fold" }>) => (
     <tr key={`f${it.id}`} className="fv-fold-row">
