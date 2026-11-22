@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChecksState } from "../../../server/lib/prs/provider";
 import ChangeRail from "./ChangeRail";
@@ -7,6 +7,7 @@ import PrSwitcher from "./PrSwitcher";
 import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
 import type { PullRequest } from "./usePrs";
+import { useWidth } from "./useWidth";
 import FileViewer from "./viewer/FileViewer";
 import "./Review.css";
 
@@ -22,7 +23,7 @@ interface ChangedFile {
 
 type Opened =
   | { status: "loading" }
-  | { status: "error"; error: string }
+  | { status: "error"; stage: "open" | "changed"; error: string }
   | { status: "ready"; head: string; base: string; changed: ChangedFile[] };
 
 type Loaded = { path: string } & ({ diff?: string; content?: string; binary?: false; error?: string } | { binary: true });
@@ -42,25 +43,6 @@ async function request(url: string, init?: RequestInit): Promise<Response> {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const q = encodeURIComponent;
 const prRef = (n: number) => `refs/pavilio/pr/${n}`;
-
-/** Reports the element's content width (null until measured). */
-function useWidth<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (el.clientWidth > 0) setWidth(el.clientWidth);
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries.at(-1)?.contentRect.width;
-      if (w !== undefined) setWidth(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, width] as const;
-}
 
 const CHECKS: Partial<Record<ChecksState, [string, string]>> = {
   pass: ["✓", "Checks passed"],
@@ -116,6 +98,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
 
   useEffect(() => {
     let cancelled = false;
+    let stage: "open" | "changed" = "open";
     setOpened({ status: "loading" });
     (async () => {
       const res = await request("/api/prs/open", {
@@ -126,10 +109,11 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
       const { head, base } = (await res.json()) as { head: string; base: string };
       // Unmounted for another PR: skip the follow-up request.
       if (cancelled) return;
+      stage = "changed";
       const changed = (await (await request(`/api/git/changed?repo=${q(pr.repoPath)}&base=${q(base)}&head=${q(head)}`)).json()) as ChangedFile[];
       if (!cancelled) setOpened({ status: "ready", head, base, changed });
     })().catch((e: unknown) => {
-      if (!cancelled) setOpened({ status: "error", error: message(e) });
+      if (!cancelled) setOpened({ status: "error", stage, error: message(e) });
     });
     return () => {
       cancelled = true;
@@ -208,7 +192,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   if (opened.status === "error")
     tree = (
       <div className="rv-msg" role="alert">
-        Couldn't fetch this PR's branch.{" "}
+        {opened.stage === "open" ? "Couldn't fetch this PR's branch." : "Couldn't load this PR's changes."}{" "}
         <button type="button" data-testid="review-retry" onClick={() => setAttempt((n) => n + 1)}>
           Retry
         </button>
@@ -220,7 +204,10 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
       <>
         {!changedOnly && whole && !Array.isArray(whole) && (
           <p className="rv-msg" role="status">
-            Couldn't list the repo at the PR head ({whole.error}).
+            Couldn't list the repo at the PR head ({whole.error}).{" "}
+            <button type="button" data-testid="review-tree-retry" onClick={() => setWhole(null)}>
+              Retry
+            </button>
           </p>
         )}
         <FileTree files={files} selected={selected ?? undefined} onSelect={select} changedOnly={changedOnly} aria-label="Pull request files" />
@@ -262,7 +249,11 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
               at <code className="rv-ref">{pr.head}</code>
             </span>
             <label className="rv-toggle">
-              <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} /> Changed files only
+              <input type="checkbox" checked={changedOnly} onChange={(e) => {
+                  setChangedOnly(e.target.checked);
+                  // A failed listing is retried on the next untick rather than sticking.
+                  if (whole && !Array.isArray(whole)) setWhole(null);
+                }} /> Changed files only
             </label>
           </div>
           {tree}

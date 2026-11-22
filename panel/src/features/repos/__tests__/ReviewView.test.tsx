@@ -70,16 +70,20 @@ interface Setup {
   search?: string;
   prs?: typeof PRS;
   open?: FetchHandler;
+  changed?: FetchHandler;
+  tree?: FetchHandler;
 }
 
-function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open }: Setup = {}) {
+const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts", "+++ /dev/null", "@@ -1,3 +0,0 @@", "-one", "-two", "-three"].join("\n");
+
+function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
     "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40) })),
     "/api/prs": { me: ME, prs, unavailable: [] },
-    "/api/git/changed": CHANGED,
-    "/api/git/tree": TREE,
-    "/api/git/diff-ref": () => text(DIFF),
+    "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
+    "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
+    "/api/git/diff-ref": (url: string) => text(url.includes("gone.ts") ? GONE_DIFF : DIFF),
     "/api/git/file": (url: string) =>
       url.includes("logo.png") ? jsonResponse({ error: "binary file", binary: true }, { status: 415 }) : text(CONTENT),
   });
@@ -277,5 +281,77 @@ describe("ReviewView", () => {
     });
     expect(calls(fetch, "/api/git/changed").map(([u]) => u)).toEqual([expect.stringContaining("head=head2")]);
     expect(screen.getByTestId("search").textContent).toContain("pr=pavilio%232");
+  });
+  it("selecting a deleted file renders its diff without reading the file", async () => {
+    const fetch = renderReview();
+    await loaded();
+    fireEvent.click(screen.getByTestId("ft-file-src/gone.ts"));
+    const viewer = await waitFor(() => {
+      const v = screen.getByTestId("file-viewer");
+      expect(within(v).getByTestId("file-viewer-header")).toHaveTextContent("src/gone.ts");
+      return v;
+    });
+    expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    expect(viewer).toHaveTextContent("three");
+    expect(calls(fetch, "/api/git/file").filter(([u]) => String(u).includes("gone.ts"))).toHaveLength(0);
+  });
+
+  it("rail offers no jump into a fully deleted file", async () => {
+    renderReview({ search: "?view=review&pr=pavilio%231&file=src%2Fgone.ts" });
+    await waitFor(() => expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("src/gone.ts"));
+    const r = await waitFor(() => rail()!);
+    await waitFor(() => expect(r).toHaveTextContent("File deleted"));
+    expect(within(r).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("switcher closes on Escape and on an outside click", async () => {
+    renderReview({ search: "?view=review" });
+    const switcher = screen.getByTestId("pr-switcher");
+    fireEvent.click(switcher);
+    expect(screen.getByRole("dialog", { name: "Pick a pull request" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Pick a pull request" })).toBeNull();
+    expect(switcher).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(switcher);
+    const pop = screen.getByRole("dialog", { name: "Pick a pull request" });
+    fireEvent.mouseDown(pop);
+    expect(screen.getByRole("dialog", { name: "Pick a pull request" })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Pick a pull request" })).toBeNull();
+  });
+
+  it("a failed changed-files listing has its own message and Retry", async () => {
+    let fail = true;
+    renderReview({ changed: () => (fail ? jsonResponse({ error: "boom" }, { status: 500 }) : jsonResponse(CHANGED)) });
+    const alert = await waitFor(() => within(treeArea()).getByRole("alert"));
+    expect(alert).toHaveTextContent("Couldn't load this PR's changes");
+    expect(alert).not.toHaveTextContent("Couldn't fetch this PR's branch");
+    fail = false;
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await loaded();
+    expect(within(treeArea()).queryByRole("alert")).toBeNull();
+  });
+
+  it("a whole-tree listing failure can be retried and resets on re-toggle", async () => {
+    let fail = true;
+    const fetch = renderReview({ tree: () => (fail ? jsonResponse({ error: "boom" }, { status: 500 }) : jsonResponse(TREE)) });
+    await loaded();
+    const box = () => within(treeArea()).getByRole("checkbox", { name: "Changed files only" });
+    fireEvent.click(box());
+    const status = await waitFor(() => within(treeArea()).getByText(/Couldn't list the repo/));
+    expect(calls(fetch, "/api/git/tree")).toHaveLength(1);
+
+    // Re-toggling clears the error and refetches.
+    fireEvent.click(box());
+    fireEvent.click(box());
+    await waitFor(() => expect(calls(fetch, "/api/git/tree")).toHaveLength(2));
+    await waitFor(() => within(treeArea()).getByText(/Couldn't list the repo/));
+
+    fail = false;
+    fireEvent.click(within(treeArea()).getByTestId("review-tree-retry"));
+    await waitFor(() => expect(screen.getByTestId("ft-file-README.md")).toBeInTheDocument());
+    expect(within(treeArea()).queryByText(/Couldn't list the repo/)).toBeNull();
+    expect(status).not.toBeInTheDocument();
   });
 });

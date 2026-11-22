@@ -42,16 +42,26 @@ interface Props {
   onJump: (line: number) => void;
 }
 
+/** True when the diff leaves no new-side line (the whole file was deleted). */
+function noNewSide(diff: string): boolean {
+  const rows = parseDiff(diff);
+  return rows.length > 0 && rows.every((r) => r.kind === "del" || r.kind === "gap");
+}
+
 export default function ChangeRail({ diff, onJump }: Props) {
-  const runs = useMemo(() => (diff ? changeRuns(diff) : []), [diff]);
+  const deleted = useMemo(() => !!diff && noNewSide(diff), [diff]);
+  // A deleted file has no new-side line to scroll to.
+  const runs = useMemo(() => (diff && !deleted ? changeRuns(diff) : []), [diff, deleted]);
   return (
     <aside className="rv-rail" aria-label="Changes in this file">
       <h4>Changes in this file</h4>
-      {runs.length === 0 ? (
+      {deleted ? (
+        <p className="rv-rail-empty">File deleted.</p>
+      ) : runs.length === 0 ? (
         <p className="rv-rail-empty">Nothing here.</p>
       ) : (
-        runs.map((r) => (
-          <button key={r.line} type="button" data-testid={`review-rail-${r.line}`} onClick={() => onJump(r.line)}>
+        runs.map((r, i) => (
+          <button key={`${r.line}-${i}`} type="button" data-testid={`review-rail-${r.line}`} onClick={() => onJump(r.line)}>
             <i className={r.add === 0 ? "rv-k-del" : r.del === 0 ? "rv-k-add" : "rv-k-mod"} aria-hidden="true" />
             <span className="rv-ln">L{r.line}</span>
             <span className="rv-sum">
