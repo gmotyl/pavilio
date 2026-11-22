@@ -29,10 +29,10 @@ function FloatingSlot() {
   return <div data-testid="floating-slot">{action}</div>;
 }
 
-function renderReposTab(search = "") {
+function renderReposTab(search = "", section = "repos") {
   return render(
     <FloatingActionProvider>
-      <MemoryRouter initialEntries={[`/project/pavilio/repos${search}`]}>
+      <MemoryRouter initialEntries={[`/project/pavilio/${section}${search}`]}>
         <Routes>
           <Route path="/project/:name/:section" element={<ProjectView />} />
         </Routes>
@@ -102,6 +102,17 @@ describe("ProjectView layout", () => {
     } finally {
       window.removeEventListener("pavilio:open-quick-finder", quickFinder);
     }
+  });
+
+  it("tab-bar search names notes, with the ⌘P hint only where ⌘P opens it", async () => {
+    const { unmount } = renderReposTab();
+    await screen.findByTestId("repos-tab");
+    // On the repos tab ⌘P is the code file search.
+    expect(screen.getByTestId("project-tabs-toggle-search")).toHaveAttribute("title", "Search notes");
+    unmount();
+
+    renderReposTab("", "notes");
+    await waitFor(() => expect(screen.getByTestId("project-tabs-toggle-search")).toHaveAttribute("title", "Search notes (⌘P)"));
   });
 
   it("a missing linked repo issues no git or PR requests", async () => {

@@ -155,6 +155,21 @@ describe("CodeView", () => {
     );
   });
 
+  it("a file over the read cap shows its size instead of loading", async () => {
+    renderCode("?view=code&file=src/b.ts", {
+      "/api/git/file": () => jsonResponse({ error: "file too large", tooLarge: true, size: 3 * 1024 * 1024 }, { status: 413 }),
+    });
+    expect(await screen.findByText("This file is too large to display (3.0 MB).")).toBeInTheDocument();
+  });
+
+  it("an untracked file too large to diff is never read whole", async () => {
+    const { fetch } = renderCode("?view=code&file=src/a.ts", {
+      "/api/git/diff": () => jsonResponse({ diff: "", tooLarge: true, size: 1.5 * 1024 * 1024 }),
+    });
+    expect(await screen.findByText("This file is too large to display (1.5 MB).")).toBeInTheDocument();
+    expect(calls(fetch, "/api/git/file")).toHaveLength(0);
+  });
+
   it("rail hides below 1100px and columns stack below 860px", async () => {
     renderCode("?view=code&file=src/b.ts");
     await screen.findByTestId("file-viewer");

@@ -75,6 +75,14 @@ describe("ReposTab", () => {
     expect(pill("Code")).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("drops the old Changes-page params from the URL on mount", async () => {
+    renderTab("pavilio", "/project/pavilio/repos?view=prs&scope=commits&sha=abc&gitfile=a.ts&branchfile=b.ts&file=x.ts");
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+      expect([...params.keys()].sort()).toEqual(["file", "view"]);
+    });
+  });
+
   it("PRs pill counts reviews requested from me", async () => {
     renderTab();
     const count = await waitFor(() => within(pill(/^PRs/)).getByTestId("prs-pill-count"));

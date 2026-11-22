@@ -8,6 +8,7 @@ import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
 import type { PullRequest } from "./usePrs";
 import { useWidth } from "./useWidth";
+import { tooLargeMessage, tooLargeSize } from "./tooLarge";
 import FileViewer from "./viewer/FileViewer";
 import "./Review.css";
 
@@ -26,17 +27,24 @@ type Opened =
   | { status: "error"; stage: "open" | "changed"; error: string }
   | { status: "ready"; head: string; base: string; changed: ChangedFile[] };
 
-type Loaded = { path: string } & ({ diff?: string; content?: string; binary?: false; error?: string } | { binary: true });
+type Loaded = { path: string } & (
+  | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string }
+  | { binary: true; tooLarge?: false }
+  | { tooLarge: true; size?: number; binary?: false }
+);
 
 class HttpError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly res: Response,
+  ) {
     super(`HTTP ${status}`);
   }
 }
 
 async function request(url: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, init);
-  if (!res.ok) throw new HttpError(res.status);
+  if (!res.ok) throw new HttpError(res.status, res);
   return res;
 }
 
@@ -165,6 +173,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
         return { path, diff, content };
       } catch (e) {
         if (e instanceof HttpError && e.status === 415) return { path, binary: true };
+        if (e instanceof HttpError && e.status === 413) return { path, tooLarge: true, size: await tooLargeSize(e.res) };
         throw e;
       }
     })()
@@ -219,6 +228,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   else if (!selected) viewer = <p className="fv-empty">This pull request changes no files.</p>;
   else if (!current) viewer = <p className="fv-empty">Loading {selected}…</p>;
   else if (current.binary) viewer = <p className="fv-empty">{selected} is a binary file and can't be shown.</p>;
+  else if (current.tooLarge) viewer = <p className="fv-empty">{tooLargeMessage(current.size)}</p>;
   else if (current.error) viewer = <p className="fv-empty" role="alert">Couldn't load {selected} ({current.error}).</p>;
   else
     viewer = (
@@ -259,7 +269,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
           {tree}
         </div>
         <div className="rv-main">{viewer}</div>
-        {showRail && <ChangeRail diff={current && !current.binary ? current.diff : undefined} deleted={change?.status === "D"} onJump={jump} />}
+        {showRail && <ChangeRail diff={current && !current.binary && !current.tooLarge ? current.diff : undefined} deleted={change?.status === "D"} onJump={jump} />}
       </div>
     </>
   );

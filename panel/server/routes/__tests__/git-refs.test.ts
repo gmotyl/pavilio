@@ -227,6 +227,27 @@ describe("ref-based git reads", () => {
     }
   });
 
+  it("refuses files over the read cap from disk and at a ref", async () => {
+    const big = "z".repeat(2 * 1024 * 1024 + 1);
+    writeFileSync(join(repoDir, "huge.txt"), big);
+    const disk = await get("file", { path: "huge.txt" });
+    expect(disk.status).toBe(413);
+    expect(disk.body).toEqual({ error: "file too large", tooLarge: true, size: big.length });
+
+    sh("add huge.txt");
+    sh("commit -q -m huge");
+    const atRef = await get("file", { ref: "HEAD", path: "huge.txt" });
+    expect(atRef.status).toBe(413);
+    expect(atRef.body).toEqual({ error: "file too large", tooLarge: true, size: big.length });
+  });
+
+  it("refuses .git internals reached through an untracked symlink when diffing against HEAD", async () => {
+    symlinkSync(".git/config", join(repoDir, "cfg"));
+    const res = await get("diff", { file: "cfg", against: "HEAD" });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).not.toContain("[core]");
+  });
+
   it("answers 500, not 400/404, when git cannot run", async () => {
     const path = process.env.PATH;
     process.env.PATH = "";
@@ -274,7 +295,7 @@ describe("ref-based git reads", () => {
     writeFileSync(join(repoDir, "big.txt"), "z".repeat(1024 * 1024 + 1));
     const big = await get("diff", { file: "big.txt", against: "HEAD" });
     expect(big.status).toBe(200);
-    expect(big.body).toEqual({ diff: "", tooLarge: true });
+    expect(big.body).toEqual({ diff: "", tooLarge: true, size: 1024 * 1024 + 1 });
 
     writeFileSync(join(repoDir, "bin.dat"), Buffer.from([1, 0, 2, 3]));
     const bin = await get("diff", { file: "bin.dat", against: "HEAD" });

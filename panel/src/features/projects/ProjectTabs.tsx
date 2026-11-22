@@ -155,7 +155,8 @@ export function ProjectTabsBar({
         onMouseLeave={(e) =>
           (e.currentTarget.style.background = "transparent")
         }
-        title="Search (⌘P)"
+        // ⌘P is the code file search on the repos tab, not this.
+        title={tabs.some((t) => t.active && t.label === "repos") ? "Search notes" : "Search notes (⌘P)"}
       >
         <Search size={14} />
       </button>

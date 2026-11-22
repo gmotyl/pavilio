@@ -85,7 +85,11 @@ function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open,
     "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
     "/api/git/diff-ref": (url: string) => text(url.includes("gone.ts") ? GONE_DIFF : DIFF),
     "/api/git/file": (url: string) =>
-      url.includes("logo.png") ? jsonResponse({ error: "binary file", binary: true }, { status: 415 }) : text(CONTENT),
+      url.includes("logo.png")
+        ? jsonResponse({ error: "binary file", binary: true }, { status: 415 })
+        : url.includes("huge.json")
+          ? jsonResponse({ error: "file too large", tooLarge: true, size: 2.5 * 1024 * 1024 }, { status: 413 })
+          : text(CONTENT),
   });
   render(
     <MemoryRouter initialEntries={[`/project/pavilio/repos${search}`]}>
@@ -209,6 +213,11 @@ describe("ReviewView", () => {
     expect(calls(fetch, "/api/git/file").map(([u]) => u)).toContain(
       `/api/git/file?repo=${encodeURIComponent(REPO_PATH)}&ref=${encodeURIComponent("refs/pavilio/pr/1")}&path=${encodeURIComponent("src/a.ts")}`,
     );
+  });
+
+  it("a file over the read cap shows its size instead of loading", async () => {
+    renderReview({ search: "?view=review&pr=pavilio%231&file=huge.json" });
+    expect(await screen.findByText("This file is too large to display (2.5 MB).")).toBeInTheDocument();
   });
 
   it("rail entry scrolls the viewer to its line", async () => {

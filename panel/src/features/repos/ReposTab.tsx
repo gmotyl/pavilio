@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { preferences, REPOS_VIEWS, type ReposView } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
@@ -30,6 +30,9 @@ const VIEWS: Record<ReposView, (props: ReposViewProps) => ReactNode> = {
 
 const isView = (v: string | null): v is ReposView => REPOS_VIEWS.includes(v as ReposView);
 
+// The retired Changes page's params; old links and tab memory still carry them.
+const LEGACY_PARAMS = ["scope", "branchfile", "sha", "gitfile"] as const;
+
 export default function ReposTab({ project, repos }: ReposTabProps) {
   const [params, setSearchParams] = useSearchParams();
   const [storedView, setStoredView] = usePreference(preferences.reposView, project);
@@ -56,6 +59,12 @@ export default function ReposTab({ project, repos }: ReposTabProps) {
       ),
     [setSearchParams],
   );
+
+  useEffect(() => {
+    if (LEGACY_PARAMS.some((k) => params.has(k))) setParams(Object.fromEntries(LEGACY_PARAMS.map((k) => [k, null])));
+    // Once on mount: nothing here writes them again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pick = (v: ReposView) => {
     setParams({ view: v });

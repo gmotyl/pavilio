@@ -12,23 +12,31 @@ import type { ParamsPatch, ReposViewProps } from "./types";
 import { useDefinitionNav, type DefinitionLocation } from "./useDefinitionNav";
 import type { SearchRequest } from "./useSearchShortcut";
 import { useWidth } from "./useWidth";
+import { tooLargeMessage, tooLargeSize } from "./tooLarge";
 import FileViewer from "./viewer/FileViewer";
 import "./Code.css";
 
 const RAIL_MIN_WIDTH = 1100;
 const STACK_MAX_WIDTH = 860;
 
-type Loaded = { path: string } & ({ diff?: string; content?: string; binary?: false; error?: string } | { binary: true });
+type Loaded = { path: string } & (
+  | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string }
+  | { binary: true; tooLarge?: false }
+  | { tooLarge: true; size?: number; binary?: false }
+);
 
 class HttpError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly res: Response,
+  ) {
     super(`HTTP ${status}`);
   }
 }
 
 async function request(url: string): Promise<Response> {
   const res = await fetch(url);
-  if (!res.ok) throw new HttpError(res.status);
+  if (!res.ok) throw new HttpError(res.status, res);
   return res;
 }
 
@@ -186,13 +194,20 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
       if (commit) diff = ((await (await request(`/api/git/diff?sha=${commit.sha}&file=${q(path)}&repo=${q(root)}`)).json()) as { diff?: string } | null)?.diff;
       else if (cmp && status) diff = await (await request(`/api/git/diff-ref?repo=${q(root)}&base=${q(cmp)}&head=HEAD&path=${q(path)}`)).text();
       // Against HEAD so staged edits count as uncommitted too.
-      else if (status) diff = ((await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}&against=HEAD`)).json()) as { diff?: string } | null)?.diff;
+      else if (status) {
+        const head = (await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}&against=HEAD`)).json()) as { diff?: string; tooLarge?: boolean; size?: number; binary?: boolean } | null;
+        // Untracked past the diff cap or binary: reading it whole would stall or fail anyway.
+        if (head?.tooLarge) return { path, tooLarge: true, size: head.size };
+        if (head?.binary) return { path, binary: true };
+        diff = head?.diff;
+      }
       if (status === "D") return { path, diff };
       try {
         const content = await (await request(`/api/git/file?repo=${q(root)}${ref ? `&ref=${q(ref)}` : ""}&path=${q(path)}`)).text();
         return { path, diff, content };
       } catch (e) {
         if (e instanceof HttpError && e.status === 415) return { path, binary: true };
+        if (e instanceof HttpError && e.status === 413) return { path, tooLarge: true, size: await tooLargeSize(e.res) };
         throw e;
       }
     })()
@@ -245,7 +260,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   const showRail = panel !== "outline" || width === null || width >= RAIL_MIN_WIDTH;
   const stack = width !== null && width < STACK_MAX_WIDTH;
   const current = loaded && loaded.path === selected && loaded.src === src ? loaded : null;
-  const content = current && !current.binary && !current.error ? current.content : undefined;
+  const content = current && !current.binary && !current.tooLarge && !current.error ? current.content : undefined;
   const outline = useMemo(
     () => (selected && content != null && OUTLINE_FILE.test(selected) ? outlineOf(content) : null),
     [selected, content],
@@ -275,6 +290,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   if (!selected) viewer = <p className="fv-empty">Pick a file from the tree, or press Ctrl+P.</p>;
   else if (!current) viewer = <p className="fv-empty">Loading {selected}…</p>;
   else if (current.binary) viewer = <p className="fv-empty">{selected} is a binary file and can't be shown.</p>;
+  else if (current.tooLarge) viewer = <p className="fv-empty">{tooLargeMessage(current.size)}</p>;
   else if (current.error) viewer = <p className="fv-empty" role="alert">Couldn't load {selected} ({current.error}).</p>;
   else
     viewer = (

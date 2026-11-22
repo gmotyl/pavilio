@@ -271,6 +271,31 @@ function isBinary(buf: Buffer): boolean {
   return buf.subarray(0, 8000).includes(0);
 }
 
+// The viewer renders whole files; past this a read would stall the browser.
+const FILE_READ_MAX_BYTES = 2 * 1024 * 1024;
+
+function sendTooLarge(res: Response, size: number): void {
+  res.status(413).json({ error: "file too large", tooLarge: true, size });
+}
+
+/** Realpath of an on-disk repo file, or 400 when it lands outside the repo or inside `.git`. */
+function realInRepo(root: string, path: string): string {
+  let real: string;
+  try {
+    real = realpathSync(join(root, path));
+  } catch (e: any) {
+    if (e?.code === "ENOENT") throw new GitInputError(`${path} not found`, 404);
+    throw e;
+  }
+  // A symlink inside the repo may still point outside it, or into .git.
+  const realRoot = realpathSync(root);
+  if (!real.startsWith(realRoot + sep)) throw new GitInputError("path escapes the repo");
+  if (relative(realRoot, real).split(sep).some((seg) => seg.toLowerCase() === ".git")) {
+    throw new GitInputError("path is inside .git");
+  }
+  return real;
+}
+
 function sendText(res: Response, buf: Buffer): void {
   if (isBinary(buf)) {
     res.status(415).json({ error: "binary file", binary: true });
@@ -409,30 +434,31 @@ router.get("/file", async (req, res) => {
     const ref = queryString(req.query.ref);
     if (ref) {
       const sha = await resolveCommit(ref, root);
-      let buf: Buffer;
+      const object = `${sha}:${path}`;
+      let size: number;
       try {
-        // cat-file blob: raw bytes (no textconv), and a tree is not a blob.
-        buf = await gitArgv(["cat-file", "blob", `${sha}:${path}`], root);
+        // A tree is not a blob; size first so a huge blob is never buffered.
+        if ((await gitArgv(["cat-file", "-t", object], root)).toString("utf-8").trim() !== "blob") throw new GitInputError(`${path} not found at ${ref}`, 404);
+        size = Number((await gitArgv(["cat-file", "-s", object], root)).toString("utf-8").trim());
       } catch (e) {
-        if (!gitExitedNonZero(e)) throw e;
+        if (e instanceof GitInputError || !gitExitedNonZero(e)) throw e;
         throw new GitInputError(`${path} not found at ${ref}`, 404);
       }
-      return sendText(res, buf);
+      if (size > FILE_READ_MAX_BYTES) return sendTooLarge(res, size);
+      // cat-file blob: raw bytes (no textconv).
+      return sendText(res, await gitArgv(["cat-file", "blob", object], root));
     }
     let real: string;
     try {
-      real = realpathSync(join(root, path));
-    } catch {
+      real = realInRepo(root, path);
+    } catch (e) {
+      // Any unreadable path (dangling link, permission) reads as missing.
+      if (e instanceof GitInputError && e.status === 400) throw e;
       throw new GitInputError(`${path} not found`, 404);
     }
-    // A symlink inside the repo may still point outside it.
-    const realRoot = realpathSync(root);
-    if (!real.startsWith(realRoot + sep)) throw new GitInputError("path escapes the repo");
-    // A committed symlink can still land inside .git.
-    if (relative(realRoot, real).split(sep).some((seg) => seg.toLowerCase() === ".git")) {
-      throw new GitInputError("path is inside .git");
-    }
-    if (!statSync(real).isFile()) throw new GitInputError(`${path} is not a file`, 404);
+    const st = statSync(real);
+    if (!st.isFile()) throw new GitInputError(`${path} is not a file`, 404);
+    if (st.size > FILE_READ_MAX_BYTES) return sendTooLarge(res, st.size);
     sendText(res, readFileSync(real));
   } catch (e: any) {
     sendGitError(res, e);
@@ -503,7 +529,7 @@ router.get("/status", (req, res) => {
 // Larger untracked files get a marker instead of a synthesized diff.
 const UNTRACKED_DIFF_MAX_BYTES = 1024 * 1024;
 
-type HeadDiff = { diff: string; tooLarge?: true; binary?: true };
+type HeadDiff = { diff: string; tooLarge?: true; size?: number; binary?: true };
 
 /** Working tree vs HEAD (staged + unstaged); untracked files as a synthesized add. */
 async function diffAgainstHead(file: string, repo?: string): Promise<HeadDiff> {
@@ -514,18 +540,10 @@ async function diffAgainstHead(file: string, repo?: string): Promise<HeadDiff> {
   if (diff.trim()) return { diff };
   const status = (await gitArgv(["status", "--porcelain=v1", "-z", "--", path], root)).toString("utf-8");
   if (!status.startsWith("??")) return { diff };
-  // An untracked symlink may point outside the repo.
-  let real: string;
-  try {
-    real = realpathSync(join(root, path));
-  } catch (e: any) {
-    if (e?.code === "ENOENT") throw new GitInputError(`${path} not found`, 404);
-    throw e;
-  }
-  if (!real.startsWith(realpathSync(root) + sep)) throw new GitInputError("path escapes the repo");
+  const real = realInRepo(root, path);
   const st = statSync(real);
   if (!st.isFile()) throw new GitInputError(`${path} is not a file`, 404);
-  if (st.size > UNTRACKED_DIFF_MAX_BYTES) return { diff: "", tooLarge: true };
+  if (st.size > UNTRACKED_DIFF_MAX_BYTES) return { diff: "", tooLarge: true, size: st.size };
   const buf = readFileSync(real);
   if (isBinary(buf)) return { diff: "", binary: true };
   return { diff: synthesizeAddDiff(path, buf.toString("utf-8")) };
