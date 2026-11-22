@@ -26,6 +26,13 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
   const [scope, setScope] = usePreference(preferences.repoSearchScope);
 
   const [files, setFiles] = useState<RepoFile[]>([]);
+  // What produced `files`: the scope, plus each repo's base for a branch diff.
+  // Set together with the list it describes, so a scope switch changes it only
+  // once the new list lands — two scopes may list the same repo/path pairs.
+  const [filesSource, setFilesSource] = useState<{
+    scope: RepoSearchScope | "";
+    bases: Map<string, string>;
+  }>({ scope: "", bases: new Map() });
   const [grepResults, setGrepResults] = useState<GrepResult[]>([]);
   const [grepLoading, setGrepLoading] = useState(false);
 
@@ -44,6 +51,7 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
     const list = repos?.filter((r) => r.present) ?? [];
     if (!active || !list.length) {
       setFiles([]);
+      setFilesSource({ scope: "", bases: new Map() });
       setGrepResults([]);
       return;
     }
@@ -64,6 +72,7 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
     let cancelled = false;
     (async () => {
       const all: RepoFile[] = [];
+      const bases = new Map<string, string>();
       await Promise.all(
         list.map(async (repo) => {
           const qs = `repo=${encodeURIComponent(repo.path)}`;
@@ -107,6 +116,7 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
               // No usable scope: search this repo without a base rather than
               // taking the whole batch down.
             }
+            bases.set(repo.path, base);
             if (base) {
               try {
                 const res = await fetch(
@@ -173,7 +183,10 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
           }
         }),
       );
-      if (!cancelled) setFiles(all);
+      if (!cancelled) {
+        setFiles(all);
+        setFilesSource({ scope, bases });
+      }
     })();
     return () => {
       cancelled = true;
@@ -190,9 +203,19 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
     const presentPaths = new Set(presentPathsKey.split("\0"));
     return files.filter((f) => presentPaths.has(f.repo));
   }, [files, presentPathsKey]);
-  const eligibleFilesKey = eligibleFiles
-    .map((f) => `${f.repo}\0${f.path}`)
-    .join("\n");
+  // `files` arrives in fetch completion order; sort so a refetch of the same
+  // files in another order leaves the key (and the running search) alone.
+  // Only the bases of repos with eligible files count: a repo that went missing
+  // drops out of the key with its files, not again when the refetch lands.
+  const eligibleFilesKey = useMemo(() => {
+    const repoPaths = new Set(eligibleFiles.map((f) => f.repo));
+    const bases = [...filesSource.bases]
+      .filter(([repo]) => repoPaths.has(repo))
+      .map(([repo, base]) => `${repo}\0${base}`)
+      .sort();
+    const pairs = eligibleFiles.map((f) => `${f.repo}\0${f.path}`).sort();
+    return [filesSource.scope, ...bases, "", ...pairs].join("\n");
+  }, [filesSource, eligibleFiles]);
 
   useEffect(() => {
     if (!active || query.length < 2 || eligibleFiles.length === 0) {
@@ -235,8 +258,9 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
       clearTimeout(timer);
       abort.abort();
     };
-    // Keyed on the eligible file set, not the `files` array or the presence
-    // key: either can change without changing what a grep would search.
+    // Keyed on the eligible file set and the list it came from, not the
+    // `files` array or the presence key: either can change without changing
+    // what a grep would search.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, query, eligibleFilesKey]);
 

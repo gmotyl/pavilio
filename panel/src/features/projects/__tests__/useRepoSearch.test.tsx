@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useRepoSearch } from "../useRepoSearch";
 import { mockFetchResponses } from "../../../test-utils";
 import { preferences } from "../../../preferences/declarations";
@@ -206,10 +206,15 @@ describe("useRepoSearch when a linked repo goes missing mid-session", () => {
       expect(result.current.grepResults).toHaveLength(2);
     });
     expect(grepCalls(spy).some((u) => repoOf(u) === "/git/beta")).toBe(true);
-    // The hook, not the server, names each match's repo.
-    expect(result.current.grepResults.map((r) => r.project).sort()).toEqual([
-      "/git/alpha",
-      "/git/beta",
+    // The hook, not the server, names each match's repo — and pairs it with
+    // the right file, so swapped labels fail.
+    const pairs = () =>
+      result.current.grepResults
+        .map((r) => ({ project: r.project, relativePath: r.relativePath }))
+        .sort((a, b) => a.project.localeCompare(b.project));
+    expect(pairs()).toEqual([
+      { project: "/git/alpha", relativePath: "alpha.ts" },
+      { project: "/git/beta", relativePath: "beta.ts" },
     ]);
 
     // Hold the surviving repo's refetch so nothing can land and overwrite state.
@@ -218,23 +223,111 @@ describe("useRepoSearch when a linked repo goes missing mid-session", () => {
     rerender({ repos: [alpha, { ...beta, present: false }], query: "ts" });
 
     expect(result.current.files.map((f) => f.repo)).toEqual(["/git/alpha"]);
-    expect(result.current.grepResults.map((r) => r.project)).toEqual(["/git/alpha"]);
+    expect(pairs()).toEqual([{ project: "/git/alpha", relativePath: "alpha.ts" }]);
 
-    // A fresh grep while the refetch is still held: it must run (so the next
-    // assertion is not vacuous) and must name only the surviving repo.
-    rerender({ repos: [alpha, { ...beta, present: false }], query: "tsx" });
-    await waitFor(() => {
-      expect(
-        grepCalls(spy, callsBefore).some(
-          (u) => repoOf(u) === "/git/alpha" && u.includes("q=tsx"),
-        ),
-      ).toBe(true);
-    });
+    // The query is unchanged: the disappearance alone must restart the grep.
+    // Wait past the debounce while the refetch is still held.
+    await new Promise((r) => setTimeout(r, 400));
+    const greps = grepCalls(spy, callsBefore);
+    expect(greps.some((u) => repoOf(u) === "/git/alpha")).toBe(true);
+    expect(greps.some((u) => repoOf(u) === "/git/beta")).toBe(false);
     const after = spy.mock.calls.slice(callsBefore).map(([u]) => String(u));
     expect(after.some((u) => u.includes("/api/git/status"))).toBe(true);
-    expect(grepCalls(spy, callsBefore).some((u) => repoOf(u) === "/git/beta")).toBe(false);
     expect(after.some((u) => repoOf(u) === "/git/beta")).toBe(false);
     expect(result.current.files.map((f) => f.repo)).toEqual(["/git/alpha"]);
+    expect(pairs()).toEqual([{ project: "/git/alpha", relativePath: "alpha.ts" }]);
+  });
+
+  it("a refetch returning the same files in another order does not re-grep", async () => {
+    const gamma = { name: "gamma", path: "/git/gamma", present: false };
+    // First load: alpha answers before beta. Refetch: beta before alpha.
+    let slow = "/git/beta";
+    const { spy } = stubFetch((url) =>
+      url.includes("/api/git/status") && repoOf(url) === slow
+        ? new Promise<Response>((done) => setTimeout(() => done(healthy(url) as never), 30))
+        : healthy(url),
+    );
+    const loading: boolean[] = [];
+    const { result, rerender } = renderHook(
+      ({ repos }) => {
+        const r = useRepoSearch({ active: true, repos, query: "ts" });
+        loading.push(r.grepLoading);
+        return r;
+      },
+      { initialProps: { repos: [alpha, beta] } },
+    );
+    await waitFor(() => {
+      expect(result.current.grepResults).toHaveLength(2);
+      expect(result.current.grepLoading).toBe(false);
+    });
+    expect(result.current.files.map((f) => f.repo)).toEqual(["/git/alpha", "/git/beta"]);
+
+    slow = "/git/alpha";
+    const callsBefore = spy.mock.calls.length;
+    loading.length = 0;
+    // A missing repo joining the list re-runs the file fetch, not the file set.
+    rerender({ repos: [alpha, beta, gamma] });
+    await waitFor(() => {
+      expect(result.current.files.map((f) => f.repo)).toEqual(["/git/beta", "/git/alpha"]);
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const after = spy.mock.calls.slice(callsBefore).map(([u]) => String(u));
+    expect(after.filter((u) => u.includes("/api/git/status"))).toHaveLength(2);
+    expect(grepCalls(spy, callsBefore)).toEqual([]);
+    expect(loading.length).toBeGreaterThan(0);
+    expect(loading.every((l) => l === false)).toBe(true);
+    expect(result.current.grepResults).toHaveLength(2);
+  });
+
+  it("re-greps when the scope changes even if the file paths are the same", async () => {
+    writePreference(preferences.branchDiffBase, "main", "/git/alpha");
+    let grepRound = 0;
+    let releaseDiff: () => void = () => {};
+    const { spy } = stubFetch((url) => {
+      if (url.includes("/api/git/branch-diff-files")) {
+        return new Promise<Response>((done) => {
+          releaseDiff = () =>
+            done({
+              ok: true,
+              json: () =>
+                Promise.resolve({ files: [{ status: "M", path: "alpha.ts" }], commitsAhead: 1 }),
+            } as Response);
+        });
+      }
+      if (url.includes("/api/git/grep")) {
+        grepRound += 1;
+        return ok([
+          { relativePath: "alpha.ts", project: "", matches: [{ line: 1, text: `round ${grepRound}` }] },
+        ]);
+      }
+      return healthy(url);
+    });
+    const { result } = renderHook(() =>
+      useRepoSearch({ active: true, repos: [alpha], query: "ts" }),
+    );
+    await waitFor(() => {
+      expect(result.current.grepResults[0]?.matches[0]?.text).toBe("round 1");
+      expect(result.current.grepLoading).toBe(false);
+    });
+
+    const callsBefore = spy.mock.calls.length;
+    act(() => result.current.setScope("branch-diff"));
+    // The branch-diff list is still loading: the old list is not grepped again.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(
+      spy.mock.calls.slice(callsBefore).some(([u]) => String(u).includes("/api/git/branch-diff-files")),
+    ).toBe(true);
+    expect(grepCalls(spy, callsBefore)).toEqual([]);
+
+    // Same repo/path pair as the changed list, yet a different list: re-grep.
+    act(() => releaseDiff());
+    await waitFor(() => {
+      expect(result.current.files[0]?.source).toBe("branch-diff");
+      expect(result.current.grepResults[0]?.matches[0]?.text).toBe("round 2");
+      expect(result.current.grepLoading).toBe(false);
+    });
+    expect(grepCalls(spy, callsBefore)).toHaveLength(1);
   });
 
   it("restoring a repo keeps existing matches and does not re-grep unchanged files", async () => {
