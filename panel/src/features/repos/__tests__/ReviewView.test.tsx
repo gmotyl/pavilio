@@ -240,13 +240,16 @@ describe("ReviewView", () => {
     scroll.mockClear();
     outer.mockClear();
     fireEvent.click(within(r).getByRole("button", { name: /^L30/ }));
-    const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-line="30"]')!;
+    // A pure removal lands on the removed row itself, not the line after it.
+    const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-old-line="29"]')!;
+    expect(row).toHaveTextContent("removed 29");
     await waitFor(() => expect(row).toHaveClass("fv-flash"));
     // Only the viewer pane scrolls; the page around it stays put.
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(scroll.mock.contexts[0]).toHaveClass("rv-main");
     expect(outer).not.toHaveBeenCalled();
-    expect(screen.getByTestId("search").textContent).toContain("line=30");
+    // URL `line` counts new-side lines only.
+    expect(screen.getByTestId("search").textContent).not.toContain("line=");
     // The default file is written with the line, so the link survives a change of first file.
     expect(screen.getByTestId("search").textContent).toContain(`file=${encodeURIComponent("src/a.ts")}`);
 
@@ -361,6 +364,21 @@ describe("ReviewView", () => {
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     await loaded();
     expect(within(treeArea()).queryByRole("alert")).toBeNull();
+  });
+
+  it("missing history says so and offers to fetch more instead of a plain Retry", async () => {
+    let fail = true;
+    const fetch = renderReview({
+      changed: () => (fail ? jsonResponse({ error: "base and head have no merge base", code: "no-merge-base" }, { status: 400 }) : jsonResponse(CHANGED)),
+    });
+    const alert = await waitFor(() => within(treeArea()).getByRole("alert"));
+    expect(alert).toHaveTextContent("This clone is missing history needed to compare");
+    expect(within(alert).queryByRole("button", { name: "Retry" })).toBeNull();
+    fail = false;
+    fireEvent.click(within(alert).getByTestId("review-fetch-history"));
+    await loaded();
+    // Re-opening the PR is what deepens a shallow clone.
+    expect(calls(fetch, "/api/prs/open")).toHaveLength(2);
   });
 
   it("a whole-tree listing failure can be retried and resets on re-toggle", async () => {

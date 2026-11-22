@@ -342,6 +342,8 @@ describe("ref-based git reads", () => {
       const res = await get(route, { base: "main", head: "lone", path: "a.txt" });
       expect(res.status, route).toBe(400);
       expect(res.body.error, route).toMatch(/merge base/);
+      // A code the client can tell apart from a plain failure: Retry alone cannot fix it.
+      expect(res.body.code, route).toBe("no-merge-base");
     }
   });
 

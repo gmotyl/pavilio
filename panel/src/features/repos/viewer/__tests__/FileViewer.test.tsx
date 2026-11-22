@@ -206,6 +206,29 @@ describe("FileViewer", () => {
     expect(row).toHaveClass("fv-flash");
   });
 
+  it("an old-side jump lands on the removed rows, switching Code to Diff", () => {
+    const viewer = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
+      <FileViewer path="notes.ts" diff={DELETE_DIFF} content={AFTER_DELETE} status="M" defaultMode="code" {...extra} />
+    );
+    const { rerender, container } = render(viewer());
+    const scroll = vi.mocked(Element.prototype.scrollTo);
+    scroll.mockClear();
+    rerender(viewer({ scrollToLine: 4, scrollSide: "old", scrollKey: 1 }));
+    expect(screen.getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-old-line="4"]');
+    expect(row).toHaveTextContent("gone 4");
+    expect(row).toHaveClass("fv-flash");
+    expect(scroll.mock.contexts.at(-1)).toBe(container);
+  });
+
+  it("an emptied file's old-side jump lands on its removed rows", () => {
+    const emptied = ["--- a/x.ts", "+++ b/x.ts", "@@ -1,2 +0,0 @@", "-one", "-two"].join("\n");
+    const { rerender } = render(<FileViewer path="x.ts" diff={emptied} content="" status="M" defaultMode="diff" />);
+    rerender(<FileViewer path="x.ts" diff={emptied} content="" status="M" defaultMode="diff" scrollToLine={1} scrollSide="old" scrollKey={1} />);
+    expect(screen.getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-old-line="1"]')).toHaveClass("fv-flash");
+  });
+
   it("re-requesting the same line with a new scrollKey flashes again", () => {
     vi.useFakeTimers();
     try {

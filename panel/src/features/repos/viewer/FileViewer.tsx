@@ -33,6 +33,8 @@ export interface FileViewerProps {
   highlight?: string;
   onIdentifierClick?: (pos: { line: number; col: number }, name: string) => void;
   scrollToLine?: number;
+  /** Which side `scrollToLine` counts on; "old" targets removed rows, which only Diff shows. */
+  scrollSide?: "old" | "new";
   /** Changes on every request so asking for the same line again re-scrolls and re-flashes. */
   scrollKey?: number | string;
 }
@@ -226,6 +228,7 @@ export default function FileViewer({
   highlight,
   onIdentifierClick,
   scrollToLine,
+  scrollSide = "new",
   scrollKey,
 }: FileViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -234,8 +237,8 @@ export default function FileViewer({
   const [layout, setLayout] = usePreference(preferences.fileViewerDiffLayout);
   const [width, setWidth] = useState<number | null>(null);
   // `seq` alternates the animation name so a repeat flash on the same row restarts it.
-  const [flash, setFlash] = useState<{ line: number; seq: number } | null>(null);
-  const [pending, setPending] = useState<number | undefined>(undefined);
+  const [flash, setFlash] = useState<{ line: number; side: "old" | "new"; seq: number } | null>(null);
+  const [pending, setPending] = useState<{ line: number; side: "old" | "new" } | undefined>(undefined);
   const [limit, setLimit] = useState(ROW_PAGE);
 
   const parsed = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);
@@ -300,33 +303,36 @@ export default function FileViewer({
   const marks = useMemo(() => (changed ? gutterMarks(rows) : new Map<number, GutterMark>()), [changed, rows]);
 
   useEffect(() => {
-    if (scrollToLine != null) setPending(scrollToLine);
-  }, [scrollToLine, scrollKey]);
+    if (scrollToLine != null) setPending({ line: scrollToLine, side: scrollSide });
+  }, [scrollToLine, scrollSide, scrollKey]);
 
   useLayoutEffect(() => {
     if (pending == null) return;
-    const el = bodyRef.current?.querySelector(`tr[data-line="${pending}"]`);
+    const { line, side } = pending;
+    const old = side === "old";
+    // Removed rows exist only in Diff.
+    if (old && shownMode !== "diff") {
+      if (changed) return setMode("diff");
+      return setPending(undefined);
+    }
+    const el = bodyRef.current?.querySelector(`tr[${old ? "data-old-line" : "data-line"}="${line}"]`);
     if (el) {
       if (rootRef.current) scrollRowIntoHost(rootRef.current, el);
-      setFlash((f) => ({ line: pending, seq: (f?.seq ?? 0) + 1 }));
+      setFlash((f) => ({ line, side, seq: (f?.seq ?? 0) + 1 }));
       setPending(undefined);
       return;
     }
+    const hit = (r: Row) => (old ? (r.kind === "ctx" || r.kind === "del") && r.old === line : (r.kind === "ctx" || r.kind === "add") && r.new === line);
     // Past the mounted page: mount up to the page holding the target, then retry.
-    const at =
-      shownMode === "code"
-        ? codeLines && pending <= codeLines.length
-          ? pending - 1
-          : -1
-        : visible.findIndex((it) => (it.kind === "ctx" || it.kind === "add") && it.new === pending);
+    const at = shownMode === "code" ? (codeLines && line <= codeLines.length ? line - 1 : -1) : visible.findIndex((it) => it.kind !== "fold" && hit(it));
     if (at >= limit) return setLimit(Math.ceil((at + 1) / ROW_PAGE) * ROW_PAGE);
     if (shownMode === "diff") {
-      const fold = items.find((it) => it.kind === "fold" && it.rows.some((r) => (r.kind === "ctx" || r.kind === "add") && r.new === pending));
+      const fold = items.find((it) => it.kind === "fold" && it.rows.some(hit));
       if (fold && fold.kind === "fold" && !expanded.has(fold.id)) return expand(fold.id);
-      if (codeLines) return setMode("code");
+      if (codeLines && !old) return setMode("code");
     }
     setPending(undefined);
-  }, [pending, shownMode, items, codeLines, expanded, expand, visible, limit]);
+  }, [pending, shownMode, changed, items, codeLines, expanded, expand, visible, limit]);
 
   useEffect(() => {
     if (flash == null) return;
@@ -343,8 +349,11 @@ export default function FileViewer({
   };
 
   const slash = path.lastIndexOf("/");
-  const flashCls = (n: number | undefined) =>
-    n !== undefined && n === flash?.line ? ` fv-flash${flash.seq % 2 ? "" : " fv-flash-alt"}` : "";
+  /** `n` is the row's new-side line, `o` its old-side one; the flash names which side it targets. */
+  const flashCls = (n: number | undefined, o?: number) => {
+    const at = flash?.side === "old" ? o : n;
+    return flash && at !== undefined && at === flash.line ? ` fv-flash${flash.seq % 2 ? "" : " fv-flash-alt"}` : "";
+  };
 
   const foldRow = (it: Extract<Item, { kind: "fold" }>) => (
     <tr key={`f${it.id}`} className="fv-fold-row">
@@ -409,8 +418,9 @@ export default function FileViewer({
               if (it.kind === "fold") return foldRow(it);
               if (it.kind === "gap") return gapRow(it, `g${i}`);
               const n = it.kind === "del" ? undefined : it.new;
+              const o = it.kind === "add" ? undefined : it.old;
               return (
-                <tr key={i} data-line={n} className={`fv-r-${it.kind}${flashCls(n)}`}>
+                <tr key={i} data-line={n} data-old-line={o} className={`fv-r-${it.kind}${flashCls(n, o)}`}>
                   <td className="fv-no">{it.kind === "add" ? "" : it.old}</td>
                   <td className="fv-no">{n ?? ""}</td>
                   <td className="fv-sg">{it.kind === "del" ? "−" : it.kind === "add" ? "+" : ""}</td>
@@ -437,7 +447,7 @@ export default function FileViewer({
               if (p.kind === "ctx") {
                 const r = p.right as Extract<Row, { kind: "ctx" }>;
                 return (
-                  <tr key={i} data-line={r.new} className={`fv-r-ctx${flashCls(r.new)}`}>
+                  <tr key={i} data-line={r.new} data-old-line={r.old} className={`fv-r-ctx${flashCls(r.new, r.old)}`}>
                     <td className="fv-no">{r.old}</td>
                     <td className="fv-cd" dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} />
                     <td className="fv-no">{r.new}</td>
@@ -448,7 +458,7 @@ export default function FileViewer({
               const d = p.del?.kind === "del" ? p.del : undefined;
               const a = p.add?.kind === "add" ? p.add : undefined;
               return (
-                <tr key={i} data-line={a?.new} className={`fv-r-change${flashCls(a?.new)}`}>
+                <tr key={i} data-line={a?.new} data-old-line={d?.old} className={`fv-r-change${flashCls(a?.new, d?.old)}`}>
                   <td className={`fv-no ${d ? "fv-s-del" : "fv-s-empty"}`}>{d?.old ?? ""}</td>
                   {cell(d, "del")}
                   <td className={`fv-no ${a ? "fv-s-add" : "fv-s-empty"}`}>{a?.new ?? ""}</td>

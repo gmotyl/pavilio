@@ -24,7 +24,7 @@ interface ChangedFile {
 
 type Opened =
   | { status: "loading" }
-  | { status: "error"; stage: "open" | "changed"; error: string }
+  | { status: "error"; stage: "open" | "changed" | "history"; error: string }
   | { status: "ready"; head: string; base: string; changed: ChangedFile[] };
 
 type Loaded = { path: string } & (
@@ -99,7 +99,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   // Bound to its file: a line is meaningless on another one. A link without
   // `file` (null) targets whichever file opens first.
-  const [scroll, setScroll] = useState<{ line: number; key: number; file: string | null } | null>(() => {
+  const [scroll, setScroll] = useState<{ line: number; side?: "old" | "new"; key: number; file: string | null } | null>(() => {
     const line = Number(params.get("line"));
     return line > 0 ? { line, key: 0, file: params.get("file") } : null;
   });
@@ -121,8 +121,10 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
       stage = "changed";
       const changed = (await (await request(`/api/git/changed?repo=${q(pr.repoPath)}&base=${q(base)}&head=${q(head)}`)).json()) as ChangedFile[];
       if (!cancelled) setOpened({ status: "ready", head, base, changed });
-    })().catch((e: unknown) => {
-      if (!cancelled) setOpened({ status: "error", stage, error: message(e) });
+    })().catch(async (e: unknown) => {
+      // No merge base: a shallow clone missing history; re-opening deepens it, a plain retry would not.
+      const code = e instanceof HttpError ? ((await e.res.json().catch(() => null)) as { code?: string } | null)?.code : undefined;
+      if (!cancelled) setOpened({ status: "error", stage: code === "no-merge-base" ? "history" : stage, error: message(e) });
     });
     return () => {
       cancelled = true;
@@ -197,11 +199,12 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
     setScroll(null);
     setParams({ file: path, line: null });
   };
-  const jump = (line: number) => {
+  const jump = (line: number, side: "old" | "new") => {
     if (!selected) return;
-    setScroll((s) => ({ line, key: (s?.key ?? 0) + 1, file: selected }));
+    setScroll((s) => ({ line, side, key: (s?.key ?? 0) + 1, file: selected }));
     // The file too: a line alone would land on whatever file opens first later.
-    setParams({ file: selected, line: String(line) });
+    // `line` in the URL counts new-side lines; a removed row has none to share.
+    setParams({ file: selected, line: side === "new" ? String(line) : null });
   };
 
   const showRail = width === null || width >= RAIL_MIN_WIDTH;
@@ -210,7 +213,16 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
   const scrollHere = scroll && (scroll.file === null || scroll.file === selected) ? scroll : null;
 
   let tree: ReactNode;
-  if (opened.status === "error")
+  if (opened.status === "error" && opened.stage === "history")
+    tree = (
+      <div className="rv-msg" role="alert">
+        This clone is missing history needed to compare this PR with its base.{" "}
+        <button type="button" data-testid="review-fetch-history" onClick={() => setAttempt((n) => n + 1)}>
+          Fetch more history
+        </button>
+      </div>
+    );
+  else if (opened.status === "error")
     tree = (
       <div className="rv-msg" role="alert">
         {opened.stage === "open" ? "Couldn't fetch this PR's branch" : "Couldn't load this PR's changes"} ({opened.error}).{" "}
@@ -259,6 +271,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
           counts={change ? { add: change.add, del: change.del } : undefined}
           defaultMode={change ? "diff" : "code"}
           scrollToLine={scrollHere?.line}
+          scrollSide={scrollHere?.side}
           scrollKey={scrollHere?.key}
         />
       </>

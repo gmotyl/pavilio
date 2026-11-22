@@ -192,6 +192,7 @@ describe("GitHubGhProvider", () => {
       if (o) return o;
       if (cmd === "gh") return ok("release\n");
       if (args[0] === "fetch") return ok("");
+      if (args.join(" ") === "rev-parse --is-shallow-repository") return ok("false\n");
       if (args[0] === "rev-parse" && args.some((a) => a.startsWith("refs/pavilio/pr/231"))) return ok("a".repeat(40) + "\n");
       if (args[0] === "rev-parse" && args.some((a) => a.startsWith("refs/pavilio/pr-base/231"))) return ok("b".repeat(40) + "\n");
       return new Error(`unexpected ${cmd} ${args.join(" ")}`);
@@ -214,5 +215,49 @@ describe("GitHubGhProvider", () => {
 
     const view = calls.find((c) => c.cmd === "gh" && c.args[1] === "view")!;
     expect(view.args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "github.com/o/r"]);
+  });
+
+  describe("openPr in a shallow clone", () => {
+    const shallowRunner = (mergeBaseAfterDeepens: number) => {
+      const origin = originIs("git@github.com:o/r.git");
+      let deepens = 0;
+      return fakeRunner((cmd, args) => {
+        const o = origin(cmd, args);
+        if (o) return o;
+        if (cmd === "gh") return ok("release\n");
+        if (args[0] === "fetch") {
+          if (args.some((a) => a.startsWith("--deepen="))) deepens++;
+          return ok("");
+        }
+        if (args.join(" ") === "rev-parse --is-shallow-repository") return ok("true\n");
+        if (args[0] === "rev-parse") return ok((args.some((a) => a.includes("pr-base")) ? "b" : "a").repeat(40) + "\n");
+        if (args[0] === "merge-base") return deepens >= mergeBaseAfterDeepens ? ok("c".repeat(40) + "\n") : { code: 1, stdout: "", stderr: "" };
+        return new Error(`unexpected ${cmd} ${args.join(" ")}`);
+      });
+    };
+    const deepenFetches = (calls: Call[]) => calls.filter((c) => c.args[0] === "fetch" && c.args.some((a) => a.startsWith("--deepen=")));
+
+    it("deepens the PR fetch until base and head share a merge base", async () => {
+      const { run, calls } = shallowRunner(2);
+      expect(await createGitHubGhProvider({ run }).openPr(REPO, 231)).toEqual({ head: "a".repeat(40), base: "b".repeat(40) });
+      const deepen = deepenFetches(calls);
+      expect(deepen).toHaveLength(2);
+      // Same private refspecs as the first fetch: still no remote-tracking update.
+      expect(deepen[0].args.some((a) => a.endsWith("pull/231/head:refs/pavilio/pr/231"))).toBe(true);
+      expect(deepen[0].args).toEqual(expect.arrayContaining(["--no-write-fetch-head", "--refmap="]));
+    });
+
+    it("does not deepen when the merge base is already here", async () => {
+      const { run, calls } = shallowRunner(0);
+      await createGitHubGhProvider({ run }).openPr(REPO, 231);
+      expect(deepenFetches(calls)).toHaveLength(0);
+    });
+
+    it("stops deepening after a bounded number of rounds", async () => {
+      const { run, calls } = shallowRunner(Infinity);
+      expect(await createGitHubGhProvider({ run }).openPr(REPO, 231)).toEqual({ head: "a".repeat(40), base: "b".repeat(40) });
+      expect(deepenFetches(calls).length).toBeGreaterThan(0);
+      expect(deepenFetches(calls).length).toBeLessThanOrEqual(5);
+    });
   });
 });

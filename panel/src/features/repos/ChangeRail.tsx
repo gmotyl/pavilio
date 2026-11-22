@@ -5,6 +5,8 @@ import "./Review.css";
 export interface ChangeRun {
   /** New-side line to jump to: the first added line, or the line after a pure deletion. */
   line: number;
+  /** A pure deletion's first removed line: those rows exist only on the old side of Diff. */
+  oldLine?: number;
   add: number;
   del: number;
 }
@@ -12,10 +14,10 @@ export interface ChangeRun {
 /** One entry per contiguous run of added/removed lines. */
 export function changeRuns(diff: string): ChangeRun[] {
   const out: ChangeRun[] = [];
-  let run: { add: number; del: number; first?: number } | null = null;
+  let run: { add: number; del: number; first?: number; firstOld?: number } | null = null;
   let nextNew = 1;
   const close = (at: number) => {
-    if (run) out.push({ line: run.first ?? at, add: run.add, del: run.del });
+    if (run) out.push(run.first === undefined ? { line: at, oldLine: run.firstOld, add: run.add, del: run.del } : { line: run.first, add: run.add, del: run.del });
     run = null;
   };
   for (const r of parseDiff(diff)) {
@@ -27,6 +29,7 @@ export function changeRuns(diff: string): ChangeRun[] {
     } else if (r.kind === "del") {
       run ??= { add: 0, del: 0 };
       run.del++;
+      run.firstOld ??= r.old;
     } else {
       close(r.new);
       nextNew = r.kind === "ctx" ? r.new + 1 : r.new;
@@ -41,7 +44,7 @@ interface Props {
   diff?: string;
   /** The file is gone at head: no new-side line to jump to. Status, not diff shape, decides — an emptied file still has one. */
   deleted?: boolean;
-  onJump: (line: number) => void;
+  onJump: (line: number, side: "old" | "new") => void;
 }
 
 export default function ChangeRail({ diff, deleted = false, onJump }: Props) {
@@ -55,7 +58,7 @@ export default function ChangeRail({ diff, deleted = false, onJump }: Props) {
         <p className="rv-rail-empty">Nothing here.</p>
       ) : (
         runs.map((r, i) => (
-          <button key={`${r.line}-${i}`} type="button" data-testid={`review-rail-${r.line}`} onClick={() => onJump(r.line)}>
+          <button key={`${r.line}-${i}`} type="button" data-testid={`review-rail-${r.line}`} onClick={() => (r.oldLine === undefined ? onJump(r.line, "new") : onJump(r.oldLine, "old"))}>
             <i className={r.add === 0 ? "rv-k-del" : r.del === 0 ? "rv-k-add" : "rv-k-mod"} aria-hidden="true" />
             <span className="rv-ln">L{r.line}</span>
             <span className="rv-sum">

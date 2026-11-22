@@ -69,6 +69,8 @@ class GitInputError extends Error {
   constructor(
     message: string,
     readonly status = 400,
+    /** Machine-readable reason for a client that answers it differently. */
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -77,7 +79,7 @@ class GitInputError extends Error {
 /** Answer a route failure: 404 repo-missing for a missing repo, else `status` with the message. */
 function sendGitError(res: Response, e: any, status = 500): void {
   if (e instanceof GitInputError) {
-    res.status(e.status).json({ error: e.message });
+    res.status(e.status).json(e.code ? { error: e.message, code: e.code } : { error: e.message });
     return;
   }
   if (e instanceof RepoMissingError) {
@@ -224,7 +226,8 @@ async function mergeBase(base: string, head: string, root: string): Promise<stri
   try {
     return (await gitArgv(["merge-base", base, head], root)).toString("utf-8").trim();
   } catch (e: any) {
-    if (e?.code === 1) throw new GitInputError("base and head have no merge base");
+    // Also what a shallow clone missing the shared history answers.
+    if (e?.code === 1) throw new GitInputError("base and head have no merge base", 400, "no-merge-base");
     throw e;
   }
 }

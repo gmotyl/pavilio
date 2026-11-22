@@ -17,6 +17,9 @@ export type Runner = (
 ) => Promise<RunResult>;
 
 const TIMEOUT_MS = 30_000;
+// Shallow clones: up to DEEPEN_ROUNDS × DEEPEN_BY extra commits per side before giving up.
+const DEEPEN_ROUNDS = 5;
+const DEEPEN_BY = 200;
 const PR_FIELDS =
   "number,title,author,isDraft,reviewRequests,reviewDecision,statusCheckRollup,headRefName,baseRefName,updatedAt,url";
 // gh exits 4 when it needs `gh auth login`; older versions only say so on stderr.
@@ -154,6 +157,19 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     return r.stdout;
   }
 
+  /** merge-base exits 1 when the two commits share no ancestor in this clone. */
+  async function hasMergeBase(a: string, b: string, cwd: string): Promise<boolean> {
+    let r: RunResult;
+    try {
+      r = await run("git", ["merge-base", a, b], { cwd, env: GIT_ENV });
+    } catch (err) {
+      throw new PrUnavailableError("failed", (err as Error).message);
+    }
+    if (r.code === 0) return true;
+    if (r.code === 1) return false;
+    throw new PrUnavailableError("failed", r.stderr.trim() || `git merge-base exited ${r.code}`);
+  }
+
   /**
    * Returns `github.com/owner/repo` of origin for gh's --repo: in a fork clone gh defaults
    * to upstream, and an unqualified slug would resolve against GH_HOST.
@@ -234,21 +250,30 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
       const baseRef = `refs/pavilio/pr-base/${n}`;
       // Touch only refs/pavilio/: --refmap= skips the opportunistic origin/* update,
       // no FETCH_HEAD, no submodule fetches. `+`: PR heads are force-pushed routinely.
-      await git(
-        [
-          "fetch",
-          "--no-tags",
-          "--no-write-fetch-head",
-          "--recurse-submodules=no",
-          "--refmap=",
-          "origin",
-          `+pull/${n}/head:${headRef}`,
-          `+refs/heads/${base}:${baseRef}`,
-        ],
-        repoPath,
-      );
+      const fetch = (extra: string[]) =>
+        git(
+          [
+            "fetch",
+            ...extra,
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--recurse-submodules=no",
+            "--refmap=",
+            "origin",
+            `+pull/${n}/head:${headRef}`,
+            `+refs/heads/${base}:${baseRef}`,
+          ],
+          repoPath,
+        );
+      await fetch([]);
       const head = (await git(["rev-parse", "--verify", `${headRef}^{commit}`], repoPath)).trim();
       const baseSha = (await git(["rev-parse", "--verify", `${baseRef}^{commit}`], repoPath)).trim();
+      // A shallow clone may lack the shared ancestor the review diffs against: deepen, bounded.
+      if ((await git(["rev-parse", "--is-shallow-repository"], repoPath)).trim() === "true") {
+        for (let round = 0; round < DEEPEN_ROUNDS && !(await hasMergeBase(baseSha, head, repoPath)); round++) {
+          await fetch([`--deepen=${DEEPEN_BY}`]);
+        }
+      }
       return { head, base: baseSha };
     },
   };
