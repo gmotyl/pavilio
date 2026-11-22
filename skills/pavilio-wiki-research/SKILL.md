@@ -75,8 +75,10 @@ with their original URL.
      `D` carries no language name: ask "which language?" as free text and stop again. Nothing is
      created until the answer arrives, so abandoning the question leaves no half-made project.
      Then run the scaffold and write the answer into `PROJECT.md` frontmatter as
-     `wiki_language: <language name>` (omit it for English). A non-English choice also
-     localizes the scaffolded `wiki/overview.md` at once: spawn `overview_writer` with
+     `wiki_language: "<language name>"` — always double-quoted, with `\` and `"` escaped, so a name
+     like `Chinese: Traditional` stays valid YAML (omit it for English). A non-English choice also
+     localizes the scaffolded `wiki/overview.md` at once — only when the scaffold reported
+     creating it (never overwrite a page that already existed): spawn `overview_writer` with
      `language:` and no `changed` pages.
      Contribute mode and a continued project ask nothing: an existing wiki continues in its own
      language (`wiki_language`, absent → English), and `/pavilio-wiki` passes it to the writers.
