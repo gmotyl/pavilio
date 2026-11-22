@@ -1,5 +1,6 @@
 import { Router, type Response } from "express";
-import { execFileSync, execSync } from "child_process";
+import { execFile, execSync } from "child_process";
+import { promisify } from "util";
 import { readFileSync, realpathSync, statSync } from "fs";
 import { isAbsolute, join, posix, resolve, sep } from "path";
 import { getConfig } from "../config.js";
@@ -174,18 +175,41 @@ function getBranchDiff(base: string, file: string, repo?: string): string {
 
 // --- Ref-based reads (argv, no shell: refs and paths come straight from the query) ---
 
-// PR trees and diffs can be large; execFileSync's 1 MiB default would truncate them.
+// PR trees and diffs can be large; execFile's 1 MiB default would truncate them.
 const REF_MAX_BUFFER = 256 * 1024 * 1024;
+const REF_TIMEOUT_MS = 30_000;
+const execFileAsync = promisify(execFile);
 
-function gitArgv(args: string[], repo?: string): Buffer {
-  const cwd = getRepoRoot(repo);
-  assertRepoDirectory(cwd);
-  return execFileSync("git", args, {
+function refReadEnv(): NodeJS.ProcessEnv {
+  return {
+    ...gitSafeEnv(),
+    // Query paths are file names, never globs or `:(exclude)` magic.
+    GIT_LITERAL_PATHSPECS: "1",
+    // Reads must not take index.lock (status would refresh the index).
+    GIT_OPTIONAL_LOCKS: "0",
+  };
+}
+
+async function gitArgv(args: string[], cwd: string): Promise<Buffer> {
+  const { stdout } = await execFileAsync("git", args, {
     cwd,
-    env: gitSafeEnv(),
+    env: refReadEnv(),
+    encoding: "buffer",
     maxBuffer: REF_MAX_BUFFER,
-    stdio: ["ignore", "pipe", "pipe"],
+    timeout: REF_TIMEOUT_MS,
   });
+  return stdout;
+}
+
+/** The repo's top-level dir; every path below is relative to it, whatever subdir `repo` named. */
+async function repoToplevel(repo?: string): Promise<string> {
+  const dir = getRepoRoot(repo);
+  assertRepoDirectory(dir);
+  try {
+    return (await gitArgv(["rev-parse", "--show-toplevel"], dir)).toString("utf-8").trim();
+  } catch {
+    throw new GitInputError(`not a git working tree: ${dir}`);
+  }
 }
 
 function queryString(v: unknown): string | undefined {
@@ -199,21 +223,32 @@ function requireQuery(v: unknown, name: string): string {
 }
 
 /** Resolve a ref to a commit sha; a leading `-` would be parsed as an option. */
-function resolveCommit(ref: string, repo?: string): string {
+async function resolveCommit(ref: string, root: string): Promise<string> {
   if (ref.startsWith("-") || ref.includes("\0")) throw new GitInputError(`invalid ref: ${ref}`);
   try {
-    return gitArgv(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], repo).toString("utf-8").trim();
-  } catch (e) {
-    if (e instanceof RepoMissingError) throw e;
+    return (await gitArgv(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], root)).toString("utf-8").trim();
+  } catch {
     throw new GitInputError(`unknown ref: ${ref}`);
   }
 }
 
-/** Repo-relative POSIX path, or 400 when absolute or escaping the repo after normalisation. */
+/** base...head as an explicit merge base, so unrelated histories answer 400 rather than 500. */
+async function mergeBase(base: string, head: string, root: string): Promise<string> {
+  try {
+    return (await gitArgv(["merge-base", base, head], root)).toString("utf-8").trim();
+  } catch (e: any) {
+    if (e?.code === 1) throw new GitInputError("base and head have no merge base");
+    throw e;
+  }
+}
+
+/** Repo-relative POSIX path, or 400 when absolute, escaping the repo, or inside `.git`. */
 function repoRelativePath(raw: string): string {
   if (raw.includes("\0") || isAbsolute(raw) || posix.isAbsolute(raw)) throw new GitInputError("path must be repo-relative");
   const norm = posix.normalize(raw.replace(/\\/g, "/"));
   if (norm === "." || norm === ".." || norm.startsWith("../")) throw new GitInputError("path escapes the repo");
+  // Case-insensitive: `.GIT` is the same dir on macOS/Windows filesystems.
+  if (norm.split("/").some((seg) => seg.toLowerCase() === ".git")) throw new GitInputError("path is inside .git");
   return norm;
 }
 
@@ -246,29 +281,29 @@ function porcelainStatus(xy: string): TreeStatus {
   return xy.trim() ? "M" : null;
 }
 
-function workingTreeFiles(repo?: string): { path: string; status: TreeStatus }[] {
+async function workingTreeFiles(root: string): Promise<{ path: string; status: TreeStatus }[]> {
   const status = new Map<string, TreeStatus>();
-  const entries = splitZ(gitArgv(["status", "--porcelain=v1", "-z", "-uall"], repo));
+  const entries = splitZ(await gitArgv(["status", "--porcelain=v1", "-z", "-uall"], root));
   for (let i = 0; i < entries.length; i++) {
     const xy = entries[i].slice(0, 2);
     status.set(entries[i].slice(3), porcelainStatus(xy));
-    // -z renames/copies carry the source path as the next entry.
-    if (xy[0] === "R" || xy[0] === "C") i++;
+    // -z renames/copies (either column) carry the source path as the next entry.
+    if (xy.includes("R") || xy.includes("C")) i++;
   }
   // -c keeps unstaged deletions listed; staged ones only come from status.
-  const paths = new Set(splitZ(gitArgv(["ls-files", "-z", "-co", "--exclude-standard"], repo)));
+  const paths = new Set(splitZ(await gitArgv(["ls-files", "-z", "-co", "--exclude-standard"], root)));
   for (const p of status.keys()) paths.add(p);
   return [...paths].sort().map((path) => ({ path, status: status.get(path) ?? null }));
 }
 
 // Files at a ref, or the working tree (incl. untracked, .gitignore honoured) with status
-router.get("/tree", (req, res) => {
+router.get("/tree", async (req, res) => {
   try {
-    const repo = queryString(req.query.repo);
+    const root = await repoToplevel(queryString(req.query.repo));
     const ref = queryString(req.query.ref);
-    if (!ref) return res.json({ files: workingTreeFiles(repo) });
-    const sha = resolveCommit(ref, repo);
-    const files = splitZ(gitArgv(["ls-tree", "-r", "-z", "--name-only", sha], repo)).map((path) => ({
+    if (!ref) return res.json({ files: await workingTreeFiles(root) });
+    const sha = await resolveCommit(ref, root);
+    const files = splitZ(await gitArgv(["ls-tree", "-r", "-z", "--name-only", sha], root)).map((path) => ({
       path,
       status: null,
     }));
@@ -279,24 +314,22 @@ router.get("/tree", (req, res) => {
 });
 
 // File content at a ref, or from disk; binary answers 415
-router.get("/file", (req, res) => {
+router.get("/file", async (req, res) => {
   try {
-    const repo = queryString(req.query.repo);
-    const ref = queryString(req.query.ref);
     const path = repoRelativePath(requireQuery(req.query.path, "path"));
+    const root = await repoToplevel(queryString(req.query.repo));
+    const ref = queryString(req.query.ref);
     if (ref) {
-      const sha = resolveCommit(ref, repo);
+      const sha = await resolveCommit(ref, root);
       let buf: Buffer;
       try {
-        buf = gitArgv(["show", `${sha}:${path}`], repo);
-      } catch (e) {
-        if (e instanceof RepoMissingError) throw e;
+        // cat-file blob: raw bytes (no textconv), and a tree is not a blob.
+        buf = await gitArgv(["cat-file", "blob", `${sha}:${path}`], root);
+      } catch {
         throw new GitInputError(`${path} not found at ${ref}`, 404);
       }
       return sendText(res, buf);
     }
-    const root = getRepoRoot(repo);
-    assertRepoDirectory(root);
     let real: string;
     try {
       real = realpathSync(join(root, path));
@@ -314,13 +347,14 @@ router.get("/file", (req, res) => {
 });
 
 // Unified diff of one path, base...head (since divergence)
-router.get("/diff-ref", (req, res) => {
+router.get("/diff-ref", async (req, res) => {
   try {
-    const repo = queryString(req.query.repo);
     const path = repoRelativePath(requireQuery(req.query.path, "path"));
-    const base = resolveCommit(requireQuery(req.query.base, "base"), repo);
-    const head = resolveCommit(requireQuery(req.query.head, "head"), repo);
-    const diff = gitArgv(["diff", "--no-color", "--no-ext-diff", `${base}...${head}`, "--", path], repo);
+    const root = await repoToplevel(queryString(req.query.repo));
+    const base = await resolveCommit(requireQuery(req.query.base, "base"), root);
+    const head = await resolveCommit(requireQuery(req.query.head, "head"), root);
+    const from = await mergeBase(base, head, root);
+    const diff = await gitArgv(["diff", "--no-color", "--no-ext-diff", from, head, "--", path], root);
     res.type("text/plain; charset=utf-8").send(diff.toString("utf-8"));
   } catch (e: any) {
     sendGitError(res, e);
@@ -328,15 +362,15 @@ router.get("/diff-ref", (req, res) => {
 });
 
 // Changed files base...head with name-status and numstat (binary counts as 0/0)
-router.get("/changed", (req, res) => {
+router.get("/changed", async (req, res) => {
   try {
-    const repo = queryString(req.query.repo);
-    const base = resolveCommit(requireQuery(req.query.base, "base"), repo);
-    const head = resolveCommit(requireQuery(req.query.head, "head"), repo);
-    const range = `${base}...${head}`;
+    const root = await repoToplevel(queryString(req.query.repo));
+    const base = await resolveCommit(requireQuery(req.query.base, "base"), root);
+    const head = await resolveCommit(requireQuery(req.query.head, "head"), root);
+    const from = await mergeBase(base, head, root);
 
     const files: { path: string; status: "M" | "A" | "D" | "R"; add: number; del: number }[] = [];
-    const ns = splitZ(gitArgv(["diff", "-z", "-M", "--name-status", range], repo));
+    const ns = splitZ(await gitArgv(["diff", "-z", "-M", "--name-status", from, head], root));
     for (let i = 0; i < ns.length; ) {
       const code = ns[i++].charAt(0);
       // Rename/copy: source then destination; the row is keyed by destination.
@@ -346,7 +380,7 @@ router.get("/changed", (req, res) => {
     }
 
     const counts = new Map<string, { add: number; del: number }>();
-    const num = splitZ(gitArgv(["diff", "-z", "-M", "--numstat", range], repo));
+    const num = splitZ(await gitArgv(["diff", "-z", "-M", "--numstat", from, head], root));
     for (let i = 0; i < num.length; ) {
       const [add, del, path] = num[i++].split("\t");
       // Rename: empty path field, then source and destination entries.

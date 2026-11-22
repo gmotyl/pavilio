@@ -140,4 +140,65 @@ describe("ref-based git reads", () => {
     expect(res.text).toBe(sh(`diff main...${PR_REF} -- a.txt`));
     expect(res.text).toContain("+TWO");
   });
+
+  it("reports a rename with counts on the destination path", async () => {
+    sh("checkout -q -b r");
+    sh("mv a.txt moved.txt");
+    writeFileSync(join(repoDir, "moved.txt"), "one\ntwo\nthree\nfour\n");
+    sh("add moved.txt");
+    sh("commit -q -m r");
+    sh("checkout -q main");
+    const res = await get("changed", { base: "main", head: "r" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([{ path: "moved.txt", status: "R", add: 1, del: 0 }]);
+  });
+
+  it("rejects a repo that is not a git repository", async () => {
+    const plain = join(tmp, "plain");
+    mkdirSync(plain);
+    writeFileSync(join(plain, "f.txt"), "f\n");
+    for (const [route, params] of [
+      ["tree", {}],
+      ["file", { path: "f.txt" }],
+      ["changed", { base: "main", head: PR_REF }],
+    ] as const) {
+      const qs = new URLSearchParams({ repo: plain, ...params }).toString();
+      const res = await request(app()).get(`/api/git/${route}?${qs}`);
+      expect(res.status, route).toBe(400);
+    }
+  });
+
+  it("uses root-relative paths when repo is a subdirectory", async () => {
+    const qs = (p: Record<string, string>) => new URLSearchParams({ repo: join(repoDir, "dir"), ...p }).toString();
+    const tree = await request(app()).get(`/api/git/tree?${qs({ ref: PR_REF })}`);
+    expect(tree.body.files.map((f: { path: string }) => f.path)).toContain("a.txt");
+    const file = await request(app()).get(`/api/git/file?${qs({ path: "keep.txt" })}`);
+    expect(file.text).toBe("kept\n");
+  });
+
+  it("refuses to serve .git internals from disk", async () => {
+    for (const path of [".git/config", ".git", "dir/../.git/HEAD", ".GIT/config"]) {
+      expect((await get("file", { path })).status, path).toBe(400);
+    }
+  });
+
+  it("treats paths literally, not as pathspec magic", async () => {
+    const glob = await get("diff-ref", { base: "main", head: PR_REF, path: "*.txt" });
+    expect(glob.status).toBe(200);
+    expect(glob.text).toBe("");
+  });
+
+  it("answers 404 for a directory at a ref", async () => {
+    expect((await get("file", { ref: "main", path: "dir" })).status).toBe(404);
+  });
+
+  it("answers 400 when base and head share no history", async () => {
+    const emptyTree = sh("hash-object -t tree --stdin </dev/null").trim();
+    sh(`update-ref refs/heads/lone ${sh(`commit-tree ${emptyTree} -m lone`).trim()}`);
+    for (const route of ["changed", "diff-ref"]) {
+      const res = await get(route, { base: "main", head: "lone", path: "a.txt" });
+      expect(res.status, route).toBe(400);
+      expect(res.body.error, route).toMatch(/merge base/);
+    }
+  });
 });
