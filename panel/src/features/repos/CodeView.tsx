@@ -105,7 +105,8 @@ const treeStatus = (s: string): TreeFile["status"] => (s === "A" || s === "D" ||
 function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: RootProps) {
   const [attempt, setAttempt] = useState(0);
   const [files, setFiles] = useState<Listing>(null);
-  const [compared, setCompared] = useState<{ base: string; files: Listing } | null>(null);
+  // `pin`: base and HEAD resolved once per comparison; every compare read uses these shas.
+  const [compared, setCompared] = useState<{ base: string; files: Listing; pin?: { base: string; head: string } } | null>(null);
   const [loaded, setLoaded] = useState<(Loaded & { src: string }) | null>(null);
   const [panel, setPanel] = useState<Panel>("outline");
   const [commit, setCommit] = useState<Commit | null>(null);
@@ -146,20 +147,23 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     if (!cmp) return;
     let cancelled = false;
     const base = cmp;
-    // HEAD's files with base...HEAD statuses; deletions are absent at HEAD so they are appended.
-    Promise.all([
-      request(`/api/git/tree?repo=${q(root)}&ref=HEAD`).then(async (res) => ((await res.json()) as { files?: TreeFile[] } | null)?.files ?? []),
-      request(`/api/git/changed?repo=${q(root)}&base=${q(base)}&head=HEAD`).then(
-        async (res) => ((await res.json()) as { path: string; status: string; add: number; del: number }[] | null) ?? [],
-      ),
-    ])
-      .then(([atHead, changed]) => {
-        const byPath = new Map(changed.map((c) => [c.path, { ...c, status: treeStatus(c.status) }]));
-        const merged: TreeFile[] = atHead.map((f) => byPath.get(f.path) ?? { path: f.path, status: null });
-        const seen = new Set(atHead.map((f) => f.path));
-        return [...merged, ...[...byPath.values()].filter((c) => !seen.has(c.path))];
-      })
-      .then((list) => !cancelled && setCompared({ base, files: list }))
+    const resolve = async (ref: string) => ((await (await request(`/api/git/resolve?repo=${q(root)}&ref=${q(ref)}`)).json()) as { sha: string }).sha;
+    // Pinned first: a checkout or commit mid-compare must not mix two versions of a file.
+    (async () => {
+      const [baseSha, headSha] = await Promise.all([resolve(base), resolve("HEAD")]);
+      // HEAD's files with base...HEAD statuses; deletions are absent at HEAD so they are appended.
+      const [atHead, changed] = await Promise.all([
+        request(`/api/git/tree?repo=${q(root)}&ref=${headSha}`).then(async (res) => ((await res.json()) as { files?: TreeFile[] } | null)?.files ?? []),
+        request(`/api/git/changed?repo=${q(root)}&base=${baseSha}&head=${headSha}`).then(
+          async (res) => ((await res.json()) as { path: string; status: string; add: number; del: number }[] | null) ?? [],
+        ),
+      ]);
+      const byPath = new Map(changed.map((c) => [c.path, { ...c, status: treeStatus(c.status) }]));
+      const merged: TreeFile[] = atHead.map((f) => byPath.get(f.path) ?? { path: f.path, status: null });
+      const seen = new Set(atHead.map((f) => f.path));
+      return { files: [...merged, ...[...byPath.values()].filter((c) => !seen.has(c.path))], pin: { base: baseSha, head: headSha } };
+    })()
+      .then(({ files: list, pin }) => !cancelled && setCompared({ base, files: list, pin }))
       .catch((e: unknown) => !cancelled && setCompared({ base, files: { error: message(e) } }));
     return () => {
       cancelled = true;
@@ -174,6 +178,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   const changedCount = working ? working.filter((f) => f.status).length : 0;
   const shown: Listing = commit ? (commitError ? { error: commitError } : commitList) : cmp ? (compared?.base === cmp ? compared.files : null) : files;
   const list = Array.isArray(shown) ? shown : null;
+  const pin = cmp && compared?.base === cmp ? compared.pin : undefined;
   // Identifies where reads come from, so a mode switch never shows the previous mode's answer.
   const src = commit ? `commit:${commit.sha}` : cmp ? `cmp:${cmp}` : "work";
 
@@ -188,11 +193,13 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     if (!list || !selected) return;
     let cancelled = false;
     const path = selected;
-    const ref = commit ? commit.sha : cmp ? "HEAD" : null;
+    const ref = commit ? commit.sha : cmp ? (pin?.head ?? null) : null;
+    // A listed compare always carries its pin; without one there is nothing consistent to read.
+    if (cmp && !commit && !pin) return;
     (async (): Promise<Loaded> => {
       let diff: string | undefined;
       if (commit) diff = ((await (await request(`/api/git/diff?sha=${commit.sha}&file=${q(path)}&repo=${q(root)}`)).json()) as { diff?: string } | null)?.diff;
-      else if (cmp && status) diff = await (await request(`/api/git/diff-ref?repo=${q(root)}&base=${q(cmp)}&head=HEAD&path=${q(path)}`)).text();
+      else if (pin && status) diff = await (await request(`/api/git/diff-ref?repo=${q(root)}&base=${pin.base}&head=${pin.head}&path=${q(path)}`)).text();
       // Against HEAD so staged edits count as uncommitted too.
       else if (status) {
         const head = (await (await request(`/api/git/diff?file=${q(path)}&repo=${q(root)}&against=HEAD`)).json()) as { diff?: string; tooLarge?: boolean; size?: number; binary?: boolean } | null;

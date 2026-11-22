@@ -77,6 +77,10 @@ export const GREP = [
   },
 ];
 
+/** What /api/git/resolve pins HEAD and any other ref to. */
+export const HEAD_SHA = "f".repeat(40);
+export const BASE_SHA = "e".repeat(40);
+
 const text = (body: string) => new Response(body, { status: 200, headers: { "Content-Type": "text/plain" } });
 
 /** `routes` answer before the defaults: URL fragment → handler. */
@@ -85,6 +89,7 @@ export function codeFetch(routes: Record<string, FetchHandler> = {}) {
     const u = new URL(url, "http://x");
     const repo = u.searchParams.get("repo") ?? "";
     if (u.pathname === "/api/prs") return jsonResponse({ me: "me", prs: [], unavailable: [] });
+    if (u.pathname === "/api/git/resolve") return jsonResponse({ sha: u.searchParams.get("ref") === "HEAD" ? HEAD_SHA : BASE_SHA });
     if (u.pathname === "/api/git/tree") return jsonResponse({ files: TREES[repo] ?? [] });
     if (u.pathname === "/api/git/worktrees") return jsonResponse(WORKTREES[repo] ?? []);
     if (u.pathname === "/api/git/status") return jsonResponse(STATUS[repo] ?? []);

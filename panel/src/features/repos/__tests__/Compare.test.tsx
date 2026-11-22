@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse } from "../../../test-utils";
-import { calls, DrivenResizeObserver, MAIN, renderCode, urlParams } from "./codeHarness";
+import { BASE_SHA, calls, DrivenResizeObserver, HEAD_SHA, MAIN, renderCode, urlParams } from "./codeHarness";
 
 const B_DIFF = ["diff --git a/src/b.ts b/src/b.ts", "--- a/src/b.ts", "+++ b/src/b.ts", "@@ -6,1 +6,1 @@", "-type Gamma = number;", "+type Gamma = string;"].join("\n");
 const q = encodeURIComponent;
@@ -63,12 +63,19 @@ describe("Compare with", () => {
     fireEvent.click(await screen.findByTestId("ft-dir-src"));
     await waitFor(() => expect(screen.getByTestId("ft-file-src/a.ts")).toHaveClass("unchanged"));
     expect(screen.getByTestId("ft-file-src/b.ts")).not.toHaveClass("unchanged");
-    expect(calls(fetch, `/api/git/changed?repo=${q(MAIN)}&base=main&head=HEAD`)).toHaveLength(1);
+    // Both refs pinned once, so tree, counts, patch and file all read one pair of commits.
+    expect(calls(fetch, `/api/git/resolve?repo=${q(MAIN)}&ref=main`)).toHaveLength(1);
+    expect(calls(fetch, `/api/git/resolve?repo=${q(MAIN)}&ref=HEAD`)).toHaveLength(1);
+    expect(calls(fetch, `/api/git/changed?repo=${q(MAIN)}&base=${BASE_SHA}&head=${HEAD_SHA}`)).toHaveLength(1);
+    expect(calls(fetch, `/api/git/tree?repo=${q(MAIN)}&ref=${HEAD_SHA}`)).toHaveLength(1);
+    expect(calls(fetch, "head=HEAD")).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId("ft-file-src/b.ts"));
     await waitFor(() => expect(screen.getByTestId("file-viewer")).toHaveTextContent("type Gamma = number;"));
     expect(within(screen.getByTestId("file-viewer")).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
-    expect(calls(fetch, `/api/git/diff-ref?repo=${q(MAIN)}&base=main&head=HEAD&path=${q("src/b.ts")}`)).toHaveLength(1);
+    expect(calls(fetch, `/api/git/diff-ref?repo=${q(MAIN)}&base=${BASE_SHA}&head=${HEAD_SHA}&path=${q("src/b.ts")}`)).toHaveLength(1);
+    await waitFor(() => expect(calls(fetch, `/api/git/file?repo=${q(MAIN)}&ref=${HEAD_SHA}&path=${q("src/b.ts")}`)).toHaveLength(1));
+    expect(calls(fetch, "ref=HEAD&")).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId("code-compare-exit"));
     expect(urlParams(screen.getByTestId("search")).get("cmp")).toBeNull();

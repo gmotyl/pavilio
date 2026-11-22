@@ -318,6 +318,23 @@ describe("ref-based git reads", () => {
     expect(res.body.diff).toContain("+new");
   });
 
+  it("resolves a ref to its commit sha, refusing unknown or option-like refs", async () => {
+    const res = await get("resolve", { ref: "HEAD" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sha: sh("rev-parse HEAD").trim() });
+    expect((await get("resolve", { ref: PR_REF })).body.sha).toBe(sh(`rev-parse ${PR_REF}`).trim());
+    expect((await get("resolve", { ref: "nope" })).status).toBe(400);
+    expect((await get("resolve", { ref: "--all" })).status).toBe(400);
+    expect((await get("resolve", {})).status).toBe(400);
+  });
+
+  it("greps untracked files too, never ignored ones", async () => {
+    writeFileSync(join(repoDir, "ignored.log"), "untracked\n");
+    const res = await get("grep", { q: "untracked" });
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: { relativePath: string }) => r.relativePath)).toEqual(["u.txt"]);
+  });
+
   it("answers 400 when base and head share no history", async () => {
     const emptyTree = sh("hash-object -t tree --stdin </dev/null").trim();
     sh(`update-ref refs/heads/lone ${sh(`commit-tree ${emptyTree} -m lone`).trim()}`);

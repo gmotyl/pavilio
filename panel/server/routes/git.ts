@@ -399,6 +399,16 @@ async function workingTreeFiles(root: string): Promise<TreeEntry[]> {
   return out;
 }
 
+// A ref pinned to its commit sha, so a multi-read view reads one fixed version
+router.get("/resolve", async (req, res) => {
+  try {
+    const root = await repoToplevel(queryString(req.query.repo));
+    res.json({ sha: await resolveCommit(requireQuery(req.query.ref, "ref"), root) });
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
 // Files at a ref, or the working tree (incl. untracked, .gitignore honoured) with status
 router.get("/tree", async (req, res) => {
   try {
@@ -718,7 +728,8 @@ router.get("/grep", async (req, res) => {
     assertRepoDirectory(cwd);
     const files = filesParam ? filesParam.split(",").filter(Boolean) : [];
     // argv: `-e` keeps a leading `-` a pattern, `--` keeps names paths; no shell sees either.
-    const args = ["grep", "-rn", "--color=never", "-e", q, ...(files.length ? ["--", ...files] : [])];
+    // --untracked: the tree lists non-ignored untracked files, so search them too (.gitignore honoured).
+    const args = ["grep", "-rn", "--untracked", "--color=never", "-e", q, ...(files.length ? ["--", ...files] : [])];
     let raw = "";
     try {
       raw = (await gitArgv(args, cwd)).toString("utf-8");
