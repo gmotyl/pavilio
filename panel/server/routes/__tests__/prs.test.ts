@@ -42,7 +42,7 @@ function setup() {
   writeFileSync(
     join(dir, "repos.json"),
     JSON.stringify([
-      { name: "gh-repo", path: gh },
+      { name: "GitHub Repo", path: gh },
       { name: "gl-repo", path: gl },
       { name: "missing-repo", path: missing },
     ]),
@@ -71,6 +71,29 @@ describe("/api/prs", () => {
       [gh, 2],
       [gh, 1],
     ]);
+  });
+
+  it("labels PR rows with the linked repo name, not the directory name", async () => {
+    const { provider } = setup();
+    const res = await request(appFor(provider)).get("/api/prs?project=proj");
+    expect(res.body.prs.map((p: PullRequest) => p.repo)).toEqual(["GitHub Repo", "GitHub Repo"]);
+  });
+
+  it("calls the provider once for concurrent cold requests", async () => {
+    const { gh, provider } = setup();
+    const list = provider.listOpen.getMockImplementation()!;
+    provider.listOpen.mockImplementation(async (p: string) => {
+      await new Promise((r) => setTimeout(r, 50));
+      return list(p);
+    });
+    const app = appFor(provider);
+    const [a, b] = await Promise.all([
+      request(app).get("/api/prs?project=proj"),
+      request(app).get("/api/prs?project=proj"),
+    ]);
+    expect(a.body.prs).toHaveLength(2);
+    expect(b.body.prs).toHaveLength(2);
+    expect(provider.listOpen.mock.calls.filter((c) => c[0] === gh)).toHaveLength(1);
   });
 
   it("reports unavailable repos with their reason", async () => {

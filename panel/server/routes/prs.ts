@@ -24,13 +24,23 @@ export function createPrsRouter(
   const router = Router();
   // Successes only: an unavailable repo must recover on the next request (e.g. after `gh auth login`).
   const cache = new Map<string, { at: number; prs: PullRequest[] }>();
+  // Concurrent cold requests share one provider call per repo.
+  const inFlight = new Map<string, Promise<PullRequest[]>>();
 
-  async function listOpen(repoPath: string): Promise<PullRequest[]> {
+  function listOpen(repoPath: string): Promise<PullRequest[]> {
     const hit = cache.get(repoPath);
-    if (hit && now() - hit.at < CACHE_TTL_MS) return hit.prs;
-    const prs = await provider.listOpen(repoPath);
-    cache.set(repoPath, { at: now(), prs });
-    return prs;
+    if (hit && now() - hit.at < CACHE_TTL_MS) return Promise.resolve(hit.prs);
+    const pending = inFlight.get(repoPath);
+    if (pending) return pending;
+    const p = provider
+      .listOpen(repoPath)
+      .then((prs) => {
+        cache.set(repoPath, { at: now(), prs });
+        return prs;
+      })
+      .finally(() => inFlight.delete(repoPath));
+    inFlight.set(repoPath, p);
+    return p;
   }
 
   router.get("/", async (req, res) => {
@@ -49,7 +59,8 @@ export function createPrsRouter(
     const prs: PullRequest[] = [];
     const unavailable: { repo: string; reason: Unavailable }[] = [];
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") prs.push(...r.value);
+      // Label by the repos.json name so PR rows and `unavailable` agree.
+      if (r.status === "fulfilled") prs.push(...r.value.map((p) => ({ ...p, repo: repos[i].name })));
       else
         unavailable.push({
           repo: repos[i].name,
