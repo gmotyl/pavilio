@@ -310,7 +310,8 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   else
     viewer = (
       <FileViewer
-        key={`${src}:${current.path}`}
+        // defaultMode only seeds state: a refresh that loses (or regains) the whole file remounts to re-pick it.
+        key={`${src}:${current.path}:${current.content == null ? "patch" : "file"}`}
         path={current.path}
         diff={current.diff}
         content={current.content}

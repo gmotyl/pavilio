@@ -65,6 +65,25 @@ describe("CodeView modes", () => {
     await screen.findByTestId("ft-file-NEW.md");
   });
 
+  it("a refresh that pushes the open file past the read cap switches it to Diff", async () => {
+    let tooLarge = false;
+    renderCode("?view=code&file=src/a.ts", {
+      "/api/git/file": () =>
+        tooLarge
+          ? jsonResponse({ error: "file too large", tooLarge: true, size: 3 * 1024 * 1024 }, { status: 413 })
+          : new Response("const area = width * height;\n"),
+    });
+    const viewer = await screen.findByTestId("file-viewer");
+    await waitFor(() => expect(within(viewer).getByTestId("file-viewer-mode-code")).toHaveAttribute("aria-pressed", "true"));
+
+    tooLarge = true;
+    act(() => frameListeners.forEach((l) => l({ type: "git-change" })));
+    await waitFor(() =>
+      expect(within(screen.getByTestId("file-viewer")).getByTestId("file-viewer-mode-diff")).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(screen.queryByText(/File content is not loaded/)).toBeNull();
+  });
+
   it("opening a file outside the commit leaves commit mode for the working tree", async () => {
     const { fetch } = renderCode("?view=code", history);
     await enterCommit();
