@@ -1,0 +1,66 @@
+[
+  {
+    "author": { "id": "MDQ6VXNlcjE=", "is_bot": false, "login": "alice", "name": "Alice" },
+    "baseRefName": "main",
+    "headRefName": "feat/search",
+    "isDraft": false,
+    "number": 231,
+    "reviewDecision": "REVIEW_REQUIRED",
+    "reviewRequests": [
+      { "__typename": "User", "login": "gmotyl" },
+      { "__typename": "Team", "name": "Core", "slug": "core" }
+    ],
+    "statusCheckRollup": [
+      { "__typename": "CheckRun", "completedAt": "2026-11-21T10:00:00Z", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/o/r/actions/runs/1", "name": "lint", "startedAt": "2026-11-21T09:58:00Z", "status": "COMPLETED", "workflowName": "CI" },
+      { "__typename": "CheckRun", "completedAt": "0001-01-01T00:00:00Z", "conclusion": "", "detailsUrl": "https://github.com/o/r/actions/runs/2", "name": "test", "startedAt": "2026-11-21T09:58:00Z", "status": "IN_PROGRESS", "workflowName": "CI" }
+    ],
+    "title": "Add search",
+    "updatedAt": "2026-11-21T10:05:00Z",
+    "url": "https://github.com/o/r/pull/231"
+  },
+  {
+    "author": { "id": "MDQ6VXNlcjI=", "is_bot": false, "login": "bob", "name": "Bob" },
+    "baseRefName": "main",
+    "headRefName": "wip/refactor",
+    "isDraft": true,
+    "number": 232,
+    "reviewDecision": "",
+    "reviewRequests": [],
+    "statusCheckRollup": [],
+    "title": "WIP refactor",
+    "updatedAt": "2026-11-20T08:00:00Z",
+    "url": "https://github.com/o/r/pull/232"
+  },
+  {
+    "author": { "id": "MDQ6VXNlcjM=", "is_bot": false, "login": "carol", "name": "Carol" },
+    "baseRefName": "release",
+    "headRefName": "fix/crash",
+    "isDraft": false,
+    "number": 233,
+    "reviewDecision": "CHANGES_REQUESTED",
+    "reviewRequests": [{ "__typename": "User", "login": "dave" }],
+    "statusCheckRollup": [
+      { "__typename": "StatusContext", "context": "ci/legacy", "startedAt": "2026-11-19T07:00:00Z", "state": "FAILURE", "targetUrl": "https://ci.example.com/1" },
+      { "__typename": "CheckRun", "completedAt": "2026-11-19T07:10:00Z", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/o/r/actions/runs/3", "name": "build", "startedAt": "2026-11-19T07:00:00Z", "status": "COMPLETED", "workflowName": "CI" }
+    ],
+    "title": "Fix crash on start",
+    "updatedAt": "2026-11-19T07:15:00Z",
+    "url": "https://github.com/o/r/pull/233"
+  },
+  {
+    "author": { "id": "BOT_kgDO", "is_bot": true, "login": "app/dependabot", "name": "" },
+    "baseRefName": "main",
+    "headRefName": "dependabot/npm/x",
+    "isDraft": false,
+    "number": 234,
+    "reviewDecision": "APPROVED",
+    "reviewRequests": [],
+    "statusCheckRollup": [
+      { "__typename": "CheckRun", "completedAt": "2026-11-18T07:10:00Z", "conclusion": "SUCCESS", "detailsUrl": "", "name": "build", "startedAt": "2026-11-18T07:00:00Z", "status": "COMPLETED", "workflowName": "CI" },
+      { "__typename": "StatusContext", "context": "ci/legacy", "startedAt": "2026-11-18T07:00:00Z", "state": "SUCCESS", "targetUrl": "" }
+    ],
+    "title": "Bump x",
+    "updatedAt": "2026-11-18T07:15:00Z",
+    "url": "https://github.com/o/r/pull/234"
+  }
+]
