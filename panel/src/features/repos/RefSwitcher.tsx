@@ -113,9 +113,11 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
     };
   }, [pathsKey]);
 
-  // Refs to compare against, listed per open like the counts above.
+  // Refs to compare against, listed per open like the counts above. Keyed on
+  // whether compare is offered, not the callback, which is new every render.
+  const canCompare = !!onCompare;
   useEffect(() => {
-    if (!open || !root || !onCompare) return;
+    if (!open || !root || !canCompare) return;
     let cancelled = false;
     fetch(`/api/git/branches?repo=${q(root)}`)
       .then((res) => (res.ok ? res.json() : null))
@@ -126,7 +128,7 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
     return () => {
       cancelled = true;
     };
-  }, [open, root, onCompare]);
+  }, [open, root, canCompare]);
 
   const list = repo ? worktrees[repo] : undefined;
   const current = list ? (wt ? list.find((w) => w.path === wt) : list[0]) : undefined;

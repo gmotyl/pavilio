@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { execSync } from "child_process";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { configMock, makeApp } from "../../test-kit";
@@ -320,5 +320,40 @@ describe("ref-based git reads", () => {
     const diff = await get("diff", { sha: root, file: "a.txt" });
     expect(diff.status).toBe(200);
     expect(diff.body.diff).toContain("+one");
+  });
+
+  it("lists and diffs a merge commit against its first parent", async () => {
+    sh("stash -q -u");
+    sh(`checkout -q -b side ${PR_REF}`);
+    sh("checkout -q main");
+    writeFileSync(join(repoDir, "keep.txt"), "main side\n");
+    sh("commit -q -am mainline");
+    sh("merge -q --no-ff --no-edit side");
+    const merge = sh("rev-parse HEAD").trim();
+
+    const files = await get("commit-files", { sha: merge });
+    expect(files.status).toBe(200);
+    expect(files.body).toEqual(
+      expect.arrayContaining([
+        { status: "M", path: "a.txt" },
+        { status: "A", path: "c.txt" },
+        { status: "D", path: "dir/b.txt" },
+      ]),
+    );
+    expect(files.body).not.toContainEqual(expect.objectContaining({ path: "keep.txt" }));
+    const diff = await get("diff", { sha: merge, file: "a.txt" });
+    expect(diff.status).toBe(200);
+    expect(diff.body.diff).toContain("+TWO");
+  });
+
+  it("refuses a sha that is not a commit before any shell sees it", async () => {
+    const marker = join(tmp, "pwned");
+    for (const sha of [`main;touch ${marker}`, "--output=x", "nope"]) {
+      for (const [route, extra] of [["commit-files", {}], ["diff", { file: "a.txt" }]] as const) {
+        const res = await get(route, { sha, ...extra });
+        expect(res.status, `${route} ${sha}`).toBe(400);
+      }
+    }
+    expect(existsSync(marker)).toBe(false);
   });
 });

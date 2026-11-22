@@ -34,21 +34,26 @@ export function useGitLog(repo?: string, limit = 30): Commit[] {
 
 const NONE: CommitFile[] = [];
 
-/** Files one commit touched; empty (and loading) until the answer for this sha arrives. */
-export function useCommitFiles(repo: string | undefined, sha: string | null) {
-  const [got, setGot] = useState<{ key: string; files: CommitFile[] } | null>(null);
+/** Files one commit touched; empty (and loading) until the answer for this sha arrives. A new `attempt` refetches. */
+export function useCommitFiles(repo: string | undefined, sha: string | null, attempt = 0) {
+  const [got, setGot] = useState<{ key: string; files: CommitFile[]; error?: string } | null>(null);
   const key = sha ? `${repo ?? ""}\0${sha}` : null;
   useEffect(() => {
     if (!sha || !key) return;
     let cancelled = false;
     fetch(`/api/git/commit-files?sha=${sha}${repoQs(repo)}`)
-      .then(async (res) => (res.ok ? ((await res.json()) as CommitFile[]) : []))
-      .catch(() => [])
-      .then((files) => !cancelled && setGot({ key, files }));
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as CommitFile[];
+      })
+      .then(
+        (files) => !cancelled && setGot({ key, files }),
+        (e: unknown) => !cancelled && setGot({ key, files: NONE, error: e instanceof Error ? e.message : String(e) }),
+      );
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, attempt]);
   const ready = !!key && got?.key === key;
-  return { files: ready ? got.files : NONE, loading: !!key && !ready };
+  return { files: ready ? got.files : NONE, error: ready ? got.error : undefined, loading: !!key && !ready };
 }

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import FileSearch, { type OpenRequest } from "./FileSearch";
 import FileTree, { type TreeFile } from "./FileTree";
 import { useCommitFiles, type Commit } from "../git/useGitHistory";
+import { useWebSocket } from "../realtime/useWebSocket";
 import ChangesPanel from "./ChangesPanel";
 import HistoryPanel from "./HistoryPanel";
 import Outline, { OUTLINE_FILE, outlineOf } from "./Outline";
@@ -106,8 +107,20 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
     return line > 0 ? { line, key: 0 } : null;
   });
   const [bodyRef, width] = useWidth<HTMLDivElement>();
-  const cmp = commit ? null : params.get("cmp");
-  const { files: commitFiles, loading: commitLoading } = useCommitFiles(root, commit?.sha ?? null);
+  const askedCmp = params.get("cmp");
+  const cmp = commit ? null : askedCmp;
+  const { files: commitFiles, error: commitError, loading: commitLoading } = useCommitFiles(root, commit?.sha ?? null, attempt);
+  const { lastMessage } = useWebSocket();
+
+  // Commits and auto-sync elsewhere change the tree; sync-status ticks don't.
+  useEffect(() => {
+    if (lastMessage?.type === "git-change") setAttempt((n) => n + 1);
+  }, [lastMessage]);
+
+  // Asking to compare wins over a picked commit, so the compare shows.
+  useEffect(() => {
+    if (askedCmp) setCommit(null);
+  }, [askedCmp]);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,12 +159,12 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   }, [root, cmp, attempt]);
 
   const commitList = useMemo<TreeFile[] | null>(
-    () => (commit && !commitLoading ? commitFiles.map((f) => ({ path: f.path, status: treeStatus(f.status) })) : null),
-    [commit, commitLoading, commitFiles],
+    () => (commit && !commitLoading && !commitError ? commitFiles.map((f) => ({ path: f.path, status: treeStatus(f.status) })) : null),
+    [commit, commitLoading, commitError, commitFiles],
   );
   const working = Array.isArray(files) ? files : null;
   const changedCount = working ? working.filter((f) => f.status).length : 0;
-  const shown: Listing = commit ? commitList : cmp ? (compared?.base === cmp ? compared.files : null) : files;
+  const shown: Listing = commit ? (commitError ? { error: commitError } : commitList) : cmp ? (compared?.base === cmp ? compared.files : null) : files;
   const list = Array.isArray(shown) ? shown : null;
   // Identifies where reads come from, so a mode switch never shows the previous mode's answer.
   const src = commit ? `commit:${commit.sha}` : cmp ? `cmp:${cmp}` : "work";
@@ -193,12 +206,14 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   }, [list, selected, status, root, src]);
 
   const open = useCallback(
-    (path: string, at: OpenRequest = {}) => {
+    (path: string, at: OpenRequest = {}, patch: ParamsPatch = {}) => {
+      // Search hits and definitions come from the working tree; a commit lists only what it touched.
+      if (commitList && !commitList.some((f) => f.path === path)) setCommit(null);
       setHighlight(at.highlight || undefined);
       setScroll((s) => (at.line ? { line: at.line, key: (s?.key ?? 0) + 1 } : null));
-      setParams({ file: path, line: at.line ? String(at.line) : null });
+      setParams({ ...patch, file: path, line: at.line ? String(at.line) : null });
     },
-    [setParams],
+    [setParams, commitList],
   );
   const openAt = useCallback((path: string, line: number) => open(path, { line }), [open]);
   const nav = useDefinitionNav({ root, file: selected, open: openAt });
@@ -209,7 +224,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
 
   // A picked commit opens its first file once the listing lands.
   useEffect(() => {
-    if (!commitList?.length || commitList.some((f) => f.path === selected)) return;
+    if (!commitList?.length || selected) return;
     open(commitList[0].path);
   }, [commitList, selected, open]);
 
@@ -245,7 +260,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
           type="button"
           data-testid="code-tree-retry"
           onClick={() => {
-            if (!cmp) setFiles(null);
+            if (!cmp && !commit) setFiles(null);
             setAttempt((n) => n + 1);
           }}
         >
@@ -280,7 +295,8 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
 
   let rail: ReactNode = null;
   if (panel === "changes")
-    rail = <ChangesPanel root={root} selected={selected} onOpen={(p) => open(p)} onChanged={() => setAttempt((n) => n + 1)} />;
+    // Changes are working-tree edits, so a click leaves compare.
+    rail = <ChangesPanel root={root} selected={selected} onOpen={(p) => open(p, {}, { cmp: null })} onChanged={() => setAttempt((n) => n + 1)} />;
   else if (panel === "history") rail = <HistoryPanel root={root} sha={commit?.sha ?? null} onPick={pickCommit} />;
   else if (showRail) rail = <Outline items={outline} onJump={jump} />;
 

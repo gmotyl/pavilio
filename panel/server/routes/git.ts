@@ -531,12 +531,12 @@ async function diffAgainstHead(file: string, repo?: string): Promise<HeadDiff> {
   return { diff: synthesizeAddDiff(path, buf.toString("utf-8")) };
 }
 
-/** A commit's first parent, or the empty tree for a root commit. */
-function commitParent(sha: string, repo?: string): string {
+/** A commit's first parent (merges diff against it), or the empty tree for a root commit. */
+async function commitParent(sha: string, root: string): Promise<string> {
   try {
-    git(`rev-parse --verify --quiet ${sha}^`, repo);
-    return `${sha}^`;
-  } catch {
+    return (await gitArgv(["rev-parse", "--verify", "--quiet", `${sha}^1`], root)).toString("utf-8").trim();
+  } catch (e) {
+    if (!gitExitedNonZero(e)) throw e;
     return EMPTY_TREE;
   }
 }
@@ -545,7 +545,7 @@ function commitParent(sha: string, repo?: string): string {
 router.get("/diff", async (req, res) => {
   try {
     const file = req.query.file as string;
-    const sha = req.query.sha as string | undefined;
+    const sha = queryString(req.query.sha);
     const repo = req.query.repo as string | undefined;
     if (!file)
       return res.status(400).json({ error: "file parameter required" });
@@ -554,11 +554,11 @@ router.get("/diff", async (req, res) => {
       if (against !== "HEAD") throw new GitInputError("against must be HEAD");
       return res.json(await diffAgainstHead(file, repo));
     }
-    const quotedFile = quoteShellArg(file);
-    const diff = sha
-      ? git(`diff ${commitParent(sha, repo)} ${sha} -- ${quotedFile}`, repo)
-      : getWorkingTreeDiff(file, repo);
-    res.json({ diff });
+    if (sha === undefined) return res.json({ diff: getWorkingTreeDiff(file, repo) });
+    const root = await repoToplevel(repo);
+    const commit = await resolveCommit(sha, root);
+    const diff = await gitArgv(["diff", await commitParent(commit, root), commit, "--", file], root);
+    res.json({ diff: diff.toString("utf-8") });
   } catch (e: any) {
     sendGitError(res, e);
   }
@@ -588,12 +588,13 @@ router.get("/log", (req, res) => {
 });
 
 // Files changed in a specific commit
-router.get("/commit-files", (req, res) => {
+router.get("/commit-files", async (req, res) => {
   try {
-    const sha = req.query.sha as string;
     const repo = req.query.repo as string | undefined;
-    if (!sha) return res.status(400).json({ error: "sha parameter required" });
-    const raw = git(`diff-tree --root --no-commit-id -r --name-status ${sha}`, repo);
+    const root = await repoToplevel(repo);
+    const sha = await resolveCommit(requireQuery(req.query.sha, "sha"), root);
+    // Against the first parent, as /diff does: a merge lists what it brought in, not nothing.
+    const raw = (await gitArgv(["diff-tree", "-r", "--name-status", await commitParent(sha, root), sha], root)).toString("utf-8");
     const files = raw
       .trim()
       .split("\n")
