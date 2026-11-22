@@ -39,10 +39,10 @@ export const A_DIFF = [
   " line 16",
 ].join("\n");
 
-const TREES: Record<string, { path: string; status: string | null }[]> = {
+const TREES: Record<string, { path: string; status: string | null; add?: number; del?: number }[]> = {
   [MAIN]: [
     { path: "README.md", status: null },
-    { path: "src/a.ts", status: "M" },
+    { path: "src/a.ts", status: "M", add: 1, del: 1 },
     { path: "src/b.ts", status: null },
   ],
   [FEAT]: [{ path: "src/feat.ts", status: "?" }],

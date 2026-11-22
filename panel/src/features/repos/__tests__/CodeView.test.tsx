@@ -68,6 +68,7 @@ describe("CodeView", () => {
     expect(input).toHaveAttribute("placeholder", "Go to file…");
     expect(within(view).getByText("Ctrl+P")).toBeInTheDocument();
     await within(view).findByRole("navigation", { name: "Repository files" });
+    expect(await within(view).findByTestId("ft-file-src/a.ts")).toHaveTextContent("+1 −1");
     const back = within(view).getByRole("button", { name: "← Back" });
     expect(back).toBeDisabled();
     const viewer = await within(view).findByTestId("file-viewer");

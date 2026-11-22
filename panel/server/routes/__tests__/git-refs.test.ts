@@ -69,19 +69,29 @@ beforeEach(() => {
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe("ref-based git reads", () => {
-  it("lists the working tree with untracked files and status", async () => {
+  it("lists the working tree with untracked files, status and counts", async () => {
+    writeFileSync(join(repoDir, "a.txt"), "one\nTWO\nthree\nfour\n");
+    sh("add a.txt");
     const res = await get("tree", {});
     expect(res.status).toBe(200);
-    const byPath = Object.fromEntries(
-      (res.body.files as { path: string; status: string | null }[]).map((f) => [f.path, f.status]),
-    );
-    expect(byPath).toEqual({
-      ".gitignore": null,
-      "a.txt": null,
-      "dir/b.txt": "D",
-      "keep.txt": "M",
-      "u.txt": "?",
-    });
+    expect(res.body.files).toEqual([
+      { path: ".gitignore", status: null },
+      { path: "a.txt", status: "M", add: 2, del: 1 },
+      { path: "dir/b.txt", status: "D", add: 0, del: 1 },
+      { path: "keep.txt", status: "M", add: 1, del: 1 },
+      { path: "u.txt", status: "?", add: 1, del: 0 },
+    ]);
+  });
+
+  it("counts working tree changes before the first commit", async () => {
+    const fresh = join(tmp, "fresh");
+    mkdirSync(fresh);
+    execSync("git init -q", { cwd: fresh, env: gitSafeEnv() });
+    writeFileSync(join(fresh, "n.txt"), "a\nb\n");
+    execSync("git add n.txt", { cwd: fresh, env: gitSafeEnv() });
+    const res = await request(app()).get(`/api/git/tree?${new URLSearchParams({ repo: fresh })}`);
+    expect(res.status).toBe(200);
+    expect(res.body.files).toEqual([{ path: "n.txt", status: "A", add: 2, del: 0 }]);
   });
 
   it("lists files at a ref", async () => {

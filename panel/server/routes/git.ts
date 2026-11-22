@@ -1,7 +1,7 @@
 import { Router, type Response } from "express";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
-import { readFileSync, realpathSync, statSync } from "fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "fs";
 import { isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
@@ -288,7 +288,55 @@ function porcelainStatus(xy: string): TreeStatus {
   return xy.trim() ? "M" : null;
 }
 
-async function workingTreeFiles(root: string): Promise<{ path: string; status: TreeStatus }[]> {
+// git's well-known empty tree: the base for a repo with no commits yet.
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/** HEAD's commit, or the empty tree while HEAD is unborn. */
+async function headOrEmptyTree(root: string): Promise<string> {
+  try {
+    return (await gitArgv(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], root)).toString("utf-8").trim();
+  } catch (e) {
+    if (!gitExitedNonZero(e)) throw e;
+    return EMPTY_TREE;
+  }
+}
+
+type Counts = { add: number; del: number };
+
+/** `git diff -z -M --numstat` output keyed by (destination) path; binary counts as 0/0. */
+function parseNumstat(buf: Buffer): Map<string, Counts> {
+  const counts = new Map<string, Counts>();
+  const num = splitZ(buf);
+  for (let i = 0; i < num.length; ) {
+    const [add, del, path] = num[i++].split("\t");
+    // Rename: empty path field, then source and destination entries.
+    const key = path === "" ? (i++, num[i++]) : path;
+    counts.set(key, { add: Number(add) || 0, del: Number(del) || 0 });
+  }
+  return counts;
+}
+
+// Untracked files are counted from disk only when small enough to read on every listing.
+const UNTRACKED_COUNT_MAX_BYTES = 64 * 1024;
+
+function untrackedCounts(root: string, path: string): Counts | undefined {
+  try {
+    const abs = join(root, path);
+    const st = lstatSync(abs);
+    if (!st.isFile() || st.size > UNTRACKED_COUNT_MAX_BYTES) return undefined;
+    const buf = readFileSync(abs);
+    if (isBinary(buf)) return { add: 0, del: 0 };
+    const text = buf.toString("utf-8");
+    const lines = text.split("\n").length - (text.endsWith("\n") || text === "" ? 1 : 0);
+    return { add: lines, del: 0 };
+  } catch {
+    return undefined;
+  }
+}
+
+type TreeEntry = { path: string; status: TreeStatus } & Partial<Counts>;
+
+async function workingTreeFiles(root: string): Promise<TreeEntry[]> {
   const status = new Map<string, TreeStatus>();
   const entries = splitZ(await gitArgv(["status", "--porcelain=v1", "-z", "-uall"], root));
   for (let i = 0; i < entries.length; i++) {
@@ -300,7 +348,15 @@ async function workingTreeFiles(root: string): Promise<{ path: string; status: T
   // -c keeps unstaged deletions listed; staged ones only come from status.
   const paths = new Set(splitZ(await gitArgv(["ls-files", "-z", "-co", "--exclude-standard"], root)));
   for (const p of status.keys()) paths.add(p);
-  return [...paths].sort().map((path) => ({ path, status: status.get(path) ?? null }));
+  const counts = status.size
+    ? parseNumstat(await gitArgv(["diff", "-z", "-M", "--numstat", await headOrEmptyTree(root)], root))
+    : new Map<string, Counts>();
+  return [...paths].sort().map((path) => {
+    const st = status.get(path) ?? null;
+    if (!st) return { path, status: st };
+    const c = st === "?" ? untrackedCounts(root, path) : (counts.get(path) ?? { add: 0, del: 0 });
+    return c ? { path, status: st, ...c } : { path, status: st };
+  });
 }
 
 // Files at a ref, or the working tree (incl. untracked, .gitignore honoured) with status
@@ -391,14 +447,7 @@ router.get("/changed", async (req, res) => {
       files.push({ path, status, add: 0, del: 0 });
     }
 
-    const counts = new Map<string, { add: number; del: number }>();
-    const num = splitZ(await gitArgv(["diff", "-z", "-M", "--numstat", from, head], root));
-    for (let i = 0; i < num.length; ) {
-      const [add, del, path] = num[i++].split("\t");
-      // Rename: empty path field, then source and destination entries.
-      const key = path === "" ? (i++, num[i++]) : path;
-      counts.set(key, { add: Number(add) || 0, del: Number(del) || 0 });
-    }
+    const counts = parseNumstat(await gitArgv(["diff", "-z", "-M", "--numstat", from, head], root));
     for (const f of files) Object.assign(f, counts.get(f.path));
     res.json(files);
   } catch (e: any) {
@@ -426,19 +475,11 @@ router.get("/status", (req, res) => {
   }
 });
 
-// git's well-known empty tree: the base for a repo with no commits yet.
-const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-
 /** Working tree vs HEAD (staged + unstaged); untracked files as a synthesized add. */
 async function diffAgainstHead(file: string, repo?: string): Promise<string> {
   const path = repoRelativePath(file);
   const root = await repoToplevel(repo);
-  let base = EMPTY_TREE;
-  try {
-    base = (await gitArgv(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], root)).toString("utf-8").trim();
-  } catch (e) {
-    if (!gitExitedNonZero(e)) throw e;
-  }
+  const base = await headOrEmptyTree(root);
   const diff = (await gitArgv(["diff", "--no-color", "--no-ext-diff", base, "--", path], root)).toString("utf-8");
   if (diff.trim()) return diff;
   const status = (await gitArgv(["status", "--porcelain=v1", "-z", "--", path], root)).toString("utf-8");
