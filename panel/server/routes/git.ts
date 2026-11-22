@@ -1,10 +1,11 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { execSync } from "child_process";
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
+import { expandHome } from "../lib/paths.js";
 
 const router = Router();
 
@@ -12,21 +13,48 @@ function quoteShellArg(value: string): string {
   return `"${value.replace(/["\\$`]/g, "\\$&")}"`;
 }
 
-function getRepoRoot(customRepo?: string): string {
-  if (customRepo) {
-    // Resolve ~ to home dir
-    const resolved = customRepo.startsWith("~/")
-      ? resolve(process.env.HOME || "", customRepo.slice(2))
-      : resolve(customRepo);
-    return resolved;
+/**
+ * The repository directory does not exist on this machine (e.g. a linked repo
+ * registered on another host). Thrown before git is spawned, so callers never
+ * see a raw `spawnSync /bin/sh ENOENT`.
+ */
+export class RepoMissingError extends Error {
+  readonly code = "repo-missing";
+  constructor(readonly path: string) {
+    super(`Repository not on this machine: ${path}`);
+    this.name = "RepoMissingError";
   }
+}
+
+function getRepoRoot(customRepo?: string): string {
+  if (customRepo) return resolve(expandHome(customRepo));
   const { projectsDir } = getConfig();
   return resolve(projectsDir, "..");
 }
 
+/**
+ * Throw RepoMissingError when `path` is not a directory on this machine. Only
+ * "nothing there" (ENOENT, ENOTDIR, or an entry that is not a directory) counts
+ * as missing; any other stat failure (EACCES, ELOOP, ...) is rethrown so it
+ * surfaces as a plain 500 with its real message.
+ */
+function assertRepoDirectory(path: string): void {
+  let isDir: boolean;
+  try {
+    isDir = statSync(path).isDirectory();
+  } catch (e: any) {
+    if (e?.code === "ENOENT" || e?.code === "ENOTDIR") throw new RepoMissingError(path);
+    throw e;
+  }
+  if (!isDir) throw new RepoMissingError(path);
+}
+
 function git(cmd: string, repoPath?: string): string {
+  const cwd = getRepoRoot(repoPath);
+  // Check before spawning: execSync with a missing cwd fails as an opaque ENOENT.
+  assertRepoDirectory(cwd);
   return execSync(`git ${cmd}`, {
-    cwd: getRepoRoot(repoPath),
+    cwd,
     // Without this an inherited GIT_DIR would win over cwd and these reads would
     // describe someone else's repository. See lib/gitEnv.ts.
     env: gitSafeEnv(),
@@ -34,10 +62,22 @@ function git(cmd: string, repoPath?: string): string {
   });
 }
 
+/** Answer a route failure: 404 repo-missing for a missing repo, else `status` with the message. */
+function sendGitError(res: Response, e: any, status = 500): void {
+  if (e instanceof RepoMissingError) {
+    res
+      .status(404)
+      .json({ code: e.code, path: e.path, error: e.message });
+    return;
+  }
+  res.status(status).json({ error: e?.message ?? String(e) });
+}
+
 function gitDiffOutput(cmd: string, repoPath?: string): string {
   try {
     return git(cmd, repoPath);
   } catch (e: any) {
+    if (e instanceof RepoMissingError) throw e;
     const stdout = e.stdout?.toString?.() ?? "";
     if (stdout) return stdout;
     throw e;
@@ -66,7 +106,8 @@ function getWorkingTreeDiff(file: string, repo?: string): string {
       const abs = join(getRepoRoot(repo), file);
       const content = readFileSync(abs, "utf-8");
       return synthesizeAddDiff(file, content);
-    } catch {
+    } catch (e) {
+      if (e instanceof RepoMissingError) throw e;
       return gitDiffOutput(`diff --no-index -- /dev/null ${quotedFile}`, repo);
     }
   }
@@ -109,7 +150,8 @@ function getBranchDiff(base: string, file: string, repo?: string): string {
   try {
     const content = git(`show HEAD:${quotedFile}`, repo);
     if (content.length > 0) return synthesizeAddDiff(file, content);
-  } catch {
+  } catch (e) {
+    if (e instanceof RepoMissingError) throw e;
     // file may not exist at HEAD (deleted) — fall through
   }
 
@@ -132,7 +174,7 @@ router.get("/status", (req, res) => {
       }));
     res.json(files);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -150,7 +192,7 @@ router.get("/diff", (req, res) => {
       : getWorkingTreeDiff(file, repo);
     res.json({ diff });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -173,7 +215,7 @@ router.get("/log", (req, res) => {
       });
     res.json(commits);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -194,7 +236,7 @@ router.get("/commit-files", (req, res) => {
       });
     res.json(files);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -204,12 +246,15 @@ router.post("/stage", (req, res) => {
     const { files, repo } = req.body;
     if (!Array.isArray(files))
       return res.status(400).json({ error: "files array required" });
+    // Checked once up front: an empty batch spawns no git, yet a missing repo
+    // must still answer repo-missing rather than "staged: 0".
+    assertRepoDirectory(getRepoRoot(repo));
     for (const f of files) {
       git(`add "${f}"`, repo);
     }
     res.json({ ok: true, staged: files.length });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -223,7 +268,7 @@ router.post("/commit", (req, res) => {
     broadcast({ type: "git-change" });
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -235,7 +280,7 @@ router.post("/push", (req, res) => {
     broadcast({ type: "git-change" });
     res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -246,7 +291,7 @@ router.get("/branch", (req, res) => {
     const branch = git("rev-parse --abbrev-ref HEAD", repo).trim();
     res.json({ branch });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -298,22 +343,30 @@ router.get("/grep", (req, res) => {
       }));
     res.json(results);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
 // Checkout branch
 router.post("/checkout", (req, res) => {
+  const { branch, repo } = req.body ?? {};
+  if (!branch)
+    return res.status(400).json({ error: "branch parameter required" });
+  // Check the repo before the checkout try: a missing repo is a 404 and any
+  // other stat failure (EACCES, ELOOP) a 500, never a 409 checkout conflict.
   try {
-    const { branch, repo } = req.body;
-    if (!branch)
-      return res.status(400).json({ error: "branch parameter required" });
+    assertRepoDirectory(getRepoRoot(repo));
+  } catch (e: any) {
+    return sendGitError(res, e);
+  }
+  try {
     const safe = branch.replace(/[;&|`$]/g, "");
     const output = git(`checkout "${safe}"`, repo);
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
     broadcast({ type: "git-change" });
     res.json({ ok: true, branch: current, output: output.trim() });
   } catch (e: any) {
+    if (e instanceof RepoMissingError) return sendGitError(res, e);
     // Git checkout errors (uncommitted changes, etc.) — return the stderr message
     const msg = e.stderr?.toString() || e.message || "Checkout failed";
     res.status(409).json({ error: msg.trim() });
@@ -350,7 +403,7 @@ router.get("/worktrees", (req, res) => {
     if (current.path) worktrees.push({ path: current.path, head: current.head ?? "", branch: current.branch ?? null });
     res.json(worktrees);
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -367,7 +420,7 @@ router.get("/branches", (req, res) => {
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
     res.json({ current, branches });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -392,10 +445,12 @@ router.get("/branch-diff-files", (req, res) => {
     try {
       commitsAhead =
         parseInt(git(`rev-list --count ${base}..HEAD`, repo).trim()) || 0;
-    } catch {}
+    } catch (e) {
+      if (e instanceof RepoMissingError) throw e;
+    }
     res.json({ files, commitsAhead });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -412,7 +467,7 @@ router.get("/branch-diff", (req, res) => {
     const diff = getBranchDiff(base, file, repo);
     res.json({ diff });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 
@@ -459,7 +514,7 @@ router.get("/suggest-message", (req, res) => {
 
     res.json({ suggestion: `${type}(${project}): ` });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    sendGitError(res, e);
   }
 });
 

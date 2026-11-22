@@ -104,7 +104,13 @@ interface PlanSource {
 
 const ADR_FILE_RE = /^(\d{1,4})-([\w-]+)\.md$/i;
 
-function readReposJson(projectDir: string): RepoEntry[] {
+/**
+ * A repos.json entry as read from disk, before discovery validates it. Typed like the
+ * shape callers expect, but nothing is checked — `present` is derived by discovery only.
+ */
+type RawRepoEntry = Omit<RepoEntry, "present">;
+
+function readReposJson(projectDir: string): RawRepoEntry[] {
   const path = join(projectDir, "repos.json");
   if (!existsSync(path)) return [];
   try {

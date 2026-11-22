@@ -1,14 +1,16 @@
 import { readdirSync, existsSync, readFileSync, statSync, realpathSync } from "fs";
-import { join, relative, isAbsolute, sep } from "path";
+import { join, relative, isAbsolute, sep, resolve } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
+import { expandHome } from "./paths.js";
 import { isProjectDir } from "./project-dir.js";
 import { projectGroup } from "./projects/group.js";
 import { projectKind, type ProjectKind } from "./projects/kind.js";
 
 export interface RepoEntry {
   name: string;
-  path: string;
+  path: string; // exactly as written in repos.json
+  present: boolean; // the expanded path is a directory on this machine, re-derived on every read
   openspec?: OpenSpecConfig;
 }
 
@@ -40,6 +42,21 @@ function latestWikiLogDate(dir: string): string | null {
     if (latest === null || m[1] > latest) latest = m[1];
   }
   return latest;
+}
+
+/**
+ * Whether a repos.json `path` names a directory on this machine. Any stat failure
+ * (ENOENT, but also ELOOP, EACCES, ...) means "not present": a well-formed entry is
+ * never dropped just because its path cannot be inspected here. The path is
+ * normalised first, exactly as the git routes resolve a repo root, so a spelling
+ * like `/work/old/../spikes` is judged by the directory git would run in.
+ */
+export function isDirectoryOnThisMachine(path: string): boolean {
+  try {
+    return statSync(resolve(expandHome(path)), { throwIfNoEntry: false })?.isDirectory() ?? false;
+  } catch {
+    return false;
+  }
 }
 
 export function discoverProjects(): Project[] {
@@ -89,9 +106,23 @@ export function readProject(root: string, name: string): Project {
         ? raw.flatMap((r) => {
             // Per-entry: a malformed `openspec` config on ONE repo must not
             // drop every other repo in the array — skip just that entry.
+            // A blank path resolves to the server cwd: it would count as present
+            // and its git calls would land in the workspace repository.
+            if (
+              typeof r?.name !== "string" ||
+              typeof r?.path !== "string" ||
+              r.path.trim() === ""
+            ) {
+              console.warn(
+                `[discovery] ${name}/repos.json: skipping repo entry without a string name or a non-empty string path:`,
+                JSON.stringify(r),
+              );
+              return [];
+            }
+            const present = isDirectoryOnThisMachine(r.path);
             try {
               const openspec = parseOpenSpecConfig(r);
-              const entry: RepoEntry = { name: r.name, path: r.path };
+              const entry: RepoEntry = { name: r.name, path: r.path, present };
               if (openspec) entry.openspec = openspec;
               return [entry];
             } catch (err) {

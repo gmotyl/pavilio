@@ -7,18 +7,20 @@ import type { OsUser } from "./os-users";
  */
 
 /**
- * Swaps `<ownerHomeDir>/git/` for `<targetHomeDir>/git/`; passes cwd through
- * unchanged if it doesn't start with that prefix.
+ * Swaps `<ownerHomeDir>/git` for `<targetHomeDir>/git` when cwd is that git
+ * root itself or a path below it; passes any other cwd through unchanged. The
+ * bare root matters because the sessions route normalises `~/git/` to `~/git`.
  */
 export function translateCwd(
   cwd: string,
   ownerHomeDir: string,
   targetHomeDir: string,
 ): string {
-  const ownerGitPrefix = `${ownerHomeDir.replace(/\/+$/, "")}/git/`;
-  if (!cwd.startsWith(ownerGitPrefix)) return cwd;
-  const targetGitPrefix = `${targetHomeDir.replace(/\/+$/, "")}/git/`;
-  return targetGitPrefix + cwd.slice(ownerGitPrefix.length);
+  const ownerGitRoot = `${ownerHomeDir.replace(/\/+$/, "")}/git`;
+  const targetGitRoot = `${targetHomeDir.replace(/\/+$/, "")}/git`;
+  if (cwd === ownerGitRoot) return targetGitRoot;
+  if (!cwd.startsWith(`${ownerGitRoot}/`)) return cwd;
+  return targetGitRoot + cwd.slice(ownerGitRoot.length);
 }
 
 /**

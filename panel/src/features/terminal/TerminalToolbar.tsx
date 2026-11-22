@@ -24,13 +24,14 @@ import { LayoutPresetMenu } from "./LayoutPresetMenu";
 import { MinimisedTray } from "./MinimisedTray";
 import { useSessionContextMenu } from "./SessionContextMenu";
 import type { LayoutPreset } from "./tileLayout";
+import type { RepoEntry } from "../projects/useProjects";
 
 interface Props {
   sessions: SessionMeta[];
   focusedId: string | null;
   maximized: boolean;
   currentProject: string;
-  repos?: { name: string; path: string }[];
+  repos?: RepoEntry[];
   onFocus: (id: string) => void;
   onCreate: (opts?: CreateSessionOpts) => void;
   /** Kill a session; resolves `false` when the DELETE failed. */
@@ -261,15 +262,20 @@ export function TerminalToolbar({
                     key={repo.path}
                     data-testid={`terminal-toolbar-new-repo-${repo.path}`}
                     type="button"
+                    // A repo whose path is not on this machine cannot host a
+                    // terminal: listed for context, but not clickable.
+                    disabled={!repo.present}
                     onClick={() => {
+                      if (!repo.present) return;
                       setRepoMenuOpen(false);
                       const name = nextProjectName(repo.name, sessions);
                       onCreate({ cwd: repo.path, name });
                     }}
-                    className="flex flex-col items-start w-full px-3 py-2 text-left transition-colors"
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.background = "var(--bg-hover)")
-                    }
+                    className="flex flex-col items-start w-full px-3 py-2 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    onMouseEnter={(e) => {
+                      if (repo.present)
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
                     onMouseLeave={(e) =>
                       (e.currentTarget.style.background = "transparent")
                     }
@@ -286,6 +292,14 @@ export function TerminalToolbar({
                     >
                       {repo.path}
                     </span>
+                    {!repo.present && (
+                      <span
+                        className="text-[10px]"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        Not on this machine
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
