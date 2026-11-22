@@ -63,4 +63,35 @@ describe("FileSearch", () => {
     await waitFor(() => expect(screen.getByTestId("file-viewer-body").querySelector("mark.fv-hl")).toHaveTextContent("area"));
     await waitFor(() => expect(Element.prototype.scrollTo).toHaveBeenCalled());
   });
+
+  it("a new query hides the previous query's hits until its own arrive", async () => {
+    renderCode("?view=code");
+    await screen.findByTestId("ft-file-README.md");
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    const input = await screen.findByRole("combobox", { name: "Search in files" });
+    fireEvent.change(input, { target: { value: "area" } });
+    const results = await screen.findByRole("listbox", { name: "Matches in files" });
+    await waitFor(() => expect(within(results).getAllByRole("group")).toHaveLength(2));
+
+    fireEvent.change(input, { target: { value: "areas" } });
+    expect(within(results).queryAllByRole("option")).toHaveLength(0);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(search().get("file")).toBeNull();
+  });
+
+  it("arrow keys keep the active option in view and announce it", async () => {
+    renderCode("?view=code");
+    await screen.findByTestId("ft-file-README.md");
+    fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+    const input = await screen.findByRole("combobox", { name: "Go to file" });
+    fireEvent.change(input, { target: { value: "s" } });
+    const options = within(screen.getByRole("listbox", { name: "Matching files" })).getAllByRole("option");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id);
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", options[1].id);
+    expect(options[1].id).not.toBe("");
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts.at(-1)).toBe(options[1]);
+  });
 });

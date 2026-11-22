@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse } from "../../../test-utils";
-import { A_DIFF, calls, DrivenResizeObserver, FEAT, MAIN, MISSING, REPOS, renderCode, urlParams } from "./codeHarness";
+import { A_DIFF, calls, DrivenResizeObserver, FEAT, MAIN, MISSING, REPOS, renderCode, SITE, urlParams } from "./codeHarness";
 
 const search = () => urlParams(screen.getByTestId("search"));
 const rail = () => screen.queryByRole("complementary", { name: "Outline" });
@@ -188,5 +188,20 @@ describe("CodeView", () => {
     DrivenResizeObserver.resize(800);
     expect(rail()).toBeNull();
     expect(body).toHaveClass("cv-stack");
+  });
+
+  it("a legacy repo path in the URL opens that repo", async () => {
+    renderCode(`?view=code&repo=${encodeURIComponent(SITE)}&file=index.html`);
+    await waitFor(() => expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("index.html"));
+    expect(screen.getByTestId("repo-switcher")).toHaveTextContent("site");
+    await waitFor(() => expect(search().get("repo")).toBe("site"));
+  });
+
+  it("an unknown repo in the URL drops the file instead of opening it in another repo", async () => {
+    renderCode("?view=code&repo=%2Fgone&file=src%2Fa.ts&line=3");
+    await waitFor(() => expect(search().get("file")).toBeNull());
+    expect(search().get("repo")).toBeNull();
+    expect(search().get("line")).toBeNull();
+    expect(await screen.findByText("Pick a file from the tree, or press Ctrl+P.")).toBeInTheDocument();
   });
 });

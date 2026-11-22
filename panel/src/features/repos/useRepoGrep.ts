@@ -15,32 +15,31 @@ export async function grepRepo(repo: string, query: string, opts: { files?: stri
   return Array.isArray(results) ? results.map((r) => ({ ...r, project: repo })) : [];
 }
 
-/** Debounced whole-tree grep of `repo`; idle (empty) while inactive or under two characters. */
+/**
+ * Debounced whole-tree grep of `repo`; idle (empty) while inactive or under two characters.
+ * Results are tagged with the repo and query they answer, so a newer query never exposes older hits.
+ */
 export function useRepoGrep(repo: string | null, query: string, active: boolean) {
-  const [results, setResults] = useState<GrepResult[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [answer, setAnswer] = useState<{ key: string; results: GrepResult[] } | null>(null);
+  const idle = !active || !repo || query.length < MIN_QUERY;
+  const key = `${repo}\0${query}`;
 
   useEffect(() => {
-    if (!active || !repo || query.length < MIN_QUERY) {
-      setResults([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (idle || !repo) return;
     const abort = new AbortController();
     const timer = setTimeout(() => {
       grepRepo(repo, query, { signal: abort.signal })
-        .then((r) => !abort.signal.aborted && setResults(r))
+        .then((r) => !abort.signal.aborted && setAnswer({ key, results: r }))
         .catch((e: unknown) => {
-          if ((e as Error)?.name !== "AbortError") setResults([]);
-        })
-        .finally(() => !abort.signal.aborted && setLoading(false));
+          if ((e as Error)?.name !== "AbortError") setAnswer({ key, results: [] });
+        });
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [repo, query, active]);
+  }, [repo, query, idle, key]);
 
-  return { results, loading };
+  const current = !idle && answer?.key === key;
+  return { results: current ? answer.results : [], loading: !idle && !current };
 }

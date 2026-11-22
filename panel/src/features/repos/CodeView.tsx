@@ -222,8 +222,13 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
 
   const open = useCallback(
     (path: string, at: OpenRequest = {}, patch: ParamsPatch = {}) => {
-      // Search hits and definitions come from the working tree; a commit lists only what it touched.
-      if (commitList && !commitList.some((f) => f.path === path)) setCommit(null);
+      // Text hits come from the working tree: show that, not a commit or compare missing the line.
+      if (at.working) {
+        setCommit(null);
+        patch = { ...patch, cmp: null };
+      }
+      // A commit lists only what it touched.
+      else if (commitList && !commitList.some((f) => f.path === path)) setCommit(null);
       setHighlight(at.highlight || undefined);
       setScroll((s) => (at.line ? { line: at.line, key: (s?.key ?? 0) + 1 } : null));
       setParams({ ...patch, file: path, line: at.line ? String(at.line) : null });
@@ -303,7 +308,8 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
         uncommitted={src === "work" && !!status}
         defaultMode={src !== "work" && status ? "diff" : "code"}
         highlight={highlight}
-        onIdentifierClick={nav.onIdentifierClick}
+        // Lookups read the working tree, so a commit's or HEAD's lines would resolve the wrong spot.
+        onIdentifierClick={src === "work" ? nav.onIdentifierClick : undefined}
         scrollToLine={scroll?.line}
         scrollKey={scroll?.key}
       />
@@ -373,13 +379,23 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
 export default function CodeView({ repos, params, setParams, contextSlot, searchRequest, onSearchHandled }: ReposViewProps) {
   const worktrees = useWorktrees(repos);
   const named = params.get("repo");
-  const repo = (named ? repos.find((r) => r.name === named) : undefined) ?? repos.find((r) => r.present);
+  // Older links carry the repo's path instead of its name.
+  const byName = named ? (repos.find((r) => r.name === named) ?? repos.find((r) => r.path === named)) : undefined;
+  const repo = byName ?? repos.find((r) => r.present);
+  const legacy = !!byName && byName.name !== named;
+  const unknown = !!named && repos.length > 0 && !byName;
   const asked = params.get("wt");
   const listed = repo ? worktrees[repo.name] : undefined;
   // The URL is untrusted: only a listed worktree of this repo is ever read.
   const wt = asked && listed?.some((w) => w.path === asked) ? asked : null;
   const waiting = !!asked && !!repo?.present && !listed;
   const root = repo?.present && !waiting ? (wt ?? repo.path) : null;
+
+  // A path becomes the name; an unknown repo drops its file rather than open it in the fallback repo.
+  useEffect(() => {
+    if (legacy && byName) setParams({ repo: byName.name });
+    else if (unknown) setParams({ repo: null, wt: null, file: null, line: null, cmp: null });
+  }, [legacy, unknown, byName, setParams]);
 
   const stale = !!asked && !!listed && !wt;
   // Drop a wt the listing doesn't know, so the URL matches what is shown.
@@ -394,6 +410,7 @@ export default function CodeView({ repos, params, setParams, contextSlot, search
   else if (!repo) body = <p className="cv-msg">None of this project's linked repositories are on this machine.</p>;
   else if (waiting) body = <p className="cv-msg">Listing worktrees…</p>;
   else if (!root) body = <p className="cv-msg">{repo.name} is not on this machine. Pick another repository above.</p>;
+  else if (unknown) body = null;
   else
     body = (
       <RootCode

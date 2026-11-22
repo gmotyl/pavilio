@@ -33,6 +33,8 @@ export function fuzzyFilter(paths: string[], query: string): string[] {
 export interface OpenRequest {
   line?: number;
   highlight?: string;
+  /** The hit came from the working tree (grep), so open it there. */
+  working?: boolean;
 }
 
 interface Props {
@@ -78,7 +80,7 @@ export default function FileSearch({ root, paths, request, onRequestHandled, onO
       onOpen(path);
     } else {
       const hit = hits[i];
-      if (hit) onOpen(hit.path, { line: hit.line, highlight: query });
+      if (hit) onOpen(hit.path, { line: hit.line, highlight: query, working: true });
     }
   };
 
@@ -97,7 +99,14 @@ export default function FileSearch({ root, paths, request, onRequestHandled, onO
 
   const label = mode === "files" ? "Go to file" : "Search in files";
   const showList = query !== "" && (mode === "files" || query.length >= 2);
+  const optionId = (i: number) => `${listId}-${i}`;
+  const activeId = showList && active < count ? optionId(active) : undefined;
   let index = 0;
+
+  // Arrow keys move past the visible rows; keep the one Enter would open in view.
+  useEffect(() => {
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeId]);
 
   return (
     <div className="cv-search">
@@ -109,6 +118,7 @@ export default function FileSearch({ root, paths, request, onRequestHandled, onO
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
+          aria-activedescendant={activeId}
           placeholder={`${label}…`}
           value={query}
           spellCheck={false}
@@ -137,6 +147,7 @@ export default function FileSearch({ root, paths, request, onRequestHandled, onO
             {matches.map((p, i) => (
               <li
                 key={p}
+                id={optionId(i)}
                 role="option"
                 aria-selected={i === active}
                 onMouseDown={(e) => e.preventDefault()}
@@ -160,6 +171,7 @@ export default function FileSearch({ root, paths, request, onRequestHandled, onO
                     return (
                       <li
                         key={m.line}
+                        id={optionId(i)}
                         role="option"
                         aria-selected={i === active}
                         onMouseDown={(e) => e.preventDefault()}

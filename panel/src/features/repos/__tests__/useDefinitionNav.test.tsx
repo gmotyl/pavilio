@@ -197,4 +197,54 @@ describe("useDefinitionNav", () => {
     expect(backs).toBe(50);
     expect(open).toHaveBeenLastCalledWith("f10.ts", 1);
   });
+
+  /** fetch answers each definition lookup only when its `release` runs. */
+  function deferredDefinitions() {
+    const pending: (() => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) =>
+            pending.push(() => resolve(jsonResponse({ locations: [{ path: "late.ts", line: 9, col: 1 }] }))),
+          ),
+      ),
+    );
+    return { releaseAll: () => pending.splice(0).forEach((r) => r()) };
+  }
+
+  it("a lookup still in flight when the checkout unmounts never navigates", async () => {
+    const { releaseAll } = deferredDefinitions();
+    const open = vi.fn();
+    const { result, unmount } = renderHook(() => useDefinitionNav({ root: MAIN, file: "a.ts", open }));
+    act(() => result.current.onIdentifierClick({ line: 1, col: 1 }));
+    unmount();
+    await act(async () => {
+      releaseAll();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("Back cancels a lookup still in flight", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ locations: [{ path: "a.ts", line: 40, col: 1 }] })));
+    const open = vi.fn();
+    const { result } = renderHook(() => useDefinitionNav({ root: MAIN, file: "a.ts", open }));
+    // A same-file jump: the file never changes, so only Back can retire the next lookup.
+    await act(async () => {
+      result.current.onIdentifierClick({ line: 1, col: 1 });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(open).toHaveBeenLastCalledWith("a.ts", 40);
+
+    const { releaseAll } = deferredDefinitions();
+    act(() => result.current.onIdentifierClick({ line: 40, col: 1 }));
+    act(() => result.current.back());
+    expect(open).toHaveBeenLastCalledWith("a.ts", 1);
+    await act(async () => {
+      releaseAll();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(open).toHaveBeenLastCalledWith("a.ts", 1);
+  });
 });

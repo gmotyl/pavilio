@@ -68,6 +68,12 @@ interface Props {
   onCompare?: (ref: string) => void;
 }
 
+/**
+ * The row that is the linked path itself (picked as `wt: null`). Usually the main checkout,
+ * but a linked path may be a secondary worktree; an unmatched path keeps the first row.
+ */
+const homeIndex = (list: Worktree[], linked: string | undefined) => Math.max(0, list.findIndex((w) => w.path === linked));
+
 const branchLabel = (w: Worktree | undefined) => (w ? (w.branch ?? `detached ${w.head.slice(0, 7)}`) : null);
 
 /** Context-slot button + popover: repos grouped, each with its main checkout then its worktrees. */
@@ -76,7 +82,8 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
   // Picking a ref to compare with: the branch list takes over the popover body.
   const [picking, setPicking] = useState(false);
   const [filter, setFilter] = useState("");
-  const [branches, setBranches] = useState<string[]>([]);
+  // Keyed by the checkout they were listed for, so another checkout never shows (or picks) them.
+  const [listed, setListed] = useState<{ root: string; branches: string[] } | null>(null);
   const [dirty, setDirty] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -124,7 +131,8 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
     fetch(`/api/git/branches?repo=${q(root)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { branches?: unknown } | null) => {
-        if (!cancelled && Array.isArray(data?.branches)) setBranches(data.branches.filter((b): b is string => typeof b === "string"));
+        if (!cancelled && Array.isArray(data?.branches))
+          setListed({ root, branches: data.branches.filter((b): b is string => typeof b === "string") });
       })
       .catch(() => {});
     return () => {
@@ -136,10 +144,11 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
     setOpen(false);
     setPicking(false);
   };
+  const branches = listed && listed.root === root ? listed.branches : [];
   const shown = filter ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())) : branches;
 
   const list = repo ? worktrees[repo] : undefined;
-  const current = list ? (wt ? list.find((w) => w.path === wt) : list[0]) : undefined;
+  const current = list ? (wt ? list.find((w) => w.path === wt) : list[homeIndex(list, repos.find((r) => r.name === repo)?.path)]) : undefined;
 
   return (
     <div className="cv-sw" ref={rootRef}>
@@ -239,8 +248,9 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
                   ) : !worktrees[r.name] ? (
                     <p className="cv-msg">Loading worktrees…</p>
                   ) : (
-                    worktrees[r.name].map((w, i) => {
-                      const isCurrent = r.name === repo && (wt ? w.path === wt : i === 0);
+                    worktrees[r.name].map((w, i, all) => {
+                      const home = i === homeIndex(all, r.path);
+                      const isCurrent = r.name === repo && (wt ? w.path === wt : home);
                       const n = dirty[w.path];
                       return (
                         <button
@@ -251,7 +261,7 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
                           aria-current={isCurrent ? "true" : undefined}
                           onClick={() => {
                             close();
-                            onPick(r.name, i === 0 ? null : w.path);
+                            onPick(r.name, home ? null : w.path);
                           }}
                         >
                           <span className="cv-sw-line">

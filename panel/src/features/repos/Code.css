@@ -71,8 +71,22 @@
   height: calc(100vh - 110px);
   min-height: 360px;
 }
+/* Fallback before the body is measured; the measured classes below override it. Only the
+   Outline hides: an open Changes or History panel (cv-widerail) always shows. */
+@media (max-width: 1100px) {
+  .cv-body:not(.cv-widerail) > .cv-rail { display: none; }
+  .cv-body { grid-template-columns: 250px minmax(0, 1fr); }
+}
+@media (max-width: 860px) {
+  .cv-body { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .cv-viewer { max-height: max(320px, calc(100vh - 140px)); }
+}
 .cv-body.cv-norail { grid-template-columns: 250px minmax(0, 1fr); }
+.cv-body.cv-widerail { grid-template-columns: 270px minmax(0, 1fr) 300px; }
+/* Last, so stacking wins over a wide rail. */
 .cv-body.cv-stack { grid-template-columns: minmax(0, 1fr); height: auto; }
+/* The stacked page grows with its content, so the viewer gets a bounded box of its own: line jumps scroll it. */
+.cv-stack .cv-viewer { max-height: max(320px, calc(100vh - 140px)); }
 .cv-side {
   display: flex;
   flex-direction: column;
@@ -188,16 +202,6 @@
 .cv-ol-ln { margin-left: auto; font: 11px var(--font-mono, monospace); color: var(--text-muted); }
 .cv-rail-empty { color: var(--text-muted); }
 
-/* Fallback before the body is measured. */
-@media (max-width: 1100px) {
-  .cv-rail { display: none; }
-  .cv-body { grid-template-columns: 250px minmax(0, 1fr); }
-}
-@media (max-width: 860px) {
-  .cv-body { grid-template-columns: minmax(0, 1fr); height: auto; }
-}
-
-.cv-body.cv-widerail { grid-template-columns: 270px minmax(0, 1fr) 300px; }
 .cv-tools { flex: none; margin-left: auto; display: flex; gap: 4px; }
 .cv-tools button { padding: 2px 8px; border-radius: 6px; }
 .cv-tools button[aria-pressed="true"] { background: var(--bg-active); color: var(--text-primary); }

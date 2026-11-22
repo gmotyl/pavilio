@@ -34,13 +34,21 @@ export function useDefinitionNav({ root, file, open }: Options) {
   const [choices, setChoices] = useState<{ from: Entry; locations: DefinitionLocation[] } | null>(null);
   // Bumped per failure so a repeat restarts the timer; 0 = hidden.
   const [notice, setNotice] = useState(0);
-  // Bumped on every lookup and every file change, so a late answer is dropped.
+  // Bumped on every lookup, file change, Back and unmount, so a late answer is dropped.
   const token = useRef(0);
+  const inflight = useRef<AbortController | null>(null);
+  const cancel = useCallback(() => {
+    token.current++;
+    inflight.current?.abort();
+    inflight.current = null;
+  }, []);
 
   useEffect(() => {
-    token.current++;
+    cancel();
     setChoices(null);
-  }, [file]);
+  }, [file, cancel]);
+
+  useEffect(() => cancel, [cancel]);
 
   useEffect(() => {
     if (!notice) return;
@@ -62,10 +70,13 @@ export function useDefinitionNav({ root, file, open }: Options) {
   const onIdentifierClick = useCallback(
     (pos: { line: number; col: number }) => {
       if (!file) return;
-      const mine = ++token.current;
+      cancel();
+      const mine = token.current;
+      const abort = new AbortController();
+      inflight.current = abort;
       const from = { file, line: pos.line };
       setChoices(null);
-      fetch(`/api/code/definition?repo=${q(root)}&path=${q(file)}&line=${pos.line}&col=${pos.col}`)
+      fetch(`/api/code/definition?repo=${q(root)}&path=${q(file)}&line=${pos.line}&col=${pos.col}`, { signal: abort.signal })
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           return ((await res.json()) as { locations?: DefinitionLocation[] }).locations ?? [];
@@ -78,15 +89,16 @@ export function useDefinitionNav({ root, file, open }: Options) {
           else setChoices({ from, locations });
         });
     },
-    [root, file, jump],
+    [root, file, jump, cancel],
   );
 
   const back = useCallback(() => {
     const prev = stack.at(-1);
     if (!prev) return;
+    cancel();
     setStack(stack.slice(0, -1));
     open(prev.file, prev.line);
-  }, [stack, open]);
+  }, [stack, open, cancel]);
 
   const dismiss = useCallback(() => setChoices(null), []);
 

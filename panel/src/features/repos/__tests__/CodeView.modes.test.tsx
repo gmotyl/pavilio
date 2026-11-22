@@ -19,6 +19,8 @@ const q = encodeURIComponent;
 const search = () => urlParams(screen.getByTestId("search"));
 const B_DIFF = ["diff --git a/src/b.ts b/src/b.ts", "--- a/src/b.ts", "+++ b/src/b.ts", "@@ -6,1 +6,1 @@", "-type Gamma = number;", "+type Gamma = string;"].join("\n");
 
+const B_SOURCE = ["a", "b", "c", "d", "e", "type Gamma = string;"].join("\n");
+
 const history: Record<string, FetchHandler> = {
   "/api/git/log": () => jsonResponse([{ sha: SHA, shortSha: "ddddddd", message: "touch b", author: "me", date: new Date().toISOString() }]),
   "/api/git/commit-files": () => jsonResponse([{ status: "M", path: "src/b.ts" }]),
@@ -125,5 +127,30 @@ describe("CodeView modes", () => {
 
     const alert = await screen.findByText(/Couldn't list files/);
     expect(alert).toHaveTextContent("HTTP 500");
+  });
+
+  it("code from a commit has no definition links: the lookup reads the working tree", async () => {
+    renderCode("?view=code", { ...history, "/api/git/file?": () => new Response(B_SOURCE) });
+    await enterCommit();
+    fireEvent.click(screen.getByTestId("file-viewer-mode-code"));
+    await waitFor(() => expect(screen.getByTestId("file-viewer-body")).toHaveTextContent("type Gamma"));
+    expect(screen.getByTestId("file-viewer-body").querySelector("[data-sym]")).toBeNull();
+  });
+
+  it("a text search hit during compare opens the working tree, where grep found it", async () => {
+    const { fetch } = renderCode("?view=code", history);
+    await screen.findByTestId("ft-file-README.md");
+    await compareWithMain();
+    await screen.findByTestId("code-compare-indicator");
+
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    const input = await screen.findByRole("combobox", { name: "Search in files" });
+    fireEvent.change(input, { target: { value: "area" } });
+    const results = await screen.findByRole("listbox", { name: "Matches in files" });
+    fireEvent.click(within(await within(results).findByRole("group", { name: "src/a.ts" })).getByRole("option"));
+
+    await waitFor(() => expect(search().get("cmp")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("src/a.ts"));
+    expect(calls(fetch, `/api/git/file?repo=${q(MAIN)}&path=${q("src/a.ts")}`)).toHaveLength(1);
   });
 });

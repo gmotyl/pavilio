@@ -12,7 +12,8 @@ const ID = "([A-Za-z_$][\\w$]*)";
 const LEAD = "^(?:export\\s+)?(?:default\\s+)?(?:declare\\s+)?";
 // Order matters: `const enum` must hit enum before const.
 const RULES: [OutlineKind, RegExp][] = [
-  ["function", new RegExp(`${LEAD}(?:async\\s+)?function\\s*\\*?\\s*${ID}`)],
+  // The name needs a separator after `function`: whitespace or a generator `*`.
+  ["function", new RegExp(`${LEAD}(?:async\\s+)?function(?:\\s*\\*\\s*|\\s+)${ID}`)],
   ["class", new RegExp(`${LEAD}(?:abstract\\s+)?class\\s+${ID}`)],
   ["interface", new RegExp(`${LEAD}interface\\s+${ID}`)],
   ["type", new RegExp(`${LEAD}type\\s+${ID}\\s*[=<]`)],
