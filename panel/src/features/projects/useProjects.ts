@@ -5,6 +5,8 @@ import type { ProjectKind } from "../../../server/lib/projects/kind";
 export interface RepoEntry {
   name: string;
   path: string;
+  /** Whether the `~`-expanded path is a directory on this machine (server-derived). */
+  present: boolean;
 }
 
 export interface Project {

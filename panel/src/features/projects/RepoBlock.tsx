@@ -15,7 +15,8 @@ export interface RepoOpenFile {
 }
 
 interface Props {
-  repo: { name: string; path: string };
+  /** `present: false` renders the resting state instead of the git sections. */
+  repo: { name: string; path: string; present: boolean };
   viewMode: GitViewMode;
   onViewModeChange: (mode: GitViewMode) => void;
   repoOpenFile: RepoOpenFile | null;
@@ -59,20 +60,20 @@ export function RepoBlock({
     matchesScope(scope) ? repoOpenFile!.file : null;
 
   const highlightFor = (scope: string) =>
-    liveHighlight || (matchesScope(scope) ? repoOpenFile!.highlight : undefined);
+    liveHighlight ||
+    (matchesScope(scope) ? repoOpenFile!.highlight : undefined);
 
-  const onOpenFileChange =
-    (scope: string) => (file: string | null) =>
-      onSetRepoOpenFile(
-        file
-          ? {
-              repo: repo.path,
-              file,
-              scope: repoOpenFile?.scope ?? scope,
-              highlight: repoOpenFile?.highlight ?? "",
-            }
-          : null,
-      );
+  const onOpenFileChange = (scope: string) => (file: string | null) =>
+    onSetRepoOpenFile(
+      file
+        ? {
+            repo: repo.path,
+            file,
+            scope: repoOpenFile?.scope ?? scope,
+            highlight: repoOpenFile?.highlight ?? "",
+          }
+        : null,
+    );
 
   return (
     <div
@@ -108,63 +109,77 @@ export function RepoBlock({
         />
       </div>
 
-      <GitChanges
-        repo={repo.path}
-        showCommit
-        viewMode={viewMode}
-        onViewModeChange={onViewModeChange}
-        onBranchChange={setBranch}
-        showBranchCopy
-        showListSidebar
-        openFile={openFileFor("changed")}
-        highlight={highlightFor("changed")}
-        onOpenFileChange={onOpenFileChange("changed")}
-      />
+      {repo.present ? (
+        <>
+          <GitChanges
+            repo={repo.path}
+            showCommit
+            viewMode={viewMode}
+            onViewModeChange={onViewModeChange}
+            onBranchChange={setBranch}
+            showBranchCopy
+            showListSidebar
+            openFile={openFileFor("changed")}
+            highlight={highlightFor("changed")}
+            onOpenFileChange={onOpenFileChange("changed")}
+          />
 
-      <div
-        className="mt-4 pt-4"
-        style={{ borderTop: "1px solid var(--border-subtle)" }}
-      >
-        <GitBranchDiff
-          repo={repo.path}
-          viewMode={viewMode}
-          onViewModeChange={onViewModeChange}
-          showListSidebar
-          openFile={openFileFor("branch-diff")}
-          highlight={highlightFor("branch-diff")}
-          activeFile={branchFile}
-          onActiveFileChange={onBranchFileChange}
-        />
-      </div>
+          <div
+            className="mt-4 pt-4"
+            style={{ borderTop: "1px solid var(--border-subtle)" }}
+          >
+            <GitBranchDiff
+              repo={repo.path}
+              viewMode={viewMode}
+              onViewModeChange={onViewModeChange}
+              showListSidebar
+              openFile={openFileFor("branch-diff")}
+              highlight={highlightFor("branch-diff")}
+              activeFile={branchFile}
+              onActiveFileChange={onBranchFileChange}
+            />
+          </div>
 
-      <div
-        className="mt-4 pt-4"
-        style={{ borderTop: "1px solid var(--border-subtle)" }}
-      >
-        <GitWorktrees
-          repo={repo.path}
-          viewMode={viewMode}
-          onViewModeChange={onViewModeChange}
-        />
-      </div>
+          <div
+            className="mt-4 pt-4"
+            style={{ borderTop: "1px solid var(--border-subtle)" }}
+          >
+            <GitWorktrees
+              repo={repo.path}
+              viewMode={viewMode}
+              onViewModeChange={onViewModeChange}
+            />
+          </div>
 
-      <div
-        className="mt-4 pt-4"
-        style={{ borderTop: "1px solid var(--border-subtle)" }}
-      >
-        <GitHistory
-          repo={repo.path}
-          viewMode={viewMode}
-          onViewModeChange={onViewModeChange}
-          showListSidebar={showListSidebar}
-          commitsOpen={commitsOpen}
-          onCommitsOpenChange={onCommitsOpenChange}
-          activeSha={activeSha}
-          activeFile={activeFile}
-          onActiveShaChange={onActiveShaChange}
-          onActiveFileChange={onActiveFileChange}
-        />
-      </div>
+          <div
+            className="mt-4 pt-4"
+            style={{ borderTop: "1px solid var(--border-subtle)" }}
+          >
+            <GitHistory
+              repo={repo.path}
+              viewMode={viewMode}
+              onViewModeChange={onViewModeChange}
+              showListSidebar={showListSidebar}
+              commitsOpen={commitsOpen}
+              onCommitsOpenChange={onCommitsOpenChange}
+              activeSha={activeSha}
+              activeFile={activeFile}
+              onActiveShaChange={onActiveShaChange}
+              onActiveFileChange={onActiveFileChange}
+            />
+          </div>
+        </>
+      ) : (
+        // A linked repo absent on this machine: no git section mounts, so no
+        // /api/git/* request is made for its path.
+        <p
+          data-testid="repo-missing"
+          className="text-xs"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Not on this machine
+        </p>
+      )}
     </div>
   );
 }

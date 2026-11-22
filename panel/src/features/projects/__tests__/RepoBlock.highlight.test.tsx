@@ -21,7 +21,7 @@ vi.mock("../../git/GitWorktrees", () => ({ default: () => null }));
 vi.mock("../../git/GitHistory", () => ({ default: () => null }));
 
 const baseProps = {
-  repo: { name: "pavilio", path: "/tmp/pavilio" },
+  repo: { name: "pavilio", path: "/tmp/pavilio", present: true },
   viewMode: "flat" as const,
   onViewModeChange: () => {},
   repoOpenFile: null,

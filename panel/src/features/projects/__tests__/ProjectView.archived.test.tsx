@@ -32,7 +32,7 @@ function detail() {
     kind: "research",
     lastActivity: null,
     // Repos on disk still hide the tab while archived.
-    repos: [{ name: "repo", path: "/r/repo" }],
+    repos: [{ name: "repo", path: "/r/repo", present: true }],
     archived,
     ...(archived ? { archivedAt: "2026-09-02T10:00:00" } : {}),
   };
