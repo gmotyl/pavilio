@@ -644,20 +644,20 @@ describe("PlayFromHere", () => {
       "",
       "An opening paragraph that comes before the cited one.",
       "",
-      // Short prose, then citations: neither match window survives if speech
-      // reads the paths while the page renders the short labels.
-      "Typing lag ([[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]; [[wiki/sources/context-snapshot-2026-10-21-speech]])",
+      // Prose, then citations: speech skips the citation while the page renders
+      // its labels, so only the block's head window (24 chars) finds the unit.
+      "Typing lag grew after the resize ([[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]; [[wiki/sources/context-snapshot-2026-10-21-speech]])",
       "",
       "A closing paragraph after the cited one.",
       "",
     ].join("\n");
     const units = prepare(pageSpeechText(text)).units;
-    const cited = units.findIndex((u) => u.source.startsWith("Typing lag"));
+    const cited = units.findIndex((u) => u.source.startsWith("Typing lag grew"));
     expect(cited).toBeGreaterThan(0);
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? units : []) });
 
     const { container } = render(<Page text={text} />);
-    const para = block(container, "Typing lag");
+    const para = block(container, "Typing lag grew");
     expect(para).toHaveAttribute("data-speak-unit", String(cited));
     fireEvent.mouseOver(para);
     fireEvent.click(playOf(container, para)!);

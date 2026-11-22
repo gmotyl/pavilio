@@ -282,13 +282,28 @@ describe("stripToSpeakableText", () => {
     const spoken = stripToSpeakableText(
       "Rate the typing ([[wiki/sources/context-snapshot-2026-10-21-speech]]; [[wiki/sources/progress-2026-09-23-repos-resize-answer-pane]]).",
     );
-    expect(spoken).toContain("typing (speech; repos resize answer pane)");
-    expect(spoken).not.toContain("wiki/sources");
+    // A parenthesis holding only links is a citation, and is skipped.
+    expect(spoken).toBe("Rate the typing.");
+    expect(stripToSpeakableText("Rate the typing (see [[wiki/sources/context-snapshot-2026-10-21-speech]]).")).toBe(
+      "Rate the typing (see speech).",
+    );
     // A concept page keeps its file name, which then goes on to the
     // code-shaped-token handling like any other name in prose.
     expect(stripToSpeakableText("See [[wiki/concepts/resizable-pane]] for the rule.")).toBe(
       "See resizable-pane for the rule.",
     );
+  });
+
+  it.each([
+    ["a markdown link", "The pane lost turns ([answer pane dropped utterances](/p/x/notes/a.md)).", "The pane lost turns."],
+    ["a mid-sentence citation", "It broke ([[wiki/concepts/resizable-pane]]) after the resize.", "It broke after the resize."],
+    ["several links", "Seen twice ([a](u1), [b](u2)).", "Seen twice."],
+    ["a citation on its own line", "Fact.\n\n([[wiki/concepts/resizable-pane]])\n\nNext.", "Fact.\n\nNext."],
+    ["words beside the link stay", "Fine (see [a](u)) here.", "Fine (see a) here."],
+    ["a call is not a citation", "Call f([a](u)) now.", "Call f(a) now."],
+    ["code is untouched", "Write `([a](u))` to cite.", "Write ([a](u)) to cite."],
+  ])("skips a parenthesised link citation: %s", (_label, markdown, spoken) => {
+    expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
 
   it("speaks a wikilink with a long numeric id without the digits", () => {
