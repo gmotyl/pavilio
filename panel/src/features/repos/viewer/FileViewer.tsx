@@ -310,7 +310,7 @@ export default function FileViewer({
   const foldRow = (it: Extract<Item, { kind: "fold" }>) => (
     <tr key={`f${it.id}`} className="fv-fold-row">
       <td colSpan={4}>
-        <button type="button" className="fv-fold" onClick={() => expand(it.id)}>
+        <button type="button" data-testid={`file-viewer-fold-${it.id}`} className="fv-fold" onClick={() => expand(it.id)}>
           ⋯ Expand {it.rows.length} unchanged lines
         </button>
       </td>
@@ -435,10 +435,10 @@ export default function FileViewer({
         <span className="fv-spacer" />
         {changed && (
           <div className="fv-seg" role="group" aria-label="Show as">
-            <button type="button" aria-pressed={shownMode === "diff"} onClick={() => setMode("diff")}>
+            <button type="button" data-testid="file-viewer-mode-diff" aria-pressed={shownMode === "diff"} onClick={() => setMode("diff")}>
               Diff
             </button>
-            <button type="button" aria-pressed={shownMode === "code"} onClick={() => setMode("code")}>
+            <button type="button" data-testid="file-viewer-mode-code" aria-pressed={shownMode === "code"} onClick={() => setMode("code")}>
               Code
             </button>
           </div>
@@ -447,6 +447,7 @@ export default function FileViewer({
           <div className="fv-seg" role="group" aria-label="Diff layout">
             <button
               type="button"
+              data-testid="file-viewer-layout-split"
               aria-pressed={shownLayout === "split"}
               disabled={narrow}
               title={narrow ? "Needs a wider pane" : undefined}
@@ -454,7 +455,7 @@ export default function FileViewer({
             >
               Split
             </button>
-            <button type="button" aria-pressed={shownLayout === "unified"} onClick={() => setLayout("unified")}>
+            <button type="button" data-testid="file-viewer-layout-unified" aria-pressed={shownLayout === "unified"} onClick={() => setLayout("unified")}>
               Unified
             </button>
           </div>
