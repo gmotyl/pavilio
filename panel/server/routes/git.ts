@@ -1,7 +1,7 @@
 import { Router, type Response } from "express";
-import { execSync } from "child_process";
-import { readFileSync, statSync } from "fs";
-import { join, resolve } from "path";
+import { execFileSync, execSync } from "child_process";
+import { readFileSync, realpathSync, statSync } from "fs";
+import { isAbsolute, join, posix, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
@@ -62,8 +62,22 @@ function git(cmd: string, repoPath?: string): string {
   });
 }
 
+/** A caller-supplied ref or path that is invalid or unsafe; answered as `status`. */
+class GitInputError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
+    super(message);
+  }
+}
+
 /** Answer a route failure: 404 repo-missing for a missing repo, else `status` with the message. */
 function sendGitError(res: Response, e: any, status = 500): void {
+  if (e instanceof GitInputError) {
+    res.status(e.status).json({ error: e.message });
+    return;
+  }
   if (e instanceof RepoMissingError) {
     res
       .status(404)
@@ -157,6 +171,194 @@ function getBranchDiff(base: string, file: string, repo?: string): string {
 
   return diff;
 }
+
+// --- Ref-based reads (argv, no shell: refs and paths come straight from the query) ---
+
+// PR trees and diffs can be large; execFileSync's 1 MiB default would truncate them.
+const REF_MAX_BUFFER = 256 * 1024 * 1024;
+
+function gitArgv(args: string[], repo?: string): Buffer {
+  const cwd = getRepoRoot(repo);
+  assertRepoDirectory(cwd);
+  return execFileSync("git", args, {
+    cwd,
+    env: gitSafeEnv(),
+    maxBuffer: REF_MAX_BUFFER,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function queryString(v: unknown): string | undefined {
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+function requireQuery(v: unknown, name: string): string {
+  const s = queryString(v);
+  if (s === undefined) throw new GitInputError(`${name} parameter required`);
+  return s;
+}
+
+/** Resolve a ref to a commit sha; a leading `-` would be parsed as an option. */
+function resolveCommit(ref: string, repo?: string): string {
+  if (ref.startsWith("-") || ref.includes("\0")) throw new GitInputError(`invalid ref: ${ref}`);
+  try {
+    return gitArgv(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], repo).toString("utf-8").trim();
+  } catch (e) {
+    if (e instanceof RepoMissingError) throw e;
+    throw new GitInputError(`unknown ref: ${ref}`);
+  }
+}
+
+/** Repo-relative POSIX path, or 400 when absolute or escaping the repo after normalisation. */
+function repoRelativePath(raw: string): string {
+  if (raw.includes("\0") || isAbsolute(raw) || posix.isAbsolute(raw)) throw new GitInputError("path must be repo-relative");
+  const norm = posix.normalize(raw.replace(/\\/g, "/"));
+  if (norm === "." || norm === ".." || norm.startsWith("../")) throw new GitInputError("path escapes the repo");
+  return norm;
+}
+
+function splitZ(buf: Buffer): string[] {
+  const parts = buf.toString("utf-8").split("\0");
+  if (parts[parts.length - 1] === "") parts.pop();
+  return parts;
+}
+
+// Same heuristic as git: a NUL in the first 8000 bytes means binary.
+function isBinary(buf: Buffer): boolean {
+  return buf.subarray(0, 8000).includes(0);
+}
+
+function sendText(res: Response, buf: Buffer): void {
+  if (isBinary(buf)) {
+    res.status(415).json({ error: "binary file", binary: true });
+    return;
+  }
+  res.type("text/plain; charset=utf-8").send(buf.toString("utf-8"));
+}
+
+type TreeStatus = "M" | "A" | "D" | "R" | "?" | null;
+
+function porcelainStatus(xy: string): TreeStatus {
+  if (xy === "??") return "?";
+  if (xy.includes("D")) return "D";
+  if (xy.includes("R")) return "R";
+  if (xy.includes("A")) return "A";
+  return xy.trim() ? "M" : null;
+}
+
+function workingTreeFiles(repo?: string): { path: string; status: TreeStatus }[] {
+  const status = new Map<string, TreeStatus>();
+  const entries = splitZ(gitArgv(["status", "--porcelain=v1", "-z", "-uall"], repo));
+  for (let i = 0; i < entries.length; i++) {
+    const xy = entries[i].slice(0, 2);
+    status.set(entries[i].slice(3), porcelainStatus(xy));
+    // -z renames/copies carry the source path as the next entry.
+    if (xy[0] === "R" || xy[0] === "C") i++;
+  }
+  // -c keeps unstaged deletions listed; staged ones only come from status.
+  const paths = new Set(splitZ(gitArgv(["ls-files", "-z", "-co", "--exclude-standard"], repo)));
+  for (const p of status.keys()) paths.add(p);
+  return [...paths].sort().map((path) => ({ path, status: status.get(path) ?? null }));
+}
+
+// Files at a ref, or the working tree (incl. untracked, .gitignore honoured) with status
+router.get("/tree", (req, res) => {
+  try {
+    const repo = queryString(req.query.repo);
+    const ref = queryString(req.query.ref);
+    if (!ref) return res.json({ files: workingTreeFiles(repo) });
+    const sha = resolveCommit(ref, repo);
+    const files = splitZ(gitArgv(["ls-tree", "-r", "-z", "--name-only", sha], repo)).map((path) => ({
+      path,
+      status: null,
+    }));
+    res.json({ files });
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
+// File content at a ref, or from disk; binary answers 415
+router.get("/file", (req, res) => {
+  try {
+    const repo = queryString(req.query.repo);
+    const ref = queryString(req.query.ref);
+    const path = repoRelativePath(requireQuery(req.query.path, "path"));
+    if (ref) {
+      const sha = resolveCommit(ref, repo);
+      let buf: Buffer;
+      try {
+        buf = gitArgv(["show", `${sha}:${path}`], repo);
+      } catch (e) {
+        if (e instanceof RepoMissingError) throw e;
+        throw new GitInputError(`${path} not found at ${ref}`, 404);
+      }
+      return sendText(res, buf);
+    }
+    const root = getRepoRoot(repo);
+    assertRepoDirectory(root);
+    let real: string;
+    try {
+      real = realpathSync(join(root, path));
+    } catch {
+      throw new GitInputError(`${path} not found`, 404);
+    }
+    // A symlink inside the repo may still point outside it.
+    const realRoot = realpathSync(root);
+    if (!real.startsWith(realRoot + sep)) throw new GitInputError("path escapes the repo");
+    if (!statSync(real).isFile()) throw new GitInputError(`${path} is not a file`, 404);
+    sendText(res, readFileSync(real));
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
+// Unified diff of one path, base...head (since divergence)
+router.get("/diff-ref", (req, res) => {
+  try {
+    const repo = queryString(req.query.repo);
+    const path = repoRelativePath(requireQuery(req.query.path, "path"));
+    const base = resolveCommit(requireQuery(req.query.base, "base"), repo);
+    const head = resolveCommit(requireQuery(req.query.head, "head"), repo);
+    const diff = gitArgv(["diff", "--no-color", "--no-ext-diff", `${base}...${head}`, "--", path], repo);
+    res.type("text/plain; charset=utf-8").send(diff.toString("utf-8"));
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
+// Changed files base...head with name-status and numstat (binary counts as 0/0)
+router.get("/changed", (req, res) => {
+  try {
+    const repo = queryString(req.query.repo);
+    const base = resolveCommit(requireQuery(req.query.base, "base"), repo);
+    const head = resolveCommit(requireQuery(req.query.head, "head"), repo);
+    const range = `${base}...${head}`;
+
+    const files: { path: string; status: "M" | "A" | "D" | "R"; add: number; del: number }[] = [];
+    const ns = splitZ(gitArgv(["diff", "-z", "-M", "--name-status", range], repo));
+    for (let i = 0; i < ns.length; ) {
+      const code = ns[i++].charAt(0);
+      // Rename/copy: source then destination; the row is keyed by destination.
+      const path = code === "R" || code === "C" ? (i++, ns[i++]) : ns[i++];
+      const status = code === "A" || code === "D" || code === "R" ? code : "M";
+      files.push({ path, status, add: 0, del: 0 });
+    }
+
+    const counts = new Map<string, { add: number; del: number }>();
+    const num = splitZ(gitArgv(["diff", "-z", "-M", "--numstat", range], repo));
+    for (let i = 0; i < num.length; ) {
+      const [add, del, path] = num[i++].split("\t");
+      // Rename: empty path field, then source and destination entries.
+      const key = path === "" ? (i++, num[i++]) : path;
+      counts.set(key, { add: Number(add) || 0, del: Number(del) || 0 });
+    }
+    for (const f of files) Object.assign(f, counts.get(f.path));
+    res.json(files);
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
 
 // Git status
 router.get("/status", (req, res) => {
