@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
@@ -181,24 +181,34 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, repoPathsKey, scope]);
 
+  // The files a grep may target right now: `files` can still hold a repo that
+  // just went missing, and must never be grepped. The grep restarts only when
+  // this set changes, so a repo that becomes present before it contributes any
+  // files leaves an unchanged search (and its matches) alone, while a repo that
+  // goes missing changes the set at once.
+  const eligibleFiles = useMemo(() => {
+    const presentPaths = new Set(presentPathsKey.split("\0"));
+    return files.filter((f) => presentPaths.has(f.repo));
+  }, [files, presentPathsKey]);
+  const eligibleFilesKey = eligibleFiles
+    .map((f) => `${f.repo}\0${f.path}`)
+    .join("\n");
+
   useEffect(() => {
-    if (!active || query.length < 2 || files.length === 0) {
+    if (!active || query.length < 2 || eligibleFiles.length === 0) {
       setGrepResults([]);
       // An earlier grep may have been cancelled mid-flight (e.g. the last repo
       // went missing); its own cleanup never resets the indicator.
       setGrepLoading(false);
       return;
     }
-    const presentPaths = new Set(presentPathsKey.split("\0"));
     setGrepLoading(true);
     const abort = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const allResults: GrepResult[] = [];
         const byRepo = new Map<string, string[]>();
-        for (const f of files) {
-          // `files` can still hold a repo that just went missing; never grep it.
-          if (!presentPaths.has(f.repo)) continue;
+        for (const f of eligibleFiles) {
           if (!byRepo.has(f.repo)) byRepo.set(f.repo, []);
           byRepo.get(f.repo)!.push(f.path);
         }
@@ -225,7 +235,10 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
       clearTimeout(timer);
       abort.abort();
     };
-  }, [active, query, files, presentPathsKey]);
+    // Keyed on the eligible file set, not the `files` array or the presence
+    // key: either can change without changing what a grep would search.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, query, eligibleFilesKey]);
 
   return { scope, setScope, files, grepResults, grepLoading };
 }

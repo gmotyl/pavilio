@@ -168,10 +168,26 @@ describe("useRepoSearch when a linked repo goes missing mid-session", () => {
       return ok([{ status: "M", path: fileFor(repo) }]);
     }
     if (url.includes("/api/git/grep")) {
-      return ok([{ relativePath: fileFor(repo), project: repo, matches: [] }]);
+      // The real `/api/git/grep` shape: `project` is always "" (the hook must
+      // assign the owner repo itself) and only files with a match get a row.
+      const files = (new URL(url, "http://x").searchParams.get("files") ?? "")
+        .split(",")
+        .filter(Boolean);
+      return ok(
+        files.map((f) => ({
+          relativePath: f,
+          project: "",
+          matches: [{ line: 1, text: `match in ${f}` }],
+        })),
+      );
     }
     return ok([]);
   };
+  const grepCalls = (spy: ReturnType<typeof stubFetch>["spy"], from = 0) =>
+    spy.mock.calls
+      .slice(from)
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/api/git/grep"));
 
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -181,31 +197,87 @@ describe("useRepoSearch when a linked repo goes missing mid-session", () => {
   it("drops a repo's results as soon as it goes missing", async () => {
     const { spy, state } = stubFetch(healthy);
     const { result, rerender } = renderHook(
-      ({ repos }) => useRepoSearch({ active: true, repos, query: "ts" }),
-      { initialProps: { repos: [alpha, beta] } },
+      ({ repos, query }) => useRepoSearch({ active: true, repos, query }),
+      { initialProps: { repos: [alpha, beta], query: "ts" } },
     );
 
     await waitFor(() => {
       expect(result.current.files).toHaveLength(2);
       expect(result.current.grepResults).toHaveLength(2);
     });
-    expect(spy.mock.calls.some(([u]) => repoOf(String(u)) === "/git/beta")).toBe(true);
+    expect(grepCalls(spy).some((u) => repoOf(u) === "/git/beta")).toBe(true);
+    // The hook, not the server, names each match's repo.
+    expect(result.current.grepResults.map((r) => r.project).sort()).toEqual([
+      "/git/alpha",
+      "/git/beta",
+    ]);
 
     // Hold the surviving repo's refetch so nothing can land and overwrite state.
     state.answer = (url) => (url.includes("/api/git/status") ? never() : healthy(url));
     const callsBefore = spy.mock.calls.length;
-    rerender({ repos: [alpha, { ...beta, present: false }] });
+    rerender({ repos: [alpha, { ...beta, present: false }], query: "ts" });
 
     expect(result.current.files.map((f) => f.repo)).toEqual(["/git/alpha"]);
     expect(result.current.grepResults.map((r) => r.project)).toEqual(["/git/alpha"]);
 
-    // Past the grep debounce: whatever was requested after the change never
-    // names the missing repo.
-    await new Promise((r) => setTimeout(r, 400));
+    // A fresh grep while the refetch is still held: it must run (so the next
+    // assertion is not vacuous) and must name only the surviving repo.
+    rerender({ repos: [alpha, { ...beta, present: false }], query: "tsx" });
+    await waitFor(() => {
+      expect(
+        grepCalls(spy, callsBefore).some(
+          (u) => repoOf(u) === "/git/alpha" && u.includes("q=tsx"),
+        ),
+      ).toBe(true);
+    });
     const after = spy.mock.calls.slice(callsBefore).map(([u]) => String(u));
     expect(after.some((u) => u.includes("/api/git/status"))).toBe(true);
+    expect(grepCalls(spy, callsBefore).some((u) => repoOf(u) === "/git/beta")).toBe(false);
     expect(after.some((u) => repoOf(u) === "/git/beta")).toBe(false);
     expect(result.current.files.map((f) => f.repo)).toEqual(["/git/alpha"]);
+  });
+
+  it("restoring a repo keeps existing matches and does not re-grep unchanged files", async () => {
+    const { spy, state } = stubFetch(healthy);
+    const { result, rerender } = renderHook(
+      ({ repos }) => useRepoSearch({ active: true, repos, query: "ts" }),
+      { initialProps: { repos: [alpha, { ...beta, present: false }] } },
+    );
+    await waitFor(() => {
+      expect(result.current.grepResults.map((r) => r.project)).toEqual(["/git/alpha"]);
+      expect(result.current.grepLoading).toBe(false);
+    });
+    const alphaMatches = result.current.grepResults;
+
+    // Hold the file-list refresh past the grep debounce.
+    const held: Array<() => void> = [];
+    state.answer = (url) =>
+      url.includes("/api/git/status")
+        ? new Promise<Response>((done) => held.push(() => done(healthy(url) as never)))
+        : healthy(url);
+    const callsBefore = spy.mock.calls.length;
+    rerender({ repos: [alpha, beta] });
+
+    // Beta is present but has contributed no files yet: alpha's search stands.
+    expect(result.current.grepLoading).toBe(false);
+    expect(result.current.grepResults).toEqual(alphaMatches);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(held.length).toBe(2); // both refetches were requested and are held
+    expect(grepCalls(spy, callsBefore)).toEqual([]);
+    expect(result.current.grepLoading).toBe(false);
+    expect(result.current.grepResults).toEqual(alphaMatches);
+
+    // Once beta's files land, one grep per repo covers the new file set.
+    held.forEach((release) => release());
+    await waitFor(() => {
+      expect(result.current.grepResults.map((r) => r.project).sort()).toEqual([
+        "/git/alpha",
+        "/git/beta",
+      ]);
+    });
+    const greps = grepCalls(spy, callsBefore);
+    expect(greps.filter((u) => repoOf(u) === "/git/alpha")).toHaveLength(1);
+    expect(greps.filter((u) => repoOf(u) === "/git/beta")).toHaveLength(1);
   });
 
   it("does not fan out commit files for a repo that went missing", async () => {
@@ -242,20 +314,29 @@ describe("useRepoSearch when a linked repo goes missing mid-session", () => {
   });
 
   it("stops the search indicator when the last repo goes missing", async () => {
-    const { spy } = stubFetch((url) =>
-      url.includes("/api/git/grep") ? never() : healthy(url),
-    );
+    const { spy, state } = stubFetch(healthy);
     const { result, rerender } = renderHook(
-      ({ repos }) => useRepoSearch({ active: true, repos, query: "ts" }),
-      { initialProps: { repos: [alpha] } },
+      ({ repos, query }) => useRepoSearch({ active: true, repos, query }),
+      { initialProps: { repos: [alpha], query: "ts" } },
     );
 
+    // A first grep lands matches on screen.
     await waitFor(() => {
-      expect(spy.mock.calls.some(([u]) => String(u).includes("/api/git/grep"))).toBe(true);
+      expect(result.current.grepResults.map((r) => r.project)).toEqual(["/git/alpha"]);
+      expect(result.current.grepLoading).toBe(false);
+    });
+
+    // A second grep is held in flight.
+    state.answer = (url) => (url.includes("/api/git/grep") ? never() : healthy(url));
+    const callsBefore = spy.mock.calls.length;
+    rerender({ repos: [alpha], query: "tsx" });
+    await waitFor(() => {
+      expect(grepCalls(spy, callsBefore).some((u) => u.includes("q=tsx"))).toBe(true);
     });
     expect(result.current.grepLoading).toBe(true);
+    expect(result.current.grepResults).toHaveLength(1);
 
-    rerender({ repos: [{ ...alpha, present: false }] });
+    rerender({ repos: [{ ...alpha, present: false }], query: "tsx" });
 
     await waitFor(() => {
       expect(result.current.grepLoading).toBe(false);
