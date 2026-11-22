@@ -104,22 +104,25 @@ function Search() {
 
 export function renderCode(search = "?view=code", routes: Record<string, FetchHandler> = {}) {
   const fetch = codeFetch(routes);
-  const utils = render(
+  const tree = (repos: typeof REPOS) => (
     <MemoryRouter initialEntries={[`/project/pavilio/repos${search}`]}>
       <Routes>
         <Route
           path="/project/:name/:section"
           element={
             <>
-              <ReposTab project="pavilio" repos={REPOS} />
+              <ReposTab project="pavilio" repos={repos} />
               <Search />
             </>
           }
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
-  return { fetch, ...utils };
+  const utils = render(tree(REPOS));
+  /** Same mounted tree, new linked repos (as when the project's repo list refreshes). */
+  const setRepos = (repos: typeof REPOS) => utils.rerender(tree(repos));
+  return { fetch, setRepos, ...utils };
 }
 
 export const urlParams = (el: HTMLElement) => new URLSearchParams(el.textContent ?? "");

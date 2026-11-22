@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse } from "../../../test-utils";
-import { A_DIFF, calls, DrivenResizeObserver, FEAT, MAIN, MISSING, renderCode, urlParams } from "./codeHarness";
+import { A_DIFF, calls, DrivenResizeObserver, FEAT, MAIN, MISSING, REPOS, renderCode, urlParams } from "./codeHarness";
 
 const search = () => urlParams(screen.getByTestId("search"));
 const rail = () => screen.queryByRole("complementary", { name: "Outline" });
@@ -67,6 +67,24 @@ describe("CodeView", () => {
     await screen.findByTestId("file-viewer");
     expect(calls(fetch, `/api/git/tree?repo=${encodeURIComponent(MAIN)}`)).toHaveLength(1);
     expect(fetch.mock.calls.some(([u]) => decodeURIComponent(String(u)).includes("/elsewhere"))).toBe(false);
+  });
+
+  it("an unlisted wt param is cleared from the URL once the listing arrives", async () => {
+    renderCode("?view=code&wt=%2Felsewhere&file=README.md");
+    await screen.findByTestId("ft-file-README.md");
+    await waitFor(() => expect(search().get("wt")).toBeNull());
+    expect(search().get("file")).toBe("README.md");
+  });
+
+  it("a changed repo list keeps the open worktree mounted while it relists", async () => {
+    const { fetch, setRepos } = renderCode(`?view=code&wt=${encodeURIComponent(FEAT)}`);
+    fireEvent.click(await screen.findByTestId("ft-dir-src"));
+    await screen.findByTestId("ft-file-src/feat.ts");
+    setRepos([...REPOS, { name: "extra", path: "/root/extra", present: true }]);
+    expect(screen.queryByText("Listing worktrees…")).toBeNull();
+    expect(screen.getByTestId("ft-file-src/feat.ts")).toBeInTheDocument();
+    await waitFor(() => expect(calls(fetch, "/api/git/worktrees?repo=%2Froot%2Fextra")).toHaveLength(1));
+    expect(calls(fetch, `/api/git/tree?repo=${encodeURIComponent(FEAT)}`)).toHaveLength(1);
   });
 
   it("a listed wt param opens that worktree once the listing arrives", async () => {

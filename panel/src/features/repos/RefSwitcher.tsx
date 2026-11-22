@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import BranchPicker from "../git/BranchPicker";
 import type { RepoEntry } from "../projects/useProjects";
 import "./Code.css";
@@ -28,13 +28,14 @@ async function listWorktrees(repo: RepoEntry): Promise<Worktree[]> {
 
 /** Worktrees of every present repo; a missing repo is never queried. */
 export function useWorktrees(repos: RepoEntry[]): WorktreeMap {
-  const [map, setMap] = useState<WorktreeMap>({});
-  const key = repos.map((r) => `${r.name}\0${r.path}\0${r.present ? 1 : 0}`).join("\n");
+  // Each listing remembers the repo identity it was made for.
+  const [lists, setLists] = useState<Record<string, { id: string; list: Worktree[] }>>({});
+  const id = (r: RepoEntry) => `${r.path}\0${r.present ? 1 : 0}`;
+  const key = repos.map((r) => `${r.name}\0${id(r)}`).join("\n");
   useEffect(() => {
     let cancelled = false;
-    setMap({});
     for (const repo of repos.filter((r) => r.present)) {
-      listWorktrees(repo).then((list) => !cancelled && setMap((m) => ({ ...m, [repo.name]: list })));
+      listWorktrees(repo).then((list) => !cancelled && setLists((m) => ({ ...m, [repo.name]: { id: id(repo), list } })));
     }
     return () => {
       cancelled = true;
@@ -42,7 +43,16 @@ export function useWorktrees(repos: RepoEntry[]): WorktreeMap {
     // Keyed on the repo identities, not the array instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  return map;
+  // Not reset on a key change: a still-valid listing stays, so the open checkout is not unmounted.
+  return useMemo(() => {
+    const map: WorktreeMap = {};
+    for (const r of repos) {
+      const entry = lists[r.name];
+      if (r.present && entry?.id === id(r)) map[r.name] = entry.list;
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, lists]);
 }
 
 interface Props {

@@ -1,7 +1,8 @@
 import { Router, type Response } from "express";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
-import { lstatSync, readFileSync, realpathSync, statSync } from "fs";
+import { readFileSync, realpathSync, statSync } from "fs";
+import { lstat, readFile } from "fs/promises";
 import { isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
@@ -318,13 +319,30 @@ function parseNumstat(buf: Buffer): Map<string, Counts> {
 
 // Untracked files are counted from disk only when small enough to read on every listing.
 const UNTRACKED_COUNT_MAX_BYTES = 64 * 1024;
+// Per listing: a tree full of generated files must not stall the request.
+const UNTRACKED_COUNT_MAX_FILES = 500;
+const UNTRACKED_COUNT_MAX_TOTAL = 4 * 1024 * 1024;
 
-function untrackedCounts(root: string, path: string): Counts | undefined {
+type CountBudget = { files: number; bytes: number; spent: boolean };
+
+/** Line count of an untracked file, or undefined when unreadable, too big or past the budget. */
+async function untrackedCounts(root: string, path: string, budget: CountBudget): Promise<Counts | undefined> {
+  if (budget.spent) return undefined;
+  if (budget.files >= UNTRACKED_COUNT_MAX_FILES) {
+    budget.spent = true;
+    return undefined;
+  }
+  budget.files++;
   try {
     const abs = join(root, path);
-    const st = lstatSync(abs);
+    const st = await lstat(abs);
     if (!st.isFile() || st.size > UNTRACKED_COUNT_MAX_BYTES) return undefined;
-    const buf = readFileSync(abs);
+    if (budget.bytes + st.size > UNTRACKED_COUNT_MAX_TOTAL) {
+      budget.spent = true;
+      return undefined;
+    }
+    budget.bytes += st.size;
+    const buf = await readFile(abs);
     if (isBinary(buf)) return { add: 0, del: 0 };
     const text = buf.toString("utf-8");
     const lines = text.split("\n").length - (text.endsWith("\n") || text === "" ? 1 : 0);
@@ -351,12 +369,19 @@ async function workingTreeFiles(root: string): Promise<TreeEntry[]> {
   const counts = status.size
     ? parseNumstat(await gitArgv(["diff", "-z", "-M", "--numstat", await headOrEmptyTree(root)], root))
     : new Map<string, Counts>();
-  return [...paths].sort().map((path) => {
+  const budget: CountBudget = { files: 0, bytes: 0, spent: false };
+  const out: TreeEntry[] = [];
+  // Sequential so the budget is spent in listing order.
+  for (const path of [...paths].sort()) {
     const st = status.get(path) ?? null;
-    if (!st) return { path, status: st };
-    const c = st === "?" ? untrackedCounts(root, path) : (counts.get(path) ?? { add: 0, del: 0 });
-    return c ? { path, status: st, ...c } : { path, status: st };
-  });
+    if (!st) {
+      out.push({ path, status: st });
+      continue;
+    }
+    const c = st === "?" ? await untrackedCounts(root, path, budget) : (counts.get(path) ?? { add: 0, del: 0 });
+    out.push(c ? { path, status: st, ...c } : { path, status: st });
+  }
+  return out;
 }
 
 // Files at a ref, or the working tree (incl. untracked, .gitignore honoured) with status
@@ -475,19 +500,35 @@ router.get("/status", (req, res) => {
   }
 });
 
+// Larger untracked files get a marker instead of a synthesized diff.
+const UNTRACKED_DIFF_MAX_BYTES = 1024 * 1024;
+
+type HeadDiff = { diff: string; tooLarge?: true; binary?: true };
+
 /** Working tree vs HEAD (staged + unstaged); untracked files as a synthesized add. */
-async function diffAgainstHead(file: string, repo?: string): Promise<string> {
+async function diffAgainstHead(file: string, repo?: string): Promise<HeadDiff> {
   const path = repoRelativePath(file);
   const root = await repoToplevel(repo);
   const base = await headOrEmptyTree(root);
   const diff = (await gitArgv(["diff", "--no-color", "--no-ext-diff", base, "--", path], root)).toString("utf-8");
-  if (diff.trim()) return diff;
+  if (diff.trim()) return { diff };
   const status = (await gitArgv(["status", "--porcelain=v1", "-z", "--", path], root)).toString("utf-8");
-  if (!status.startsWith("??")) return diff;
+  if (!status.startsWith("??")) return { diff };
   // An untracked symlink may point outside the repo.
-  const real = realpathSync(join(root, path));
+  let real: string;
+  try {
+    real = realpathSync(join(root, path));
+  } catch (e: any) {
+    if (e?.code === "ENOENT") throw new GitInputError(`${path} not found`, 404);
+    throw e;
+  }
   if (!real.startsWith(realpathSync(root) + sep)) throw new GitInputError("path escapes the repo");
-  return synthesizeAddDiff(path, readFileSync(real, "utf-8"));
+  const st = statSync(real);
+  if (!st.isFile()) throw new GitInputError(`${path} is not a file`, 404);
+  if (st.size > UNTRACKED_DIFF_MAX_BYTES) return { diff: "", tooLarge: true };
+  const buf = readFileSync(real);
+  if (isBinary(buf)) return { diff: "", binary: true };
+  return { diff: synthesizeAddDiff(path, buf.toString("utf-8")) };
 }
 
 /** A commit's first parent, or the empty tree for a root commit. */
@@ -511,7 +552,7 @@ router.get("/diff", async (req, res) => {
     const against = queryString(req.query.against);
     if (against !== undefined) {
       if (against !== "HEAD") throw new GitInputError("against must be HEAD");
-      return res.json({ diff: await diffAgainstHead(file, repo) });
+      return res.json(await diffAgainstHead(file, repo));
     }
     const quotedFile = quoteShellArg(file);
     const diff = sha

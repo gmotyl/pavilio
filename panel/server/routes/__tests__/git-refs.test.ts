@@ -94,6 +94,31 @@ describe("ref-based git reads", () => {
     expect(res.body.files).toEqual([{ path: "n.txt", status: "A", add: 2, del: 0 }]);
   });
 
+  it("stops counting untracked files past the file budget and still lists them", async () => {
+    mkdirSync(join(repoDir, "n"));
+    for (let i = 0; i < 510; i++) writeFileSync(join(repoDir, "n", `f${String(i).padStart(3, "0")}.txt`), "x\n");
+    const res = await get("tree", {});
+    expect(res.status).toBe(200);
+    const untracked = res.body.files.filter((f: { status: string }) => f.status === "?");
+    expect(untracked).toHaveLength(511);
+    expect(untracked.filter((f: { add?: number }) => f.add !== undefined)).toHaveLength(500);
+    expect(untracked.find((f: { path: string }) => f.path === "n/f499.txt")).toEqual({ path: "n/f499.txt", status: "?", add: 1, del: 0 });
+    expect(untracked.find((f: { path: string }) => f.path === "n/f500.txt")).toEqual({ path: "n/f500.txt", status: "?" });
+    expect(untracked.find((f: { path: string }) => f.path === "u.txt")).toEqual({ path: "u.txt", status: "?" });
+  });
+
+  it("stops counting untracked files past the byte budget", async () => {
+    mkdirSync(join(repoDir, "n"));
+    const chunk = "y".repeat(63) + "\n";
+    // 70 files of 60 KiB: the 4 MiB budget runs out after 68.
+    for (let i = 0; i < 70; i++) writeFileSync(join(repoDir, "n", `g${String(i).padStart(2, "0")}.txt`), chunk.repeat(960));
+    const res = await get("tree", {});
+    expect(res.status).toBe(200);
+    const counted = res.body.files.filter((f: { path: string; add?: number }) => f.path.startsWith("n/") && f.add !== undefined);
+    expect(counted).toHaveLength(68);
+    expect(res.body.files.find((f: { path: string }) => f.path === "n/g69.txt")).toEqual({ path: "n/g69.txt", status: "?" });
+  });
+
   it("lists files at a ref", async () => {
     const res = await get("tree", { ref: PR_REF });
     expect(res.status).toBe(200);
@@ -243,6 +268,21 @@ describe("ref-based git reads", () => {
     const out = await get("diff", { file: "out.txt", against: "HEAD" });
     expect(out.status).toBe(400);
     expect(JSON.stringify(out.body)).not.toContain("secret\\n");
+  });
+
+  it("guards untracked diffs against HEAD: size cap, binary, vanished file", async () => {
+    writeFileSync(join(repoDir, "big.txt"), "z".repeat(1024 * 1024 + 1));
+    const big = await get("diff", { file: "big.txt", against: "HEAD" });
+    expect(big.status).toBe(200);
+    expect(big.body).toEqual({ diff: "", tooLarge: true });
+
+    writeFileSync(join(repoDir, "bin.dat"), Buffer.from([1, 0, 2, 3]));
+    const bin = await get("diff", { file: "bin.dat", against: "HEAD" });
+    expect(bin.status).toBe(200);
+    expect(bin.body).toEqual({ diff: "", binary: true });
+
+    symlinkSync(join(repoDir, "gone.txt"), join(repoDir, "dangling.txt"));
+    expect((await get("diff", { file: "dangling.txt", against: "HEAD" })).status).toBe(404);
   });
 
   it("diffs against HEAD before the first commit", async () => {

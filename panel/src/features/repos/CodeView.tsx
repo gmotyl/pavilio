@@ -349,6 +349,12 @@ export default function CodeView({ repos, params, setParams, contextSlot, search
   const waiting = !!asked && !!repo?.present && !listed;
   const root = repo?.present && !waiting ? (wt ?? repo.path) : null;
 
+  const stale = !!asked && !!listed && !wt;
+  // Drop a wt the listing doesn't know, so the URL matches what is shown.
+  useEffect(() => {
+    if (stale) setParams({ wt: null });
+  }, [stale, setParams]);
+
   const pick = (name: string, path: string | null) => setParams({ repo: name, wt: path, file: null, line: null, cmp: null });
 
   let body: ReactNode;

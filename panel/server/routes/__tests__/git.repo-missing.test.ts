@@ -67,6 +67,11 @@ describe("git routes and a repo missing on this machine", () => {
       ["status", () => request(app()).get(`/api/git/status?repo=${q}`)],
       ["diff", () => request(app()).get(`/api/git/diff?file=a.txt&repo=${q}`)],
       [
+        "diff (against HEAD)",
+        () => request(app()).get(`/api/git/diff?file=a.txt&against=HEAD&repo=${q}`),
+      ],
+      ["tree", () => request(app()).get(`/api/git/tree?repo=${q}`)],
+      [
         "diff (sha)",
         () => request(app()).get(`/api/git/diff?file=a.txt&sha=abc&repo=${q}`),
       ],
