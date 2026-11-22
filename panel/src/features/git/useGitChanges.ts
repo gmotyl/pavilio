@@ -78,6 +78,8 @@ export function useGitChanges(repo?: string) {
               const data = await res.json();
               if (res.ok) {
                 setBranch(data.branch);
+                // A stage/commit/push error belongs to the branch just left.
+                setActionError("");
                 await refresh();
                 await fetchBranches();
               } else {
