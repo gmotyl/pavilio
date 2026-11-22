@@ -1,0 +1,51 @@
+import { describe, it, expect, vi } from "vitest";
+import request from "supertest";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+import { configMock, makeApp, withProjectsDir } from "../../test-kit";
+import type { TsNav } from "../../lib/ts-nav";
+
+const projects = withProjectsDir("code-route-");
+vi.mock("../../config", () => configMock(() => projects.dir()));
+
+import { createCodeRouter } from "../code";
+
+function setup() {
+  const repo = join(projects.root(), "repo");
+  mkdirSync(repo);
+  const dir = join(projects.dir(), "proj");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "PROJECT.md"), "# proj\n");
+  writeFileSync(join(dir, "repos.json"), JSON.stringify([{ name: "repo", path: repo }]));
+  const nav = {
+    definition: vi.fn(async () => [{ path: "src/a.ts", line: 1, col: 1 }]),
+    activeRoots: () => [],
+    dispose: () => {},
+  } satisfies TsNav;
+  return { repo, nav, app: makeApp(createCodeRouter(nav), "/api/code") };
+}
+
+describe("/api/code/definition", () => {
+  it("answers the definitions for a linked repo", async () => {
+    const { repo, nav, app } = setup();
+    const res = await request(app).get("/api/code/definition").query({ repo, path: "src/b.ts", line: "3", col: "7" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ locations: [{ path: "src/a.ts", line: 1, col: 1 }] });
+    expect(nav.definition).toHaveBeenCalledWith(repo, "src/b.ts", 3, 7);
+  });
+
+  it("rejects an unlinked repo, an escaping path and a bad position", async () => {
+    const { repo, nav, app } = setup();
+    for (const q of [
+      { repo: "/somewhere/else", path: "a.ts", line: "1", col: "1" },
+      { repo, path: "../outside.ts", line: "1", col: "1" },
+      { repo, path: "/etc/a.ts", line: "1", col: "1" },
+      { repo, path: "a.ts", line: "0", col: "1" },
+      { repo, path: "a.ts", line: "1", col: "x" },
+    ]) {
+      const res = await request(app).get("/api/code/definition").query(q);
+      expect(res.status).toBe(400);
+    }
+    expect(nav.definition).not.toHaveBeenCalled();
+  });
+});
