@@ -153,27 +153,6 @@ export function synthesizeAddDiff(file: string, content: string): string {
   return header + bodyLines.map((l) => `+${l}`).join("\n");
 }
 
-function getBranchDiff(base: string, file: string, repo?: string): string {
-  const quotedFile = quoteShellArg(file);
-  const diff = git(`diff ${base}...HEAD -- ${quotedFile}`, repo);
-  if (diff.trim()) return diff;
-
-  // Empty diff can happen for added files (some git configs + path quirks),
-  // renames without content change, or identical content across the branch
-  // boundary that still appears in --name-status. Fall back to synthesizing
-  // an add-diff from the file's HEAD blob so the viewer shows something
-  // meaningful instead of "No changes".
-  try {
-    const content = git(`show HEAD:${quotedFile}`, repo);
-    if (content.length > 0) return synthesizeAddDiff(file, content);
-  } catch (e) {
-    if (e instanceof RepoMissingError) throw e;
-    // file may not exist at HEAD (deleted) — fall through
-  }
-
-  return diff;
-}
-
 // --- Ref-based reads (argv, no shell: refs and paths come straight from the query) ---
 
 // PR trees and diffs can be large; execFile's 1 MiB default would truncate them.
@@ -806,53 +785,6 @@ router.get("/branches", (req, res) => {
       .map((b) => b.trim());
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
     res.json({ current, branches });
-  } catch (e: any) {
-    sendGitError(res, e);
-  }
-});
-
-// Files changed between base branch and HEAD (three-dot diff = since divergence)
-router.get("/branch-diff-files", (req, res) => {
-  try {
-    const base = req.query.base as string;
-    const repo = req.query.repo as string | undefined;
-    if (!base)
-      return res.status(400).json({ error: "base parameter required" });
-    const raw = git(`diff --name-status ${base}...HEAD`, repo);
-    const files = raw
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [status, ...pathParts] = line.split("\t");
-        return { status: status.charAt(0), path: pathParts.join("\t") };
-      });
-    // Also get commit count ahead
-    let commitsAhead = 0;
-    try {
-      commitsAhead =
-        parseInt(git(`rev-list --count ${base}..HEAD`, repo).trim()) || 0;
-    } catch (e) {
-      if (e instanceof RepoMissingError) throw e;
-    }
-    res.json({ files, commitsAhead });
-  } catch (e: any) {
-    sendGitError(res, e);
-  }
-});
-
-// Diff for a specific file between branches
-router.get("/branch-diff", (req, res) => {
-  try {
-    const file = req.query.file as string;
-    const base = req.query.base as string;
-    const repo = req.query.repo as string | undefined;
-    if (!file)
-      return res.status(400).json({ error: "file parameter required" });
-    if (!base)
-      return res.status(400).json({ error: "base parameter required" });
-    const diff = getBranchDiff(base, file, repo);
-    res.json({ diff });
   } catch (e: any) {
     sendGitError(res, e);
   }
