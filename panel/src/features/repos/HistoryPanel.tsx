@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useGitLog, type Commit } from "../git/useGitHistory";
 
 interface Props {
@@ -20,14 +21,24 @@ function ago(iso: string): string {
 
 /** Recent commits; picking one shows its files in the tree. */
 export default function HistoryPanel({ root, sha, onPick }: Props) {
-  const commits = useGitLog(root);
+  const [attempt, setAttempt] = useState(0);
+  const log = useGitLog(root, undefined, attempt);
   return (
     <aside className="cv-rail cv-panel" aria-label="History" data-testid="code-history-panel">
       <h4>History</h4>
-      {commits.length === 0 ? (
+      {log.status === "loading" ? (
+        <p className="cv-rail-empty">Loading history…</p>
+      ) : log.status === "error" ? (
+        <p className="cv-rail-empty" role="alert">
+          Couldn't load history ({log.error}).{" "}
+          <button type="button" data-testid="history-retry" onClick={() => setAttempt((n) => n + 1)}>
+            Retry
+          </button>
+        </p>
+      ) : log.commits.length === 0 ? (
         <p className="cv-rail-empty">No commits.</p>
       ) : (
-        commits.map((c) => (
+        log.commits.map((c) => (
           <button
             key={c.sha}
             type="button"

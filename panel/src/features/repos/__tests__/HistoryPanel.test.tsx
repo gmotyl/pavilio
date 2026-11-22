@@ -46,4 +46,22 @@ describe("HistoryPanel", () => {
     await screen.findByTestId("ft-file-README.md");
     expect(screen.queryByTestId("code-commit-indicator")).toBeNull();
   });
+
+  it("a failed history load says so and retries", async () => {
+    let fail = true;
+    renderCode("?view=code", {
+      "/api/git/log": () =>
+        fail
+          ? jsonResponse({ error: "boom" }, { status: 500 })
+          : jsonResponse([{ sha: SHA, shortSha: "ddddddd", message: "add docs", author: "me", date: new Date().toISOString() }]),
+    });
+    fireEvent.click(await screen.findByTestId("code-history-toggle"));
+    const p = await waitFor(() => screen.getByRole("complementary", { name: "History" }));
+    expect(await within(p).findByRole("alert")).toHaveTextContent("Couldn't load history");
+    expect(p).not.toHaveTextContent("No commits.");
+
+    fail = false;
+    fireEvent.click(within(p).getByTestId("history-retry"));
+    expect(await within(p).findByTestId(`history-commit-${SHA}`)).toBeInTheDocument();
+  });
 });
