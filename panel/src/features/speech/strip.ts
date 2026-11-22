@@ -22,6 +22,9 @@
  * brackets are the point — no answer contains them, so the substitution
  * downstream cannot collide with the response's own prose.
  *
+ * A parenthesised citation made only of links is dropped whole, text and
+ * parentheses, so a wiki answer's repeated sources are not read out each time.
+ *
  * An address is the one removal with a *named* exception: `[text](url)` keeps
  * its text and gets no sentinel, because the sentence around it already reads
  * as a whole sentence without the address. Only an address with nothing
@@ -129,6 +132,26 @@ const LINK_RE = new RegExp(String.raw`\[(${LINK_TEXT})\]${LINK_TAIL}`, "g");
  * it is left to the link rule, which keeps that text.
  */
 const WIKILINK_RE = /\[\[([^\[\]\n]*)\]\](?!\()/g;
+
+/**
+ * One link of either kind: `[[wikilink]]`, or a markdown `[text](url)` /
+ * `[text][ref]`. Used only to recognise a parenthesis that holds nothing else.
+ */
+const LINK_ITEM = String.raw`(?:\[\[[^\[\]\n]*\]\]|\[${LINK_TEXT}\]${LINK_TAIL})`;
+
+/**
+ * A parenthesis whose whole content is links — `([title](url))`, `([[page]])`,
+ * `([[a]]; [[b]])`. That is how a wiki answer cites its sources, and read aloud
+ * the citation is the same few words again after every claim. Matched with its
+ * parentheses so none are left behind to be voiced as an empty aside.
+ *
+ * Only a parenthesis with *nothing but* links in it: `(see [[a]])` carries
+ * words of its own and is spoken, link text included.
+ */
+const PARENTHESISED_LINKS_RE = new RegExp(
+  String.raw`\(\s*${LINK_ITEM}(?:\s*[,;]?\s*${LINK_ITEM})*\s*\)`,
+  "g",
+);
 
 /**
  * A reference definition's destination: angle-bracketed, or a run without
@@ -475,6 +498,17 @@ function reduceLinks(segment: string): string {
  * but speech drops it (per spec), since the raw brackets and path are nothing a
  * listener could use.
  */
+/**
+ * Drops a parenthesised citation made only of links, parentheses included. Like
+ * a link, it never abuts a word character on its left: `f([a](x))` is a call,
+ * not a citation.
+ */
+function dropParenthesisedLinks(segment: string): string {
+  return segment.replace(PARENTHESISED_LINKS_RE, (match: string, offset: number) =>
+    offset > 0 && /\w/.test(segment[offset - 1]) ? match : "",
+  );
+}
+
 function reduceWikiLinks(segment: string): string {
   return segment.replace(WIKILINK_RE, (_match, inner: string) => parseWikiLink(inner)?.label ?? "");
 }
@@ -518,7 +552,7 @@ function reduceAddresses(line: string): string {
 
   // Wikilinks first: `[[a]]` is not a markdown link, but the link rule must
   // never see its brackets. Both skip code spans, where `[[…]]` is quoted code.
-  return outsideCodeSpans(withoutImages, (text) => reduceLinks(reduceWikiLinks(text))).replace(
+  return outsideCodeSpans(withoutImages, (text) => reduceLinks(reduceWikiLinks(dropParenthesisedLinks(text)))).replace(
     BARE_ADDRESS_RE,
     SENTINEL.link,
   );
