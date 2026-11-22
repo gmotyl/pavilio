@@ -17,7 +17,8 @@ export interface RepoFile {
 
 export interface UseRepoSearchOptions {
   active: boolean;
-  repos: { name: string; path: string }[] | undefined;
+  /** `present: false` marks a linked repo that is not on this machine. */
+  repos: { name: string; path: string; present: boolean }[] | undefined;
   query: string;
 }
 
@@ -28,15 +29,20 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
   const [grepResults, setGrepResults] = useState<GrepResult[]>([]);
   const [grepLoading, setGrepLoading] = useState(false);
 
-  const repoPathsKey = repos?.map((r) => r.path).join(",") ?? "";
+  // Presence is part of the key: a missing repo that appears (or vanishes)
+  // must re-run the search even though no path changed.
+  const repoPathsKey =
+    repos?.map((r) => `${r.path}:${r.present ? 1 : 0}`).join(",") ?? "";
 
   useEffect(() => {
-    if (!active || !repos?.length) {
+    // A repo missing on this machine has nothing to search; every git call
+    // against its path would only fail on the server.
+    const list = repos?.filter((r) => r.present) ?? [];
+    if (!active || !list.length) {
       setFiles([]);
       return;
     }
     let cancelled = false;
-    const list = repos;
     (async () => {
       const all: RepoFile[] = [];
       await Promise.all(
