@@ -1,0 +1,55 @@
+/* Repos tab top bar: crumb, view pills, context slot. */
+.rt-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+.rt-crumb {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.rt-crumb b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.rt-views {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+}
+.rt-views button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.rt-views button[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.rt-n {
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.rt-n-hot { color: var(--accent); }
+.rt-context {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.rt-body { min-width: 0; }
+.rt-placeholder {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.rt-context .rt-placeholder { padding: 0; }

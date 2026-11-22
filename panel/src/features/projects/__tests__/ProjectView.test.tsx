@@ -7,15 +7,9 @@ import { FloatingActionProvider } from "../../shell/Layout";
 import { FloatingActionContext } from "../../shell/Layout/FloatingActionProvider";
 import { mockFetchResponses } from "../../../test-utils";
 
-// The repos tab's sibling blocks each fetch and render a tree of their own.
-// GitHistory is stubbed to report the one prop under test: whether the repo
-// block hands it the file-list sidebar.
-vi.mock("../../git/GitBranchDiff", () => ({ default: () => null }));
-vi.mock("../../git/GitWorktrees", () => ({ default: () => null }));
-vi.mock("../../git/GitHistory", () => ({
-  default: ({ showListSidebar }: { showListSidebar?: boolean }) => (
-    <div data-testid="git-history" data-list-sidebar={String(showListSidebar)} />
-  ),
+// The repos tab is covered by its own suite; here it only has to mount.
+vi.mock("../../repos/ReposTab", () => ({
+  default: ({ project }: { project: string }) => <div data-testid="repos-tab" data-project={project} />,
 }));
 
 /**
@@ -72,15 +66,15 @@ describe("ProjectView layout", () => {
     });
   });
 
-  it("project view is always full width with the list sidebar", async () => {
+  it("project view is always full width and renders the repos tab", async () => {
     // A compact choice an older panel wrote stays in the file, read by nothing.
     prefsDoc()["view.wide@repos"] = false;
     renderReposTab();
 
     const wrapper = await waitFor(() => screen.getByTestId("project-view"));
     expect(wrapper.className).not.toContain("max-w-5xl");
-    const history = await screen.findByTestId("git-history");
-    expect(history.getAttribute("data-list-sidebar")).toBe("true");
+    const tab = await screen.findByTestId("repos-tab");
+    expect(tab.getAttribute("data-project")).toBe("pavilio");
     // No compact/wide toggle anywhere, floating slot included.
     expect(screen.queryByTestId("wide-toggle")).toBeNull();
   });

@@ -2,8 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { refreshFileIndex, useFileIndex } from "../explorer/useFileIndex";
-import { useGitViewMode } from "../git/useGitViewMode";
-import RepoBlock from "./RepoBlock";
+import ReposTab from "../repos/ReposTab";
 import ProjectSearchBar from "./ProjectSearchBar";
 import FileViewer from "./FileViewer";
 import SectionFilesList, { visibleSectionRows } from "./SectionFilesList";
@@ -28,7 +27,6 @@ import { useProjectTabs } from "./useProjectTabs";
 import { useProjectSearch } from "./useProjectSearch";
 import { useRepoSearch } from "./useRepoSearch";
 import { useFileViewer } from "./useFileViewer";
-import { useCommitsOpenMap } from "./useCommitsOpenMap";
 import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectGroupStrip from "./ProjectGroupStrip";
@@ -109,10 +107,6 @@ export default function ProjectView() {
   const scrollContainerRef = useScrollContainer();
   useTabScrollMemory(name, section, scrollContainerRef ?? { current: null });
 
-  const [gitViewMode, setGitViewMode] = useGitViewMode();
-
-  const commitsOpen = useCommitsOpenMap();
-
   const [searchParams, setSearchParams] = useSearchParams();
   useReposTabMemory(name, section, searchParams);
 
@@ -142,7 +136,7 @@ export default function ProjectView() {
     query: search.query,
   });
 
-  const { repoOpenFile, setRepoOpenFile } = useRepoOpenFile({
+  const { setRepoOpenFile } = useRepoOpenFile({
     searchParams,
     setSearchParams,
   });
@@ -357,68 +351,8 @@ export default function ProjectView() {
       )}
 
       {/* Repos tab */}
-      {section === "repos" && !archived && project?.repos && (
-        <div className="space-y-6">
-          {project.repos.map((repo) => (
-            <RepoBlock
-              key={repo.path}
-              repo={repo}
-              viewMode={gitViewMode}
-              onViewModeChange={setGitViewMode}
-              repoOpenFile={repoOpenFile}
-              onSetRepoOpenFile={setRepoOpenFile}
-              branchFile={searchParams.get("branchfile")}
-              onBranchFileChange={(file) =>
-                setSearchParams(
-                  (prev) => {
-                    const p = new URLSearchParams(prev);
-                    if (file) p.set("branchfile", file);
-                    else p.delete("branchfile");
-                    return p;
-                  },
-                  { replace: true },
-                )
-              }
-              activeSha={searchParams.get("sha")}
-              activeFile={searchParams.get("gitfile")}
-              onActiveShaChange={(sha) =>
-                setSearchParams(
-                  (prev) => {
-                    const p = new URLSearchParams(prev);
-                    if (sha) p.set("sha", sha);
-                    else {
-                      p.delete("sha");
-                      p.delete("gitfile");
-                    }
-                    return p;
-                  },
-                  { replace: true },
-                )
-              }
-              onActiveFileChange={(file) =>
-                setSearchParams(
-                  (prev) => {
-                    const p = new URLSearchParams(prev);
-                    if (file) p.set("gitfile", file);
-                    else p.delete("gitfile");
-                    return p;
-                  },
-                  { replace: true },
-                )
-              }
-              commitsOpen={commitsOpen.isOpen(repo.path)}
-              onCommitsOpenChange={(open) =>
-                commitsOpen.setOpen(repo.path, open)
-              }
-              showListSidebar
-              liveHighlight={
-                search.active && search.query.trim().length >= 2
-                  ? search.query.trim()
-                  : undefined
-              }
-            />
-          ))}
-        </div>
+      {section === "repos" && !archived && name && project?.repos && (
+        <ReposTab project={name} repos={project.repos} />
       )}
 
       {/* iTerm tab */}
