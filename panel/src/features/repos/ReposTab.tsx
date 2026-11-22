@@ -8,6 +8,7 @@ import PrsView from "./PrsView";
 import ReviewView from "./ReviewView";
 import type { ParamsPatch, ReposViewProps } from "./types";
 import { usePrs } from "./usePrs";
+import { useSearchShortcut } from "./useSearchShortcut";
 import "./ReposTab.css";
 
 export interface ReposTabProps {
@@ -61,6 +62,10 @@ export default function ReposTab({ project, repos }: ReposTabProps) {
     setStoredView(v);
   };
 
+  const [searchRequest, clearSearchRequest] = useSearchShortcut(() => {
+    if (view !== "code") pick("code");
+  });
+
   const View = VIEWS[view];
 
   return (
@@ -93,6 +98,8 @@ export default function ReposTab({ project, repos }: ReposTabProps) {
           params={params}
           setParams={setParams}
           contextSlot={contextSlot}
+          searchRequest={searchRequest}
+          onSearchHandled={clearSearchRequest}
         />
       </div>
     </div>

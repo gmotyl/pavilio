@@ -4,6 +4,7 @@ import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
 import { isPreferenceScope } from "../../preferences/types";
 import type { GrepResult } from "../search/grep";
+import { grepRepo } from "../repos/useRepoGrep";
 
 export type RepoSearchScope = "changed" | "branch-diff" | "commits";
 
@@ -237,14 +238,9 @@ export function useRepoSearch({ active, repos, query }: UseRepoSearchOptions) {
         }
         await Promise.all(
           [...byRepo.entries()].map(async ([repo, paths]) => {
-            const url = `/api/git/grep?q=${encodeURIComponent(query)}&repo=${encodeURIComponent(repo)}&files=${encodeURIComponent(paths.join(","))}`;
-            const res = await fetch(url, { signal: abort.signal });
-            if (res.ok) {
-              const results: GrepResult[] = await res.json();
-              allResults.push(
-                ...results.map((r) => ({ ...r, project: repo })),
-              );
-            }
+            allResults.push(
+              ...(await grepRepo(repo, query, { files: paths, signal: abort.signal })),
+            );
           }),
         );
         if (!abort.signal.aborted) setGrepResults(allResults);
