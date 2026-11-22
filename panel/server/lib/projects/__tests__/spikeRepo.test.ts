@@ -241,6 +241,16 @@ describe("ensureSpikeRepo", () => {
   it("discovery lists the registered spikes repo", () => {
     makeProject("lab", "research");
     ensureSpikeRepo({ projectsDir, project: "lab", spikesRoot: "~/spikes", home });
-    expect(readProject(projectsDir, "lab").repos).toEqual([{ name: "lab-spikes", path: "~/spikes/lab" }]);
+    // Discovery expands `~` via os.homedir(), so point HOME at the test home for presence.
+    const savedHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      expect(readProject(projectsDir, "lab").repos).toEqual([
+        { name: "lab-spikes", path: "~/spikes/lab", present: true },
+      ]);
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+    }
   });
 });

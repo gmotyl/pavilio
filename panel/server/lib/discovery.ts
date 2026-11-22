@@ -2,13 +2,15 @@ import { readdirSync, existsSync, readFileSync, statSync, realpathSync } from "f
 import { join, relative, isAbsolute, sep } from "path";
 import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
+import { expandHome } from "./paths.js";
 import { isProjectDir } from "./project-dir.js";
 import { projectGroup } from "./projects/group.js";
 import { projectKind, type ProjectKind } from "./projects/kind.js";
 
 export interface RepoEntry {
   name: string;
-  path: string;
+  path: string; // exactly as written in repos.json
+  present: boolean; // the expanded path is a directory on this machine, re-derived on every read
   openspec?: OpenSpecConfig;
 }
 
@@ -89,9 +91,18 @@ export function readProject(root: string, name: string): Project {
         ? raw.flatMap((r) => {
             // Per-entry: a malformed `openspec` config on ONE repo must not
             // drop every other repo in the array — skip just that entry.
+            if (typeof r?.name !== "string" || typeof r?.path !== "string") {
+              console.warn(
+                `[discovery] ${name}/repos.json: skipping repo entry without a string name and path:`,
+                JSON.stringify(r),
+              );
+              return [];
+            }
             try {
               const openspec = parseOpenSpecConfig(r);
-              const entry: RepoEntry = { name: r.name, path: r.path };
+              const present =
+                statSync(expandHome(r.path), { throwIfNoEntry: false })?.isDirectory() ?? false;
+              const entry: RepoEntry = { name: r.name, path: r.path, present };
               if (openspec) entry.openspec = openspec;
               return [entry];
             } catch (err) {
