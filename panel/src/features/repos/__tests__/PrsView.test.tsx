@@ -129,6 +129,35 @@ describe("PrsView", () => {
     expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("pr")).toBe("pavilio#5");
   });
 
+  it("list uses a roving tabindex with arrow, Home and End navigation", async () => {
+    renderPrs();
+    await waitFor(() => expect(rows()).toHaveLength(6));
+    expect(rows().map((r) => r.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
+
+    rows()[0].focus();
+    fireEvent.keyDown(rows()[0], { key: "ArrowDown" });
+    expect(rows()[1]).toHaveFocus();
+    expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1]);
+    fireEvent.keyDown(rows()[1], { key: "End" });
+    expect(rows()[5]).toHaveFocus();
+    fireEvent.keyDown(rows()[5], { key: "ArrowDown" });
+    expect(rows()[5]).toHaveFocus();
+    fireEvent.keyDown(rows()[5], { key: "ArrowUp" });
+    expect(rows()[4]).toHaveFocus();
+    fireEvent.keyDown(rows()[4], { key: "Home" });
+    expect(rows()[0]).toHaveFocus();
+    const firstNumber = rows()[0].getAttribute("data-number");
+    fireEvent.keyDown(rows()[0], { key: "Enter" });
+    expect(new URLSearchParams(screen.getByTestId("search").textContent ?? "").get("pr")).toBe(`pavilio#${firstNumber}`);
+  });
+
+  it("no open pull requests at all says so without Show all", async () => {
+    writePreference(preferences.reposPrFilter, { preset: "mine", author: null }, "pavilio");
+    renderPrs({ me: ME, prs: [], unavailable: [] });
+    expect(await screen.findByText("No open pull requests.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+  });
+
   it("empty match offers Show all", async () => {
     writePreference(preferences.reposPrFilter, { preset: "mine", author: "bob" }, "pavilio");
     renderPrs();

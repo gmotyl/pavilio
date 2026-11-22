@@ -6,6 +6,9 @@ interface Props {
   pr: PullRequest;
   me: string | null;
   selected?: boolean;
+  /** Roving tabindex: only the list's active row is in the tab order. */
+  tabbable?: boolean;
+  onFocus?: () => void;
   onOpen: (pr: PullRequest) => void;
 }
 
@@ -46,15 +49,16 @@ function badge(pr: PullRequest, me: string | null): [string, string] | null {
   return null;
 }
 
-export default function PrRow({ pr, me, selected = false, onOpen }: Props) {
+export default function PrRow({ pr, me, selected = false, tabbable = true, onFocus, onOpen }: Props) {
   const chk = CHECKS[pr.checks];
   const b = badge(pr, me);
   return (
     <li
       className="pr-row"
       role="option"
-      tabIndex={0}
+      tabIndex={tabbable ? 0 : -1}
       aria-selected={selected}
+      onFocus={onFocus}
       data-testid={`pr-row-${prKey(pr)}`}
       data-number={pr.number}
       onClick={() => onOpen(pr)}

@@ -60,6 +60,16 @@ describe("FileTree", () => {
     expect(rowNames()).toEqual(["a.ts", "b1.ts", "B2.ts", "b10.ts"]);
   });
 
+  it("orders names equal ignoring case deterministically", () => {
+    const names = (paths: string[]) => {
+      const { unmount } = render(<FileTree files={paths.map((path) => ({ path }))} onSelect={() => {}} />);
+      const out = rowNames();
+      unmount();
+      return out;
+    };
+    expect(names(["a.ts", "A.ts"])).toEqual(names(["A.ts", "a.ts"]));
+  });
+
   it("gives every row a test id", () => {
     render(<FileTree files={FILES} onSelect={() => {}} />);
     expect(screen.getByTestId("ft-dir-src")).toBe(folder("src"));

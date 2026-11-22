@@ -27,8 +27,10 @@ interface Props {
 }
 
 const isChanged = (f: TreeFile) => !!f.status;
+// Byte-order tie-break keeps names equal under `base` (e.g. `A.ts`/`a.ts`) in a stable order.
 const byName = (a: { name: string }, b: { name: string }) =>
-  a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+  a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }) ||
+  (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 // Maps while building: whole-repo trees reach tens of thousands of files.
 function buildTree(files: TreeFile[]): DirNode {
