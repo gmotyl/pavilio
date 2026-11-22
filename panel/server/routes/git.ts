@@ -114,7 +114,7 @@ function getWorkingTreeDiff(file: string, repo?: string): string {
   if (status === "??") {
     // Read the file directly and synthesize an add-diff. Avoids the
     // `git diff --no-index` argument-parsing quirks and works the same
-    // whether the file is text or otherwise — DiffView falls back
+    // whether the file is text or otherwise — the file viewer falls back
     // gracefully for binary content. If the read fails, fall back to
     // git diff --no-index so the user at least gets git's "Binary files
     // differ" message rather than a 500.
@@ -139,7 +139,7 @@ export function synthesizeAddDiff(file: string, content: string): string {
   const lines = content.split("\n");
   // A trailing newline produces an empty last element; don't count it in the
   // hunk header but keep the "\ No newline at end of file" convention off —
-  // DiffView doesn't need it and it'd just add noise.
+  // the file viewer doesn't need it and it'd just add noise.
   const hasTrailingNewline =
     lines.length > 0 && lines[lines.length - 1] === "";
   const bodyLines = hasTrailingNewline ? lines.slice(0, -1) : lines;

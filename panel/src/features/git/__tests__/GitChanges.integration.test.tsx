@@ -61,6 +61,21 @@ describe("GitChanges integration", () => {
     });
   });
 
+  it("renders the opened diff with the file viewer", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<GitChanges highlight="new" />);
+    await user.click(await screen.findByText("src/app.ts"));
+    const viewer = await screen.findByTestId("file-viewer");
+    expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("src/app.ts");
+    expect(screen.getByTestId("file-viewer-mode-diff")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("file-viewer-layout-unified")).toBeInTheDocument();
+    expect(viewer.querySelector("mark.fv-hl")).toHaveTextContent("new");
+    expect(screen.queryByTestId("git-changes-mode-inline-workspace")).toBeNull();
+
+    await user.click(screen.getByText("Back"));
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+  });
+
   it("shows added file contents for a new file diff", async () => {
     const user = userEvent.setup();
     renderWithRouter(<GitChanges />);
@@ -76,9 +91,7 @@ describe("GitChanges integration", () => {
         ),
       ).toBeInTheDocument();
     });
-    expect(
-      screen.queryByText("No changes (binary or new file)"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("src/new-file.ts");
   });
 
   it("populates commit message from suggestion", async () => {

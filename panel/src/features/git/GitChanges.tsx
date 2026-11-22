@@ -5,15 +5,13 @@ import {
   Check,
   ExternalLink,
   ArrowLeft,
-  Columns2,
-  AlignJustify,
   List,
   FolderTree,
   ChevronRight,
   ChevronDown,
   Folder,
 } from "lucide-react";
-import DiffView, { type DiffMode } from "./DiffView";
+import FileViewer, { type FileViewerProps } from "../repos/viewer/FileViewer";
 import BranchPicker from "./BranchPicker";
 import CopyIconButton from "../shell/CopyIconButton";
 import FileChangeList from "./FileChangeList";
@@ -71,6 +69,10 @@ export function statusColor(s: string) {
   return "var(--text-tertiary)";
 }
 
+/** Porcelain XY status → the viewer's single-letter status. */
+const viewerStatus = (s: string | undefined): FileViewerProps["status"] =>
+  !s ? null : s.includes("D") ? "D" : s === "??" || s.includes("A") ? "A" : "M";
+
 export default function GitChanges({
   repo,
   title,
@@ -104,7 +106,6 @@ export default function GitChanges({
   } = useGitChanges(repo);
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
-  const [diffMode, setDiffMode] = useState<DiffMode>("inline");
   const [diffLoading, setDiffLoading] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // Above the early returns below, where every hook has to be.
@@ -457,62 +458,19 @@ export default function GitChanges({
             <ArrowLeft size={14} />
             Back
           </button>
-          <span
-            className="text-sm font-mono flex-1 truncate"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {activeDiff}
-          </span>
-          <div
-            className="flex rounded-md overflow-hidden"
-            style={{ border: "1px solid var(--border-default)" }}
-          >
-            <button
-              data-testid={`git-changes-mode-inline-${repo ?? "workspace"}`}
-              onClick={() => setDiffMode("inline")}
-              className="p-1.5 transition-colors"
-              style={{
-                background:
-                  diffMode === "inline" ? "var(--bg-active)" : "transparent",
-                color:
-                  diffMode === "inline"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-              }}
-              title="Inline diff"
-            >
-              <AlignJustify size={14} />
-            </button>
-            <button
-              data-testid={`git-changes-mode-side-by-side-${repo ?? "workspace"}`}
-              onClick={() => setDiffMode("side-by-side")}
-              className="p-1.5 transition-colors"
-              style={{
-                background:
-                  diffMode === "side-by-side"
-                    ? "var(--bg-active)"
-                    : "transparent",
-                color:
-                  diffMode === "side-by-side"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-                borderLeft: "1px solid var(--border-default)",
-              }}
-              title="Side by side"
-            >
-              <Columns2 size={14} />
-            </button>
-          </div>
         </div>
         {diffLoading ? (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Loading diff...
           </p>
         ) : (
-          <DiffView
+          <FileViewer
+            key={activeDiff}
+            path={activeDiff}
             diff={diffContent}
-            mode={diffMode}
-            filename={activeDiff}
+            status={viewerStatus(files.find((f) => f.path === activeDiff)?.status)}
+            uncommitted
+            defaultMode="diff"
             highlight={highlight}
           />
         )}
