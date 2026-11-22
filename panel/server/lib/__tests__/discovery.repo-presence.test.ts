@@ -116,6 +116,24 @@ describe("readProject repo presence", () => {
     expect(malformedWarnings).toHaveLength(4);
   });
 
+  it("skips an entry with an empty path", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ok = join(scratch, "ok");
+    mkdirSync(ok);
+    writeRepos([
+      { name: "empty", path: "" },
+      { name: "blank", path: "   " },
+      { name: "ok", path: ok },
+    ]);
+    // An empty path would resolve to the server cwd and count as present, so
+    // git calls for it would silently hit the workspace repository.
+    expect(repos()).toEqual([{ name: "ok", path: ok, present: true }]);
+    const malformedWarnings = warn.mock.calls.filter((c) =>
+      String(c[0]).includes("skipping repo entry"),
+    );
+    expect(malformedWarnings).toHaveLength(2);
+  });
+
   it("keeps an entry whose path cannot be stat'ed as not present", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     // A symlink loop makes stat throw ELOOP rather than return "no entry".

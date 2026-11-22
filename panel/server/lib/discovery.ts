@@ -106,9 +106,15 @@ export function readProject(root: string, name: string): Project {
         ? raw.flatMap((r) => {
             // Per-entry: a malformed `openspec` config on ONE repo must not
             // drop every other repo in the array — skip just that entry.
-            if (typeof r?.name !== "string" || typeof r?.path !== "string") {
+            // A blank path resolves to the server cwd: it would count as present
+            // and its git calls would land in the workspace repository.
+            if (
+              typeof r?.name !== "string" ||
+              typeof r?.path !== "string" ||
+              r.path.trim() === ""
+            ) {
               console.warn(
-                `[discovery] ${name}/repos.json: skipping repo entry without a string name or path:`,
+                `[discovery] ${name}/repos.json: skipping repo entry without a string name or a non-empty string path:`,
                 JSON.stringify(r),
               );
               return [];

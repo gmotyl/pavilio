@@ -168,11 +168,17 @@ router.get("/start-dirs", (req, res) => {
   if (project) {
     try {
       const reposPath = resolve(projectsDir, project, "repos.json");
-      const repos = JSON.parse(readFileSync(reposPath, "utf-8")) as Array<{
-        name: string;
-        path: string;
-      }>;
-      for (const repo of repos) {
+      const repos = JSON.parse(readFileSync(reposPath, "utf-8")) as unknown;
+      for (const repo of Array.isArray(repos) ? repos : []) {
+        // Skip a malformed entry (as discovery does) rather than letting
+        // expandPath throw and end the loop for every repo after it.
+        if (
+          typeof repo?.name !== "string" ||
+          typeof repo?.path !== "string" ||
+          repo.path.trim() === ""
+        ) {
+          continue;
+        }
         // A linked repo that is not on this machine is no place to start a shell.
         const path = expandPath(repo.path);
         if (!isDirectoryOnThisMachine(path)) continue;

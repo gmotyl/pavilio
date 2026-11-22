@@ -155,6 +155,27 @@ describe("git routes and a repo missing on this machine", () => {
     expect(res.body.error).toContain("ELOOP");
   });
 
+  it("checkout reports a stat failure as 500, not a conflict", async () => {
+    const a = join(tmp, "loop-a");
+    const b = join(tmp, "loop-b");
+    symlinkSync(b, a);
+    symlinkSync(a, b);
+    const res = await request(app())
+      .post("/api/git/checkout")
+      .send({ branch: "main", repo: a });
+    expect(res.status).toBe(500);
+    expect(res.body.code).toBeUndefined();
+    expect(res.body.error).toContain("ELOOP");
+  });
+
+  it("checkout still answers 409 for a git checkout failure", async () => {
+    const res = await request(app())
+      .post("/api/git/checkout")
+      .send({ branch: "no-such-branch" });
+    expect(res.status).toBe(409);
+    expect(typeof res.body.error).toBe("string");
+  });
+
   it("stage with an empty batch still answers repo-missing", async () => {
     const missing = join(tmp, "does-not-exist");
     const res = await request(app())

@@ -25,6 +25,21 @@ describe("translateCwd", () => {
       translateCwd("/home/greg/git/prv/pavilio", "/home/greg/", "/home/greg-ip"),
     ).toBe("/home/greg-ip/git/prv/pavilio");
   });
+
+  it("translates the bare git root without a trailing slash", () => {
+    // The sessions route normalises `/home/greg/git/` to `/home/greg/git`;
+    // that is still the owner's git root and must translate like its children.
+    expect(translateCwd("/home/greg/git", "/home/greg", "/home/greg-ip")).toBe(
+      "/home/greg-ip/git",
+    );
+    expect(translateCwd("/home/greg/git/", "/home/greg", "/home/greg-ip")).toBe(
+      "/home/greg-ip/git/",
+    );
+    // A sibling that merely shares the prefix is not the git root.
+    expect(translateCwd("/home/greg/gitlab", "/home/greg", "/home/greg-ip")).toBe(
+      "/home/greg/gitlab",
+    );
+  });
 });
 
 describe("shQuote", () => {

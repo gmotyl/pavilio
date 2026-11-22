@@ -349,10 +349,17 @@ router.get("/grep", (req, res) => {
 
 // Checkout branch
 router.post("/checkout", (req, res) => {
+  const { branch, repo } = req.body ?? {};
+  if (!branch)
+    return res.status(400).json({ error: "branch parameter required" });
+  // Check the repo before the checkout try: a missing repo is a 404 and any
+  // other stat failure (EACCES, ELOOP) a 500, never a 409 checkout conflict.
   try {
-    const { branch, repo } = req.body;
-    if (!branch)
-      return res.status(400).json({ error: "branch parameter required" });
+    assertRepoDirectory(getRepoRoot(repo));
+  } catch (e: any) {
+    return sendGitError(res, e);
+  }
+  try {
     const safe = branch.replace(/[;&|`$]/g, "");
     const output = git(`checkout "${safe}"`, repo);
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();

@@ -103,6 +103,37 @@ describe("terminal routes and directories missing on this machine", () => {
       { label: "present", path: present },
     ]);
   });
+  it("start-dirs skips a malformed entry and keeps the ones after it", async () => {
+    const before = join(root, "before");
+    const after = join(root, "after");
+    mkdirSync(before);
+    mkdirSync(after);
+    mkdirSync(join(projectsDir, "alpha"));
+    writeFileSync(
+      join(projectsDir, "alpha", "repos.json"),
+      JSON.stringify([
+        { name: "before", path: before },
+        { name: "no-path" },
+        { name: "bad-path", path: 7 },
+        { name: "empty", path: "" },
+        null,
+        { name: "after", path: after },
+      ]),
+    );
+
+    const res = await request(makeApp(terminalRouter, "/api/terminal"))
+      .get("/api/terminal/start-dirs")
+      .query({ project: "alpha" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { label: "Projects", path: projectsDir },
+      { label: "Home", path: process.env.HOME || "/tmp" },
+      { label: "before", path: before },
+      { label: "after", path: after },
+    ]);
+  });
+
   it("checks and returns the same expanded path for start dirs", async () => {
     const home = join(root, "home");
     mkdirSync(join(home, "x"), { recursive: true });
