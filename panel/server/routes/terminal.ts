@@ -17,6 +17,7 @@ import { getConfig } from "../config.js";
 import { listOsUsers } from "../lib/os-users.js";
 import { getDefaultUser } from "../lib/project-default-user.js";
 import { isProjectDir } from "../lib/project-dir.js";
+import { isDirectoryOnThisMachine } from "../lib/discovery.js";
 
 function expandPath(p: string): string {
   if (p.startsWith("~/")) return resolve(homedir(), p.slice(2));
@@ -42,6 +43,18 @@ router.post("/sessions", (req, res) => {
     cwd && typeof cwd === "string"
       ? expandPath(cwd)
       : resolve(getConfig().projectsDir, "..");
+  // Checked on the cwd as requested, before createSession's run-as
+  // translation: the translated path is the same shared tree seen through the
+  // target's `~/git` link, and a target without that link falls back to its
+  // home inside createSession — so judging the translated path would refuse a
+  // directory that exists. The omitted-cwd default is never refused here.
+  if (cwd && typeof cwd === "string" && !isDirectoryOnThisMachine(effectiveCwd)) {
+    return res.status(400).json({
+      code: "cwd-missing",
+      path: effectiveCwd,
+      error: `Directory not on this machine: ${effectiveCwd}`,
+    });
+  }
   // An explicit runAsUser in the body always wins; only an omitted (or
   // non-string/empty) value falls back to the project's stored default.
   const effectiveRunAsUser =
@@ -156,6 +169,8 @@ router.get("/start-dirs", (req, res) => {
         path: string;
       }>;
       for (const repo of repos) {
+        // A linked repo that is not on this machine is no place to start a shell.
+        if (!isDirectoryOnThisMachine(repo.path)) continue;
         dirs.push({ label: repo.name, path: expandPath(repo.path) });
       }
     } catch {

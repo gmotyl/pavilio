@@ -49,7 +49,7 @@ function latestWikiLogDate(dir: string): string | null {
  * (ENOENT, but also ELOOP, EACCES, ...) means "not present": a well-formed entry is
  * never dropped just because its path cannot be inspected here.
  */
-function isDirectoryOnThisMachine(path: string): boolean {
+export function isDirectoryOnThisMachine(path: string): boolean {
   try {
     return statSync(expandHome(path), { throwIfNoEntry: false })?.isDirectory() ?? false;
   } catch {
