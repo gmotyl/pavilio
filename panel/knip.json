@@ -8,5 +8,8 @@
     "public/sw.js",
     "server/lib/sync-role-cli.ts",
     "server/lib/machine-id-cli.ts"
+  ],
+  "ignore": [
+    "server/lib/__tests__/fixtures/**"
   ]
 }
