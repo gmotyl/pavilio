@@ -28,6 +28,7 @@ export default function ChangesPanel({ root, selected, onOpen, onChanged }: Prop
             branches={g.branches}
             value={g.branch}
             onChange={(b) => after(g.checkout(b))}
+            disabled={busy}
             align="right"
             testIdPrefix="changes-branch"
             trigger={<>{g.loading === "switching" ? "switching…" : g.branch} ▾</>}
@@ -40,6 +41,14 @@ export default function ChangesPanel({ root, selected, onOpen, onChanged }: Prop
         <p className="cv-panel-err" role="alert">
           {g.checkoutError}{" "}
           <button type="button" data-testid="changes-checkout-error-dismiss" onClick={() => g.setCheckoutError("")}>
+            dismiss
+          </button>
+        </p>
+      )}
+      {g.actionError && (
+        <p className="cv-panel-err" role="alert">
+          {g.actionError}{" "}
+          <button type="button" data-testid="changes-action-error-dismiss" onClick={() => g.setActionError("")}>
             dismiss
           </button>
         </p>

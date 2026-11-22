@@ -17,6 +17,8 @@ interface BranchPickerProps {
   triggerStyle?: React.CSSProperties;
   /** Disambiguator for data-testid when multiple pickers render simultaneously */
   testIdPrefix?: string;
+  /** Blocks opening while another git mutation is in flight. */
+  disabled?: boolean;
 }
 
 export default function BranchPicker({
@@ -29,6 +31,7 @@ export default function BranchPicker({
   triggerClassName,
   triggerStyle,
   testIdPrefix = "branch-picker",
+  disabled = false,
 }: BranchPickerProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -43,6 +46,7 @@ export default function BranchPicker({
   );
 
   useEffect(() => { setHighlightIdx(0); }, [filter]);
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,6 +83,7 @@ export default function BranchPicker({
     <div ref={containerRef} className="relative">
       <button
         data-testid={`${testIdPrefix}-toggle`}
+        disabled={disabled}
         onClick={() => setOpen(!open)}
         className={triggerClassName ?? "text-[11px] font-mono rounded px-1.5 py-0.5 cursor-pointer flex items-center gap-1"}
         style={triggerStyle ?? { background: "var(--bg-base)", color: "var(--text-secondary)", border: "1px solid var(--border-subtle)" }}

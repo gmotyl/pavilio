@@ -100,4 +100,44 @@ describe("ChangesPanel", () => {
     fireEvent.click(await within(p).findByTestId("changes-branch-option-feat/y"));
     await waitFor(() => expect(posts(fetch, "/api/git/checkout")).toEqual([{ branch: "feat/y", repo: MAIN }]));
   });
+
+  it("a rejected commit never pushes and keeps the message", async () => {
+    const routes = committing();
+    routes["/api/git/commit"] = () => jsonResponse({ error: "pre-commit hook failed" }, { status: 500 });
+    const { fetch } = renderCode("?view=code", routes);
+    fireEvent.click(await screen.findByTestId("code-changes-toggle"));
+    const p = await waitFor(() => panel()!);
+    const msg = within(p).getByRole("textbox", { name: "Commit message" });
+    await waitFor(() => expect(msg).toHaveValue("chore: tweak a"));
+    fireEvent.change(msg, { target: { value: "fix: area" } });
+    const commitPush = within(p).getByTestId("changes-commit-push");
+    await waitFor(() => expect(commitPush).toBeEnabled());
+    fireEvent.click(commitPush);
+
+    expect(await within(p).findByRole("alert")).toHaveTextContent("pre-commit hook failed");
+    expect(posts(fetch, "/api/git/commit")).toHaveLength(1);
+    expect(posts(fetch, "/api/git/push")).toEqual([]);
+    expect(msg).toHaveValue("fix: area");
+    expect(commitPush).toBeEnabled();
+  });
+
+  it("the branch picker is locked while a commit is in flight", async () => {
+    const routes = committing();
+    let release!: () => void;
+    routes["/api/git/commit"] = () =>
+      new Promise<Response>((resolve) => {
+        release = () => resolve(jsonResponse({ ok: true }));
+      });
+    renderCode("?view=code", routes);
+    fireEvent.click(await screen.findByTestId("code-changes-toggle"));
+    const p = await waitFor(() => panel()!);
+    const commitPush = within(p).getByTestId("changes-commit-push");
+    await waitFor(() => expect(commitPush).toBeEnabled());
+    const branch = await within(p).findByTestId("changes-branch-toggle");
+    fireEvent.click(commitPush);
+
+    await waitFor(() => expect(branch).toBeDisabled());
+    release();
+    await waitFor(() => expect(branch).toBeEnabled());
+  });
 });

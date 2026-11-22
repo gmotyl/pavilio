@@ -100,6 +100,7 @@ export default function GitChanges({
     loading,
     checkoutError,
     setCheckoutError,
+    actionError,
     stageFiles,
     commit: runCommit,
     checkout: handleCheckout,
@@ -557,6 +558,7 @@ export default function GitChanges({
               branches={branches}
               value={branch}
               onChange={handleCheckout}
+              disabled={!!loading}
               align="left"
               triggerClassName="text-xs px-2 py-0.5 rounded-full font-mono cursor-pointer flex items-center gap-1 transition-colors"
               triggerStyle={{
@@ -778,6 +780,11 @@ export default function GitChanges({
                     style={{ color: "var(--text-muted)" }}
                   >
                     {loading}...
+                  </p>
+                )}
+                {actionError && (
+                  <p role="alert" className="text-xs mt-2" style={{ color: "var(--red)" }}>
+                    {actionError}
                   </p>
                 )}
               </div>

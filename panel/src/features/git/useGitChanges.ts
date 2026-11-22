@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 
 export interface GitFile {
@@ -8,6 +8,14 @@ export interface GitFile {
 
 const post = (url: string, body: unknown) =>
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+/** POST that throws the server's `error` on a non-2xx answer. */
+async function mutate(url: string, body: unknown, fallback: string): Promise<void> {
+  const res = await post(url, body);
+  if (res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  throw new Error(data?.error || fallback);
+}
 
 /**
  * Working-tree changes of one repo plus the stage / commit / push / checkout
@@ -22,6 +30,21 @@ export function useGitChanges(repo?: string) {
   const [commitMsg, setCommitMsg] = useState("");
   const [loading, setLoading] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
+  const [actionError, setActionError] = useState("");
+  // Stage, commit, push and checkout run one at a time: a checkout landing
+  // mid commit-and-push would push whatever branch it switched to.
+  const busy = useRef(false);
+  const exclusive = async <T,>(label: string, run: () => Promise<T>, fallback: T): Promise<T> => {
+    if (busy.current) return fallback;
+    busy.current = true;
+    setLoading(label);
+    try {
+      return await run();
+    } finally {
+      busy.current = false;
+      setLoading("");
+    }
+  };
 
   const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
 
@@ -43,25 +66,29 @@ export function useGitChanges(repo?: string) {
     } catch {}
   };
 
-  const checkout = async (target: string) => {
-    if (target === branch) return;
-    setCheckoutError("");
-    setLoading("switching");
-    try {
-      const res = await post("/api/git/checkout", { branch: target, repo });
-      const data = await res.json();
-      if (res.ok) {
-        setBranch(data.branch);
-        await refresh();
-        await fetchBranches();
-      } else {
-        setCheckoutError(data.error);
-      }
-    } catch (e: any) {
-      setCheckoutError(e.message || "Checkout failed");
-    }
-    setLoading("");
-  };
+  const checkout = (target: string) =>
+    target === branch
+      ? Promise.resolve()
+      : exclusive(
+          "switching",
+          async () => {
+            setCheckoutError("");
+            try {
+              const res = await post("/api/git/checkout", { branch: target, repo });
+              const data = await res.json();
+              if (res.ok) {
+                setBranch(data.branch);
+                await refresh();
+                await fetchBranches();
+              } else {
+                setCheckoutError(data.error);
+              }
+            } catch (e: any) {
+              setCheckoutError(e.message || "Checkout failed");
+            }
+          },
+          undefined,
+        );
 
   const { lastMessage } = useWebSocket();
 
@@ -87,27 +114,52 @@ export function useGitChanges(repo?: string) {
     setSelected(next);
   };
 
-  const stageFiles = async (paths: string[]) => {
-    setLoading("staging");
-    await post("/api/git/stage", { files: paths, repo });
-    setSelected(new Set());
-    await refresh();
-    setLoading("");
-  };
+  const stageFiles = (paths: string[]) =>
+    exclusive(
+      "staging",
+      async () => {
+        setActionError("");
+        try {
+          await mutate("/api/git/stage", { files: paths, repo }, "Stage failed");
+          setSelected(new Set());
+        } catch (e: any) {
+          setActionError(e.message || "Stage failed");
+        }
+        await refresh().catch(() => {});
+      },
+      undefined,
+    );
 
-  /** Resolves true once a commit (and optional push) ran. */
-  const commit = async (push = false): Promise<boolean> => {
-    if (!commitMsg.trim()) return false;
-    setLoading("committing");
-    await post("/api/git/commit", { message: commitMsg, repo });
-    if (push) {
-      setLoading("pushing");
-      await post("/api/git/push", { repo });
-    }
-    setCommitMsg("");
-    await refresh();
-    setLoading("");
-    return true;
+  /**
+   * Resolves true once the commit landed. A failed commit (hook rejection,
+   * nothing staged) never pushes and keeps the message for another try.
+   */
+  const commit = (push = false): Promise<boolean> => {
+    if (!commitMsg.trim()) return Promise.resolve(false);
+    return exclusive(
+      "committing",
+      async () => {
+        setActionError("");
+        try {
+          await mutate("/api/git/commit", { message: commitMsg, repo }, "Commit failed");
+        } catch (e: any) {
+          setActionError(e.message || "Commit failed");
+          return false;
+        }
+        setCommitMsg("");
+        if (push) {
+          setLoading("pushing");
+          try {
+            await mutate("/api/git/push", { repo }, "Push failed");
+          } catch (e: any) {
+            setActionError(e.message || "Push failed");
+          }
+        }
+        await refresh().catch(() => {});
+        return true;
+      },
+      false,
+    );
   };
 
   return {
@@ -122,6 +174,8 @@ export function useGitChanges(repo?: string) {
     loading,
     checkoutError,
     setCheckoutError,
+    actionError,
+    setActionError,
     refresh,
     stageFiles,
     commit,
