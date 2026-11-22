@@ -19,7 +19,7 @@ tool's `model`; elsewhere the harness's small-model tier).
   `scheme://host/<owner>/<repo>` (`ssh://`, `http://`, `git://`) → `https://host/<owner>/<repo>`,
   userinfo such as `user:token@` stripped — never credentials on a page); absent for a local-path
   or `file://` clone. Use it verbatim — never derive or guess one yourself.
-- `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged
+- `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged; the fixed `From …` / `Original:` labels may be translated, but the `[[…]]` target, the URL and the line placement stay exactly as specified
 
 The orchestrator passes these in the prompt; there is no input file to read.
 

@@ -13,7 +13,7 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `url` — external material only (an article, a YouTube transcript, a clone): the original's URL,
   as the orchestrator gives it, already normalised and with any userinfo (`user:token@`) stripped
   (a local-path or `file://` clone has none); never write credentials onto a page
-- `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged
+- `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged; the fixed `From …` / `Original:` labels may be translated, but the `[[…]]` target, the URL and the line placement stay exactly as specified
 
 The orchestrator passes these in the prompt; there is no input file to read.
 
