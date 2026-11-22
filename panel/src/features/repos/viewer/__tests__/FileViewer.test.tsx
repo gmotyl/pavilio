@@ -1,0 +1,164 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { stubFetch } from "../../../../test-utils";
+import { preferences } from "../../../../preferences/declarations";
+import { readPreference } from "../../../../preferences/store";
+import FileViewer from "../FileViewer";
+
+/** A ResizeObserver the test drives: `resize(width)` reports a new content width to every observer. */
+class DrivenResizeObserver {
+  static all: DrivenResizeObserver[] = [];
+  constructor(private cb: ResizeObserverCallback) {
+    DrivenResizeObserver.all.push(this);
+  }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {
+    DrivenResizeObserver.all = DrivenResizeObserver.all.filter((o) => o !== this);
+  }
+  static resize(width: number): void {
+    for (const o of DrivenResizeObserver.all) {
+      o.cb([{ contentRect: { width } } as ResizeObserverEntry], o as unknown as ResizeObserver);
+    }
+  }
+}
+
+const CONTENT = Array.from({ length: 20 }, (_, i) => (i === 14 ? "const area = width * height;" : `line ${i + 1}`)).join("\n");
+// Line 15 changed, line 16 added; everything else unchanged.
+const DIFF = [
+  "--- a/src/geo/area.ts",
+  "+++ b/src/geo/area.ts",
+  "@@ -12,7 +12,8 @@",
+  " line 12",
+  " line 13",
+  " line 14",
+  "-const area = w * h;",
+  "+const area = width * height;",
+  "+line 16",
+  " line 16",
+  " line 17",
+  " line 18",
+].join("\n");
+const NEW_CONTENT = CONTENT.split("\n");
+NEW_CONTENT.splice(15, 0, "line 16");
+const FULL = NEW_CONTENT.slice(0, 20).join("\n");
+
+const changed = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
+  <FileViewer path="src/geo/area.ts" diff={DIFF} content={FULL} status="M" counts={{ add: 2, del: 1 }} defaultMode="diff" {...extra} />
+);
+
+beforeEach(() => {
+  DrivenResizeObserver.all = [];
+  vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
+  stubFetch({}, { ok: true });
+});
+
+describe("FileViewer", () => {
+  it("header shows path, counts and the Diff | Code toggle", () => {
+    render(changed({ uncommitted: true }));
+    const header = screen.getByTestId("file-viewer-header");
+    expect(header).toHaveTextContent("src/geo/area.ts");
+    expect(within(header).getByText("area.ts").tagName).toBe("B");
+    expect(header).toHaveTextContent("+2 −1");
+    expect(header).toHaveTextContent("· modified, uncommitted");
+    expect(screen.getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Split" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unified" })).toBeInTheDocument();
+  });
+
+  it("unchanged file opens in Code without a toggle", () => {
+    render(<FileViewer path="README.md" content={"# hi\nthere"} defaultMode="diff" />);
+    expect(screen.queryByRole("button", { name: "Diff" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Split" })).toBeNull();
+    expect(screen.getByTestId("file-viewer-header")).not.toHaveTextContent("+");
+    expect(screen.getByTestId("file-viewer-body").querySelectorAll("tr[data-line]")).toHaveLength(2);
+  });
+
+  it("falls back to unified below 720px with Split disabled", () => {
+    const { container } = render(changed());
+    act(() => DrivenResizeObserver.resize(1000));
+    expect(container.querySelector("table.fv-split")).not.toBeNull();
+    act(() => DrivenResizeObserver.resize(600));
+    const split = screen.getByRole("button", { name: "Split" });
+    expect(split).toBeDisabled();
+    expect(split).toHaveAttribute("title", "Needs a wider pane");
+    expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector("table.fv-unified")).not.toBeNull();
+    // The stored layout is untouched by a narrow pane.
+    expect(readPreference(preferences.fileViewerDiffLayout)).toBe("split");
+  });
+
+  it("remembers the diff layout across viewers", () => {
+    const first = render(changed());
+    fireEvent.click(screen.getByRole("button", { name: "Unified" }));
+    expect(readPreference(preferences.fileViewerDiffLayout)).toBe("unified");
+    first.unmount();
+    const { container } = render(changed({ path: "src/other.ts" }));
+    expect(screen.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector("table.fv-unified")).not.toBeNull();
+  });
+
+  it("expands a fold on click", () => {
+    render(changed());
+    const fold = screen.getByRole("button", { name: "⋯ Expand 11 unchanged lines" });
+    expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="5"]')).toBeNull();
+    fireEvent.click(fold);
+    expect(screen.queryByRole("button", { name: /Expand/ })).toBeNull();
+    expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="5"]')).not.toBeNull();
+  });
+
+  it("marks only the changed tokens on both sides", () => {
+    const { container } = render(changed());
+    const marks = [...container.querySelectorAll("mark.fv-word")].map((m) => m.textContent);
+    expect(marks).toEqual(["w", "h", "width", "height"]);
+  });
+
+  it("code mode legend and gutter markers render", () => {
+    render(changed({ defaultMode: "code", uncommitted: true }));
+    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Split" })).toBeNull();
+    const legend = screen.getByTestId("file-viewer-legend");
+    expect(legend).toHaveTextContent("added");
+    expect(legend).toHaveTextContent("changed");
+    expect(legend).toHaveTextContent("removed");
+    const body = screen.getByTestId("file-viewer-body");
+    expect(body.querySelector('tr[data-line="15"]')).toHaveAttribute("data-mark", "changed");
+    expect(body.querySelector('tr[data-line="16"]')).toHaveAttribute("data-mark", "added");
+    expect(body.querySelector('tr[data-line="14"]')).not.toHaveAttribute("data-mark");
+    expect(body.querySelectorAll("tr[data-line]")).toHaveLength(20);
+  });
+
+  it("scrollToLine flashes the target line", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(changed({ defaultMode: "code" }));
+      const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+      scroll.mockClear();
+      rerender(changed({ defaultMode: "code", scrollToLine: 7 }));
+      const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-line="7"]')!;
+      expect(scroll).toHaveBeenCalled();
+      expect(scroll.mock.contexts.at(-1)).toBe(row);
+      expect(row).toHaveClass("fv-flash");
+      act(() => vi.advanceTimersByTime(2000));
+      expect(row).not.toHaveClass("fv-flash");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks highlight matches in both modes", () => {
+    const { container } = render(changed({ highlight: "AREA" }));
+    expect(container.querySelectorAll("mark.fv-hl").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    expect([...container.querySelectorAll("mark.fv-hl")].map((m) => m.textContent)).toEqual(["area"]);
+  });
+
+  it("identifiers are clickable in Code when onIdentifierClick is given", () => {
+    const onIdentifierClick = vi.fn();
+    const { container } = render(changed({ defaultMode: "code", onIdentifierClick }));
+    const sym = [...container.querySelectorAll<HTMLElement>("[data-sym]")].find((s) => s.textContent === "height")!;
+    fireEvent.click(sym);
+    expect(onIdentifierClick).toHaveBeenCalledWith({ line: 15, col: 22 }, "height");
+  });
+});
