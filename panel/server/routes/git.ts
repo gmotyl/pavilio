@@ -170,13 +170,13 @@ function refReadEnv(): NodeJS.ProcessEnv {
   };
 }
 
-async function gitArgv(args: string[], cwd: string): Promise<Buffer> {
+async function gitArgv(args: string[], cwd: string, timeout = REF_TIMEOUT_MS): Promise<Buffer> {
   const { stdout } = await execFileAsync("git", args, {
     cwd,
     env: refReadEnv(),
     encoding: "buffer",
     maxBuffer: REF_MAX_BUFFER,
-    timeout: REF_TIMEOUT_MS,
+    timeout,
   });
   return stdout;
 }
@@ -606,18 +606,21 @@ router.get("/commit-files", async (req, res) => {
   }
 });
 
+// Writes run hooks (pre-commit, post-checkout) that may legitimately take long.
+const WRITE_TIMEOUT_MS = 0;
+
 // Stage files
-router.post("/stage", (req, res) => {
+router.post("/stage", async (req, res) => {
   try {
     const { files, repo } = req.body;
-    if (!Array.isArray(files))
+    if (!Array.isArray(files) || !files.every((f) => typeof f === "string" && f !== "" && !f.includes("\0")))
       return res.status(400).json({ error: "files array required" });
     // Checked once up front: an empty batch spawns no git, yet a missing repo
     // must still answer repo-missing rather than "staged: 0".
-    assertRepoDirectory(getRepoRoot(repo));
-    for (const f of files) {
-      git(`add "${f}"`, repo);
-    }
+    const cwd = getRepoRoot(repo);
+    assertRepoDirectory(cwd);
+    // argv after `--`: names are never shell-parsed nor read as options.
+    if (files.length) await gitArgv(["add", "--", ...files], cwd, WRITE_TIMEOUT_MS);
     res.json({ ok: true, staged: files.length });
   } catch (e: any) {
     sendGitError(res, e);
@@ -625,12 +628,14 @@ router.post("/stage", (req, res) => {
 });
 
 // Commit
-router.post("/commit", (req, res) => {
+router.post("/commit", async (req, res) => {
   try {
     const { message, repo } = req.body;
-    if (!message) return res.status(400).json({ error: "message required" });
-    const safe = message.replace(/"/g, '\\"');
-    git(`commit -m "${safe}"`, repo);
+    if (typeof message !== "string" || !message || message.includes("\0"))
+      return res.status(400).json({ error: "message required" });
+    const cwd = getRepoRoot(repo);
+    assertRepoDirectory(cwd);
+    await gitArgv(["commit", "-m", message], cwd, WRITE_TIMEOUT_MS);
     broadcast({ type: "git-change" });
     res.json({ ok: true });
   } catch (e: any) {
@@ -662,28 +667,23 @@ router.get("/branch", (req, res) => {
 });
 
 // Grep within repo files — scoped to specific paths
-router.get("/grep", (req, res) => {
+router.get("/grep", async (req, res) => {
   try {
-    const q = req.query.q as string;
+    const q = queryString(req.query.q);
     const repo = req.query.repo as string | undefined;
-    const filesParam = req.query.files as string | undefined; // comma-separated paths
+    const filesParam = queryString(req.query.files); // comma-separated paths
     if (!q) return res.status(400).json({ error: "q parameter required" });
-    const safeQ = q.replace(/"/g, '\\"');
-    const fileArgs = filesParam
-      ? filesParam
-          .split(",")
-          .map((f) => `"${f.replace(/"/g, '\\"')}"`)
-          .join(" ")
-      : "";
-    const cmd = fileArgs
-      ? `grep -rn --color=never "${safeQ}" -- ${fileArgs}`
-      : `grep -rn --color=never "${safeQ}"`;
+    const cwd = getRepoRoot(repo);
+    assertRepoDirectory(cwd);
+    const files = filesParam ? filesParam.split(",").filter(Boolean) : [];
+    // argv: `-e` keeps a leading `-` a pattern, `--` keeps names paths; no shell sees either.
+    const args = ["grep", "-rn", "--color=never", "-e", q, ...(files.length ? ["--", ...files] : [])];
     let raw = "";
     try {
-      raw = git(cmd, repo);
+      raw = (await gitArgv(args, cwd)).toString("utf-8");
     } catch (e: any) {
-      // git grep returns exit 1 when no matches — that's fine
-      if (e.status === 1) {
+      // git grep exits 1 when nothing matches
+      if (gitExitedNonZero(e) && e.code === 1) {
         res.json([]);
         return;
       }
@@ -714,10 +714,13 @@ router.get("/grep", (req, res) => {
 });
 
 // Checkout branch
-router.post("/checkout", (req, res) => {
+router.post("/checkout", async (req, res) => {
   const { branch, repo } = req.body ?? {};
-  if (!branch)
+  if (typeof branch !== "string" || !branch)
     return res.status(400).json({ error: "branch parameter required" });
+  // A leading `-` would be parsed as an option (e.g. --orphan).
+  if (branch.startsWith("-") || branch.includes("\0"))
+    return res.status(400).json({ error: `invalid branch: ${branch}` });
   // Check the repo before the checkout try: a missing repo is a 404 and any
   // other stat failure (EACCES, ELOOP) a 500, never a 409 checkout conflict.
   try {
@@ -726,8 +729,9 @@ router.post("/checkout", (req, res) => {
     return sendGitError(res, e);
   }
   try {
-    const safe = branch.replace(/[;&|`$]/g, "");
-    const output = git(`checkout "${safe}"`, repo);
+    const cwd = getRepoRoot(repo);
+    // Trailing `--` pins the argument to a branch, never a pathspec.
+    const output = (await gitArgv(["checkout", branch, "--"], cwd, WRITE_TIMEOUT_MS)).toString("utf-8");
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
     broadcast({ type: "git-change" });
     res.json({ ok: true, branch: current, output: output.trim() });
