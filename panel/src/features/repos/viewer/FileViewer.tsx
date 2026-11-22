@@ -188,6 +188,9 @@ function sideHtml(rows: Row[], side: "old" | "new", lang: string | undefined): M
 const prefersReducedMotion = (): boolean =>
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+// git prints this in place of hunks when either side is binary.
+const BINARY_DIFF_RE = /^Binary files .* differ$/m;
+
 const MARK_TITLE: Record<GutterMark, string> = { added: "Added", changed: "Changed", removed: "Lines removed above" };
 const STATUS_TEXT = { M: "modified", A: "new file", D: "deleted" } as const;
 
@@ -215,6 +218,7 @@ export default function FileViewer({
 
   const parsed = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);
   const changed = isChanged(parsed);
+  const binary = !changed && !!diff && BINARY_DIFF_RE.test(diff);
   const rows = useMemo(() => (content != null && changed ? fillGaps(parsed, content) : parsed), [parsed, content, changed]);
   const codeLines = useMemo(
     () => (content != null ? splitLines(content) : changed && status !== "D" ? newSide(parsed) : null),
@@ -348,7 +352,9 @@ export default function FileViewer({
         </tbody>
       </table>
     ) : (
-      <p className="fv-empty">{status === "D" ? "This file was deleted." : "File content is not loaded."}</p>
+      <p className="fv-empty">
+        {binary ? "Binary file — no text diff" : status === "D" ? "This file was deleted." : "File content is not loaded."}
+      </p>
     );
   } else {
     const visible = expandFolds(items, expanded);

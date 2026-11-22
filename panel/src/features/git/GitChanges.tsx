@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   GitBranch,
   Upload,
@@ -106,6 +106,8 @@ export default function GitChanges({
   } = useGitChanges(repo);
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
+  const [fileContent, setFileContent] = useState<string | undefined>(undefined);
+  const openSeq = useRef(0);
   const [diffLoading, setDiffLoading] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // Above the early returns below, where every hook has to be.
@@ -116,17 +118,27 @@ export default function GitChanges({
   }, [branch]);
 
   const openDiff = async (path: string) => {
+    const seq = ++openSeq.current;
     setActiveDiff(path);
     onOpenFileChange?.(path);
     setDiffLoading(true);
-    try {
-      const res = await fetch(
-        `/api/git/diff?file=${encodeURIComponent(path)}${repo ? `&repo=${encodeURIComponent(repo)}` : ""}`,
-      );
-      if (res.ok) setDiffContent((await res.json()).diff);
-    } catch {
-      setDiffContent("");
-    }
+    const repoQ = repo ? `&repo=${encodeURIComponent(repo)}` : "";
+    const deleted = viewerStatus(files.find((f) => f.path === path)?.status) === "D";
+    const [diff, content] = await Promise.all([
+      fetch(`/api/git/diff?file=${encodeURIComponent(path)}${repoQ}`)
+        .then(async (res) => (res.ok ? ((await res.json()).diff as string) : ""))
+        .catch(() => ""),
+      // The whole file feeds Code mode; binary (415) and oversized (413) files fall back to the diff alone.
+      deleted
+        ? undefined
+        : fetch(`/api/git/file?path=${encodeURIComponent(path)}${repoQ}`)
+            .then((res) => (res.ok ? res.text() : undefined))
+            .catch(() => undefined),
+    ]);
+    // A later click wins over a slower earlier response.
+    if (seq !== openSeq.current) return;
+    setDiffContent(diff);
+    setFileContent(content);
     setDiffLoading(false);
   };
 
@@ -468,6 +480,7 @@ export default function GitChanges({
             key={activeDiff}
             path={activeDiff}
             diff={diffContent}
+            content={fileContent}
             status={viewerStatus(files.find((f) => f.path === activeDiff)?.status)}
             uncommitted
             defaultMode="diff"

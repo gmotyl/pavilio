@@ -214,4 +214,17 @@ describe("FileViewer", () => {
     const { container } = render(<FileViewer path="README.md" content={"# Title\nsome words here"} defaultMode="code" onIdentifierClick={vi.fn()} />);
     expect(container.querySelectorAll("[data-sym]")).toHaveLength(0);
   });
+
+  it("a binary diff says there is no text diff instead of content not loaded", () => {
+    const diff = "diff --git a/logo.png b/logo.png\nindex 1111111..2222222 100644\nBinary files a/logo.png and b/logo.png differ\n";
+    render(<FileViewer path="logo.png" diff={diff} status="M" defaultMode="diff" />);
+    expect(screen.getByTestId("file-viewer-body")).toHaveTextContent("Binary file — no text diff");
+    expect(screen.queryByText("File content is not loaded.")).toBeNull();
+  });
+
+  it("a deleted binary file still reads as binary", () => {
+    const diff = "diff --git a/logo.png b/logo.png\ndeleted file mode 100644\nBinary files a/logo.png and /dev/null differ\n";
+    render(<FileViewer path="logo.png" diff={diff} status="D" defaultMode="diff" />);
+    expect(screen.getByTestId("file-viewer-body")).toHaveTextContent("Binary file — no text diff");
+  });
 });

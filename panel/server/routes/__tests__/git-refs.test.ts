@@ -367,6 +367,29 @@ describe("ref-based git reads", () => {
     expect(diff.body.diff).toContain("+TWO");
   });
 
+  it("lists an octopus merge against its first parent", async () => {
+    sh("stash -q -u");
+    for (const side of ["s1", "s2"]) {
+      sh(`checkout -q -b ${side} main`);
+      writeFileSync(join(repoDir, `${side}.txt`), `${side}\n`);
+      sh(`add ${side}.txt`);
+      sh(`commit -q -m ${side}`);
+    }
+    sh("checkout -q main");
+    writeFileSync(join(repoDir, "keep.txt"), "main side\n");
+    sh("commit -q -am mainline");
+    sh("merge -q --no-edit s1 s2");
+    const merge = sh("rev-parse HEAD").trim();
+    expect(sh(`rev-list --parents -n1 ${merge}`).trim().split(" ")).toHaveLength(4);
+
+    const files = await get("commit-files", { sha: merge });
+    expect(files.status).toBe(200);
+    expect(files.body).toEqual([
+      { status: "A", path: "s1.txt" },
+      { status: "A", path: "s2.txt" },
+    ]);
+  });
+
   it("refuses a sha that is not a commit before any shell sees it", async () => {
     const marker = join(tmp, "pwned");
     for (const sha of [`main;touch ${marker}`, "--output=x", "nope"]) {
