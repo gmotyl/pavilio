@@ -1,0 +1,89 @@
+/* Repo file tree: folders collapse; changed files badge themselves and dot their collapsed folders. */
+.ft {
+  font-size: 13px;
+  padding: 8px 6px;
+  overflow: auto;
+}
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ft-row:hover {
+  background: var(--bg-hover);
+}
+.ft-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.ft-dir {
+  color: var(--text-muted);
+}
+.ft-dir:hover {
+  color: var(--text-secondary);
+}
+.ft-chev {
+  width: 10px;
+  flex: none;
+}
+.ft-nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ft-dir .ft-nm {
+  flex: 0 1 auto;
+}
+.ft-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--blue);
+}
+.ft-file.unchanged {
+  color: var(--text-secondary);
+}
+.ft-file[aria-current="true"] {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.ft-st {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font: 700 10.5px "JetBrains Mono", ui-monospace, monospace;
+}
+.ft-st-M,
+.ft-st-R {
+  color: var(--blue);
+}
+.ft-st-A,
+.ft-st-U {
+  color: var(--green);
+}
+.ft-st-D {
+  color: var(--red);
+}
+.ft-cnt {
+  flex: none;
+  font: 11px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-muted);
+}
+.ft-add {
+  color: var(--green);
+}
+.ft-del {
+  color: var(--red);
+}
