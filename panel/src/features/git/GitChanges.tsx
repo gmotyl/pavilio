@@ -19,16 +19,11 @@ import CopyIconButton from "../shell/CopyIconButton";
 import FileChangeList from "./FileChangeList";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
-import { useWebSocket } from "../realtime/useWebSocket";
+import { useGitChanges, type GitFile } from "./useGitChanges";
 import PaneResizer from "../shell/PaneResizer";
 import useResizablePane from "../shell/useResizablePane";
 import { TREE_BOUNDS } from "./repoTree";
 import { preferences } from "../../preferences/declarations";
-
-interface GitFile {
-  status: string;
-  path: string;
-}
 
 interface GitChangesProps {
   /** Absolute repo path, or undefined for the workspace repo */
@@ -92,14 +87,21 @@ export default function GitChanges({
   nested = false,
   advancedCommit = false,
 }: GitChangesProps) {
-  const [files, setFiles] = useState<GitFile[]>([]);
-  const [branch, setBranch] = useState("");
-  const [branches, setBranches] = useState<string[]>([]);
-  const [suggestion, setSuggestion] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [commitMsg, setCommitMsg] = useState("");
-  const [loading, setLoading] = useState("");
-  const [checkoutError, setCheckoutError] = useState("");
+  const {
+    files,
+    branch,
+    branches,
+    selected,
+    toggleFile,
+    commitMsg,
+    setCommitMsg,
+    loading,
+    checkoutError,
+    setCheckoutError,
+    stageFiles,
+    commit: runCommit,
+    checkout: handleCheckout,
+  } = useGitChanges(repo);
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
   const [diffMode, setDiffMode] = useState<DiffMode>("inline");
@@ -108,80 +110,9 @@ export default function GitChanges({
   // Above the early returns below, where every hook has to be.
   const tree = useResizablePane(preferences.repoTreePaneWidth, TREE_BOUNDS);
 
-  const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
-
-  const fetchStatus = async () => {
-    const [statusRes, branchRes, suggestRes] = await Promise.all([
-      fetch(`/api/git/status${qs}`),
-      fetch(`/api/git/branch${qs}`),
-      fetch(`/api/git/suggest-message${qs}`),
-    ]);
-    if (statusRes.ok) setFiles(await statusRes.json());
-    if (branchRes.ok) setBranch((await branchRes.json()).branch);
-    if (suggestRes.ok) setSuggestion((await suggestRes.json()).suggestion);
-  };
-
-  const fetchBranches = async () => {
-    try {
-      const res = await fetch(`/api/git/branches${qs}`);
-      if (res.ok) {
-        const data = await res.json();
-        setBranches(data.branches);
-      }
-    } catch {}
-  };
-
-  const handleCheckout = async (targetBranch: string) => {
-    if (targetBranch === branch) return;
-    setCheckoutError("");
-    setLoading("switching");
-    try {
-      const res = await fetch("/api/git/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch: targetBranch, repo }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setBranch(data.branch);
-        await fetchStatus();
-        await fetchBranches();
-      } else {
-        setCheckoutError(data.error);
-      }
-    } catch (e: any) {
-      setCheckoutError(e.message || "Checkout failed");
-    }
-    setLoading("");
-  };
-
-  const { lastMessage } = useWebSocket();
-
-  useEffect(() => {
-    fetchStatus();
-    fetchBranches();
-  }, [repo]);
-
-  // A commit/push from anywhere — the Sync button, a background auto-sync tick, another
-  // client — leaves this list showing files that no longer differ. Only git-change is
-  // honoured: sync-status fires on every tick and would refetch for nothing.
-  useEffect(() => {
-    if (lastMessage?.type !== "git-change") return;
-    fetchStatus();
-    fetchBranches();
-  }, [lastMessage]);
-  useEffect(() => {
-    setCommitMsg(suggestion);
-  }, [suggestion]);
   useEffect(() => {
     onBranchChange?.(branch);
   }, [branch]);
-
-  const toggleFile = (path: string) => {
-    const next = new Set(selected);
-    next.has(path) ? next.delete(path) : next.add(path);
-    setSelected(next);
-  };
 
   const openDiff = async (path: string) => {
     setActiveDiff(path);
@@ -207,38 +138,8 @@ export default function GitChanges({
     }
   }, [openFile, files]);
 
-  const stageFiles = async (filesToStage: string[]) => {
-    setLoading("staging");
-    await fetch("/api/git/stage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files: filesToStage, repo }),
-    });
-    setSelected(new Set());
-    await fetchStatus();
-    setLoading("");
-  };
-
   const commit = async (push = false) => {
-    if (!commitMsg.trim()) return;
-    setLoading("committing");
-    await fetch("/api/git/commit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: commitMsg, repo }),
-    });
-    if (push) {
-      setLoading("pushing");
-      await fetch("/api/git/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo }),
-      });
-    }
-    setCommitMsg("");
-    setActiveDiff(null);
-    await fetchStatus();
-    setLoading("");
+    if (await runCommit(push)) setActiveDiff(null);
   };
 
   const [localViewMode, setLocalViewMode] = useGitViewMode();

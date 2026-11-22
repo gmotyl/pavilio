@@ -10,23 +10,11 @@ import {
 import DiffView, { type DiffMode } from "./DiffView";
 import FileChangeList from "./FileChangeList";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
+import { useCommitFiles, useGitLog } from "./useGitHistory";
 import PaneResizer from "../shell/PaneResizer";
 import useResizablePane from "../shell/useResizablePane";
 import { TREE_BOUNDS } from "./repoTree";
 import { preferences } from "../../preferences/declarations";
-
-interface Commit {
-  sha: string;
-  shortSha: string;
-  message: string;
-  author: string;
-  date: string;
-}
-
-interface CommitFile {
-  status: string;
-  path: string;
-}
 
 interface GitHistoryProps {
   repo?: string;
@@ -71,10 +59,9 @@ export default function GitHistory({
   onActiveFileChange,
   showListSidebar = false,
 }: GitHistoryProps) {
-  const [commits, setCommits] = useState<Commit[]>([]);
+  const commits = useGitLog(repo);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
-  const [filesLoading, setFilesLoading] = useState(false);
+  const { files: commitFiles, loading: filesLoading } = useCommitFiles(repo, expanded);
   const [activeDiff, setActiveDiff] = useState<{
     sha: string;
     file: string;
@@ -91,10 +78,7 @@ export default function GitHistory({
   useEffect(() => {
     if (activeSha === undefined) return;
     setExpanded(activeSha ?? null);
-    if (!activeSha) {
-      setActiveDiff(null);
-      setCommitFiles([]);
-    }
+    if (!activeSha) setActiveDiff(null);
   }, [activeSha]);
 
   // Controlled/uncontrolled sync: when activeFile prop changes, mirror to internal state
@@ -109,12 +93,6 @@ export default function GitHistory({
 
   const qs = repo ? `&repo=${encodeURIComponent(repo)}` : "";
 
-  useEffect(() => {
-    fetch(`/api/git/log?limit=30${qs}`).then(async (res) => {
-      if (res.ok) setCommits(await res.json());
-    });
-  }, [repo]);
-
   const toggleCommit = (sha: string) => {
     if (expanded === sha) {
       setExpanded(null);
@@ -128,29 +106,6 @@ export default function GitHistory({
     onActiveShaChange?.(sha);
     onActiveFileChange?.(null);
   };
-
-  // Fetch files for the currently expanded commit. Reacts to both manual
-  // toggle clicks and URL-driven expansion (?sha=<sha>).
-  useEffect(() => {
-    if (!expanded) {
-      setCommitFiles([]);
-      return;
-    }
-    let cancelled = false;
-    setFilesLoading(true);
-    (async () => {
-      try {
-        const res = await fetch(`/api/git/commit-files?sha=${expanded}${qs}`);
-        if (!cancelled && res.ok) setCommitFiles(await res.json());
-      } catch {
-        if (!cancelled) setCommitFiles([]);
-      }
-      if (!cancelled) setFilesLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded, qs]);
 
   const openDiff = async (sha: string, file: string) => {
     if (activeDiff?.sha === sha && activeDiff?.file === file) {
