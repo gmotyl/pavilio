@@ -81,6 +81,8 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 
   // ── oneOf ───────────────────────────────────────────────────────────────
   "repos.searchScope": ["changed", "branch-diff", "commits"],
+  "repos.view": ["review", "code", "prs"],
+  "fileViewer.diffLayout": ["split", "unified"],
   "git.viewMode": ["flat", "tree"],
   "terminal.drawer.side": ["left", "right"],
 
@@ -95,6 +97,10 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     { top: ["g:InfoPoly", "p:pavilio"], groups: { InfoPoly: ["anytts", "vector"] } },
   ],
   "shell.groupCollapsed": [{}, { InfoPoly: true, Other: false }],
+  "repos.prFilter": [
+    { preset: "review", author: null },
+    { preset: "mine", author: "gmotyl" },
+  ],
   "home.actions": [
     [],
     [{ label: "Go", runner: "shell", text: "ls", project: "pavilio" }],
@@ -154,7 +160,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 68;
+const DECLARATION_COUNT = 71;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

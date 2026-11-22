@@ -327,6 +327,35 @@ export const DEFAULT_TASK_PROMPT =
  */
 export const DEFAULT_SPEECH_VOICE = "fr-FR-VivienneMultilingualNeural";
 
+/** Which view the project's Repos tab opens on. */
+export type ReposView = "review" | "code" | "prs";
+export const REPOS_VIEWS: readonly ReposView[] = ["review", "code", "prs"];
+
+/** The PRs view's filter: a preset chip plus an optional author narrowing it. */
+export type PrFilterPreset = "mine" | "review" | "all";
+export interface PrFilter {
+  preset: PrFilterPreset;
+  author: string | null;
+}
+const PR_FILTER_PRESETS: readonly string[] = ["mine", "review", "all"];
+
+/** Whole-value: an unknown preset or a non-string author reads as the default. */
+const prFilterCodec: PreferenceCodec<PrFilter> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.preset !== "string" ||
+      !PR_FILTER_PRESETS.includes(parsed.preset) ||
+      !(parsed.author === null || typeof parsed.author === "string")
+    ) {
+      throw new Error(`not a PR filter: ${raw}`);
+    }
+    return { preset: parsed.preset as PrFilterPreset, author: parsed.author };
+  },
+  serialize: (value) => JSON.stringify(value),
+};
+
 /** Engine id → voice id: one voice per engine (`speech.voice`, and each project's entry). */
 export type EngineVoices = Record<string, string>;
 
@@ -800,6 +829,31 @@ export const preferences = {
     scope: "repo",
     default: false,
     codec: bool,
+    portable: true,
+  }),
+
+  // ── Repos tab ────────────────────────────────────────────────────────────
+  /** Per project: one project is mostly reviewed, another mostly coded in. */
+  reposView: definePreference<ReposView>({
+    key: "repos.view", // was: nothing — new with the Repos tab views
+    scope: "project",
+    default: "code",
+    codec: oneOf(REPOS_VIEWS),
+    portable: true,
+  }),
+  reposPrFilter: definePreference<PrFilter>({
+    key: "repos.prFilter", // was: nothing — new with the PRs view
+    scope: "project",
+    default: { preset: "review", author: null },
+    codec: prFilterCodec,
+    portable: true,
+  }),
+  /** Split vs unified is a reading habit, not a property of the file. */
+  fileViewerDiffLayout: definePreference<"split" | "unified">({
+    key: "fileViewer.diffLayout", // was: nothing — new with the file viewer
+    scope: "global",
+    default: "split",
+    codec: oneOf(["split", "unified"] as const),
     portable: true,
   }),
 

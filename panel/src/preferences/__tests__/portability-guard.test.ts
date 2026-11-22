@@ -95,6 +95,9 @@ const FIXTURES: Record<string, Fixture> = {
   "shell.starredCollapsed": { value: true },
   "shell.projectsCollapsed": { value: true },
   "repos.searchScope": { value: "commits" },
+  "repos.view": { value: "prs", scopeArg: "pavilio" },
+  "repos.prFilter": { value: { preset: "mine", author: "gmotyl" }, scopeArg: "pavilio" },
+  "fileViewer.diffLayout": { value: "unified" },
   "search.includeArchived": { value: false },
 
   // ── Git ──────────────────────────────────────────────────────────────────
@@ -273,8 +276,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(68);
-    expect(portable.length).toBe(54);
+    expect(ALL_PREFERENCES.length).toBe(71);
+    expect(portable.length).toBe(57);
     expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the
