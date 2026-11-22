@@ -30,6 +30,7 @@ import markRouter from "./routes/mark.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import filesRouter from "./routes/files.js";
 import gitRouter from "./routes/git.js";
+import prsRouter from "./routes/prs.js";
 import agentsRouter from "./routes/agents.js";
 import searchRouter from "./routes/search.js";
 import imagesRouter from "./routes/images.js";
@@ -269,6 +270,7 @@ export async function startPanel(
   app.use("/api/files", filesRouter);
   app.use("/api/skills", skillsRouter);
   app.use("/api/git", gitRouter);
+  app.use("/api/prs", prsRouter);
   app.use("/api/agents", agentsRouter);
   app.use("/api/search", searchRouter);
   app.use("/api/images", imagesRouter);
