@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse } from "../../../test-utils";
 import { A_DIFF, calls, DrivenResizeObserver, FEAT, MAIN, MISSING, REPOS, renderCode, SITE, urlParams } from "./codeHarness";
@@ -209,7 +209,8 @@ describe("CodeView", () => {
   it("an unknown repo in the URL drops the file instead of opening it in another repo", async () => {
     renderCode("?view=code&repo=%2Fgone&file=src%2Fa.ts&line=3");
     await waitFor(() => expect(search().get("file")).toBeNull());
-    expect(search().get("repo")).toBeNull();
+    // The fallback repo shown is then pinned, so the URL names what is open.
+    await waitFor(() => expect(search().get("repo")).toBe("pavilio"));
     expect(search().get("line")).toBeNull();
     expect(await screen.findByText("Pick a file from the tree, or press Ctrl+P.")).toBeInTheDocument();
   });
@@ -226,5 +227,33 @@ describe("CodeView", () => {
     setRepos([{ ...notes, present: true }, pavilio, site]);
     expect(screen.getByTestId("repo-switcher")).toHaveTextContent("pavilio");
     expect(search().get("file")).toBe("src/b.ts");
+  });
+
+  it("a tab with no repo param pins its defaulted repo, so a clone from another tab never switches it", async () => {
+    const notes = { name: "notes", path: MISSING, present: false, cloneable: true };
+    const [pavilio, , site] = REPOS;
+    const { setRepos } = renderCode("?view=code&file=src/b.ts", {}, [notes, pavilio, site]);
+    await waitFor(() => expect(search().get("repo")).toBe("pavilio"));
+    setRepos([{ ...notes, present: true }, pavilio, site]);
+    expect(screen.getByTestId("repo-switcher")).toHaveTextContent("pavilio");
+    expect(search().get("file")).toBe("src/b.ts");
+  });
+
+  it("a repo picked while a clone is pending stays picked when the clone lands", async () => {
+    const notes = { name: "notes", path: MISSING, present: false, cloneable: true };
+    const [pavilio, , site] = REPOS;
+    let land: (r: Response) => void = () => {};
+    renderCode("?view=code", { "/api/git/clone": () => new Promise<Response>((r) => (land = r)) }, [notes, pavilio, site]);
+    const switcher = screen.getByTestId("repo-switcher");
+    await waitFor(() => expect(switcher).toHaveTextContent("pavilio"));
+    fireEvent.click(switcher);
+    fireEvent.click(await screen.findByTestId("repo-switcher-clone-notes"));
+    fireEvent.click(await screen.findByTestId(`repo-switcher-wt-${SITE}`));
+    await waitFor(() => expect(search().get("repo")).toBe("site"));
+    await act(async () => {
+      land(jsonResponse({ ok: true, path: MISSING }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(search().get("repo")).toBe("site");
   });
 });

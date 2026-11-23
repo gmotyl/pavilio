@@ -408,6 +408,12 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
     else if (unknown) setParams({ repo: null, wt: null, file: null, line: null, cmp: null });
   }, [legacy, unknown, byName, setParams]);
 
+  // Pin a defaulted repo in the URL: a later presence change (a clone) must not move this tab to another repo.
+  const defaulted = !named && repo ? repo.name : null;
+  useEffect(() => {
+    if (defaulted) setParams({ repo: defaulted });
+  }, [defaulted, setParams]);
+
   const stale = !!asked && !!listed && !wt;
   // Drop a wt the listing doesn't know, so the URL matches what is shown.
   useEffect(() => {
@@ -448,8 +454,6 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
             root={root}
             compare={params.get("cmp")}
             onCompare={(ref) => setParams({ cmp: ref })}
-            // A defaulted repo is pinned first: the refreshed list may default to the clone instead.
-            onCloned={() => !named && repo && setParams({ repo: repo.name })}
           />,
           contextSlot,
         )}

@@ -92,13 +92,10 @@ describe("RefSwitcher", () => {
       const refreshed = vi.fn();
       window.addEventListener("pavilio:projects-refresh", refreshed);
       try {
-        const onCloned = vi.fn(() => expect(refreshed).not.toHaveBeenCalled());
-        render(<RefSwitcher {...base} project="infopoly" repos={missing(true)} onCloned={onCloned} />);
+        render(<RefSwitcher {...base} project="infopoly" repos={missing(true)} />);
         fireEvent.click(screen.getByTestId("repo-switcher"));
         fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));
         await waitFor(() => expect(refreshed).toHaveBeenCalled());
-        // Told before the refresh, so the caller can pin its selection first.
-        expect(onCloned).toHaveBeenCalledTimes(1);
         const call = fetch.mock.calls.find(([u]) => String(u) === "/api/git/clone");
         expect(call?.[1]?.method).toBe("POST");
         expect(JSON.parse(String(call?.[1]?.body))).toEqual({ project: "infopoly", repo: "infopoly-skills", path: GONE });
