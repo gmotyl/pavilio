@@ -48,7 +48,7 @@ describe("ReposTab", () => {
     renderTab();
     expect(screen.getByTestId("repos-crumb")).toHaveTextContent("pavilio / Repos");
     const pills = within(screen.getByRole("group", { name: "Repos view" })).getAllByRole("button");
-    expect(pills.map((b) => b.textContent?.replace(/\d+$/, ""))).toEqual(["Review", "Code", "PRs"]);
+    expect(pills.map((b) => b.textContent?.replace(/\d+$/, ""))).toEqual(["Code", "PRs", "Review"]);
   });
 
   it("switching a pill updates the URL and the project preference", () => {

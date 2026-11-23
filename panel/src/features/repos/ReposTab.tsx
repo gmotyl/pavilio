@@ -17,15 +17,15 @@ export interface ReposTabProps {
 }
 
 const PILLS: { view: ReposView; label: string }[] = [
-  { view: "review", label: "Review" },
   { view: "code", label: "Code" },
   { view: "prs", label: "PRs" },
+  { view: "review", label: "Review" },
 ];
 
 const VIEWS: Record<ReposView, (props: ReposViewProps) => ReactNode> = {
-  review: ReviewView,
   code: CodeView,
   prs: PrsView,
+  review: ReviewView,
 };
 
 const isView = (v: string | null): v is ReposView => REPOS_VIEWS.includes(v as ReposView);

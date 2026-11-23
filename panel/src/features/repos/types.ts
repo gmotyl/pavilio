@@ -7,7 +7,7 @@ import type { SearchRequest } from "./useSearchShortcut";
 /** A URL query patch: a string sets the key, null deletes it. Applied with history replace. */
 export type ParamsPatch = Record<string, string | null>;
 
-/** What `ReposTab` hands each of its views (Review, Code, PRs). */
+/** What `ReposTab` hands each of its views (Code, PRs, Review). */
 export interface ReposViewProps {
   project: string;
   repos: RepoEntry[];
