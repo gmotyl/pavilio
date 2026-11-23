@@ -239,6 +239,14 @@ describe("CodeView", () => {
     expect(search().get("file")).toBe("src/b.ts");
   });
 
+  it("a defaulted repo whose name a missing entry listed first shares stays on the present checkout", async () => {
+    const [pavilio] = REPOS;
+    renderCode("?view=code&file=src/b.ts", {}, [{ name: "pavilio", path: MISSING, present: false }, pavilio]);
+    await waitFor(() => expect(search().get("repo")).toBe("pavilio"));
+    await waitFor(() => expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("b.ts"));
+    expect(screen.queryByText("pavilio is not on this machine. Pick another repository above.")).toBeNull();
+  });
+
   it("a repo picked while a clone is pending stays picked when the clone lands", async () => {
     const notes = { name: "notes", path: MISSING, present: false, cloneable: true };
     const [pavilio, , site] = REPOS;

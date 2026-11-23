@@ -390,8 +390,11 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
 export default function CodeView({ project, repos, params, setParams, contextSlot, searchRequest, onSearchHandled }: ReposViewProps) {
   const worktrees = useWorktrees(repos);
   const named = params.get("repo");
-  // Older links carry the repo's path instead of its name.
-  const byName = named ? (repos.find((r) => r.name === named) ?? repos.find((r) => r.path === named)) : undefined;
+  // Older links carry the repo's path instead of its name. A name several entries share
+  // means the present one, which is the one a defaulted tab pinned.
+  const byName = named
+    ? (repos.find((r) => r.name === named && r.present) ?? repos.find((r) => r.name === named) ?? repos.find((r) => r.path === named))
+    : undefined;
   const repo = byName ?? repos.find((r) => r.present);
   const legacy = !!byName && byName.name !== named;
   const unknown = !!named && repos.length > 0 && !byName;
