@@ -97,7 +97,8 @@ describe("ChangesPanel", () => {
     expect(posts(fetch, "/api/git/commit")).toEqual([{ message: "chore: tweak a", repo: MAIN }]);
 
     fireEvent.click(await within(p).findByTestId("changes-branch-toggle"));
-    fireEvent.click(await within(p).findByTestId("changes-branch-option-feat/y"));
+    // The popover is portalled to body, outside the panel.
+    fireEvent.click(await screen.findByTestId("changes-branch-option-feat/y"));
     await waitFor(() => expect(posts(fetch, "/api/git/checkout")).toEqual([{ branch: "feat/y", repo: MAIN }]));
   });
 

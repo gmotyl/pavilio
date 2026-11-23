@@ -1,5 +1,24 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Search } from "lucide-react";
+
+const POPOVER_WIDTH = 320;
+const GUTTER = 8;
+
+interface Place {
+  top: number;
+  left: number;
+  width: number;
+}
+
+/** Fixed-position box under the trigger, kept inside the viewport horizontally. */
+function placeUnder(trigger: DOMRect, align: "left" | "right"): Place {
+  const vw = window.innerWidth;
+  const width = Math.max(0, Math.min(POPOVER_WIDTH, vw - 2 * GUTTER));
+  const wanted = align === "right" ? trigger.right - width : trigger.left;
+  const left = Math.max(GUTTER, Math.min(wanted, vw - GUTTER - width));
+  return { top: trigger.bottom + 4, left, width };
+}
 
 interface BranchPickerProps {
   branches: string[];
@@ -37,6 +56,9 @@ export default function BranchPicker({
   const [filter, setFilter] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<Place | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -51,11 +73,29 @@ export default function BranchPicker({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (containerRef.current?.contains(t) || popoverRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
+
+  // Portalled + fixed so an overflow-clipped or narrow ancestor never cuts the popover off.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (r) setPlace(placeUnder(r, align));
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, align]);
 
   useEffect(() => {
     if (open) {
@@ -82,6 +122,7 @@ export default function BranchPicker({
   return (
     <div ref={containerRef} className="relative">
       <button
+        ref={triggerRef}
         data-testid={`${testIdPrefix}-toggle`}
         disabled={disabled}
         onClick={() => setOpen(!open)}
@@ -95,14 +136,18 @@ export default function BranchPicker({
           </>
         )}
       </button>
-      {open && (
+      {open && place && createPortal(
         <div
-          className="absolute top-full mt-1 z-50 rounded-lg overflow-hidden shadow-lg"
+          ref={popoverRef}
+          data-testid={`${testIdPrefix}-popover`}
+          className="z-50 rounded-lg overflow-hidden shadow-lg"
           style={{
+            position: "fixed",
+            top: `${place.top}px`,
+            left: `${place.left}px`,
+            width: `${place.width}px`,
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
-            width: "320px",
-            ...(align === "right" ? { right: 0 } : { left: 0 }),
           }}
         >
           <div className="flex items-center gap-1.5 px-2 py-1.5" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
@@ -136,13 +181,15 @@ export default function BranchPicker({
                     background: i === highlightIdx ? "var(--bg-hover)" : "transparent",
                   }}
                   onMouseEnter={() => setHighlightIdx(i)}
+                  title={b}
                 >
-                  {b}
+                  <span className="truncate min-w-0">{b}</span>
                 </button>
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
