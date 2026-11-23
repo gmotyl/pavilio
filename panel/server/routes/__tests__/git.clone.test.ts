@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { configMock, makeApp } from "../../test-kit";
@@ -112,5 +112,62 @@ describe("POST /api/git/clone", () => {
     expect(res.status).toBe(502);
     expect(existsSync(join(tmp, "pwned"))).toBe(false);
     expect(existsSync(join(projectsDir, "pwned"))).toBe(false);
+  });
+
+  /** A fake `ssh` first on PATH: records its argv, optionally sleeps, then fails. */
+  function fakeSsh(sleep = 0): string {
+    const bin = join(tmp, "bin");
+    mkdirSync(bin, { recursive: true });
+    const log = join(tmp, "ssh-args");
+    writeFileSync(join(bin, "ssh"), `#!/bin/sh\necho "$@" >> "${log}"\n${sleep ? `sleep ${sleep}\n` : ""}exit 255\n`);
+    chmodSync(join(bin, "ssh"), 0o755);
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    vi.stubEnv("GIT_SSH_COMMAND", undefined as unknown as string);
+    vi.stubEnv("GIT_SSH", undefined as unknown as string);
+    return log;
+  }
+
+  it("runs ssh in batch mode so a host-key or password prompt cannot hang the clone", async () => {
+    const log = fakeSsh();
+    linkRepos("alpha", [{ name: "skills", path: join(tmp, "out"), remote: "ssh://git@example.invalid/o/skills.git" }]);
+    const res = await request(app()).post("/api/git/clone").send({ project: "alpha", repo: "skills" });
+    expect(res.status).toBe(502);
+    expect(readFileSync(log, "utf-8")).toContain("-o BatchMode=yes");
+  });
+
+  it("refuses transports other than https, ssh and file", async () => {
+    linkRepos("alpha", [{ name: "skills", path: join(tmp, "out"), remote: "git://127.0.0.1:9/o/skills.git" }]);
+    const res = await request(app()).post("/api/git/clone").send({ project: "alpha", repo: "skills" });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/transport 'git' not allowed/);
+  });
+
+  it("answers 409 clone-in-progress to a second clone of the same target", async () => {
+    fakeSsh(0.3);
+    linkRepos("alpha", [{ name: "skills", path: join(tmp, "out"), remote: "ssh://git@example.invalid/o/skills.git" }]);
+    const send = () => request(app()).post("/api/git/clone").send({ project: "alpha", repo: "skills" });
+    const [a, b] = await Promise.all([send(), new Promise((r) => setTimeout(r, 50)).then(send)]);
+    expect(a.status).toBe(502);
+    expect(b.status).toBe(409);
+    expect(b.body.code).toBe("clone-in-progress");
+    // The slot frees once the first clone settles.
+    expect((await send()).status).toBe(502);
+  });
+
+  it("removes the parent dirs it created when the clone fails", async () => {
+    mkdirSync(join(tmp, "srv"));
+    linkRepos("alpha", [{ name: "skills", path: join(tmp, "srv", "a", "b", "skills"), remote: join(tmp, "missing.git") }]);
+    const res = await request(app()).post("/api/git/clone").send({ project: "alpha", repo: "skills" });
+    expect(res.status).toBe(502);
+    expect(existsSync(join(tmp, "srv"))).toBe(true);
+    expect(existsSync(join(tmp, "srv", "a"))).toBe(false);
+  });
+
+  it("never echoes https credentials from the remote in the error", async () => {
+    linkRepos("alpha", [{ name: "skills", path: join(tmp, "out"), remote: "https://bob:s3cret@127.0.0.1:9/o/skills.git" }]);
+    const res = await request(app()).post("/api/git/clone").send({ project: "alpha", repo: "skills" });
+    expect(res.status).toBe(502);
+    expect(JSON.stringify(res.body)).not.toContain("s3cret");
+    expect(JSON.stringify(res.body)).not.toContain("bob:");
   });
 });

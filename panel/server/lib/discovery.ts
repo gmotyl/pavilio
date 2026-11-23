@@ -11,7 +11,7 @@ export interface RepoEntry {
   name: string;
   path: string; // exactly as written in repos.json
   present: boolean; // the expanded path is a directory on this machine, re-derived on every read
-  remote?: string; // clone URL from repos.json, when given
+  remote?: string; // clone URL from repos.json, when given, with http(s) userinfo stripped
   openspec?: OpenSpecConfig;
 }
 
@@ -115,6 +115,23 @@ export function readProject(root: string, name: string): Project {
   };
 }
 
+const rawRemote = (r: { remote?: unknown }): string | undefined =>
+  typeof r.remote === "string" && r.remote.trim() ? r.remote.trim() : undefined;
+
+/** Drop `user[:password]@` from every http(s) URL in `text`, so tokens never leave the server. */
+export const redactUrlCredentials = (text: string): string => text.replace(/\b(https?:\/\/)[^/@\s]+@/gi, "$1");
+
+/** The unredacted remote of `<dir>/repos.json` entry `name`, for git itself; never send it to a client. */
+export function linkedRemote(dir: string, name: string): string | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, "repos.json"), "utf-8"));
+    const hit = Array.isArray(raw) ? raw.find((r) => r?.name === name) : undefined;
+    return hit ? rawRemote(hit) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** `<dir>/repos.json` entries; a malformed file or entry is warned about and skipped. */
 export function readRepos(dir: string, name: string): RepoEntry[] {
   const reposPath = join(dir, "repos.json");
@@ -143,7 +160,8 @@ export function readRepos(dir: string, name: string): RepoEntry[] {
             try {
               const openspec = parseOpenSpecConfig(r);
               const entry: RepoEntry = { name: r.name, path: r.path, present };
-              if (typeof r.remote === "string" && r.remote.trim()) entry.remote = r.remote.trim();
+              const remote = rawRemote(r);
+              if (remote) entry.remote = redactUrlCredentials(remote);
               if (openspec) entry.openspec = openspec;
               return [entry];
             } catch (err) {

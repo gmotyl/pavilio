@@ -2,11 +2,11 @@ import { Router, type Response } from "express";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import { readFileSync, realpathSync, statSync } from "fs";
-import { lstat, mkdir, readFile } from "fs/promises";
+import { lstat, mkdir, readFile, rm } from "fs/promises";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
-import { isLiveProject, readRepos } from "../lib/discovery.js";
+import { isLiveProject, linkedRemote, readRepos, redactUrlCredentials } from "../lib/discovery.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
 import { expandHome } from "../lib/paths.js";
 
@@ -728,6 +728,17 @@ router.post("/push", (req, res) => {
 });
 
 const CLONE_TIMEOUT_MS = 10 * 60_000;
+// Transports a linked repo may name; anything else (git://, ext::, …) is refused.
+const CLONE_CONFIG = [
+  "protocol.allow=never",
+  "protocol.https.allow=always",
+  "protocol.ssh.allow=always",
+  "protocol.file.allow=always",
+  // No tty to answer a host-key or passphrase prompt; GIT_SSH_COMMAND, when set, still wins.
+  "core.sshCommand=ssh -o BatchMode=yes",
+].flatMap((c) => ["-c", c]);
+/** Targets with a clone running; a second request would race the existence check. */
+const cloning = new Set<string>();
 
 /**
  * Clone a linked repo that is missing here. Only `{ project, repo }` names come from the client;
@@ -740,23 +751,34 @@ router.post("/clone", async (req, res) => {
       return res.status(400).json({ error: "project and repo required" });
     const { projectsDir } = getConfig();
     if (!isLiveProject(projectsDir, project)) return res.status(404).json({ error: `unknown project: ${project}` });
-    const entry = readRepos(join(projectsDir, project), project).find((r) => r.name === repo);
+    const projectDir = join(projectsDir, project);
+    const entry = readRepos(projectDir, project).find((r) => r.name === repo);
     if (!entry) return res.status(404).json({ error: `${project} links no repo named ${repo}` });
-    if (!entry.remote) return res.status(409).json({ code: "no-remote", error: `${repo} has no remote in repos.json` });
+    const remote = linkedRemote(projectDir, repo);
+    if (!remote) return res.status(409).json({ code: "no-remote", error: `${repo} has no remote in repos.json` });
     const target = resolve(expandHome(entry.path));
+    if (cloning.has(target))
+      return res.status(409).json({ code: "clone-in-progress", path: target, error: `${target} is already being cloned` });
     if (await lstat(target).then(() => true, () => false))
       return res.status(409).json({ code: "target-exists", path: target, error: `${target} already exists` });
-    await mkdir(dirname(target), { recursive: true });
+    cloning.add(target);
     try {
-      // argv after `--`: the URL is never shell-parsed nor read as an option.
-      await execFileAsync("git", ["clone", "--", entry.remote, target], {
-        cwd: dirname(target),
-        env: { ...gitSafeEnv(), GIT_TERMINAL_PROMPT: "0" },
-        timeout: CLONE_TIMEOUT_MS,
-      });
-    } catch (e: any) {
-      const detail = String(e?.stderr ?? "").trim() || e?.message || String(e);
-      return res.status(502).json({ error: `git clone failed: ${detail}` });
+      // The first dir mkdir made, if any: removed again when the clone fails.
+      const created = await mkdir(dirname(target), { recursive: true });
+      try {
+        // argv after `--`: the URL is never shell-parsed nor read as an option.
+        await execFileAsync("git", [...CLONE_CONFIG, "clone", "--", remote, target], {
+          cwd: dirname(target),
+          env: { ...gitSafeEnv(), GIT_TERMINAL_PROMPT: "0" },
+          timeout: CLONE_TIMEOUT_MS,
+        });
+      } catch (e: any) {
+        if (created) await rm(created, { recursive: true, force: true }).catch(() => {});
+        const detail = String(e?.stderr ?? "").trim() || e?.message || String(e);
+        return res.status(502).json({ error: redactUrlCredentials(`git clone failed: ${detail}`) });
+      }
+    } finally {
+      cloning.delete(target);
     }
     broadcast({ type: "git-change" });
     res.json({ ok: true, path: target });
