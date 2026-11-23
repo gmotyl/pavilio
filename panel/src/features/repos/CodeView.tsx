@@ -448,6 +448,8 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
             root={root}
             compare={params.get("cmp")}
             onCompare={(ref) => setParams({ cmp: ref })}
+            // A defaulted repo is pinned first: the refreshed list may default to the clone instead.
+            onCloned={() => !named && repo && setParams({ repo: repo.name })}
           />,
           contextSlot,
         )}

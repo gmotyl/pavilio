@@ -68,6 +68,8 @@ interface Props {
   /** Ref the tree is compared against, if any. */
   compare?: string | null;
   onCompare?: (ref: string) => void;
+  /** A clone succeeded; called before the project list refreshes, so the caller can pin its selection. */
+  onCloned?: () => void;
 }
 
 /**
@@ -114,7 +116,7 @@ function MissingRepo({ repo: r, canClone, state, onClone }: { repo: RepoEntry; c
 }
 
 /** Context-slot button + popover: repos grouped, each with its main checkout then its worktrees. */
-export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare }: Props) {
+export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare, onCloned }: Props) {
   const [open, setOpen] = useState(false);
   // Picking a ref to compare with: the branch list takes over the popover body.
   const [picking, setPicking] = useState(false);
@@ -200,7 +202,10 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
-    if (!error) await refreshProjects();
+    if (!error) {
+      onCloned?.();
+      await refreshProjects();
+    }
     setCloning(({ [key]: _, ...rest }) => (error ? { ...rest, [key]: { error } } : rest));
   };
 

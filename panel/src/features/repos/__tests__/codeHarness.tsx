@@ -2,13 +2,14 @@ import { act, render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { jsonResponse, stubFetch, type FetchHandler } from "../../../test-utils";
 import ReposTab from "../ReposTab";
+import type { RepoEntry } from "../../projects/useProjects";
 
 export const MAIN = "/root/pavilio";
 export const FEAT = "/root/pavilio-feat";
 export const MISSING = "/root/notes";
 export const SITE = "/root/site";
 
-export const REPOS = [
+export const REPOS: RepoEntry[] = [
   { name: "pavilio", path: MAIN, present: true },
   { name: "notes", path: MISSING, present: false },
   { name: "site", path: SITE, present: true },
@@ -107,9 +108,9 @@ function Search() {
   return <output data-testid="search">{useLocation().search}</output>;
 }
 
-export function renderCode(search = "?view=code", routes: Record<string, FetchHandler> = {}) {
+export function renderCode(search = "?view=code", routes: Record<string, FetchHandler> = {}, initial: RepoEntry[] = REPOS) {
   const fetch = codeFetch(routes);
-  const tree = (repos: typeof REPOS) => (
+  const tree = (repos: RepoEntry[]) => (
     <MemoryRouter initialEntries={[`/project/pavilio/repos${search}`]}>
       <Routes>
         <Route
@@ -124,9 +125,9 @@ export function renderCode(search = "?view=code", routes: Record<string, FetchHa
       </Routes>
     </MemoryRouter>
   );
-  const utils = render(tree(REPOS));
+  const utils = render(tree(initial));
   /** Same mounted tree, new linked repos (as when the project's repo list refreshes). */
-  const setRepos = (repos: typeof REPOS) => utils.rerender(tree(repos));
+  const setRepos = (repos: RepoEntry[]) => utils.rerender(tree(repos));
   return { fetch, setRepos, ...utils };
 }
 

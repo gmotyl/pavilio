@@ -213,4 +213,18 @@ describe("CodeView", () => {
     expect(search().get("line")).toBeNull();
     expect(await screen.findByText("Pick a file from the tree, or press Ctrl+P.")).toBeInTheDocument();
   });
+
+  it("cloning a repo listed before the defaulted one keeps the open repo and file", async () => {
+    const notes = { name: "notes", path: MISSING, present: false, cloneable: true };
+    const [pavilio, , site] = REPOS;
+    const { setRepos } = renderCode("?view=code&file=src/b.ts", { "/api/git/clone": () => jsonResponse({ ok: true, path: MISSING }) }, [notes, pavilio, site]);
+    const switcher = screen.getByTestId("repo-switcher");
+    await waitFor(() => expect(switcher).toHaveTextContent("pavilio"));
+    fireEvent.click(switcher);
+    fireEvent.click(await screen.findByTestId("repo-switcher-clone-notes"));
+    await waitFor(() => expect(search().get("repo")).toBe("pavilio"));
+    setRepos([{ ...notes, present: true }, pavilio, site]);
+    expect(screen.getByTestId("repo-switcher")).toHaveTextContent("pavilio");
+    expect(search().get("file")).toBe("src/b.ts");
+  });
 });
