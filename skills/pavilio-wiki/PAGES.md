@@ -60,10 +60,8 @@ checklists. Code detail is allowed here; it is cited from `repos/` pages, not co
 Once a harvest took one of its findings, the page ends with the back-links `scripts/wiki
 backlink` appends (never written by hand or by `source_writer`). `source_writer` rewrites the
 whole page and drops the section; ingest keeps it by capturing these lines before the rewrite and
-re-appending each with `scripts/wiki backlink` after it (`SKILL.md § 4. Ingest`, step 5). A
-re-append refused with `not a knowledge target` or `ambiguous knowledge target` (the wiki was
-archived or renamed, or targets are ambiguous) is skipped and named in the ingest report, not
-fatal; the harvest's own back-links still stop on any error:
+re-appending each with `scripts/wiki backlink --keep` after it (`SKILL.md § 4. Ingest`, step 5;
+`--keep` skips the knowledge-target check, so a link to a since-archived wiki is kept):
 
 ```markdown
 ## Knowledge

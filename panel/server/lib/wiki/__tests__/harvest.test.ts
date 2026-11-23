@@ -291,6 +291,57 @@ describe("harvest", () => {
     expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
   });
 
+  it("addBacklink keep mode re-appends to an archived target after the section was dropped", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
+    write("projects/old-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: old\n---\n");
+    write(".projects.local.md", "| Project | Type |\n| --- | --- |\n\n## Archived Projects\n\n| old-wiki | private |\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n");
+    expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", "old-wiki:wiki/concepts/x")).toThrow(
+      /not a knowledge target/,
+    );
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "old-wiki:wiki/concepts/x", { keep: true })).toEqual({
+      added: true,
+    });
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/y", { keep: true })).toEqual({ added: true });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(
+      "body\n\n## Knowledge\n- [[old-wiki:wiki/concepts/x]]\n- [[knowledge:wiki/concepts/y]]\n",
+    );
+    // Dedupes like the plain form.
+    expect(addBacklink(root, "alpha", "wiki/sources/a", "[[old-wiki:wiki/concepts/x.md]]", { keep: true })).toEqual({
+      added: false,
+    });
+  });
+
+  it("addBacklink keep mode re-appends in an ambiguous workspace", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
+    write("projects/metro-kb/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n");
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/x", { keep: true })).toEqual({
+      added: true,
+    });
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/y", { keep: true })).toEqual({ added: true });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(
+      "body\n\n## Knowledge\n- [[metro-wiki:wiki/concepts/x]]\n- [[knowledge:wiki/concepts/y]]\n",
+    );
+  });
+
+  it("addBacklink keep mode still rejects malformed targets and source paths", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n");
+    write("projects/alpha/notes.md", "x\n");
+    for (const bad of ["../x:wiki/concepts/vat", "..:wiki/a", "a/b:wiki/a", "wiki/../x", "metro-wiki:concepts/vat", "x:wiki/a]]b"]) {
+      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", bad, { keep: true }), bad).toThrow(
+        /invalid backlink target/,
+      );
+    }
+    expect(() => addBacklink(root, "alpha", "../alpha/notes.md", "wiki/concepts/x", { keep: true })).toThrow(
+      /inside projects\/alpha\/wiki/,
+    );
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe("body\n");
+  });
+
   it("addBacklink fails on ambiguous knowledge targets", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
     knowledgeWikis();

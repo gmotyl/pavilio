@@ -93,7 +93,7 @@ next run picks them up; a page with an empty backlog is up to date.
 | `notes/` | query | new, or enriched in place |
 | `open-questions.md` | query, ingest, harvest | append items; people resolve and delete them |
 | `log.md` | query, ingest, harvest, `scripts/wiki record` | append-only |
-| `sources/` `## Knowledge` | `scripts/wiki backlink` | harvest; ingest re-adds after a rewrite |
+| `sources/` `## Knowledge` | `scripts/wiki backlink` | harvest; ingest re-adds after a rewrite (`--keep`) |
 | `knowledge/wiki/` `entities/`, `concepts/` | `page_writer`, knowledge-wiki mode | harvest only |
 | `CONTEXT.md` | archive-plan, migrate | never this skill |
 

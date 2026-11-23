@@ -204,13 +204,12 @@ every `projects/*/PROJECT.md` (not `archived/`) whose trimmed `group:` equals it
    GitHub URL for a non-GitHub or local clone).
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
    `[[<target>:…]]` lines under its `## Knowledge` (`knowledge:` or a group wiki's name); once
-   that writer has returned, re-append each with `scripts/wiki backlink <p> <source page>
+   that writer has returned, re-append each with `scripts/wiki backlink --keep <p> <source page>
    <target>:wiki/<slug>` — strip the `- `, the brackets and any `|alias`, as harvest step 7 passes
-   it (idempotent — a link the writer kept is left alone, even to a project that is no longer a
-   target). A failed writer left the old page in place; re-append anyway. A re-append that exits 1
-   with `not a knowledge target` or `ambiguous knowledge target` is **not** fatal here (the
-   only exception to § Errors' stop rule): skip that line, name it (page + link + error) in the
-   ingest report, and continue. Any other `backlink` error still stops.
+   it (idempotent — a link the writer kept is left alone). `--keep` skips the knowledge-target
+   check (the link was validated when the harvest wrote it), so a link to an archived or renamed
+   wiki, or one written in an ambiguous workspace, survives the rewrite. A failed writer left the
+   old page in place; re-append anyway.
    **Glossary check** — for each record with a `## Glossary` section (an archived `design.md`),
    once its writer has returned: every term there must be among the receipt's `slugs` as
    `concepts/<slug>`, `<slug>` taken from the term's `CONTEXT.md` line (`See [[wiki/concepts/<slug>]]`).
@@ -299,9 +298,7 @@ Inputs:
 - `index` exit 1 → stop before record and commit (steps 8–9).
 - Stale lock taken over → `lock: taken over from <session>` in the log entry.
 - Fetch warning → no source page, reported.
-- Any `scripts/wiki` exit 1 with a JSON `error` → report it, release the lock, stop — except a
-  step 5 back-link re-append failing with `not a knowledge target` / `ambiguous knowledge target`:
-  skip and report that line, continue (step 5). No JSON on
+- Any `scripts/wiki` exit 1 with a JSON `error` → report it, release the lock, stop. No JSON on
   stdout → the launcher failed, not the wiki: retry once through another executor (§ Reading a
   `scripts/wiki` failure).
 

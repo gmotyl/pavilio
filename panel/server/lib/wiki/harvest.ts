@@ -290,13 +290,16 @@ function parseTarget(target: string): { project: string; page: string } {
  * target) under the source page's `## Knowledge` heading, created at the end when absent. A page
  * that already links the target is left alone (even when that project is no longer a target).
  * A new link's project must be one of `knowledgeTargets` (the global wiki or a group wiki);
- * ambiguous targets throw.
+ * ambiguous targets throw. `keep` (ingest re-appending a link it captured before `source_writer`
+ * rewrote the page) skips that check — the link was validated when first written — but keeps
+ * every syntax and path check.
  */
 export function addBacklink(
   workspaceRoot: string,
   project: string,
   sourcePage: string,
   target: string,
+  options: { keep?: boolean } = {},
 ): { added: boolean } {
   const wikiDir = resolve(workspaceRoot, "projects", project, "wiki");
   const rel = sourcePage.endsWith(".md") ? sourcePage : `${sourcePage}.md`;
@@ -321,12 +324,14 @@ export function addBacklink(
       if (link?.project === wanted.project && link.target === wanted.page) return { added: false };
     }
   }
-  const targets = knowledgeTargets(workspaceRoot);
-  const allowed = [targets.global, ...Object.values(targets.groups)].filter((t): t is string => t !== null);
-  if (!allowed.includes(wanted.project)) {
-    throw new Error(
-      `${wanted.project} is not a knowledge target (targets: ${allowed.join(", ") || "none"})`,
-    );
+  if (!options.keep) {
+    const targets = knowledgeTargets(workspaceRoot);
+    const allowed = [targets.global, ...Object.values(targets.groups)].filter((t): t is string => t !== null);
+    if (!allowed.includes(wanted.project)) {
+      throw new Error(
+        `${wanted.project} is not a knowledge target (targets: ${allowed.join(", ") || "none"})`,
+      );
+    }
   }
   if (range) {
     let at = range[1];

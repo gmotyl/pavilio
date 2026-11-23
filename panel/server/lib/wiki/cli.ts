@@ -82,6 +82,10 @@ const USAGE = `usage: scripts/wiki <command> [args]
                                             project must be a current knowledge target (global
                                             or a group wiki, see targets), else exit 1; a link
                                             already there is {added:false} either way
+  backlink --keep <p> <source page> <target>
+                                            the same without the knowledge-target check, for
+                                            ingest re-appending links it captured before a
+                                            rewrite (syntax, path and dedupe checks still apply)
   harvest-status                            {lastRun, daysAgo, waiting, waitingGroup}: newest harvest
                                             entry in knowledge/wiki/log.md (null = never),
                                             candidates waiting, of which from ## Group candidates
@@ -131,7 +135,13 @@ class UnknownCommand extends Error {}
 
 type Parsed = { positional: string[]; flags: Map<string, string[]> };
 
-/** `--flag value` and `--flag=value`; a flag without a value is an error. Repeats are kept in order. */
+/** Flags that take no value: present → `"true"`. */
+const SWITCHES = new Set(["keep"]);
+
+/**
+ * `--flag value` and `--flag=value`; a flag without a value is an error. Repeats are kept in order.
+ * A switch (`SWITCHES`) takes no value and refuses `=value`.
+ */
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
   const flags = new Map<string, string[]>();
@@ -143,6 +153,11 @@ function parseArgs(args: string[]): Parsed {
       continue;
     }
     const eq = arg.indexOf("=");
+    if (SWITCHES.has(eq === -1 ? arg.slice(2) : arg.slice(2, eq))) {
+      if (eq !== -1) throw new CliError(`${arg.slice(0, eq)} takes no value`);
+      add(arg.slice(2), "true");
+      continue;
+    }
     if (eq !== -1) {
       add(arg.slice(2, eq), arg.slice(eq + 1));
       continue;
@@ -357,9 +372,11 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       return ok({ ...clearCandidates(workspaceRoot, readIds(resolve(deps.cwd, file))) });
     }
     case "backlink": {
-      const [p, page, target] = only(parsed, 3, "backlink <p> <source page> <[project:]wiki/<slug>>");
+      const [p, page, target] = only(parsed, 3, "backlink [--keep] <p> <source page> <[project:]wiki/<slug>>", [
+        "keep",
+      ]);
       projectDir(workspaceRoot, p);
-      return ok({ ...addBacklink(workspaceRoot, p, page, target) });
+      return ok({ ...addBacklink(workspaceRoot, p, page, target, { keep: flag("keep") === "true" }) });
     }
     case "targets": {
       only(parsed, 0, "no arguments");

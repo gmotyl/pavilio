@@ -274,6 +274,17 @@ describe("wiki cli", () => {
       code: 1,
       json: { error: expect.stringMatching(/not a knowledge target/) },
     });
+    expect(await cli(["backlink", "--keep", "demo", "wiki/sources/a.md", "demo:wiki/concepts/vat"])).toMatchObject({
+      code: 0,
+      json: { added: true },
+    });
+    expect(await cli(["backlink", "demo", "wiki/sources/a.md", "demo:wiki/concepts/vat", "--keep"])).toMatchObject({
+      code: 0,
+      json: { added: false },
+    });
+    expect(readFileSync(join(project, "wiki/sources/a.md"), "utf8")).toContain("- [[demo:wiki/concepts/vat]]\n");
+    expect((await cli(["backlink", "--keep", "demo", "wiki/sources/a.md", "../x:wiki/concepts/vat"])).code).toBe(1);
+    expect((await cli(["backlink", "--keep=yes", "demo", "wiki/sources/a.md", "wiki/concepts/vat"])).code).toBe(1);
 
     const status = await cli(["harvest-status"], { now: () => new Date(2026, 9, 22) });
     expect(status).toMatchObject({ code: 0, json: { lastRun: null, daysAgo: null, waiting: 1, waitingGroup: 0 } });
