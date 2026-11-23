@@ -4,6 +4,7 @@ import MarkdownRenderer from "../../markdown/MarkdownRenderer";
 import { usePageSpeech } from "../../speech/SpeechHostProvider";
 import { prDescriptionSource } from "../PrDescription";
 import { hue, updatedAgo } from "../PrRow";
+import type { ReviewComment } from "../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../reviewThreads";
 
 /** Grace period after the pointer leaves both the marker and the popover (as in WikiLinkHoverCard). */
@@ -39,13 +40,43 @@ const FOCUSABLE = "button, a[href]";
 const TABBABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** The first tabbable element after `marker` in document order, outside `pop`. */
+/**
+ * Whether `el` can take focus as it stands: not inside a `hidden`, `inert` or `display: none` /
+ * `visibility: hidden` ancestor, nor a disabled fieldset (e.g. a `hidden md:block` toggle on a
+ * narrow screen). The ancestor walk is what jsdom can see; `checkVisibility` adds layout where it exists.
+ */
+function canFocus(el: HTMLElement): boolean {
+  if (el.closest("[hidden], [inert], fieldset[disabled]")) return false;
+  for (let n: Element | null = el; n; n = n.parentElement) {
+    const cs = getComputedStyle(n);
+    if (cs.display === "none") return false;
+    if (n === el && (cs.visibility === "hidden" || cs.visibility === "collapse")) return false;
+  }
+  return el.checkVisibility ? el.checkVisibility({ visibilityProperty: true }) : true;
+}
+
+/** The first focusable tabbable element after `marker` in document order, outside `pop`. */
 function nextTabbable(marker: HTMLElement, pop: HTMLElement | null): HTMLElement | null {
   for (const el of document.querySelectorAll<HTMLElement>(TABBABLE)) {
-    if (el.tabIndex < 0 || marker.contains(el) || pop?.contains(el)) continue;
+    if (el.tabIndex < 0 || marker.contains(el) || pop?.contains(el) || !canFocus(el)) continue;
     if (marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) return el;
   }
   return null;
+}
+
+/**
+ * The popover's comments as conversations: one per root, in the roots' order, each root followed by
+ * its replies. `groupThreads` can merge several roots anchored on the same line into one thread.
+ */
+function conversations(comments: readonly ReviewComment[]): { root: ReviewComment; items: number[] }[] {
+  const byRoot = new Map<number, { root: ReviewComment; items: number[] }>();
+  comments.forEach((c, i) => {
+    const rootId = c.replyTo ?? c.id;
+    const group = byRoot.get(rootId);
+    if (group) group.items.push(i);
+    else byRoot.set(rootId, { root: comments.find((r) => r.id === rootId) ?? c, items: [i] });
+  });
+  return [...byRoot.values()];
 }
 
 const initials = (login: string): string => login.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
@@ -77,7 +108,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   const n = comments.length;
   const line = anchor.line;
   const bodies = comments.map((c) => prDescriptionSource(c.body));
-  const href = safeHref(comments[0].url);
+  const groups = conversations(comments);
 
   const cancelClose = useCallback(() => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -98,6 +129,17 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   }, [cancelClose, close]);
 
   useEffect(() => cancelClose, [cancelClose]);
+
+  // Speech this marker started stops with it: leaving the file or PR must not leave a comment
+  // playing, nor a stale key for the global Play shortcut to resume (as `SpeakingToolbar` does).
+  const started = useRef(new Set<string>());
+  useEffect(() => {
+    const keys = started.current;
+    return () => {
+      for (const k of keys) speech.stopDocument(k);
+      keys.clear();
+    };
+  }, [speech, speechKey]);
 
   const focusMarkerClosed = useCallback(() => {
     quietFocus.current = true;
@@ -173,14 +215,20 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
     first.focus();
   };
 
-  const playOne = (i: number) =>
-    speechKey && speech.speakDocument({ key: `${speechKey}/c/${comments[i].id}`, text: `${comments[i].author}: ${bodies[i]}` });
+  // The author on a paragraph of their own: a body opening with a fence (```suggestion) must start
+  // its line, or the speech filter's line-anchored fence match misses it and swallows what follows.
+  const spoken = (i: number) => `${comments[i].author}:\n\n${bodies[i]}`;
+  const speak = (key: string, text: string) => {
+    started.current.add(key);
+    speech.speakDocument({ key, text });
+  };
+  const playOne = (i: number) => speechKey && speak(`${speechKey}/c/${comments[i].id}`, spoken(i));
   const playAll = () =>
     speechKey &&
-    speech.speakDocument({
-      key: `${speechKey}/t/${comments[0].id}`,
-      text: comments.map((c, i) => `${c.author}: ${bodies[i]}`).join("\n\n"),
-    });
+    speak(
+      `${speechKey}/t/${comments[0].id}`,
+      groups.flatMap((g) => g.items.map(spoken)).join("\n\n"),
+    );
 
   const style: CSSProperties = { top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" };
 
@@ -237,8 +285,9 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
               }
               const next = markerRef.current ? nextTabbable(markerRef.current, popRef.current) : null;
               close();
-              if (next) next.focus();
-              else focusMarkerClosed();
+              next?.focus();
+              // Nothing focusable after it, or the browser refused the focus: keep it on the marker.
+              if (!next || document.activeElement !== next) focusMarkerClosed();
             }}
             // React events from a portal bubble through the React tree: keep them out of the viewer's body click.
             onClick={(e) => e.stopPropagation()}
@@ -251,34 +300,44 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
                 </button>
               )}
             </header>
-            {comments.map((c, i) => (
-              <div key={c.id} className="fv-cmmsg">
-                <div className="fv-cmwho">
-                  <span className="fv-cmav" style={{ background: hue(c.author) }} aria-hidden="true">
-                    {initials(c.author)}
-                  </span>
-                  <b>{me && c.author === me ? "you" : c.author}</b> · {updatedAgo(c.createdAt)}
-                  {speechKey && n >= 2 && (
-                    <button type="button" data-testid={`comment-play-${c.id}`} className="fv-cmplay" aria-label="Play comment" onClick={() => playOne(i)}>
-                      ▷
-                    </button>
-                  )}
-                </div>
-                <div className="fv-cmbody">
-                  <MarkdownRenderer content={bodies[i]} untrusted={{ linkBase: c.url }} />
-                </div>
-              </div>
-            ))}
-            <footer>
-              Read-only ·{" "}
-              {href ? (
-                <a href={href} target="_blank" rel="noreferrer noopener">
-                  Reply on GitHub ↗
-                </a>
-              ) : (
-                "Reply on GitHub"
-              )}
-            </footer>
+            {groups.map(({ root, items }) => {
+              const href = safeHref(root.url);
+              return (
+                <section key={root.id} className="fv-cmconv">
+                  {items.map((i) => {
+                    const c = comments[i];
+                    return (
+                      <div key={c.id} className="fv-cmmsg">
+                        <div className="fv-cmwho">
+                          <span className="fv-cmav" style={{ background: hue(c.author) }} aria-hidden="true">
+                            {initials(c.author)}
+                          </span>
+                          <b>{me && c.author === me ? "you" : c.author}</b> · {updatedAgo(c.createdAt)}
+                          {speechKey && n >= 2 && (
+                            <button type="button" data-testid={`comment-play-${c.id}`} className="fv-cmplay" aria-label="Play comment" onClick={() => playOne(i)}>
+                              ▷
+                            </button>
+                          )}
+                        </div>
+                        <div className="fv-cmbody">
+                          <MarkdownRenderer content={bodies[i]} untrusted={{ linkBase: c.url }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="fv-cmreply">
+                    {href ? (
+                      <a href={href} target="_blank" rel="noreferrer noopener">
+                        Reply on GitHub ↗
+                      </a>
+                    ) : (
+                      "Reply on GitHub"
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+            <footer>Read-only</footer>
           </div>,
           document.body,
         )}

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewComment } from "../../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../../reviewThreads";
 
-const speech = vi.hoisted(() => ({ speakDocument: vi.fn() }));
+const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn() }));
 
 vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech }));
 vi.mock("../../../markdown/MarkdownRenderer", () => ({
@@ -14,6 +14,7 @@ vi.mock("../../../markdown/MarkdownRenderer", () => ({
   ),
 }));
 
+import { stripToSpeakableText } from "../../../speech/strip";
 import CommentMarker from "../CommentMarker";
 
 const NOW = new Date("2026-11-23T12:00:00Z").getTime();
@@ -29,6 +30,7 @@ const comment = (over: Partial<ReviewComment>): ReviewComment => ({
   body: "Should `prod` link to the prod tfvars?",
   createdAt: "2026-11-23T10:00:00Z",
   url: "https://github.com/gmotyl/pavilio/pull/7#discussion_r990",
+  commitId: "head",
   ...over,
 });
 
@@ -73,6 +75,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   vi.setSystemTime(NOW);
   speech.speakDocument.mockReset();
+  speech.stopDocument.mockReset();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -153,14 +156,69 @@ describe("CommentMarker", () => {
     expect(bodies[1].textContent).toBe("It does.");
   });
 
-  it("CommentMarker shows the read-only footer linking to GitHub", () => {
+  it("CommentMarker shows the read-only note once and a reply link to GitHub", () => {
     render(<CommentMarker thread={TWO} speechKey={KEY} />);
     fireEvent.focus(marker());
     const footer = dialog().querySelector("footer")!;
-    expect(footer).toHaveTextContent("Read-only · Reply on GitHub ↗");
-    const link = within(footer).getByRole("link", { name: "Reply on GitHub ↗" });
-    expect(link).toHaveAttribute("href", ROOT.url);
-    expect(link).toHaveAttribute("target", "_blank");
+    expect(footer).toHaveTextContent(/^Read-only$/);
+    const links = within(dialog()).getAllByRole("link", { name: "Reply on GitHub ↗" });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", ROOT.url);
+    expect(links[0]).toHaveAttribute("target", "_blank");
+  });
+
+  it("CommentMarker gives each root conversation on the line its own reply link", () => {
+    const OTHER = comment({
+      id: 995,
+      author: "ajanik",
+      body: "Unrelated nit.",
+      createdAt: "2026-11-23T10:30:00Z",
+      url: "https://github.com/gmotyl/pavilio/pull/7#discussion_r995",
+    });
+    // groupThreads sorts by time: the roots' comments interleave.
+    render(<CommentMarker thread={thread([ROOT, OTHER, REPLY])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    const pop = dialog();
+    const links = within(pop).getAllByRole("link", { name: "Reply on GitHub ↗" });
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([ROOT.url, OTHER.url]);
+    // Each conversation reads as one: the reply sits with its root, the link under its last comment.
+    const order = [...pop.querySelectorAll(".fv-cmmsg, a")].map((el) =>
+      el.tagName === "A" ? `link:${el.getAttribute("href")}` : el.querySelector("b")!.textContent,
+    );
+    expect(order).toEqual(["kwojcik", "gmotyl", `link:${ROOT.url}`, "ajanik", `link:${OTHER.url}`]);
+    expect(within(pop).getAllByText("Read-only")).toHaveLength(1);
+  });
+
+  it("CommentMarker Play speaks the author on a line of its own, so a leading fence still strips", () => {
+    const SUGGEST = comment({ body: "```suggestion\nconst prod = true;\n```\nPlease rename this flag." });
+    render(<CommentMarker thread={thread([SUGGEST, REPLY])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    const spoken = stripToSpeakableText(speech.speakDocument.mock.calls[0][0].text);
+    expect(spoken).toContain("kwojcik:");
+    expect(spoken).not.toContain("const prod");
+    expect(spoken).toContain("Please rename this flag.");
+    expect(spoken).toContain("It does.");
+    fireEvent.click(within(dialog()).getAllByRole("button", { name: "Play comment" })[0]);
+    expect(stripToSpeakableText(speech.speakDocument.mock.calls[1][0].text)).toContain("Please rename this flag.");
+  });
+
+  it("CommentMarker stops the speech it started when it unmounts", () => {
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(dialog()).getAllByRole("button", { name: "Play comment" })[1]);
+    expect(speech.stopDocument).not.toHaveBeenCalled();
+    unmount();
+    expect(speech.stopDocument).toHaveBeenCalledWith(`${KEY}/t/990`);
+    expect(speech.stopDocument).toHaveBeenCalledWith(`${KEY}/c/991`);
+    expect(speech.stopDocument).toHaveBeenCalledTimes(2);
+  });
+
+  it("CommentMarker unmounting without playing stops nothing", () => {
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    unmount();
+    expect(speech.stopDocument).not.toHaveBeenCalled();
   });
 
   it("CommentMarker Play speaks one comment under its key", () => {
@@ -168,9 +226,9 @@ describe("CommentMarker", () => {
     fireEvent.focus(marker());
     const [first, second] = within(dialog()).getAllByRole("button", { name: "Play comment" });
     fireEvent.click(first);
-    expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/c/990`, text: `kwojcik: ${ROOT.body}` });
+    expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/c/990`, text: `kwojcik:\n\n${ROOT.body}` });
     fireEvent.click(second);
-    expect(speech.speakDocument).toHaveBeenLastCalledWith({ key: `${KEY}/c/991`, text: "gmotyl: It does." });
+    expect(speech.speakDocument).toHaveBeenLastCalledWith({ key: `${KEY}/c/991`, text: "gmotyl:\n\nIt does." });
   });
 
   it("CommentMarker Play all speaks the thread in order", () => {
@@ -180,7 +238,7 @@ describe("CommentMarker", () => {
     expect(speech.speakDocument).toHaveBeenCalledTimes(1);
     expect(speech.speakDocument).toHaveBeenCalledWith({
       key: `${KEY}/t/990`,
-      text: `kwojcik: ${ROOT.body}\n\ngmotyl: It does.`,
+      text: `kwojcik:\n\n${ROOT.body}\n\ngmotyl:\n\nIt does.`,
     });
   });
   it("CommentMarker one-comment thread has a single Play, speaking the thread", () => {
@@ -192,7 +250,7 @@ describe("CommentMarker", () => {
     expect(play).not.toHaveTextContent("Play all");
     expect(within(pop).queryByRole("button", { name: "Play comment" })).toBeNull();
     fireEvent.click(play);
-    expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/t/990`, text: `kwojcik: ${ROOT.body}` });
+    expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/t/990`, text: `kwojcik:\n\n${ROOT.body}` });
   });
 
   it("CommentMarker without a speech key renders no Play buttons", () => {
@@ -267,13 +325,79 @@ describe("CommentMarker", () => {
     expect(document.activeElement).toBe(marker());
   });
 
-  it("CommentMarker footer links only to http(s) urls", () => {
+  it("CommentMarker Tab off the last control skips hidden controls after the marker", () => {
+    render(
+      <div>
+        <CommentMarker thread={TWO} speechKey={KEY} />
+        <button type="button" hidden data-testid="hidden-attr">
+          hidden
+        </button>
+        <div style={{ display: "none" }}>
+          <button type="button" data-testid="in-display-none">
+            in display none
+          </button>
+        </div>
+        <fieldset disabled>
+          <a href="https://example.com" data-testid="in-disabled-fieldset">
+            x
+          </a>
+        </fieldset>
+        <div inert>
+          <button type="button" data-testid="inert">
+            inert
+          </button>
+        </div>
+        <button type="button" data-testid="after">
+          after
+        </button>
+      </div>,
+    );
+    act(() => marker().focus());
+    act(() => within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" }).focus());
+    tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("after"));
+  });
+
+  it("CommentMarker Tab off the last control with only hidden controls after lands on the closed marker", () => {
+    render(
+      <div>
+        <CommentMarker thread={TWO} speechKey={KEY} />
+        <button type="button" hidden>
+          hidden
+        </button>
+        <div style={{ display: "none" }}>
+          <button type="button">in display none</button>
+        </div>
+      </div>,
+    );
+    act(() => marker().focus());
+    act(() => within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" }).focus());
+    tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(marker());
+  });
+
+  it("CommentMarker Tab off the last control falls back to the marker when focus does not take", () => {
+    render(<Inline />);
+    const after = screen.getByTestId("after");
+    // A control the browser refuses to focus (e.g. hidden by layout jsdom cannot see).
+    after.focus = () => {};
+    act(() => marker().focus());
+    act(() => within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" }).focus());
+    tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(marker());
+  });
+
+  it("CommentMarker reply links only to http(s) urls", () => {
     render(<CommentMarker thread={thread([comment({ url: "javascript:alert(1)" })])} speechKey={KEY} />);
     fireEvent.focus(marker());
-    const footer = dialog().querySelector("footer")!;
-    expect(footer).toHaveTextContent("Read-only · Reply on GitHub");
-    expect(footer).not.toHaveTextContent("↗");
-    expect(within(footer).queryByRole("link")).toBeNull();
-    expect(footer.querySelector("a")).toBeNull();
+    const pop = dialog();
+    expect(pop).toHaveTextContent("Reply on GitHub");
+    expect(pop).not.toHaveTextContent("↗");
+    expect(within(pop).queryByRole("link")).toBeNull();
+    expect(pop.querySelector("a")).toBeNull();
+    expect(pop.querySelector("footer")).toHaveTextContent(/^Read-only$/);
   });
 });

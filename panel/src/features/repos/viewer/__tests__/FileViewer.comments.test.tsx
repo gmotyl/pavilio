@@ -46,6 +46,7 @@ const thread = (side: "old" | "new", line: number, n = 1): ReviewThread => ({
       body: `note ${i}`,
       createdAt: `2026-11-23T10:0${i}:00Z`,
       url: `https://github.com/gmotyl/pavilio/pull/7#discussion_r${line * 10 + i}`,
+      commitId: "head",
     }),
   ),
 });
@@ -175,5 +176,39 @@ describe("FileViewer comment lane", () => {
     expect([...row.children].map((td) => td.className.split(" ")[0])).toEqual(["fv-cm", "fv-gm", "fv-no", "fv-cd"]);
     expect(row.querySelector(".fv-cmbtn")).toHaveAccessibleName("2 comments on line 16");
     expect(body().querySelector('tr[data-line="15"] .fv-cmbtn')).toBeNull();
+  });
+
+  it("FileViewer expands a fold holding a commented line, so its marker shows without a click", () => {
+    const long = Array.from({ length: 100 }, (_, i) => `row ${i + 1}`);
+    long[79] = "row 80 edited";
+    const longDiff = [
+      "--- a/src/geo/area.ts",
+      "+++ b/src/geo/area.ts",
+      "@@ -77,7 +77,7 @@",
+      " row 77",
+      " row 78",
+      " row 79",
+      "-row 80",
+      "+row 80 edited",
+      " row 81",
+      " row 82",
+      " row 83",
+    ].join("\n");
+    const fixture = (comments: Map<string, ReviewThread>) =>
+      viewer({ diff: longDiff, content: long.join("\n"), counts: { add: 1, del: 1 }, comments });
+    // Without a comment in it, lines 1–73 fold.
+    const { container, unmount } = render(fixture(new Map([["new:80", thread("new", 80)]])));
+    unified();
+    expect(container.querySelectorAll(".fv-fold-row")).not.toHaveLength(0);
+    expect(body().querySelector('tr[data-line="10"]')).toBeNull();
+    unmount();
+
+    render(fixture(new Map([["new:10", thread("new", 10)], ["old:95", thread("old", 95)]])));
+    unified();
+    expect(body().querySelector('tr[data-line="10"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 10");
+    expect(body().querySelector('tr[data-old-line="95"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 95");
+    split();
+    expect(body().querySelector('tr[data-line="10"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 10");
+    expect(body().querySelector('tr[data-old-line="95"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 95");
   });
 });

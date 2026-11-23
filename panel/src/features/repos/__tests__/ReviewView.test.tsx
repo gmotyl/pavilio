@@ -24,7 +24,7 @@ vi.mock("../PrDescription", async (importOriginal) => {
   };
 });
 // Comment markers speak through the panel's one host; only the call matters here.
-const speech = vi.hoisted(() => ({ speakDocument: vi.fn() }));
+const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn() }));
 vi.mock("../../speech/SpeechHostProvider", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/SpeechHostProvider")>()),
   usePageSpeech: () => speech,

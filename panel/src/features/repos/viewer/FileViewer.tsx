@@ -357,7 +357,21 @@ export default function FileViewer({
   const items = useMemo(() => foldRows(rows), [rows]);
   // Expanded folds belong to one row list; a new diff starts folded again.
   const [expansion, setExpansion] = useState<{ rows: Row[]; ids: Set<number> }>({ rows, ids: new Set() });
-  const expanded = useMemo(() => (expansion.rows === rows ? expansion.ids : new Set<number>()), [expansion, rows]);
+  // A fold holding a commented line starts open: the file badge counts that comment, so its marker must show.
+  const commentedFolds = useMemo(() => {
+    const ids = new Set<number>();
+    if (!comments?.size) return ids;
+    for (const it of items) {
+      if (it.kind !== "fold") continue;
+      // Folds hold context rows only, which carry both sides — the same keys the lane looks up.
+      if (it.rows.some((r) => r.kind === "ctx" && (comments.has(`new:${r.new}`) || comments.has(`old:${r.old}`)))) ids.add(it.id);
+    }
+    return ids;
+  }, [items, comments]);
+  const expanded = useMemo(() => {
+    const user = expansion.rows === rows ? expansion.ids : new Set<number>();
+    return commentedFolds.size ? new Set([...user, ...commentedFolds]) : user;
+  }, [expansion, rows, commentedFolds]);
   const expand = useCallback((id: number) => setExpansion({ rows, ids: new Set([...expanded, id]) }), [rows, expanded]);
   const visible = useMemo(() => expandFolds(items, expanded), [items, expanded]);
 
