@@ -280,6 +280,10 @@ describe("FileViewer", () => {
     const { container } = render(<FileViewer path="src/big.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
     expect(container.querySelector('tr[data-line="2"]')).not.toBeNull();
     expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);
+    // Path text is still no identifier, even without string classes.
+    const syms = [...container.querySelectorAll<HTMLElement>(".fv-sym")].map((s) => s.dataset.sym);
+    expect(syms).not.toContain("comment");
+    expect(syms).not.toContain("real");
   });
 
   it("import specifiers stay plain outside TS/JS", () => {

@@ -55,13 +55,13 @@ function highlightLines(lines: string[], lang: string | undefined): { html: stri
   // An empty text still highlights to one (empty) line; keep the counts equal.
   if (lines.length === 0) return { html: [], tokens: true };
   const text = lines.join("\n");
-  const plain = { html: lines.map(escapeHtml), tokens: false };
-  if (!lang || text.length > MAX_HIGHLIGHT_CHARS) return plain;
+  const plain = () => ({ html: lines.map(escapeHtml), tokens: false });
+  if (!lang || text.length > MAX_HIGHLIGHT_CHARS) return plain();
   let html: string;
   try {
     html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
   } catch {
-    return plain;
+    return plain();
   }
   const out: string[] = [];
   const open: string[] = [];
@@ -240,8 +240,7 @@ function lineHtml(
   if (opts.words?.length) html = decorate(html, opts.words, () => '<mark class="fv-word">', "</mark>");
   html = decorate(html, matchRanges(text, opts.term), () => '<mark class="fv-hl">', "</mark>");
   if (opts.symbols && text.length <= MAX_SYMBOL_LINE) {
-    // Without comment classes a specifier inside a comment cannot be told apart: link none.
-    const spec = opts.specs === false ? { ranges: [], specs: [] } : specifierRanges(text);
+    const spec = specifierRanges(text);
     const ids = identifierRanges(text);
     // Unhighlighted text has no string classes to veto words inside a specifier.
     // Both range lists are sorted: walk them together.
@@ -260,7 +259,8 @@ function lineHtml(
       (classes) => classes.some((c) => NOT_CODE.test(c)),
     );
     // data-col is the first character inside the quotes: ts-nav resolves the specifier there.
-    html = decorate(
+    // Without comment classes a specifier inside a comment cannot be told apart: link none.
+    if (opts.specs !== false) html = decorate(
       html,
       spec.ranges,
       (i) => `<span class="fv-sym fv-spec" data-sym="${attr(spec.specs[i])}" data-col="${spec.ranges[i][0] + 2}" title="Open module">`,
