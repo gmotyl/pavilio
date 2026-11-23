@@ -166,6 +166,7 @@ beforeEach(() => {
   DrivenResizeObserver.all = [];
   vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
   vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  vi.mocked(Element.prototype.scrollTo).mockClear();
   speech.speakDocument.mockClear();
   writePreference(preferences.reposPrFilter, { preset: "mine", author: null }, "pavilio");
 });
@@ -332,7 +333,50 @@ describe("ReviewView", () => {
     expect(desc()).toHaveAttribute("data-speech-key", prSpeechKey("pavilio", PRS[0]));
     expect(screen.queryByTestId("file-viewer")).toBeNull();
     expect(calls(fetch, "/api/git/diff-ref")).toHaveLength(0);
-    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    // FileViewer jumps by scrolling its host box (scrollRowIntoHost), never via scrollIntoView.
+    expect(Element.prototype.scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("a deep link's file and line scroll the review pane to that line", async () => {
+    renderReview({ search: `${FILE_A}&line=15` });
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    const scroll = vi.mocked(Element.prototype.scrollTo);
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    expect(scroll.mock.contexts).toContain(document.querySelector(".rv-main"));
+  });
+
+  it("an empty file parameter opens the Description", async () => {
+    const fetch = renderReview({ search: "?view=review&pr=pavilio%231&file=" });
+    await loaded();
+    expect(descEntry()).toHaveAttribute("aria-current", "true");
+    await waitFor(() => expect(desc()).toHaveTextContent("PR body text"));
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+    expect(calls(fetch, "/api/git/diff-ref")).toHaveLength(0);
+  });
+
+  it("a pull request that changes no files says so in the tree area", async () => {
+    renderReview({ changed: () => jsonResponse([]) });
+    const msg = await screen.findByText("This pull request changes no files.");
+    expect(treeArea().contains(msg)).toBe(true);
+    expect(within(treeArea()).getByRole("checkbox", { name: "Changed files only" })).toBeChecked();
+    expect(within(treeArea()).queryByRole("navigation", { name: "Pull request files" })).toBeNull();
+  });
+
+  it("in a PR diff the comment lane is always present, so line numbers never shift", async () => {
+    // Pending: the comments request never answers.
+    renderReview({ search: FILE_A, comments: () => new Promise<Response>(() => {}) });
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    expect(viewer.querySelector(".fv-cm-col")).not.toBeNull();
+  });
+
+  it("the comment lane stays when the comments request fails", async () => {
+    renderReview({ search: FILE_A, comments: () => jsonResponse({ error: "boom" }, { status: 502 }) });
+    await screen.findByTestId("review-comments-note");
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    expect(viewer.querySelector(".fv-cm-col")).not.toBeNull();
   });
 
   it("Description entry stays first with the whole-repo tree", async () => {
