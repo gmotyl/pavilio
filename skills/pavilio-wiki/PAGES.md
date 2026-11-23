@@ -157,7 +157,14 @@ description: "Gaps the wiki could not answer and knowledge waiting for a home"
 
 ## Knowledge candidates
 - 2026-10-20 — <generic finding> (from [[wiki/sources/progress-2026-10-19-tts-relay-node20]])
+
+## Group candidates
+- 2026-10-20 — <group-scoped finding> (from [[wiki/sources/note-2026-10-20-vat-check]])
 ```
+
+`## Group candidates` exists only in a grouped project's file (card has `group:`): findings true
+across the group's projects but not outside them, same format as `## Knowledge candidates`.
+Ungrouped → the section is never written.
 
 Append only; create the file with this skeleton when missing. People delete resolved items. A
 candidate's indented sub-lines are part of it: the harvest reads them as its `details` and clears

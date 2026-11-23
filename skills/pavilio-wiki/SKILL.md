@@ -169,6 +169,9 @@ Per URL:
 
 Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMINAL_ID`, else
 `<hostname>-<epoch>`). Read `scripts/wiki config` once for `writerModel`.
+Resolve the group once: `group:` from `projects/<p>/PROJECT.md` frontmatter (trimmed; missing or
+empty → ungrouped). Grouped → `members` = every `projects/*/PROJECT.md` (not `archived/`) whose
+trimmed `group:` equals it, minus `kind: knowledge` cards (group wikis).
 
 1. **Gitignore** — ensure `wiki/.gitignore` lists `.ingest.lock*` and `raw/repos/`.
 2. **Lock** — `scripts/wiki lock take <p> --session <id>`. `busy: true` → retry once after a few
@@ -186,6 +189,7 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 5. **Source writers** — one `source_writer` per record (target `wiki/sources/<kind>-<stem>.md`
    per `CONVENTIONS.md § Identity and the ledger`), in parallel, ≤10 at a time; one `repo_writer`
    (architecture mode) per cloned repo, skipped when `action: "refreshed"` left `commit` unchanged.
+   Grouped project → pass each `source_writer` `group` and `members`; ungrouped → pass neither.
    For external material, hand the writer its original `url` (`PAGES.md § Common frontmatter`):
    an article/YouTube/Atlassian raw file's `source_url` frontmatter, a clone's `git -C <clonePath>
    remote get-url origin` normalised by its form — a GitHub origin →
@@ -224,11 +228,14 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 10. **Record** — `scripts/wiki record <p> <path> <hash>` for each record whose source page landed
     (repo pages carry `commit` instead).
 11. **Log** — append the ingest entry (`PAGES.md § log.md`); append every `generic:` finding under
-    `## Knowledge candidates` in `wiki/open-questions.md`, every `contradictions` item under
-    `## Gaps`, and every `collisions` item under `## Gaps` prefixed `Term collision:` (one word,
-    two meanings — a glossary `_Avoid_` note or a rename settles it). Before appending a
-    contradiction, drop it when its own text says it was settled, superseded, reconciled or that
-    the page states what holds now (`agents/page_writer.md` reports only open ones), and when
+    `## Knowledge candidates` in `wiki/open-questions.md`; grouped project → every `group:` finding
+    under `## Group candidates`, same bullet format, the section added after
+    `## Knowledge candidates` when missing (ungrouped → never write it, ignore `group:` items);
+    every `contradictions` item under `## Gaps`, and every `collisions` item under `## Gaps`
+    prefixed `Term collision:` (one word, two meanings — a glossary `_Avoid_` note or a rename
+    settles it). Before appending a contradiction, drop it when its own text says it was settled,
+    superseded, reconciled or that the page states what holds now (`agents/page_writer.md` reports
+    only open ones), and when
     `## Gaps` already has an item on the same question — append the new page's link to that item
     instead of adding a second one. `## Gaps` is read by a person; every item must need one.
 12. **Commit** — `git add projects/<p>/wiki` and commit `<p>: wiki ingest <n> records` right away;
@@ -238,9 +245,11 @@ Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMIN
 
 Report: source pages written, knowledge pages created/updated, slugs waiting, slugs whose backlog
 stayed after the re-run, failures, warnings. It always ends with the harvest age from
-`scripts/wiki harvest-status` (`daysAgo` null → `never`; `waiting` → M):
+`scripts/wiki harvest-status` (`daysAgo` null → `never`; `waiting` → M, both scopes;
+`waitingGroup` → G, the ` (G group)` part only when `waitingGroup > 0`):
 
 ```
+Knowledge harvest: last run N days ago, M candidates waiting (G group) — /pavilio-wiki-ingest-knowledge
 Knowledge harvest: last run N days ago, M candidates waiting — /pavilio-wiki-ingest-knowledge
 Knowledge harvest: last run never, M candidates waiting — /pavilio-wiki-ingest-knowledge
 ```

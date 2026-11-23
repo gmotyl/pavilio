@@ -137,10 +137,12 @@ describe("scaffoldProject", () => {
     expect(card.startsWith("---\nkind: project\ngroup: metro\n---\n")).toBe(true);
     expect(card).toContain("[2-3 sentences: what the project is, for whom, where Greg fits.]");
     expect(projectKind(projectsDir, "acme")).toBe("project");
+    expect(read("acme/wiki/open-questions.md")).toMatch(/## Gaps[\s\S]*## Knowledge candidates[\s\S]*## Group candidates/);
 
     const plain = scaffoldProject({ projectsDir, name: "solo", kind: "project", today: "2026-10-22" });
     expect(plain.ok).toBe(true);
     expect(read("solo/PROJECT.md")).not.toContain("group:");
+    expect(read("solo/wiki/open-questions.md")).not.toContain("## Group candidates");
   });
 
   it("grouped knowledge scaffold uses the group overview line", () => {
@@ -154,6 +156,7 @@ describe("scaffoldProject", () => {
     expect(card).toContain("group: metro\n");
     expect(card).toContain("Group knowledge for metro: findings shared by its projects, promoted from their wikis.");
     expect(card).not.toContain("Workspace-wide knowledge");
+    expect(read("metro-wiki/wiki/open-questions.md")).not.toContain("## Group candidates");
     expect(projectKind(projectsDir, "metro-wiki")).toBe("knowledge");
   });
 

@@ -117,18 +117,23 @@ function wikiOverview(input: ScaffoldInput): string {
   ].join("\n");
 }
 
-const OPEN_QUESTIONS = [
-  "---",
-  "type: open-questions",
-  'description: "Gaps the wiki could not answer and knowledge waiting for a home"',
-  "---",
-  "# Open questions",
-  "",
-  "## Gaps",
-  "",
-  "## Knowledge candidates",
-  "",
-].join("\n");
+/** A grouped non-knowledge project also collects group-scoped findings; a group wiki does not. */
+function openQuestions(input: ScaffoldInput): string {
+  const grouped = Boolean(input.group?.trim()) && input.kind !== "knowledge";
+  return [
+    "---",
+    "type: open-questions",
+    'description: "Gaps the wiki could not answer and knowledge waiting for a home"',
+    "---",
+    "# Open questions",
+    "",
+    "## Gaps",
+    "",
+    "## Knowledge candidates",
+    "",
+    ...(grouped ? ["## Group candidates", ""] : []),
+  ].join("\n");
+}
 
 function emptyIndex(): string {
   const rendered = renderIndexes([]);
@@ -148,7 +153,7 @@ function skeleton(input: ScaffoldInput): { files: [string, string][]; keptDirs: 
     ["wiki/index.md", emptyIndex()],
     ["wiki/overview.md", wikiOverview(input)],
     ["wiki/log.md", ""],
-    ["wiki/open-questions.md", OPEN_QUESTIONS],
+    ["wiki/open-questions.md", openQuestions(input)],
     ["wiki/.gitignore", WIKI_GITIGNORE_LINES.join("\n") + "\n"],
   );
   keptDirs.push("wiki/sources", "wiki/entities", "wiki/concepts");
