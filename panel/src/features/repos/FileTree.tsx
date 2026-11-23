@@ -8,6 +8,8 @@ export interface TreeFile {
   status?: TreeStatus;
   add?: number;
   del?: number;
+  /** Review comments on this file; a badge shows when above zero. */
+  comments?: number;
 }
 
 interface DirNode {
@@ -139,6 +141,11 @@ export default function FileTree({ files, selected, onSelect, changedOnly = fals
         >
           <span className={`ft-st ft-st-${st === "?" ? "U" : (st ?? "none")}`}>{st === "?" ? "U" : st}</span>
           <span className="ft-nm">{name}</span>
+          {!!file.comments && file.comments > 0 && (
+            <span className="ft-cm" title={`${file.comments} comment${file.comments === 1 ? "" : "s"}`}>
+              💬{file.comments}
+            </span>
+          )}
           {st && file.add != null && file.del != null && (
             <span className="ft-cnt">
               <span className="ft-add">+{file.add}</span> <span className="ft-del">−{file.del}</span>

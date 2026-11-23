@@ -109,6 +109,29 @@ describe("FileTree", () => {
     expect(folder("lib")).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("shows a comment badge on files with comments", () => {
+    render(<FileTree files={[{ path: "README.md", status: "M", add: 72, del: 1, comments: 3 }]} onSelect={() => {}} />);
+    const row = screen.getByRole("button", { name: /README/ });
+    const badge = row.querySelector(".ft-cm");
+    expect(badge).toHaveTextContent("💬3");
+    expect(badge).toHaveAttribute("title", "3 comments");
+    expect(badge?.nextElementSibling).toHaveClass("ft-cnt");
+  });
+
+  it("shows no comment badge without comments", () => {
+    render(
+      <FileTree
+        files={[
+          { path: "a.ts", status: "M", add: 1, del: 0, comments: 0 },
+          { path: "b.ts", status: "M", add: 1, del: 0 },
+        ]}
+        onSelect={() => {}}
+      />,
+    );
+    expect(document.querySelector(".ft-cm")).toBeNull();
+    expect(screen.getByRole("button", { name: /a\.ts/ })).not.toHaveTextContent("💬");
+  });
+
   it("changedOnly hides unchanged files", () => {
     render(<FileTree files={FILES} changedOnly selected="src/a.ts" onSelect={() => {}} />);
     expect(rowNames()).toEqual(["src", "lib", "a.ts", "z.ts"]);
