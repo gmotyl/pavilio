@@ -234,19 +234,23 @@ export function clearCandidates(workspaceRoot: string, ids: string[]): { removed
 /** A link target page without `.md`. */
 const normalizePage = (page: string) => page.trim().replace(/\.md$/, "");
 
+const TARGET_PROJECT = /^[A-Za-z0-9._-]+$/;
+const TARGET_PAGE = /^wiki\/[^[\]|#\r\n]+$/;
+
 /**
- * `wiki/<slug>` (the `knowledge` project) or `<project>:wiki/<slug>`, optionally in `[[…]]` and
- * with `.md` → the target project and page. A malformed project name throws.
+ * `wiki/<slug>` (the `knowledge` project) or `<project>:wiki/<slug>` (`knowledge` or a group
+ * wiki), optionally in `[[…]]` and with `.md` → the target project and page. A project name
+ * outside `[A-Za-z0-9._-]` (or `.`, or holding `..`) or a page outside `wiki/` throws.
  */
 function parseTarget(target: string): { project: string; page: string } {
   const bare = target.trim().replace(/^\[\[/, "").replace(/\]\]$/, "");
   const colon = bare.indexOf(":");
-  if (colon === -1) return { project: KNOWLEDGE_PROJECT, page: normalizePage(bare) };
-  const project = bare.slice(0, colon).trim();
-  if (!project || project === "." || project.includes("..") || /[/\\\s]/.test(project)) {
-    throw new Error(`invalid target project: ${JSON.stringify(project)}`);
+  const project = colon === -1 ? KNOWLEDGE_PROJECT : bare.slice(0, colon).trim();
+  const page = normalizePage(colon === -1 ? bare : bare.slice(colon + 1));
+  if (!TARGET_PROJECT.test(project) || project === "." || project.includes("..") || !TARGET_PAGE.test(page)) {
+    throw new Error(`invalid backlink target ${JSON.stringify(target)}: expected [<project>:]wiki/<slug>`);
   }
-  return { project, page: normalizePage(bare.slice(colon + 1)) };
+  return { project, page };
 }
 
 /**
@@ -269,7 +273,6 @@ export function addBacklink(
   }
   if (!existsSync(path)) throw new Error(`no source page: projects/${project}/${rel}`);
   const wanted = parseTarget(target);
-  if (!wanted.page) throw new Error("backlink needs a knowledge target");
   const link = `- [[${wanted.project}:${wanted.page}]]`;
 
   const text = readFileSync(path, "utf8");

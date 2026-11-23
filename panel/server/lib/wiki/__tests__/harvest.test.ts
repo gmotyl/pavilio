@@ -193,6 +193,34 @@ describe("harvest", () => {
     expect(read("projects/alpha/wiki/sources/a.md")).toBe(once);
   });
 
+  it("addBacklink rejects malformed targets", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    const text = "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/vat]]\n";
+    write("projects/alpha/wiki/sources/a.md", text);
+    const bad = [
+      ".:wiki/concepts/vat",
+      "..:wiki/concepts/vat",
+      "x..y:wiki/concepts/vat",
+      "metro wiki:wiki/concepts/vat",
+      "metro\\wiki:wiki/concepts/vat",
+      "metro$wiki:wiki/concepts/vat",
+      "metro[wiki:wiki/concepts/vat",
+      "metro-wiki:concepts/vat",
+      "concepts/vat",
+      "metro-wiki:wiki/",
+      "wiki/",
+      "metro-wiki:wiki/a]]b",
+      "metro-wiki:wiki/a|b",
+    ];
+    for (const target of bad) {
+      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", target), target).toThrow(/backlink target/);
+    }
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "Metro_Bank.v2-wiki:wiki/concepts/vat")).toEqual({
+      added: true,
+    });
+  });
+
   it("addBacklink keeps knowledge default for bare targets", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
     write("projects/alpha/wiki/sources/a.md", "body\n\n## Knowledge\n- [[metro-wiki:wiki/concepts/x]]\n");
