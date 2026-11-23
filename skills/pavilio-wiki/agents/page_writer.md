@@ -67,8 +67,10 @@ One file, `wiki/<slug>.md`, shaped per `skills/pavilio-wiki/PAGES.md § Entity p
 
 ## Knowledge-wiki mode
 
-When `project` is a harvest target — `knowledge`, or a group wiki (a `kind: knowledge` project
-with `group:`) — the knowledge harvest runs you, and these rules replace the matching ones above:
+When the knowledge harvest runs you — you are given `claims`, not `sources`, and `project` is a
+harvest target: `knowledge`, or a group wiki (a `kind: knowledge` project with `group:`) — these
+rules replace the matching ones above. An ordinary ingest into `knowledge` or a group wiki passes
+`sources` from its backlog: the rules above apply unchanged.
 
 - Inputs: `project` (the target), `slug`, and `claims` — the picked or promoted findings, each
   with its origin as `<project>:wiki/sources/<kind>-<stem>.md` (no `sources` from a backlog, no

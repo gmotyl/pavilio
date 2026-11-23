@@ -352,13 +352,15 @@ wiki, group findings never to `knowledge`.
    threshold table before it.
 4. **Route** — the orchestrator computes per cluster:
    - *Group* (any mode, no question, never shown for picking): count = distinct origin
-     **projects** of its items. ≥2 → **promoted** to that group's wiki. Below 2 → **kept**
+     **projects** of its items with a `source` (an item without one gives the page writer nothing
+     to cite, so it does not count). ≥2 → **promoted** to that group's wiki. Below 2 → **kept**
      (not written, not cleared), unless every item in it has a `date` more than 90 days before
      today → **expired** (cleared in step 8, logged in step 9). An undated item never expires,
      so its cluster is kept. `--min` and `-yolo` thresholds do not apply.
    - *Generic* (into `knowledge` only, never a group wiki — even when every origin is in one
      group): count = distinct origin `source` pages of its items (an item with `source` null
-     counts as its own origin), then:
+     counts as its own origin), then — no generic cluster at all → no pick and no question in any
+     mode, the run goes on with the group routing:
      - *Manual (default):* numbered clusters grouped by subject, pages of ~30 (`text`, count,
        origin projects). The user replies with numbers or ranges (`3, 7, 12-15`), `next` for the
        next page, or `done`. Clusters shown and not picked are skipped.
@@ -377,15 +379,18 @@ wiki, group findings never to `knowledge`.
        below n is **kept**: not shown, not written, not cleared in step 8, so its items stay as
        candidates and can reach n origins at a later harvest, when a new source repeats the
        finding.
-   Generic candidates never expire. `--min` only: no generic cluster meets n, no group cluster
-   is promoted and none expired → release the lock, report the cluster counts and stop without a
-   commit (dropped ids stay as candidates). Manual and `-yolo` runs always go on to steps 8–10,
+   Generic candidates never expire. `--min` only: nothing to write or clear — no generic cluster
+   meets n, no id was dropped, no group cluster is promoted and none expired → release the lock,
+   report the cluster counts and stop without a commit. Dropped ids are cleared whenever the run
+   goes on, whatever the group routing did. Manual and `-yolo` runs always go on to steps 8–10,
    even with nothing picked: skipped and dropped ids are cleared, the log written and committed.
 5. **Group wiki** — per group with a promoted cluster: `groups[<group>]` from step 1 is its
    wiki; none → `scripts/project new <groupWikiName> --kind knowledge --group <group>` first
    (`groupWikiName` = the group slugged — lowercase, non-alphanumeric runs → `-`, trimmed — plus
-   `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`); exit 2 (`exists` / `archived`) → treat that
-   group as a lock not held (below). Then `scripts/wiki lock take <group wiki>
+   `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`; a group that slugs to nothing → `group-wiki`).
+   Exit 2 (`exists` / `archived`: the name is taken) → retry with `-2`, `-3`, … appended
+   (`motyl-oss-wiki-2`), at most 5 names; exit 1, or every name taken → treat that group as a lock
+   not held (below). Then `scripts/wiki lock take <group wiki>
    --session <id>`; `held: false` → that group's clusters stay as candidates (no page, no
    back-link, not cleared — dropped ids of its chunks included), the other targets proceed, and
    the report names the group. A renamed
@@ -395,23 +400,25 @@ wiki, group findings never to `knowledge`.
    group wiki), its `language`, the slug (`entities/<name>` for a tool, library or platform,
    `concepts/<name>` for a technique or a group's shared process or convention — reuse an existing
    page of that target or alias first), the picked or promoted claims (each `text` with its
-   `details`) and their origins as `<project>:wiki/sources/<page>.md`. ≤10 in parallel, never two
+   `details`) and their origins as `<project>:wiki/sources/<page>.md` (a promoted group cluster's
+   items without a `source` are left out: nothing to cite). ≤10 in parallel, never two
    on one page.
 7. **Back-link** — only after that subject's writer returned a valid receipt, for every item of
    it with a `source`: generic → `scripts/wiki backlink <project> <source> wiki/<slug>` (adds
    `- [[knowledge:wiki/<slug>]]`); group → `scripts/wiki backlink <project> <source> <group
    wiki>:wiki/<slug>` (adds `- [[<group wiki>:wiki/<slug>]]`). Idempotent; under the source
    page's `## Knowledge`. A failed writer's items get no back-link.
-8. **Clear** — write every id the harvest saw — picked, skipped, dropped, promoted and expired —
+8. **Index, then clear** — first, per written target: `scripts/wiki index <target>`, an
+   `overview_writer` when pages changed, `index` again. Exit 1 → stop here, before anything is
+   cleared and before the commit (as in § Ingest): release every lock and report `error` and
+   `page`; every candidate is still in place for the next harvest. Then write every id the harvest saw — picked, skipped, dropped, promoted and expired —
    except the items of a failed page writer, of clusters kept (`--min` below n, group below 2 and
    not expired, `group: null` not expired), of a group whose lock was not held or whose wiki could
    not be created (step 5) — its prefilter-dropped ids included — and ids missing from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
    <file.json>` (clears from either section); `removed` must equal the number of ids in that
    file. Kept and failed-writer items stay as candidates for the next harvest. A group chunk's
    `single-project` drop is cleared now, like any drop — no 90-day wait.
-9. **Index + overview + log** — per written target: `scripts/wiki index <target>`, an
-   `overview_writer` when pages changed, `index` again (exit 1 → stop before the commit, as in
-   § Ingest). Append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
+9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
    run that reaches this step — `harvest-status` reads the harvest age there — listing picked,
    skipped and dropped generic items with their origin project (with `--min`, the threshold and
    the number of clusters kept instead of the skipped list), the group counts (promoted / kept per
