@@ -313,9 +313,12 @@ wiki, group findings never to `knowledge`.
 
 1. **Targets** — `scripts/wiki targets` → `{global, groups: {<group>: <project>}}`. Exit 1 with
    `{error}` (`ambiguous knowledge target: <a>, <b>` — two knowledge projects for one group, or
-   two ungrouped) → report the named projects and stop before anything is written. `global` null →
-   `scripts/project new knowledge --kind knowledge` (creates `PROJECT.md` with `kind: knowledge`
-   and the `wiki/` skeleton). Read each target's `wiki_language` (§ Writers → Language) when it is
+   two ungrouped) → report the named projects and stop before anything is written. `global` null
+   and no `projects/knowledge/` → `scripts/project new knowledge --kind knowledge` (creates
+   `PROJECT.md` with `kind: knowledge` and the `wiki/` skeleton). `global` null but
+   `projects/knowledge/` exists (a legacy card without `kind:`) → stop, no writes, and tell the
+   user to add `kind: knowledge` to its card frontmatter. `global` set but not `knowledge` → stop,
+   no writes, and report it: the harvest locks, logs and commits `knowledge` by name. Read each target's `wiki_language` (§ Writers → Language) when it is
    first written and pass it to every page and overview writer for that target; a source
    project's language does not apply. Then `scripts/wiki lock take knowledge --session <id>` as in
    § Ingest; `held: false` → stop. Group wikis are locked in step 5, when first written.
@@ -374,14 +377,18 @@ wiki, group findings never to `knowledge`.
        below n is **kept**: not shown, not written, not cleared in step 8, so its items stay as
        candidates and can reach n origins at a later harvest, when a new source repeats the
        finding.
-   Generic candidates never expire. Nothing picked, nothing promoted and nothing expired →
-   release the lock, report the cluster counts and stop without a commit.
+   Generic candidates never expire. `--min` only: no generic cluster meets n, no group cluster
+   is promoted and none expired → release the lock, report the cluster counts and stop without a
+   commit (dropped ids stay as candidates). Manual and `-yolo` runs always go on to steps 8–10,
+   even with nothing picked: skipped and dropped ids are cleared, the log written and committed.
 5. **Group wiki** — per group with a promoted cluster: `groups[<group>]` from step 1 is its
    wiki; none → `scripts/project new <groupWikiName> --kind knowledge --group <group>` first
    (`groupWikiName` = the group slugged — lowercase, non-alphanumeric runs → `-`, trimmed — plus
-   `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`). Then `scripts/wiki lock take <group wiki>
+   `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`); exit 2 (`exists` / `archived`) → treat that
+   group as a lock not held (below). Then `scripts/wiki lock take <group wiki>
    --session <id>`; `held: false` → that group's clusters stay as candidates (no page, no
-   back-link, not cleared), the other targets proceed, and the report names the group. A renamed
+   back-link, not cleared — dropped ids of its chunks included), the other targets proceed, and
+   the report names the group. A renamed
    group keeps its wiki: the target is found by card (`group:`), never by name.
 6. **Page writers** — one `page_writer` per subject per target in knowledge-wiki mode
    (`agents/page_writer.md § Knowledge-wiki mode`), given the target project (`knowledge` or the
@@ -397,10 +404,11 @@ wiki, group findings never to `knowledge`.
    page's `## Knowledge`. A failed writer's items get no back-link.
 8. **Clear** — write every id the harvest saw — picked, skipped, dropped, promoted and expired —
    except the items of a failed page writer, of clusters kept (`--min` below n, group below 2 and
-   not expired, `group: null` not expired), of a group whose lock was not held, and ids missing
-   from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
+   not expired, `group: null` not expired), of a group whose lock was not held or whose wiki could
+   not be created (step 5) — its prefilter-dropped ids included — and ids missing from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
    <file.json>` (clears from either section); `removed` must equal the number of ids in that
-   file. Kept and failed-writer items stay as candidates for the next harvest.
+   file. Kept and failed-writer items stay as candidates for the next harvest. A group chunk's
+   `single-project` drop is cleared now, like any drop — no 90-day wait.
 9. **Index + overview + log** — per written target: `scripts/wiki index <target>`, an
    `overview_writer` when pages changed, `index` again (exit 1 → stop before the commit, as in
    § Ingest). Append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
@@ -412,13 +420,14 @@ wiki, group findings never to `knowledge`.
 10. **Commit** — one commit for the whole harvest: `git add projects/knowledge`, every written
     group wiki's `projects/<group wiki>` (new ones included), and every origin project's
     `wiki/open-questions.md` and back-linked source pages, message
-    `knowledge: wiki harvest <n> picked, <m> to group wikis` (`<m>` = group clusters promoted).
+    `knowledge: wiki harvest <n> picked, <m> to group wikis` (`<n>` = generic clusters picked,
+    `<m>` = group clusters promoted).
     Then `lock release` on `knowledge` and on every group wiki locked in step 5.
 
 Report: generic clusters picked / skipped (or kept, with `--min`) / dropped; group clusters
 promoted / kept / expired per group, group wikis created; pages created/updated per target,
 back-links added, failures — each failed writer's subject, its items left as candidates (steps
-7–8), each group whose lock was not held.
+7–8), each group whose lock was not held or whose wiki could not be created.
 
 Steps 7–8 edit other projects' `open-questions.md` and source pages while holding only the target
 locks, not those projects' ingest locks. An ingest or query running in an origin project at the

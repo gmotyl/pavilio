@@ -176,7 +176,8 @@ It is the budget, not a minimum — stop as soon as the question is answered.
    repository entity page (`repos/<repo>/index.md`, then ≤2 repo pages). Never for a general
    question.
 6. A `<project>:` link to another project's wiki only when the page in hand does not answer —
-   including the `[[knowledge:wiki/…]]` back-links under a source page's `## Knowledge`. When the
+   including the `[[knowledge:wiki/…]]` or `[[<group-wiki>:wiki/…]]` back-links under a source
+   page's `## Knowledge`. When the
    target project is `kind: research` (`scripts/wiki project --name <p>` → `kind`), every claim
    taken from it is labelled `(research, unverified)` in the answer, unless the reader is itself
    a research project.
@@ -185,7 +186,7 @@ It is the budget, not a minimum — stop as soon as the question is answered.
    (`scripts/wiki targets` → `groups[<group>]`; no entry → skip). Read it (`index.md` → ≤2 section
    indexes → ≤2 pages) when the topic is shared across the group (domain, process, conventions)
    or the project's wiki did not answer. Cite it as `<group-wiki>:wiki/…`. Ungrouped projects
-   skip this step.
+   skip this step, and so does a `kind: knowledge` project (the group wiki itself), as in ingest.
 
 7. The shared `knowledge` wiki (`projects/knowledge/wiki/`: `index.md` → ≤2 section indexes → ≤2
    pages) when the topic is a tool, library, platform or technique rather than this project's own
