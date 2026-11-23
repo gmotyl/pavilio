@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 import type { ProjectKind } from "../../../server/lib/projects/kind";
 
@@ -49,9 +49,14 @@ export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const { lastMessage } = useWebSocket();
 
+  // Each refetch outranks the ones before it: an older response arriving last must not win.
+  const latest = useRef(0);
   const fetchProjects = async () => {
+    const id = ++latest.current;
     const res = await fetch("/api/projects");
-    if (res.ok) setProjects(await res.json());
+    if (!res.ok) return;
+    const body = await res.json();
+    if (id === latest.current) setProjects(body);
   };
 
   useEffect(() => {
