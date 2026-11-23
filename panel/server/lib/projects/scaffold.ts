@@ -3,9 +3,10 @@ import { dirname, join } from "path";
 
 import { addProjectToRegistry } from "../registry";
 import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
+import { KNOWLEDGE_PROJECT, knowledgeTargetsIn } from "../wiki/harvest";
 import { renderIndexes } from "../wiki/index-md";
 import { WIKI_GITIGNORE_LINES } from "../wiki/lock";
-import { rewriteGroup } from "./group";
+import { GROUP_NAME_MAX, parseGroupName, rewriteGroup } from "./group";
 import type { ProjectKind } from "./kind";
 import { isValidProjectSlug } from "./slug";
 
@@ -179,9 +180,26 @@ function assertWritable(projectsDir: string, name: string, files: [string, strin
 }
 
 /**
+ * Refuse a knowledge project whose harvest target is taken — `knowledge` for no group, one wiki
+ * per group: a second one makes `scripts/wiki targets` ambiguous and blocks every harvest.
+ */
+function assertFreeKnowledgeTarget(projectsDir: string, group: string | null): void {
+  const targets = knowledgeTargetsIn(projectsDir);
+  const taken = group === null ? targets.global : (targets.groups[group] ?? null);
+  if (taken === null) return;
+  throw new Error(
+    group === null
+      ? `the workspace already has its ungrouped knowledge wiki: ${taken}`
+      : `group ${group} already has a knowledge wiki: ${taken}`,
+  );
+}
+
+/**
  * Create the skeleton of project `name` under `projectsDir` and add its registry row. Asks (writes
  * nothing) when the project already has a card or the name is taken under `archived/`. Throws on
- * a name that is not a slug, on a research project without a topic and on an empty group.
+ * a name that is not a slug, on a research project without a topic, on an empty or over-long
+ * group, on a grouped `knowledge`, and on a knowledge project whose harvest target (the
+ * ungrouped one, or its group's) already exists.
  */
 export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const { projectsDir, name } = input;
@@ -190,9 +208,16 @@ export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
     throw new Error("a topic is required for research projects (--topic \"…\")");
   }
   if (input.group !== undefined && !input.group.trim()) throw new Error("--group must not be empty");
+  if (input.group !== undefined && parseGroupName(input.group) === undefined) {
+    throw new Error(`--group must be one line of at most ${GROUP_NAME_MAX} characters`);
+  }
+  if (name === KNOWLEDGE_PROJECT && input.group !== undefined) {
+    throw new Error(`${KNOWLEDGE_PROJECT} is the workspace-wide knowledge wiki and takes no --group`);
+  }
   const projectDir = join(projectsDir, name);
   if (existsSync(join(projectDir, "PROJECT.md"))) return { ok: false, ask: true, reason: "exists" };
   if (existsSync(join(projectsDir, "archived", name))) return { ok: false, ask: true, reason: "archived" };
+  if (input.kind === "knowledge") assertFreeKnowledgeTarget(projectsDir, input.group?.trim() || null);
 
   const { files, keptDirs } = skeleton(input);
   assertWritable(projectsDir, name, files, keptDirs);

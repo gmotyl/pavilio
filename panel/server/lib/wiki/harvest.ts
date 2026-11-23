@@ -86,7 +86,11 @@ function candidateProjects(workspaceRoot: string): string[] {
  * with one → `groups[group]`. Two for one group (or two ungrouped) throw, naming both.
  */
 export function knowledgeTargets(workspaceRoot: string): KnowledgeTargets {
-  const projectsDir = join(workspaceRoot, "projects");
+  return knowledgeTargetsIn(join(workspaceRoot, "projects"));
+}
+
+/** `knowledgeTargets` for a `projects/` dir (the scaffold knows only that). */
+export function knowledgeTargetsIn(projectsDir: string): KnowledgeTargets {
   const byGroup = new Map<string | null, string[]>();
   for (const name of knownProjects(projectsDir)) {
     if (projectKind(projectsDir, name) !== "knowledge") continue;

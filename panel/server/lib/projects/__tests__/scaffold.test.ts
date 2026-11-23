@@ -145,6 +145,37 @@ describe("scaffoldProject", () => {
     expect(read("solo/wiki/open-questions.md")).not.toContain("## Group candidates");
   });
 
+  it("scaffold refuses a second knowledge wiki for one group, writing nothing", () => {
+    expect(scaffoldProject({ projectsDir, name: "metro-wiki", kind: "knowledge", group: "metro", today: "2026-10-22" }).ok).toBe(true);
+    expect(() =>
+      scaffoldProject({ projectsDir, name: "metro-kb", kind: "knowledge", group: "metro", today: "2026-10-22" }),
+    ).toThrow(/metro-wiki/);
+    expect(existsSync(join(projectsDir, "metro-kb"))).toBe(false);
+    expect(scaffoldProject({ projectsDir, name: "other-wiki", kind: "knowledge", group: "other", today: "2026-10-22" }).ok).toBe(true);
+  });
+
+  it("scaffold refuses a second ungrouped knowledge wiki", () => {
+    expect(scaffoldProject({ projectsDir, name: "knowledge", kind: "knowledge", today: "2026-10-22" }).ok).toBe(true);
+    expect(() => scaffoldProject({ projectsDir, name: "kb", kind: "knowledge", today: "2026-10-22" })).toThrow(/knowledge/);
+    expect(existsSync(join(projectsDir, "kb"))).toBe(false);
+  });
+
+  it("scaffold refuses a grouped project named knowledge", () => {
+    for (const kind of ["knowledge", "project"] as const) {
+      expect(() => scaffoldProject({ projectsDir, name: "knowledge", kind, group: "metro", today: "2026-10-22" })).toThrow(
+        /knowledge/,
+      );
+    }
+    expect(existsSync(join(projectsDir, "knowledge"))).toBe(false);
+  });
+
+  it("scaffold rejects a group name the panel cannot rename", () => {
+    for (const group of ["a".repeat(65), "two\nlines"]) {
+      expect(() => scaffoldProject({ projectsDir, name: "acme", kind: "project", group, today: "2026-10-22" })).toThrow(/group/);
+    }
+    expect(existsSync(join(projectsDir, "acme"))).toBe(false);
+  });
+
   it("grouped knowledge scaffold uses the group overview line", () => {
     const result = scaffoldProject({ projectsDir, name: "metro-wiki", kind: "knowledge", group: "metro", today: "2026-10-22" });
     expect(result.ok).toBe(true);

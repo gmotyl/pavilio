@@ -77,6 +77,30 @@ describe("scripts/project", () => {
     expect((await cli(["new", "lab", "--kind", "research", "--topic", "  "])).code).toBe(1);
   });
 
+  it("cli new never takes the next option as a flag value", async () => {
+    for (const argv of [
+      ["new", "--group", "--kind", "knowledge"],
+      ["new", "acme", "--group", "--kind", "knowledge"],
+      ["new", "lab", "--topic", "--kind", "research"],
+    ]) {
+      const res = await cli(argv);
+      expect(res.code, argv.join(" ")).toBe(1);
+      expect(res.json.error, argv.join(" ")).toMatch(/needs a value/);
+    }
+    expect(existsSync(join(root, "projects/knowledge"))).toBe(false);
+    expect(existsSync(join(root, "projects/acme"))).toBe(false);
+  });
+
+  it("cli new rejects a group name the panel cannot rename", async () => {
+    for (const group of ["a".repeat(65), "two\nlines"]) {
+      const res = await cli(["new", "acme", "--group", group]);
+      expect(res.code).toBe(1);
+      expect(res.json.error).toMatch(/--group/);
+    }
+    expect(existsSync(join(root, "projects/acme"))).toBe(false);
+    expect((await cli(["new", "acme", "--group", "a".repeat(64)])).code).toBe(0);
+  });
+
   it("cli rejects an empty --group", async () => {
     for (const argv of [
       ["new", "metro-wiki", "--kind", "knowledge", "--group", ""],

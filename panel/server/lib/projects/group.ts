@@ -13,6 +13,21 @@ export function readGroup(data: Record<string, unknown>): string | null {
   return trimmed ? trimmed : null;
 }
 
+/** The longest group name the panel accepts (`PUT /:name/group`, group rename) and the CLI writes. */
+export const GROUP_NAME_MAX = 64;
+
+/**
+ * A group name as the panel and `scripts/project new --group` accept it: null stays null, a
+ * string is trimmed and empty means null; undefined = invalid (not a string or null, holds a line
+ * break, or longer than `GROUP_NAME_MAX` once trimmed).
+ */
+export function parseGroupName(v: unknown): string | null | undefined {
+  if (v === null) return null;
+  if (typeof v !== "string" || /[\r\n]/.test(v)) return undefined;
+  const t = v.trim();
+  return t.length > GROUP_NAME_MAX ? undefined : t || null;
+}
+
 /** The project's `group` from its `PROJECT.md` frontmatter; missing project or card → null. */
 export function projectGroup(projectsDir: string, project: string): string | null {
   const dir = projectCardDir(projectsDir, project);
