@@ -14,7 +14,12 @@ let origin = "";
 vi.mock("../../config", () => configMock(() => projectsDir));
 vi.mock("../../watcher", () => ({ broadcast: vi.fn() }));
 // A slow existence check widens the window two requests could both pass before either reserves.
-const slow = vi.hoisted(() => ({ lstatMs: 0, mkdtempDelays: [] as number[], mkdtempError: null as NodeJS.ErrnoException | null }));
+const slow = vi.hoisted(() => ({
+  lstatMs: 0,
+  mkdtempError: null as NodeJS.ErrnoException | null,
+  beforeMkdtemp: null as (() => Promise<void>) | null,
+  beforeRm: null as (() => Promise<void>) | null,
+}));
 vi.mock("fs/promises", async (importOriginal) => {
   const real = await importOriginal<typeof import("fs/promises")>();
   const lstat = (async (...args: Parameters<typeof real.lstat>) => {
@@ -23,11 +28,14 @@ vi.mock("fs/promises", async (importOriginal) => {
   }) as typeof real.lstat;
   const mkdtemp = (async (...args: Parameters<typeof real.mkdtemp>) => {
     if (slow.mkdtempError) throw slow.mkdtempError;
-    const ms = slow.mkdtempDelays.shift();
-    if (ms) await new Promise((r) => setTimeout(r, ms));
+    await slow.beforeMkdtemp?.();
     return real.mkdtemp(...args);
   }) as typeof real.mkdtemp;
-  return { ...real, default: { ...real, lstat, mkdtemp }, lstat, mkdtemp };
+  const rm = (async (...args: Parameters<typeof real.rm>) => {
+    await slow.beforeRm?.();
+    return real.rm(...args);
+  }) as typeof real.rm;
+  return { ...real, default: { ...real, lstat, mkdtemp, rm }, lstat, mkdtemp, rm };
 });
 
 import gitRouter from "../git";
@@ -62,8 +70,9 @@ beforeEach(() => {
 
 afterEach(() => {
   slow.lstatMs = 0;
-  slow.mkdtempDelays = [];
   slow.mkdtempError = null;
+  slow.beforeMkdtemp = null;
+  slow.beforeRm = null;
   vi.unstubAllEnvs();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -265,12 +274,19 @@ describe("POST /api/git/clone", () => {
         { name: "a", path: a, remote: SSH_REMOTE },
         { name: "b", path: b, remote: origin },
       ]);
-      // b passes mkdir, then stalls before staging while a fails and prunes.
-      slow.mkdtempDelays = [0, 500];
+      // a fails and holds before cleanup; b is sent then, and a cleans up only once b reaches staging.
+      let atCleanup = () => {};
+      const aAtCleanup = new Promise<void>((r) => (atCleanup = r));
+      let release = () => {};
+      slow.beforeRm = () => (atCleanup(), new Promise<void>((r) => (release = r)));
       const first = post({ project: "alpha", repo: "a", path: a }).then((r) => r);
-      await new Promise((r) => setTimeout(r, 20));
+      await aAtCleanup;
+      let aDone = () => {};
+      const aSettled = new Promise<void>((r) => (aDone = r));
+      slow.beforeMkdtemp = () => (release(), aSettled);
       const second = post({ project: "alpha", repo: "b", path: b }).then((r) => r);
       expect((await first).status).toBe(502);
+      aDone();
       expect((await second).status).toBe(200);
       expect(existsSync(join(b, "hello.txt"))).toBe(true);
     });
