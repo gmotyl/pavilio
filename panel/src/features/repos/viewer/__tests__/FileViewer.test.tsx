@@ -242,6 +242,12 @@ describe("FileViewer", () => {
     expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./a", "./b"]);
   });
 
+  it("a block comment is scanned only up to a short bound, so an unclosed one cannot rescan the line", () => {
+    const content = [`const a = () => import(/* ${"x".repeat(300)} */ './far');`, `const b = () => import(/* ok */ './near');`].join("\n");
+    const { container } = render(<FileViewer path="src/s.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./near"]);
+  });
+
   it("a line too long to scan (minified code) gets no links, others still do", () => {
     const minified = Array.from({ length: 400 }, (_, i) => `require('./m${i}');`).join("");
     const content = [minified, "import x from './short';"].join("\n");

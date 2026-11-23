@@ -161,7 +161,8 @@ function identifierRanges(text: string): { ranges: Range[]; names: string[] } {
 
 // A module specifier: `from '…'`, `import '…'`, `import('…')`, `require('…')`. One line only.
 // Block comments may sit before the string, e.g. `import(/* webpackChunkName: "x" */ './y')`.
-const SPECIFIER_GAP = String.raw`(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/)*`;
+// Bounded: an unclosed comment must not send every candidate to the end of the line.
+const SPECIFIER_GAP = String.raw`(?:\s|\/\*(?:[^*]|\*(?!\/)){0,200}\*\/)*`;
 const SPECIFIER = new RegExp(String.raw`(?:\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport)${SPECIFIER_GAP}(['"])([^'"\\\n]+)\1`, "g");
 const IN_COMMENT = /\bhljs-comment\b/;
 // Longer lines (minified or generated code) get no links: scanning them is not worth a stalled tab.
