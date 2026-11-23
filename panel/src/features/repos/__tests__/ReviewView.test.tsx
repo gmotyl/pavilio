@@ -500,6 +500,27 @@ describe("ReviewView", () => {
     expect(screen.queryByTestId("review-stale-note")).toBeNull();
   });
 
+  it("Re-open refetches comments that lag behind the viewed head", async () => {
+    const OLDER = "o".repeat(40);
+    // The diff is already at the newest head; only the first comments answer is behind it.
+    let commentsHead = OLDER;
+    const fetch = renderReview({
+      search: FILE_A,
+      comments: () => jsonResponse(COMMENTS.map((c) => ({ ...c, commitId: commentsHead }))),
+    });
+    const note = await screen.findByTestId("review-stale-note");
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    expect(within(viewer).queryByRole("button", { name: /comments? on line/ })).toBeNull();
+    expect(calls(fetch, "/api/prs/comments")).toHaveLength(1);
+
+    commentsHead = HEAD;
+    fireEvent.click(within(note).getByRole("button", { name: "Re-open" }));
+    await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "2 comments on line 15" });
+    expect(calls(fetch, "/api/prs/comments")).toHaveLength(2);
+    expect(screen.queryByTestId("review-stale-note")).toBeNull();
+  });
+
   it("picking Description from deep in a diff opens it at the top", async () => {
     renderReview({ search: FILE_A });
     await waitFor(() => expect(screen.getByTestId("file-viewer")).toHaveTextContent("const area = width * height;"));

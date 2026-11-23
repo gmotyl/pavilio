@@ -241,6 +241,21 @@ describe("CommentMarker", () => {
       text: `kwojcik:\n\n${ROOT.body}\n\ngmotyl:\n\nIt does.`,
     });
   });
+
+  it("CommentMarker Play all speaks two conversations on a line one after the other, each with its replies", () => {
+    const OTHER = comment({ id: 995, author: "ajanik", body: "Unrelated nit.", createdAt: "2026-11-23T10:30:00Z" });
+    const OTHER_REPLY = comment({ id: 996, replyTo: 995, author: "mnowak", body: "Fixed.", createdAt: "2026-11-23T11:30:00Z" });
+    // groupThreads sorts by time: the two conversations interleave.
+    render(<CommentMarker thread={thread([ROOT, OTHER, REPLY, OTHER_REPLY])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    expect(speech.speakDocument).toHaveBeenCalledTimes(1);
+    expect(speech.speakDocument).toHaveBeenCalledWith({
+      key: `${KEY}/t/990`,
+      text: `kwojcik:\n\n${ROOT.body}\n\ngmotyl:\n\nIt does.\n\najanik:\n\nUnrelated nit.\n\nmnowak:\n\nFixed.`,
+    });
+  });
+
   it("CommentMarker one-comment thread has a single Play, speaking the thread", () => {
     render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} />);
     fireEvent.focus(marker());

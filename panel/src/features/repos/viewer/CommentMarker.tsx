@@ -58,8 +58,10 @@ function canFocus(el: HTMLElement): boolean {
 /** The first focusable tabbable element after `marker` in document order, outside `pop`. */
 function nextTabbable(marker: HTMLElement, pop: HTMLElement | null): HTMLElement | null {
   for (const el of document.querySelectorAll<HTMLElement>(TABBABLE)) {
+    // Document order first: it is cheap, and skips the style walk for everything before the marker.
+    if (!(marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
     if (el.tabIndex < 0 || marker.contains(el) || pop?.contains(el) || !canFocus(el)) continue;
-    if (marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) return el;
+    return el;
   }
   return null;
 }
