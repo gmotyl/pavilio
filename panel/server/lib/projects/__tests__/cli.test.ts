@@ -77,6 +77,27 @@ describe("scripts/project", () => {
     expect((await cli(["new", "lab", "--kind", "research", "--topic", "  "])).code).toBe(1);
   });
 
+  it("cli rejects an empty --group", async () => {
+    for (const argv of [
+      ["new", "metro-wiki", "--kind", "knowledge", "--group", ""],
+      ["new", "metro-wiki", "--kind", "knowledge", "--group", "  "],
+      ["new", "metro-wiki", "--kind", "knowledge", "--group="],
+      ["new", "metro-wiki", "--kind", "knowledge", "--group"],
+    ]) {
+      const res = await cli(argv);
+      expect(res.code, argv.join(" ")).toBe(1);
+      expect(res.json.error, argv.join(" ")).toMatch(/--group/);
+    }
+    expect(existsSync(join(root, "projects/metro-wiki"))).toBe(false);
+
+    const ok = await cli(["new", "metro-wiki", "--kind", "knowledge", "--group", "metro"]);
+    expect(ok.code).toBe(0);
+    const card = readFileSync(join(root, "projects/metro-wiki/PROJECT.md"), "utf8");
+    expect(card).toContain("kind: knowledge\n");
+    expect(card).toContain("group: metro\n");
+    expect(card).toContain("Group knowledge for metro");
+  });
+
   it("cli new exits 2 with reason", async () => {
     mkdirSync(join(root, "projects/acme"), { recursive: true });
     writeFileSync(join(root, "projects/acme/PROJECT.md"), "# Acme\n");

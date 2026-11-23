@@ -5,6 +5,7 @@ import { addProjectToRegistry } from "../registry";
 import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
 import { renderIndexes } from "../wiki/index-md";
 import { WIKI_GITIGNORE_LINES } from "../wiki/lock";
+import { rewriteGroup } from "./group";
 import type { ProjectKind } from "./kind";
 import { isValidProjectSlug } from "./slug";
 
@@ -18,19 +19,30 @@ import { isValidProjectSlug } from "./slug";
  * | research  | the same, plus `topic`/`created` frontmatter and `wiki/raw/`             |
  * | knowledge | `PROJECT.md`, `wiki/` skeleton, registry row                             |
  *
+ * A `group` adds `group: <group>` to the card frontmatter of any kind; a grouped knowledge
+ * project is that group's wiki, and its overview line says so.
+ *
  * A folder that exists without `PROJECT.md` (notes waiting for a card) only gets the parts it
  * lacks: an existing file is never rewritten, and an existing dir gets no `.gitkeep`. Research code
  * lives in the spikes repo (`scripts/project spike-repo`), not in the project folder; a legacy
  * `spikes/` dir is left as it is.
  */
 
-export type ScaffoldInput = { projectsDir: string; name: string; kind: ProjectKind; topic?: string; today: string };
+export type ScaffoldInput = {
+  projectsDir: string;
+  name: string;
+  kind: ProjectKind;
+  topic?: string;
+  group?: string;
+  today: string;
+};
 export type ScaffoldResult =
   | { ok: true; created: string[] } // project-relative paths written
   | { ok: false; ask: true; reason: "exists" | "archived" };
 
 function projectCard(input: ScaffoldInput): string {
   const { name, kind, topic, today } = input;
+  const group = input.group?.trim();
   const frontmatter = [`kind: ${kind}`];
   if (kind === "research") {
     // JSON string = a double-quoted YAML scalar, safe for any topic text.
@@ -40,7 +52,9 @@ function projectCard(input: ScaffoldInput): string {
     kind === "research"
       ? `Research project: ${topic ?? "[topic]"}. External material lives in \`wiki/raw/\`, code in the spikes repo (\`scripts/project spike-repo ${name}\`).`
       : kind === "knowledge"
-        ? "Workspace-wide knowledge: generic findings promoted from project wikis."
+        ? group
+          ? `Group knowledge for ${group}: findings shared by its projects, promoted from their wikis.`
+          : "Workspace-wide knowledge: generic findings promoted from project wikis."
         : "[2-3 sentences: what the project is, for whom, where Greg fits.]";
   const seeAlso =
     kind === "knowledge"
@@ -62,7 +76,8 @@ function projectCard(input: ScaffoldInput): string {
     );
   }
   lines.push("## See also", "", ...seeAlso, "");
-  return lines.join("\n");
+  const card = lines.join("\n");
+  return group ? rewriteGroup(card, group) : card;
 }
 
 function statusCard(input: ScaffoldInput): string {
@@ -161,7 +176,7 @@ function assertWritable(projectsDir: string, name: string, files: [string, strin
 /**
  * Create the skeleton of project `name` under `projectsDir` and add its registry row. Asks (writes
  * nothing) when the project already has a card or the name is taken under `archived/`. Throws on
- * a name that is not a slug and on a research project without a topic.
+ * a name that is not a slug, on a research project without a topic and on an empty group.
  */
 export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const { projectsDir, name } = input;
@@ -169,6 +184,7 @@ export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   if (input.kind === "research" && !input.topic?.trim()) {
     throw new Error("a topic is required for research projects (--topic \"…\")");
   }
+  if (input.group !== undefined && !input.group.trim()) throw new Error("--group must not be empty");
   const projectDir = join(projectsDir, name);
   if (existsSync(join(projectDir, "PROJECT.md"))) return { ok: false, ask: true, reason: "exists" };
   if (existsSync(join(projectsDir, "archived", name))) return { ok: false, ask: true, reason: "archived" };

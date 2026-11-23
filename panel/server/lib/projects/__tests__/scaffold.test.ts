@@ -130,6 +130,33 @@ describe("scaffoldProject", () => {
     expect(projectKind(projectsDir, "knowledge")).toBe("knowledge");
   });
 
+  it("scaffold writes group into the card frontmatter", () => {
+    const result = scaffoldProject({ projectsDir, name: "acme", kind: "project", group: "metro", today: "2026-10-22" });
+    expect(result.ok).toBe(true);
+    const card = read("acme/PROJECT.md");
+    expect(card.startsWith("---\nkind: project\ngroup: metro\n---\n")).toBe(true);
+    expect(card).toContain("[2-3 sentences: what the project is, for whom, where Greg fits.]");
+    expect(projectKind(projectsDir, "acme")).toBe("project");
+
+    const plain = scaffoldProject({ projectsDir, name: "solo", kind: "project", today: "2026-10-22" });
+    expect(plain.ok).toBe(true);
+    expect(read("solo/PROJECT.md")).not.toContain("group:");
+  });
+
+  it("grouped knowledge scaffold uses the group overview line", () => {
+    const result = scaffoldProject({ projectsDir, name: "metro-wiki", kind: "knowledge", group: "metro", today: "2026-10-22" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect([...result.created].sort()).toEqual(["PROJECT.md", ...WIKI_SKELETON].sort());
+    expect(existsSync(join(projectsDir, "metro-wiki/spikes"))).toBe(false);
+    const card = read("metro-wiki/PROJECT.md");
+    expect(card).toContain("kind: knowledge\n");
+    expect(card).toContain("group: metro\n");
+    expect(card).toContain("Group knowledge for metro: findings shared by its projects, promoted from their wikis.");
+    expect(card).not.toContain("Workspace-wide knowledge");
+    expect(projectKind(projectsDir, "metro-wiki")).toBe("knowledge");
+  });
+
   it("refuses an existing project card", () => {
     write("acme/PROJECT.md", "# Acme\n");
     const result = scaffoldProject({ projectsDir, name: "acme", kind: "project", today: "2026-10-22" });
