@@ -380,6 +380,19 @@ export default function FileViewer({
   const shownLayout = narrow ? "unified" : layout;
   // Split pages count paired rows: slicing raw rows first would cut a del/add block and pair it with blanks.
   const pairs = useMemo(() => (shownMode === "diff" && shownLayout === "split" ? pairRows(visible) : null), [shownMode, shownLayout, visible]);
+  // Threads on lines the diff has no row for (no whole file to fill its gaps, or a line past the file).
+  // The file badge counts them, so Diff lists them above the table rather than dropping them.
+  const unplaced = useMemo(() => {
+    if (!comments?.size || shownMode !== "diff") return [];
+    const shown = new Set<string>();
+    // Folds holding a commented line are always open, so `visible` has every row a marker could sit on.
+    for (const it of visible) {
+      if (it.kind === "fold" || it.kind === "gap") continue;
+      if (it.kind !== "del") shown.add(`new:${it.new}`);
+      if (it.kind !== "add") shown.add(`old:${it.old}`);
+    }
+    return [...comments].filter(([k]) => !shown.has(k)).sort(([, a], [, b]) => a.anchor.line - b.anchor.line);
+  }, [comments, shownMode, visible]);
   const total = counts ?? countChanges(parsed);
   const lang = detectLang(path);
   const term = highlight ?? "";
@@ -514,6 +527,7 @@ export default function FileViewer({
     r && r.kind !== "gap" ? <td className={`fv-cd fv-s-${side}`} dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} /> : <td className="fv-cd fv-s-empty" />;
 
   let body: ReactNode;
+  let unplacedNote: ReactNode = null;
   let totalRows = 0;
   if (shownMode === "code") {
     totalRows = codeLines?.length ?? 0;
@@ -547,6 +561,14 @@ export default function FileViewer({
     );
   } else {
     totalRows = pairs ? pairs.length : visible.length;
+    unplacedNote = unplaced.length > 0 && (
+      <p className="fv-unplaced" role="note" data-testid="file-viewer-unplaced">
+        On lines not in this diff:
+        {unplaced.map(([k, thread]) => (
+          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
+        ))}
+      </p>
+    );
     if (!pairs) {
       body = (
         <table className="fv-table fv-unified">
@@ -695,6 +717,7 @@ export default function FileViewer({
         </span>
       </div>
       <div ref={bodyRef} className="fv-body" data-testid="file-viewer-body" onClick={onBodyClick}>
+        {unplacedNote}
         {body}
         {totalRows > limit && (
           <button type="button" className="fv-more" data-testid="file-viewer-more" onClick={() => setLimit((n) => n + ROW_PAGE)}>

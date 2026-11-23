@@ -211,4 +211,34 @@ describe("FileViewer comment lane", () => {
     expect(body().querySelector('tr[data-line="10"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 10");
     expect(body().querySelector('tr[data-old-line="95"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 95");
   });
+
+  it("FileViewer lists threads whose lines the diff leaves out above the table, in unified and split", () => {
+    // No whole file and no context lines: line 13 and old line 30 have no row to carry a marker.
+    const bare = ["--- a/src/geo/area.ts", "+++ b/src/geo/area.ts", "@@ -15 +15,2 @@", "-const area = w * h;", "+const area = width * height;", "+line 16"].join("\n");
+    const comments = new Map([
+      ["new:16", thread("new", 16)],
+      ["new:13", thread("new", 13, 2)],
+      ["old:30", thread("old", 30)],
+    ]);
+    render(viewer({ diff: bare, content: undefined, comments }));
+    for (const layout of [unified, split]) {
+      layout();
+      const note = screen.getByTestId("file-viewer-unplaced");
+      expect(note).toHaveTextContent("On lines not in this diff:");
+      expect(body().firstElementChild).toBe(note);
+      const listed = [...note.querySelectorAll("button.fv-cmbtn")].map((b) => b.getAttribute("aria-label"));
+      expect(listed).toEqual(["2 comments on line 13", "1 comment on line 30"]);
+      // The one on a shown line stays in its row, not in the note.
+      expect(body().querySelector('tr[data-line="16"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 16");
+      expect(markers()).toHaveLength(3);
+    }
+  });
+
+  it("FileViewer shows no unplaced note when every thread has a row", () => {
+    render(viewer({ comments: COMMENTS }));
+    unified();
+    expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
+    split();
+    expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
+  });
 });
