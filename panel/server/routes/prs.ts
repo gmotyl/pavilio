@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { type Response, Router } from "express";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
 import { isLiveProject, linkedRepos, readRepos, type RepoEntry } from "../lib/discovery.js";
@@ -15,6 +15,21 @@ import {
 const CACHE_TTL_MS = 60_000;
 
 const repoRoot = (r: RepoEntry): string => resolve(expandHome(r.path));
+
+const NOT_LINKED = { error: "repo is not linked to any project" };
+
+/** The resolved path of `repo` when it is a present linked repo, else null: the path comes from the client. */
+function linkedTarget(repo: string): string | null {
+  const target = resolve(expandHome(repo));
+  return linkedRepos().some((r) => r.present && repoRoot(r) === target) ? target : null;
+}
+
+/** One provider-failure mapping for every per-PR route. */
+function sendProviderFailure(res: Response, e: unknown): void {
+  // Upstream text may echo an origin URL with embedded credentials.
+  const reason: Unavailable = e instanceof PrUnavailableError ? e.reason : "failed";
+  res.status(502).json({ error: redactUrlCredentials((e as Error)?.message ?? String(e)), reason });
+}
 
 export function createPrsRouter(
   provider: PrProvider,
@@ -78,17 +93,28 @@ export function createPrsRouter(
     if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
       return res.status(400).json({ error: "number must be a positive integer" });
     }
-    // Only a present linked repo may be fetched into: the path comes from the client.
-    const target = resolve(expandHome(repo));
-    const linked = linkedRepos().some((r) => r.present && repoRoot(r) === target);
-    if (!linked) return res.status(400).json({ error: "repo is not linked to any project" });
+    const target = linkedTarget(repo);
+    if (!target) return res.status(400).json(NOT_LINKED);
 
     try {
       res.json(await provider.openPr(target, number));
     } catch (e) {
-      // Upstream text may echo an origin URL with embedded credentials.
-      const reason: Unavailable = e instanceof PrUnavailableError ? e.reason : "failed";
-      res.status(502).json({ error: redactUrlCredentials((e as Error)?.message ?? String(e)), reason });
+      sendProviderFailure(res, e);
+    }
+  });
+
+  router.get("/comments", async (req, res) => {
+    const repo = typeof req.query.repo === "string" ? req.query.repo : "";
+    if (!repo.trim()) return res.status(400).json({ error: "repo required" });
+    const raw = typeof req.query.number === "string" ? req.query.number : "";
+    if (!/^[1-9]\d*$/.test(raw)) return res.status(400).json({ error: "number must be a positive integer" });
+    const target = linkedTarget(repo);
+    if (!target) return res.status(400).json(NOT_LINKED);
+
+    try {
+      res.json(await provider.reviewComments(target, Number(raw)));
+    } catch (e) {
+      sendProviderFailure(res, e);
     }
   });
 
