@@ -54,6 +54,13 @@ function linkRepos(project: string, repos: unknown[]): void {
 }
 
 beforeEach(() => {
+  // Diagnostics asserted below come from git itself: keep proxies, user/system config and locale out of it.
+  for (const v of ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"]) vi.stubEnv(v, undefined as unknown as string);
+  vi.stubEnv("NO_PROXY", "*");
+  vi.stubEnv("no_proxy", "*");
+  vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
+  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+  vi.stubEnv("LC_ALL", "C");
   tmp = mkdtempSync(join(tmpdir(), "git-clone-"));
   projectsDir = join(tmp, "projects");
   mkdirSync(projectsDir);
@@ -279,16 +286,30 @@ describe("POST /api/git/clone", () => {
       const aAtCleanup = new Promise<void>((r) => (atCleanup = r));
       let release = () => {};
       slow.beforeRm = () => (atCleanup(), new Promise<void>((r) => (release = r)));
-      const first = post({ project: "alpha", repo: "a", path: a }).then((r) => r);
-      await aAtCleanup;
       let aDone = () => {};
       const aSettled = new Promise<void>((r) => (aDone = r));
-      slow.beforeMkdtemp = () => (release(), aSettled);
-      const second = post({ project: "alpha", repo: "b", path: b }).then((r) => r);
-      expect((await first).status).toBe(502);
-      aDone();
-      expect((await second).status).toBe(200);
-      expect(existsSync(join(b, "hello.txt"))).toBe(true);
+      const started: Promise<unknown>[] = [];
+      try {
+        const first = post({ project: "alpha", repo: "a", path: a }).then((r) => r);
+        started.push(first);
+        // Each checkpoint also gives way when a request ends early, so a regression fails instead of hanging.
+        await Promise.race([aAtCleanup, first]);
+        slow.beforeMkdtemp = () => (release(), aSettled);
+        const second = post({ project: "alpha", repo: "b", path: b }).then((r) => r);
+        started.push(second);
+        void second.then(
+          () => release(),
+          () => release(),
+        );
+        expect((await first).status).toBe(502);
+        aDone();
+        expect((await second).status).toBe(200);
+        expect(existsSync(join(b, "hello.txt"))).toBe(true);
+      } finally {
+        release();
+        aDone();
+        await Promise.allSettled(started);
+      }
     });
   });
 
@@ -339,13 +360,13 @@ describe("POST /api/git/clone", () => {
   it("logs only the stage, exit status and category, never git's output or the remote", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const res = await cloneOne(join(tmp, "out"), "https://127.0.0.1:9/o/it's.git?sig=t0ken");
+      const target = join(tmp, "out");
+      const res = await cloneOne(target, "https://127.0.0.1:9/o/it's.git?sig=t0ken");
       expect(res.status).toBe(502);
+      expect(log.mock.calls).toEqual([[`[git] clone of alpha/skills into ${target} failed in git: exit 128, remote unreachable`]]);
+      // git's own diagnostic ("fatal: unable to access ...: Failed to connect") never reaches the log.
       const logged = log.mock.calls.flat().map(String).join("\n");
-      expect(logged).toContain("remote unreachable");
-      expect(logged).toContain("exit 128");
-      expect(logged).not.toContain("t0ken");
-      expect(logged).not.toContain("127.0.0.1");
+      expect(logged).not.toMatch(/fatal|Failed to connect/);
     } finally {
       log.mockRestore();
     }
