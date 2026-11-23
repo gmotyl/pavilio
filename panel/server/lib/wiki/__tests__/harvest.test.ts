@@ -295,6 +295,55 @@ describe("harvest", () => {
     expect(knowledgeTargets(root)).toEqual({ global: "knowledge", groups: { metro: "metro-wiki" } });
   });
 
+  it("knowledgeTargets ignores an active dir without a card whose name has an archived knowledge card", () => {
+    write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
+    write("projects/archived/metro-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/metro-wiki/wiki/open-questions.md", "# Open questions\n\n## Knowledge candidates\n- 2026-10-20 — line\n");
+    write(".projects.local.md", "| Project | Type |\n| --- | --- |\n| metro-wiki | private |\n");
+    expect(knowledgeTargets(root)).toEqual({ global: "knowledge", groups: {} });
+    expect(listCandidates(root).items.map((i) => i.project)).toEqual(["metro-wiki"]);
+  });
+
+  it("knowledgeTargets keeps a __proto__ group as an own key", () => {
+    write("projects/proto-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: __proto__\n---\n");
+    const targets = knowledgeTargets(root);
+    expect(Object.keys(targets.groups)).toEqual(["__proto__"]);
+    expect(JSON.parse(JSON.stringify(targets))).toEqual(JSON.parse('{"global":null,"groups":{"__proto__":"proto-wiki"}}'));
+  });
+
+  it("clearing a generic candidate never shifts an identical group candidate onto its id", () => {
+    const line = "- 2026-10-20 — same finding";
+    project("metro-app", [line]);
+    write("projects/metro-app/PROJECT.md", "---\ngroup: metro\n---\n");
+    write(
+      "projects/metro-app/wiki/open-questions.md",
+      read("projects/metro-app/wiki/open-questions.md") + ["## Group candidates", line, ""].join("\n"),
+    );
+    const generic = listCandidates(root).items.find((i) => i.scope === "generic")!.id;
+    expect(clearCandidates(root, [generic])).toEqual({ removed: 1 });
+    expect(clearCandidates(root, [generic])).toEqual({ removed: 0 });
+    expect(listCandidates(root).items.map((i) => i.scope)).toEqual(["group"]);
+  });
+
+  it("addBacklink agrees with the renderer on what links the target", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    const text = "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/x.MD]]\n- [[ metro-wiki:wiki\\concepts\\y|Y]]\n";
+    write("projects/alpha/wiki/sources/a.md", text);
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toEqual({ added: false });
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/y")).toEqual({ added: false });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
+    for (const bad of ["wiki/../x", "metro-wiki:wiki/a//b", "metro-wiki:wiki/./b", "_x:wiki/concepts/y", "-x:wiki/concepts/y"]) {
+      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", bad), bad).toThrow(/backlink target/);
+    }
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/z.MD")).toEqual({ added: true });
+    expect(read("projects/alpha/wiki/sources/a.md")).toContain("- [[metro-wiki:wiki/concepts/z]]\n");
+  });
+
+  it("groupWikiName falls back when the group slugs to nothing", () => {
+    expect(groupWikiName("日本")).toBe("group-wiki");
+    expect(groupWikiName("!!")).toBe("group-wiki");
+  });
+
   it("groupWikiName slugs the group name", () => {
     expect(groupWikiName("Motyl OSS")).toBe("motyl-oss-wiki");
     expect(groupWikiName("metro")).toBe("metro-wiki");
