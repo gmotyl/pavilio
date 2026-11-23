@@ -16,6 +16,7 @@ type Row = {
   repos: unknown[];
   kind: ProjectKind;
   lastActivity: string | null;
+  group?: string;
 };
 
 const shell = vi.hoisted(() => ({
@@ -165,6 +166,22 @@ describe("LeftSidebar Research section", () => {
     // Projects are untouched by the Research collapse (alphabetical: no saved
     // sidebar order, so the merge appends newcomers by name).
     expect(namesIn(section("projects"))).toEqual(["atlas", "vector"]);
+  });
+
+  it("grouped knowledge project renders inside its group, not Research", () => {
+    shell.projects = () => [
+      ...ROWS,
+      { name: "metro", repos: [], kind: "project", lastActivity: null, group: "metro" },
+      { name: "metro-wiki", repos: [], kind: "knowledge", lastActivity: null, group: "metro" },
+    ];
+    setup();
+    const research = section("research");
+    expect(namesIn(research)).toContain("knowledge");
+    expect(namesIn(research)).not.toContain("metro-wiki");
+    expect(namesIn(screen.getByTestId("sidebar-group-members-metro"))).toEqual([
+      "metro-wiki",
+      "metro",
+    ]);
   });
 
   it("Research order: knowledge first, then lastActivity desc", () => {

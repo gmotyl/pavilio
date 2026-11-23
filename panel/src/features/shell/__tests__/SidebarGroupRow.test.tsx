@@ -386,6 +386,90 @@ describe("SidebarGroupRow", () => {
     expect(screen.getByTestId("sidebar-group-count-Motyl OSS").textContent).toBe("2");
   });
 
+  const METRO: Row[] = [
+    { name: "metro", repos: [], group: "metro" },
+    { name: "metro-bank", repos: [], group: "metro" },
+    { name: "metro-wiki", repos: [], kind: "knowledge", group: "metro" },
+  ];
+  const membersOf = (g: string) =>
+    within(screen.getByTestId(`sidebar-group-members-${g}`))
+      .queryAllByTestId(/^sidebar-project-row-/)
+      .map((r) => r.getAttribute("data-testid")!.replace("sidebar-project-row-", ""));
+
+  it("group wiki is pinned first and excluded from icon and count", () => {
+    shell.projects = () => [...ROWS, ...METRO];
+    writePreference(preferences.sidebarOrder, {
+      top: ["g:metro"],
+      groups: { metro: ["metro", "metro-bank", "metro-wiki"] },
+    });
+    setup();
+    expect(membersOf("metro")).toEqual(["metro-wiki", "metro", "metro-bank"]);
+    const wikiRow = screen.getByTestId("sidebar-project-row-metro-wiki");
+    expect(within(wikiRow).getByTestId("project-mark-icon-book")).toBeTruthy();
+    expect(wikiRow.hasAttribute("data-drag-key")).toBe(false);
+    expect(screen.getByTestId("sidebar-group-count-metro").textContent).toBe("2");
+    expect(iconColor("metro")).toBe(memberColor("metro", "metro"));
+    expect(
+      within(screen.getByTestId("sidebar-group-icon-metro")).queryByTestId(
+        "project-mark-icon-book",
+      ),
+    ).toBeNull();
+    expect(
+      within(screen.getByTestId("sidebar-section-research")).queryByTestId(
+        "sidebar-project-row-metro-wiki",
+      ),
+    ).toBeNull();
+  });
+
+  it("drag to top of a group lands below the group wiki", () => {
+    shell.projects = () => [...ROWS, ...METRO];
+    writePreference(preferences.sidebarOrder, {
+      top: ["g:metro"],
+      groups: { metro: ["metro", "metro-bank", "metro-wiki"] },
+    });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 0, height: 20, bottom: 20, left: 0, right: 100, width: 100, x: 0, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    let under: Element | null = null;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => under,
+    });
+    try {
+      setup();
+      const row = (n: string) => screen.getByTestId(`sidebar-project-row-${n}`);
+      fireEvent.pointerDown(row("metro-bank"), { button: 0, clientX: 0, clientY: 10, pointerId: 1 });
+      fireEvent.pointerMove(window, { clientX: 0, clientY: 30, pointerId: 1 });
+      // The wiki row is no drop target: nothing lands above it.
+      under = row("metro-wiki");
+      fireEvent.pointerMove(window, { clientX: 0, clientY: 2, pointerId: 1 });
+      expect(row("metro-wiki").hasAttribute("data-drop")).toBe(false);
+      // The top drop slot is above the first draggable member.
+      under = row("metro");
+      fireEvent.pointerMove(window, { clientX: 0, clientY: 2, pointerId: 1 });
+      expect(row("metro").getAttribute("data-drop")).toBe("before");
+      fireEvent.pointerUp(window, { clientX: 0, clientY: 2, pointerId: 1 });
+      expect(membersOf("metro")).toEqual(["metro-wiki", "metro-bank", "metro"]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("group with only its wiki shows count 0", () => {
+    shell.projects = () => [
+      ...ROWS,
+      { name: "metro-wiki", repos: [], kind: "knowledge", group: "metro" },
+    ];
+    setup();
+    expect(screen.getByTestId("sidebar-group-row-metro")).toBeTruthy();
+    expect(screen.getByTestId("sidebar-group-count-metro").textContent).toBe("0");
+    expect(membersOf("metro")).toEqual(["metro-wiki"]);
+    expect(
+      within(screen.getByTestId("sidebar-group-icon-metro")).queryByTestId("project-mark"),
+    ).toBeNull();
+  });
+
   it("collapse toggles and persists", () => {
     setup();
     fireEvent.click(screen.getByTestId("sidebar-group-toggle-Motyl OSS"));

@@ -168,7 +168,9 @@ async function failure(res: Response): Promise<string> {
 /**
  * Right-click menus for the sidebar's project and group rows: Group ▸
  * (existing groups, ✓ current, New group…, Remove from group) on a project;
- * Rename… and Collapse/Expand on a group. Inert on mobile.
+ * Rename… and Collapse/Expand on a group. Inert on mobile. A group wiki (a
+ * grouped `knowledge` project) has no Group ▸ entries: it lives in its group by
+ * its card, so its menu has nothing to offer and does not open.
  */
 export function useSidebarRowMenu({
   groups,
@@ -183,7 +185,12 @@ export function useSidebarRowMenu({
   collapsed: Record<string, boolean>;
   setCollapsed: (c: Record<string, boolean>) => void;
 }): {
-  onProjectContextMenu: (e: React.MouseEvent, project: string, group: string | null) => void;
+  onProjectContextMenu: (
+    e: React.MouseEvent,
+    project: string,
+    group: string | null,
+    opts?: { groupWiki?: boolean },
+  ) => void;
   onGroupContextMenu: (e: React.MouseEvent, group: string, toggle: () => void) => void;
   element: ReactNode;
 } {
@@ -357,7 +364,10 @@ export function useSidebarRowMenu({
   );
 
   return {
-    onProjectContextMenu: (e, project, group) => open(e, { kind: "project", project, group, x: e.clientX, y: e.clientY }),
+    onProjectContextMenu: (e, project, group, opts) => {
+      if (opts?.groupWiki) return;
+      open(e, { kind: "project", project, group, x: e.clientX, y: e.clientY });
+    },
     onGroupContextMenu: (e, group, toggle) => open(e, { kind: "group", group, toggle, x: e.clientX, y: e.clientY }),
     element,
   };

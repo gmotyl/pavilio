@@ -17,13 +17,15 @@ const DECK_SHADOW = [
  * One project group in the sidebar's Projects tree: chevron (an indicator
  * only; the whole row toggles and drags past a small threshold, see
  * `useSidebarDrag`), the aggregate activity slot, one deck icon (the first
- * member's mark), the bold name and the member count.
+ * member's mark), the bold name and the member count. The group wiki (`wikis`,
+ * grouped `knowledge` projects) is a member but never the icon nor counted.
  * Expanded, its member rows sit beneath it under one vertical rule; collapsed,
  * the slot carries the most urgent member state (attention > busy > idle).
  */
 export function SidebarGroupRow({
   name,
   members,
+  wikis = [],
   sessionIds,
   collapsed,
   onToggle,
@@ -34,6 +36,8 @@ export function SidebarGroupRow({
 }: {
   name: string;
   members: readonly string[];
+  /** Members that are the group's wiki: excluded from the icon and the count. */
+  wikis?: readonly string[];
   /** Every session of every member, for the collapsed aggregate. */
   sessionIds: readonly string[];
   collapsed: boolean;
@@ -47,6 +51,7 @@ export function SidebarGroupRow({
   children: ReactNode;
 }) {
   const tileSize = isMobile ? 24 : 22;
+  const counted = members.filter((m) => !wikis.includes(m));
   // The row has an explicit aria-label, which hides descendants from the
   // accessible name; describe it by the status slot instead.
   const statusId = useId();
@@ -91,9 +96,9 @@ export function SidebarGroupRow({
           data-deck="true"
           className="flex shrink-0"
         >
-          {members[0] !== undefined && (
+          {counted[0] !== undefined && (
             <ProjectMark
-              project={members[0]}
+              project={counted[0]}
               size={tileSize}
               style={{ boxShadow: DECK_SHADOW }}
             />
@@ -111,7 +116,7 @@ export function SidebarGroupRow({
           className="text-[11px] tabular-nums shrink-0"
           style={{ color: "var(--text-muted)" }}
         >
-          {members.length}
+          {counted.length}
         </span>
       </div>
       {!collapsed && (
