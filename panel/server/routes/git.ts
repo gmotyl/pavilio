@@ -6,7 +6,7 @@ import { lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir } from "fs/promises"
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
-import { isLiveProject, readLinkedRepos, readRepos, redactUrlCredentials } from "../lib/discovery.js";
+import { isLiveProject, readLinkedRepos, readRepos } from "../lib/discovery.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
 import { expandHome } from "../lib/paths.js";
 
@@ -751,19 +751,29 @@ async function pruneEmpty(dir: string, top: string, self: string): Promise<void>
   }
 }
 
-/** Short client-safe causes; git's raw diagnostic may echo the remote and stays in the server log. */
+/**
+ * Short client-safe causes, matched against whole stderr lines: the reason must sit where git
+ * or ssh puts it (after the quoted remote or path), so words inside either cannot pose as one.
+ */
 const CLONE_CAUSES: [RegExp, string][] = [
-  [/transport '[^']*' not allowed/i, "transport not allowed"],
-  [/permission denied \(publickey|authentication failed|could not read (username|password)|host key verification failed/i, "authentication failed"],
-  [/does not exist|not appear to be a git repository|repository not found|not found/i, "repository not found"],
-  [/could not resolve host|connection (refused|timed out)|network is unreachable|could not read from remote repository|unable to access/i, "remote unreachable"],
+  [/^fatal: transport '[^']*' not allowed$/, "transport not allowed"],
+  [
+    /^ssh: Could not resolve hostname [^\s:]+: |^ssh: connect to host \S+ port \d+: |^fatal: unable to access '.*': (Could not resolve host|Failed to connect|Couldn't connect|Connection timed out|Resolving timed out)/,
+    "remote unreachable",
+  ],
+  [
+    /^[^\s']+: Permission denied \(publickey|^fatal: Authentication failed for '.*'$|^fatal: could not read (Username|Password) for '.*': |^Host key verification failed\.$/,
+    "authentication failed",
+  ],
+  [/^fatal: repository '.*' (not found|does not exist)$|^fatal: '.*' does not appear to be a git repository$|^(ERROR|remote): Repository not found\.?$/, "repository not found"],
 ];
 
-function cloneFailure(e: any): string {
-  if (e?.killed) return "git clone failed: timed out";
-  const raw = `${e?.stderr ?? ""}\n${e?.message ?? ""}`;
-  const cause = CLONE_CAUSES.find(([re]) => re.test(raw))?.[1];
-  return cause ? `git clone failed: ${cause}` : "git clone failed — see server log";
+function cloneCause(e: any): string | undefined {
+  if (e?.killed) return "timed out";
+  const lines = String(e?.stderr ?? "")
+    .split(/\r?\n|\r/)
+    .map((l) => l.trim());
+  return CLONE_CAUSES.find(([re]) => lines.some((l) => re.test(l)))?.[1];
 }
 
 /**
@@ -817,10 +827,12 @@ router.post("/clone", async (req, res) => {
           staging = undefined;
         }
       } catch (e: any) {
-        const raw = String(e?.stderr ?? "").trim() || e?.message || String(e);
-        console.error(`[git] clone of ${project}/${repo} into ${target} failed:`, redactUrlCredentials(raw));
+        // Fixed facts only: git's output and argv may carry the remote's secrets.
+        const cause = inGit ? cloneCause(e) : undefined;
+        const status = typeof e?.code === "number" ? `exit ${e.code}` : e?.signal ? `signal ${e.signal}` : String(e?.code ?? "error");
+        console.error(`[git] clone of ${project}/${repo} into ${target} failed in ${inGit ? "git" : "staging"}: ${status}, ${cause ?? "unclassified"}`);
         failure = inGit
-          ? { status: 502, body: { error: cloneFailure(e) } }
+          ? { status: 502, body: { error: cause ? `git clone failed: ${cause}` : "git clone failed — see server log" } }
           : { status: 500, body: { error: `clone could not be written to ${target}` } };
       }
       if (staging) await rm(staging, { recursive: true, force: true }).catch(() => {});

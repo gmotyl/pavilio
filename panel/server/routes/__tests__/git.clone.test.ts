@@ -311,6 +311,30 @@ describe("POST /api/git/clone", () => {
     expect(JSON.stringify(res.body)).not.toContain("t0ken");
   });
 
+  it("classifies by git's diagnostic, never by words in the remote or path", async () => {
+    const malformed = await cloneOne(join(tmp, "a"), "https://127.0.0.1:9/o/repository not found.git");
+    expect(malformed.body).toEqual({ error: "git clone failed — see server log" });
+    const missing = await cloneOne(join(tmp, "b"), join(tmp, "Permission denied (publickey)", "missing.git"));
+    expect(missing.body).toEqual({ error: "git clone failed: repository not found" });
+    const refused = await cloneOne(join(tmp, "c"), "https://127.0.0.1:9/o/x.git");
+    expect(refused.body).toEqual({ error: "git clone failed: remote unreachable" });
+  });
+
+  it("logs only the stage, exit status and category, never git's output or the remote", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await cloneOne(join(tmp, "out"), "https://127.0.0.1:9/o/it's.git?sig=t0ken");
+      expect(res.status).toBe(502);
+      const logged = log.mock.calls.flat().map(String).join("\n");
+      expect(logged).toContain("remote unreachable");
+      expect(logged).toContain("exit 128");
+      expect(logged).not.toContain("t0ken");
+      expect(logged).not.toContain("127.0.0.1");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("stages under a short fixed name, so a long target basename still fits", async () => {
     const target = join(tmp, "s".repeat(250));
     const res = await cloneOne(target, origin);

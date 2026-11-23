@@ -118,10 +118,6 @@ export function readProject(root: string, name: string): Project {
 const rawRemote = (r: { remote?: unknown }): string | undefined =>
   typeof r.remote === "string" && r.remote.trim() ? r.remote.trim() : undefined;
 
-/** Drop `user[:password]@` and `?query#fragment` from every http(s) URL in `text`, so tokens never leave the server. */
-export const redactUrlCredentials = (text: string): string =>
-  text.replace(/\b(https?:\/\/)[^/@\s]+@/gi, "$1").replace(/\b(https?:\/\/[^\s?#'"]*)[?#][^\s'"]*/gi, "$1");
-
 /** A validated repos.json entry with its unredacted remote, for git itself; never send `remote` to a client. */
 export interface LinkedRepo {
   entry: RepoEntry;
