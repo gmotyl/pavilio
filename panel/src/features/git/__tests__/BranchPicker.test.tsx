@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BranchPicker from "../BranchPicker";
 
@@ -132,6 +132,20 @@ describe("BranchPicker", () => {
       await user.click(screen.getByTestId("bp-toggle"));
       await user.click(screen.getByPlaceholderText("Filter branches..."));
       expect(screen.getByTestId("bp-popover")).toBeInTheDocument();
+    });
+
+    it("closes when the trigger stops being laid out (its column hidden)", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+      const toggle = screen.getByTestId("bp-toggle");
+      toggle.getBoundingClientRect = () => rect(600, 700);
+      await user.click(toggle);
+      expect(screen.getByTestId("bp-popover")).toBeInTheDocument();
+      toggle.getBoundingClientRect = () => rect(0, 0, 0, 0);
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(screen.queryByTestId("bp-popover")).toBeNull();
     });
 
     it("a click outside closes it", async () => {

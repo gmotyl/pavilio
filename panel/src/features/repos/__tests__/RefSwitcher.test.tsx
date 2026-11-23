@@ -113,5 +113,18 @@ describe("RefSwitcher", () => {
       expect(await within(pop()).findByRole("alert")).toHaveTextContent("Permission denied (publickey)");
       expect(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills")).toBeEnabled();
     });
+
+    it("a clone error belongs to its project, not a same-named repo of the next one", async () => {
+      stubFetch({ "/api/git/clone": () => jsonResponse({ error: "boom" }, { status: 502 }) }, []);
+      const repos = missing("git@github.com:o/skills.git");
+      const { rerender } = render(<RefSwitcher {...base} project="infopoly" repos={repos} />);
+      fireEvent.click(screen.getByTestId("repo-switcher"));
+      fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));
+      expect(await within(pop()).findByRole("alert")).toHaveTextContent("boom");
+      rerender(<RefSwitcher {...base} project="other" repos={repos} />);
+      expect(within(pop()).queryByRole("alert")).toBeNull();
+      rerender(<RefSwitcher {...base} project="infopoly" repos={repos} />);
+      expect(within(pop()).getByRole("alert")).toHaveTextContent("boom");
+    });
   });
 });

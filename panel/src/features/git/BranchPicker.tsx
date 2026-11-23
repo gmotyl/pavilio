@@ -84,16 +84,22 @@ export default function BranchPicker({
   // Portalled + fixed so an overflow-clipped or narrow ancestor never cuts the popover off.
   useLayoutEffect(() => {
     if (!open) return;
-    const update = () => {
+    const place = () => {
       const r = triggerRef.current?.getBoundingClientRect();
       if (r) setPlace(placeUnder(r, align));
+      return r;
     };
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
+    // A trigger measuring 0×0 is no longer laid out (e.g. its column hidden by a media query).
+    const follow = () => {
+      const r = place();
+      if (!r || (r.width === 0 && r.height === 0)) setOpen(false);
+    };
+    place();
+    window.addEventListener("resize", follow);
+    window.addEventListener("scroll", follow, true);
     return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", follow);
+      window.removeEventListener("scroll", follow, true);
     };
   }, [open, align]);
 

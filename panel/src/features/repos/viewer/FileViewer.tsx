@@ -162,11 +162,26 @@ function identifierRanges(text: string): { ranges: Range[]; names: string[] } {
 const SPECIFIER = /(?:\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport)\s*(['"])([^'"\\\n]+)\1/g;
 const IN_COMMENT = /\bhljs-comment\b/;
 
+/** Whether `at` sits inside a '…', "…" or `…` literal opened earlier on the line. */
+function insideString(text: string, at: number): boolean {
+  let quote = "";
+  for (let i = 0; i < at; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+    } else if (c === "'" || c === '"' || c === "`") quote = c;
+  }
+  return quote !== "";
+}
+
 /** Quoted specifier ranges (quotes included) with the specifier text. */
 function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
   const ranges: Range[] = [];
   const specs: string[] = [];
   for (const m of text.matchAll(SPECIFIER)) {
+    // `"imported from 'x'"` is text, not an import.
+    if (insideString(text, m.index)) continue;
     const end = m.index + m[0].length;
     ranges.push([end - m[2].length - 2, end]);
     specs.push(m[2]);

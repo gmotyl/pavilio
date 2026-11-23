@@ -78,6 +78,41 @@ const homeIndex = (list: Worktree[], linked: string | undefined) => Math.max(0, 
 
 const branchLabel = (w: Worktree | undefined) => (w ? (w.branch ?? `detached ${w.head.slice(0, 7)}`) : null);
 
+type CloneState = "busy" | { error: string } | undefined;
+
+/** A linked repo absent here: its path, and Clone when repos.json names a remote. */
+function MissingRepo({ repo: r, canClone, state, onClone }: { repo: RepoEntry; canClone: boolean; state: CloneState; onClone: () => void }) {
+  return (
+    <>
+      <div className="cv-sw-missing-row">
+        <button type="button" className="cv-sw-row" data-testid={`repo-switcher-missing-${r.name}`} disabled>
+          <span className="cv-sw-path" title={r.path}>
+            {r.path}
+          </span>
+          <span className="cv-sw-missing">Not on this machine</span>
+        </button>
+        {canClone && r.remote && (
+          <button
+            type="button"
+            className="cv-sw-clone"
+            data-testid={`repo-switcher-clone-${r.name}`}
+            title={`git clone ${r.remote} ${r.path}`}
+            disabled={state === "busy"}
+            onClick={onClone}
+          >
+            {state === "busy" ? "Cloning…" : "Clone"}
+          </button>
+        )}
+      </div>
+      {typeof state === "object" && (
+        <p className="cv-sw-clone-err" role="alert">
+          {state.error}
+        </p>
+      )}
+    </>
+  );
+}
+
 /** Context-slot button + popover: repos grouped, each with its main checkout then its worktrees. */
 export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare }: Props) {
   const [open, setOpen] = useState(false);
@@ -87,7 +122,7 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
   // Keyed by the checkout they were listed for, so another checkout never shows (or picks) them.
   const [listed, setListed] = useState<{ root: string; branches: string[] } | null>(null);
   const [dirty, setDirty] = useState<Record<string, number>>({});
-  const [cloning, setCloning] = useState<Record<string, "busy" | { error: string }>>({});
+  const [cloning, setCloning] = useState<Record<string, Exclude<CloneState, undefined>>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -148,9 +183,12 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
     setPicking(false);
   };
 
+  // Keyed by project too: another project may link a repo of the same name.
+  const cloneKey = (name: string) => `${project ?? ""}\0${name}`;
   const clone = async (name: string) => {
     if (!project) return;
-    setCloning((c) => ({ ...c, [name]: "busy" }));
+    const key = cloneKey(name);
+    setCloning((c) => ({ ...c, [key]: "busy" }));
     let error = "";
     try {
       const res = await fetch("/api/git/clone", {
@@ -163,8 +201,9 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
       error = e instanceof Error ? e.message : String(e);
     }
     if (!error) await refreshProjects();
-    setCloning(({ [name]: _, ...rest }) => (error ? { ...rest, [name]: { error } } : rest));
+    setCloning(({ [key]: _, ...rest }) => (error ? { ...rest, [key]: { error } } : rest));
   };
+
   const branches = listed && listed.root === root ? listed.branches : [];
   const shown = filter ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())) : branches;
 
@@ -260,33 +299,7 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
                 <div key={r.name} className="cv-sw-group" role="group" aria-label={r.name}>
                   <div className="cv-sw-head">{r.name}</div>
                   {!r.present ? (
-                    <>
-                      <div className="cv-sw-missing-row">
-                        <button type="button" className="cv-sw-row" data-testid={`repo-switcher-missing-${r.name}`} disabled>
-                          <span className="cv-sw-path" title={r.path}>
-                            {r.path}
-                          </span>
-                          <span className="cv-sw-missing">Not on this machine</span>
-                        </button>
-                        {project && r.remote && (
-                          <button
-                            type="button"
-                            className="cv-sw-clone"
-                            data-testid={`repo-switcher-clone-${r.name}`}
-                            title={`git clone ${r.remote} ${r.path}`}
-                            disabled={cloning[r.name] === "busy"}
-                            onClick={() => clone(r.name)}
-                          >
-                            {cloning[r.name] === "busy" ? "Cloning…" : "Clone"}
-                          </button>
-                        )}
-                      </div>
-                      {typeof cloning[r.name] === "object" && (
-                        <p className="cv-sw-clone-err" role="alert">
-                          {(cloning[r.name] as { error: string }).error}
-                        </p>
-                      )}
-                    </>
+                    <MissingRepo repo={r} canClone={!!project} state={cloning[cloneKey(r.name)]} onClone={() => clone(r.name)} />
                   ) : !worktrees[r.name] ? (
                     <p className="cv-msg">Loading worktrees…</p>
                   ) : (

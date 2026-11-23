@@ -223,6 +223,16 @@ describe("FileViewer", () => {
     expect(onIdentifierClick).toHaveBeenLastCalledWith({ line: 2, col: 25 }, "../../interfaces/modules/module-metadata.interface");
   });
 
+  it("a from/import inside another string is not a specifier", () => {
+    const content = [
+      `const a = "imported from 'x'";`,
+      "const b = `import('y')`;",
+      `const c = 'say "from" here'; import z from './real';`,
+    ].join("\n");
+    const { container } = render(<FileViewer path="src/s.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./real"]);
+  });
+
   it("import specifiers stay plain outside TS/JS", () => {
     const { container } = render(<FileViewer path="src/x.py" content={"from os import path"} defaultMode="code" onIdentifierClick={vi.fn()} />);
     expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);
