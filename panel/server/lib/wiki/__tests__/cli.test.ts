@@ -217,6 +217,23 @@ describe("wiki cli", () => {
     });
   });
 
+  it("cli targets prints the map", async () => {
+    mkdirSync(join(root, "projects/knowledge"), { recursive: true });
+    writeFileSync(join(root, "projects/knowledge/PROJECT.md"), "---\nkind: knowledge\n---\n");
+    mkdirSync(join(root, "projects/metro-wiki"), { recursive: true });
+    writeFileSync(join(root, "projects/metro-wiki/PROJECT.md"), "---\nkind: knowledge\ngroup: metro\n---\n");
+    expect(await cli(["targets"])).toMatchObject({
+      code: 0,
+      json: { global: "knowledge", groups: { metro: "metro-wiki" } },
+    });
+    mkdirSync(join(root, "projects/metro-kb"), { recursive: true });
+    writeFileSync(join(root, "projects/metro-kb/PROJECT.md"), "---\nkind: knowledge\ngroup: metro\n---\n");
+    expect(await cli(["targets"])).toMatchObject({
+      code: 1,
+      json: { error: "ambiguous knowledge target: metro-kb, metro-wiki" },
+    });
+  });
+
   it("cli dispatches the harvest commands", async () => {
     write("wiki/open-questions.md", "## Gaps\n- g\n\n## Knowledge candidates\n- 2026-10-20 — one (from [[wiki/sources/a]])\n- 2026-10-20 — two\n");
     const listed = await cli(["candidates"]);

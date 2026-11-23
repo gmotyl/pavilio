@@ -3,6 +3,9 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { join, relative, resolve, sep } from "path";
 
 import { isProjectDir } from "../project-dir";
+import { projectGroup } from "../projects/group";
+import { projectKind } from "../projects/kind";
+import { slugifyProjectTitle } from "../projects/slug";
 import { readActiveProjects, readArchivedProjects } from "../registry";
 
 /**
@@ -37,22 +40,56 @@ export type Candidate = {
 
 export type HarvestStatus = { lastRun: string | null; daysAgo: number | null; waiting: number };
 
+/** Where the harvest writes: the ungrouped knowledge project, and one knowledge project per group. */
+export type KnowledgeTargets = { global: string | null; groups: Record<string, string> };
+
 /**
- * Non-archived projects with a `wiki/` dir, `knowledge` excluded. A project is known the way
- * `resolveProject` knows it: a `PROJECT.md` (discovery's rule) or an active registry row, and never
- * a registry `## Archived Projects` row. Sorted for stable output.
+ * Non-archived projects, known the way `resolveProject` knows them: a `PROJECT.md` (discovery's
+ * rule) or an active registry row, and never a registry `## Archived Projects` row. Sorted.
  */
-function candidateProjects(workspaceRoot: string): string[] {
-  const projectsDir = join(workspaceRoot, "projects");
+function knownProjects(projectsDir: string): string[] {
   if (!existsSync(projectsDir)) return [];
   const active = readActiveProjects(projectsDir);
   const archived = readArchivedProjects(projectsDir);
   return readdirSync(projectsDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name !== "archived" && e.name !== KNOWLEDGE_PROJECT)
+    .filter((e) => e.isDirectory() && e.name !== "archived")
     .map((e) => e.name)
     .filter((name) => (active.includes(name) || isProjectDir(projectsDir, name)) && !archived.includes(name))
-    .filter((name) => isDir(join(projectsDir, name, "wiki")))
     .sort();
+}
+
+/** Non-archived projects with a `wiki/` dir, every knowledge wiki (`kind: knowledge`, grouped or not) excluded. */
+function candidateProjects(workspaceRoot: string): string[] {
+  const projectsDir = join(workspaceRoot, "projects");
+  return knownProjects(projectsDir)
+    .filter((name) => name !== KNOWLEDGE_PROJECT && projectKind(projectsDir, name) !== "knowledge")
+    .filter((name) => isDir(join(projectsDir, name, "wiki")));
+}
+
+/**
+ * `scripts/wiki targets`: every non-archived `kind: knowledge` project — no `group:` → `global`,
+ * with one → `groups[group]`. Two for one group (or two ungrouped) throw, naming both.
+ */
+export function knowledgeTargets(workspaceRoot: string): KnowledgeTargets {
+  const projectsDir = join(workspaceRoot, "projects");
+  const byGroup = new Map<string | null, string[]>();
+  for (const name of knownProjects(projectsDir)) {
+    if (projectKind(projectsDir, name) !== "knowledge") continue;
+    const group = projectGroup(projectsDir, name);
+    byGroup.set(group, [...(byGroup.get(group) ?? []), name]);
+  }
+  const targets: KnowledgeTargets = { global: null, groups: {} };
+  for (const [group, names] of byGroup) {
+    if (names.length > 1) throw new Error(`ambiguous knowledge target: ${names.join(", ")}`);
+    if (group === null) targets.global = names[0];
+    else targets.groups[group] = names[0];
+  }
+  return targets;
+}
+
+/** The project name a new group wiki gets: the slugged group plus `-wiki`. */
+export function groupWikiName(group: string): string {
+  return `${slugifyProjectTitle(group)}-wiki`;
 }
 
 function isDir(path: string): boolean {

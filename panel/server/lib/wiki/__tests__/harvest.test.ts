@@ -3,7 +3,14 @@ import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 
-import { addBacklink, clearCandidates, harvestStatus, listCandidates } from "../harvest";
+import {
+  addBacklink,
+  clearCandidates,
+  groupWikiName,
+  harvestStatus,
+  knowledgeTargets,
+  listCandidates,
+} from "../harvest";
 
 let root = "";
 
@@ -183,5 +190,46 @@ describe("harvest", () => {
     write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
     write("projects/knowledge/wiki/log.md", "# Log\n\n## [2026-10-25] harvest\n- picked: a\n");
     expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-25", daysAgo: 0, waiting: 0 });
+  });
+
+  it("knowledgeTargets maps ungrouped and grouped knowledge projects", () => {
+    write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
+    expect(knowledgeTargets(root)).toEqual({ global: "knowledge", groups: {} });
+    write("projects/metro-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/metro-app/PROJECT.md", "---\ngroup: metro\n---\n");
+    expect(knowledgeTargets(root)).toEqual({ global: "knowledge", groups: { metro: "metro-wiki" } });
+  });
+
+  it("knowledgeTargets rejects two targets for one group", () => {
+    write("projects/metro-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/metro-kb/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    expect(() => knowledgeTargets(root)).toThrow("ambiguous knowledge target: metro-kb, metro-wiki");
+    rmSync(join(root, "projects/metro-kb"), { recursive: true });
+    write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
+    write("projects/other-kb/PROJECT.md", "---\nkind: knowledge\n---\n");
+    expect(() => knowledgeTargets(root)).toThrow("ambiguous knowledge target: knowledge, other-kb");
+  });
+
+  it("knowledgeTargets skips archived projects", () => {
+    write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
+    write("projects/metro-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/archived/old-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/gone-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write(".projects.local.md", "| Project | Type |\n| --- | --- |\n\n## Archived Projects\n\n| gone-wiki | private |\n");
+    expect(knowledgeTargets(root)).toEqual({ global: "knowledge", groups: { metro: "metro-wiki" } });
+  });
+
+  it("groupWikiName slugs the group name", () => {
+    expect(groupWikiName("Motyl OSS")).toBe("motyl-oss-wiki");
+    expect(groupWikiName("metro")).toBe("metro-wiki");
+  });
+
+  it("listCandidates skips grouped knowledge projects", () => {
+    project("alpha", ["- 2026-10-20 — alpha line"]);
+    project("metro-wiki", ["- 2026-10-20 — group wiki line"]);
+    write("projects/metro-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    project("kb", ["- 2026-10-20 — ungrouped knowledge line"]);
+    write("projects/kb/PROJECT.md", "---\nkind: knowledge\n---\n");
+    expect(listCandidates(root).items.map((i) => i.project)).toEqual(["alpha"]);
   });
 });

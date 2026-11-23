@@ -9,7 +9,7 @@ import { readWikiConfig, type WikiConfig } from "./config";
 import { preferencesFileFor } from "../../config";
 import { fetchArticle } from "./fetch-article";
 import { fetchYoutube, UvMissingError, type Runner } from "./fetch-youtube";
-import { addBacklink, clearCandidates, harvestStatus, listCandidates } from "./harvest";
+import { addBacklink, clearCandidates, harvestStatus, knowledgeTargets, listCandidates } from "./harvest";
 import { buildIndex } from "./index-md";
 import { pendingRecords, recordIngested } from "./ledger";
 import { lintDiagrams } from "./diagrams";
@@ -68,13 +68,16 @@ const USAGE = `usage: scripts/wiki <command> [args]
   clone-repo <p> <url>                      {clonePath, commitSha, action}
   candidates                                {items: [{id, project, text, details, date, source}]}: the
                                             ## Knowledge candidates of every non-archived wiki
-                                            except knowledge; source is wiki/sources/… or null
+                                            except kind: knowledge ones; source is wiki/sources/… or null
   clear-candidates --ids <file.json>        {removed}: drop exactly those candidate lines
                                             (file holds a JSON array of ids)
   backlink <p> <source page> <target>       {added}: - [[knowledge:<target>]] under the page's
                                             ## Knowledge (created at the end when absent)
   harvest-status                            {lastRun, daysAgo, waiting}: newest harvest entry in
                                             knowledge/wiki/log.md (null = never), candidates waiting
+  targets                                   {global, groups: {<group>: <project>}}: the harvest
+                                            targets — non-archived kind: knowledge projects, keyed
+                                            by group: (none → global) | exit 1 {error} when ambiguous
 
 <p> is a project dir under <workspace>/projects/. Paths in receipts are wiki-relative except
 pending/record paths (project-relative). Exit: 0 ok, 1 error {error}, 2 ask the user.
@@ -347,6 +350,10 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       const [p, page, target] = only(parsed, 3, "backlink <p> <source page> <knowledge target>");
       projectDir(workspaceRoot, p);
       return ok({ ...addBacklink(workspaceRoot, p, page, target) });
+    }
+    case "targets": {
+      only(parsed, 0, "no arguments");
+      return ok({ ...knowledgeTargets(workspaceRoot) });
     }
     case "harvest-status": {
       only(parsed, 0, "no arguments");
