@@ -1,6 +1,6 @@
 ---
 name: pavilio-wiki
-description: Query, ingest into, or lint a project's agent-maintained LLM wiki (`projects/<p>/wiki/`). Query is the default — it walks the reading ladder, answers with panel-link citations and leaves a question page; ingest runs only with the explicit `ingest` verb and turns records, files, articles, YouTube transcripts, repos or quoted snippets into source pages and knowledge pages via cheap writer subagents; `ingest knowledge` runs the knowledge harvest into the shared `knowledge` wiki. Use when the user invokes `/pavilio-wiki`, asks "what does the wiki say about …", says "ingest this into the wiki", or when note / session-start / archive-plan run a checkpoint ingest.
+description: Query, ingest into, or lint a project's agent-maintained LLM wiki (`projects/<p>/wiki/`). Query is the default — it walks the reading ladder, answers with panel-link citations and leaves a question page; ingest runs only with the explicit `ingest` verb and turns records, files, articles, YouTube transcripts, repos or quoted snippets into source pages and knowledge pages via cheap writer subagents; `ingest knowledge` runs the knowledge harvest into the shared `knowledge` wiki and each group's wiki. Use when the user invokes `/pavilio-wiki`, asks "what does the wiki say about …", says "ingest this into the wiki", or when note / session-start / archive-plan run a checkpoint ingest.
 ---
 
 # Pavilio Wiki
@@ -200,10 +200,10 @@ trimmed `group:` equals it, minus `kind: knowledge` cards (group wikis).
    — never write credentials onto a page. None → pass no `url`; never guess one (never fabricate a
    GitHub URL for a non-GitHub or local clone).
    `source_writer` rewrites the whole page, so when the target already exists, first capture the
-   `[[knowledge:…]]` lines under its `## Knowledge`; once that writer has returned, re-append each
-   with `scripts/wiki backlink <p> <source page> <target>`, where `<target>` is the link's bare
-   target `wiki/<slug>` — strip the `- `, the brackets, the `knowledge:` prefix and any `|alias`,
-   as harvest step 6 passes it (idempotent — a link the writer kept is left alone). A failed
+   `[[<target>:…]]` lines under its `## Knowledge` (`knowledge:` or a group wiki's name); once
+   that writer has returned, re-append each with `scripts/wiki backlink <p> <source page>
+   <target>:wiki/<slug>` — strip the `- `, the brackets and any `|alias`, as harvest step 7 passes
+   it (idempotent — a link the writer kept is left alone). A failed
    writer left the old page in place; re-append anyway.
    **Glossary check** — for each record with a `## Glossary` section (an archived `design.md`),
    once its writer has returned: every term there must be among the receipt's `slugs` as
@@ -296,87 +296,128 @@ Inputs:
 
 ## 5. Knowledge harvest
 
-Moves generic findings from every project's `## Knowledge candidates` into topic knowledge pages
-of the shared `knowledge` project, linked both ways. Run only when the user asks
+Moves findings from every project's candidates into topic knowledge pages, linked both ways:
+generic findings (`## Knowledge candidates`) into the shared `knowledge` project, group-scoped
+findings (`## Group candidates`) into their group's wiki — the `kind: knowledge` project whose
+`group:` is that group. Run only when the user asks
 (`/pavilio-wiki ingest knowledge [-yolo | --min <n>]` or `/pavilio-wiki-ingest-knowledge`); nothing
-moves on its own. Selection is the promotion: the ≥2-source rule does not apply here.
+moves on its own. Generic: selection is the promotion, the ≥2-source rule does not apply. Group:
+≥2 distinct member projects is the promotion, in every mode. Generic findings never go to a group
+wiki, group findings never to `knowledge`.
 
-1. **Target** — no `projects/knowledge/` → `scripts/project new knowledge --kind knowledge`
-   (creates `PROJECT.md` with `kind: knowledge` and the `wiki/` skeleton). Read the target's
-   `wiki_language` (§ Writers → Language) and pass it to every page and overview writer this run
-   spawns; a source project's language does not apply. Then
-   `scripts/wiki lock take knowledge --session <id>` as in § Ingest; `held: false` → stop.
+1. **Targets** — `scripts/wiki targets` → `{global, groups: {<group>: <project>}}`. Exit 1 with
+   `{error}` (`ambiguous knowledge target: <a>, <b>` — two knowledge projects for one group, or
+   two ungrouped) → report the named projects and stop before anything is written. `global` null →
+   `scripts/project new knowledge --kind knowledge` (creates `PROJECT.md` with `kind: knowledge`
+   and the `wiki/` skeleton). Read each target's `wiki_language` (§ Writers → Language) when it is
+   first written and pass it to every page and overview writer for that target; a source
+   project's language does not apply. Then `scripts/wiki lock take knowledge --session <id>` as in
+   § Ingest; `held: false` → stop. Group wikis are locked in step 5, when first written.
 2. **Candidates** — `scripts/wiki candidates` → `items` (`id`, `project`, `text`, `details`:
    the bullet's indented sub-lines, dedented, `[]` when none, `date`, `source`: the origin
-   `wiki/sources/…` page or null) from every non-archived wiki except `knowledge`, research
-   projects included. `text` + `details` together are the finding: pass both to the prefilter
-   and the page writers (step 7 clears the sub-lines with the bullet). None → release, report
-   "no candidates", stop.
+   `wiki/sources/…` page or null, `scope`: `generic` | `group`, `group`: for a group item the
+   origin project's **current** `group:`, null when it has none any more) from every non-archived
+   wiki except `kind: knowledge` ones, research projects included. `date` is the bullet's leading
+   `YYYY-MM-DD` — the day ingest appended it (`PAGES.md § open-questions.md`); null when the bullet
+   has none. `text` + `details` together are the finding: pass both to the prefilter and the page
+   writers (step 8 clears the sub-lines with the bullet). None → release, report "no
+   candidates", stop.
 3. **Prefilter + cluster** — this is the harvest's own work, not a question for the user. Split
-   `items` into chunks of ≤150 (by project, any number of chunks) and spawn one `cluster_writer`
-   per chunk (`agents/cluster_writer.md`, § Writers; ≤10 in parallel), passing the chunk inline
-   and the existing `knowledge` page slugs. Writers drop what is not generic, merge duplicates
-   into clusters and give each a subject and slug. With more than one chunk, merge clusters across
-   receipts only when they state the same finding; distinct findings on one slug stay separate
-   clusters (step 5 groups them per page). No subagent tool in this harness → do the same work
-   inline, chunk by chunk. A receipt that is not JSON, has `status` other than `ok`, or lacks the
-   `clusters` / `dropped` arrays → re-run that chunk once → still failing: release the lock and
-   stop.
-   The orchestrator then computes each cluster's count — distinct origin `source` pages of its
-   items (an item with `source` null counts as its own origin) — and checks that every item id
-   ends in exactly one cluster or the dropped list. Ids missing from a chunk's receipt → re-run
-   that chunk once; still missing → they stay out of every cluster and out of step 7's clear, so
-   they remain candidates for the next harvest.
-   Steps 1–3 run without stopping: no progress report, no question, no threshold table before
-   step 4.
-4. **Pick** —
-   - *Manual (default):* numbered clusters grouped by subject, pages of ~30 (`text`, count,
-     origin projects). The user replies with numbers or ranges (`3, 7, 12-15`), `next` for the
-     next page, or `done`. Clusters shown and not picked are skipped.
-   - *`-yolo`:* before anything is written, show how many clusters meet each threshold:
+   `items` by scope, and group items by `group`; a group item with `group: null` is clustered
+   nowhere (routed nowhere: it waits, and expires on schedule in step 4 as a cluster of one).
+   Split each part into chunks of ≤150 (by project, any number of chunks) and spawn one
+   `cluster_writer` per chunk (`agents/cluster_writer.md`, § Writers; ≤10 in parallel), passing
+   the chunk inline, its `scope` (and `group`), and the existing page slugs of that chunk's target
+   (`knowledge`, or the group wiki; none yet → empty). Generic chunks drop what is not generic;
+   group chunks keep group-scoped claims and drop only claims specific to one project. Writers
+   merge duplicates into clusters and give each a subject and slug. Clusters never mix scopes or
+   groups. With more than one chunk in a part, merge clusters across its receipts only when they
+   state the same finding; distinct findings on one slug stay separate clusters (step 6 groups
+   them per page). No subagent tool in this harness → do the same work inline, chunk by chunk. A
+   receipt that is not JSON, has `status` other than `ok`, or lacks the `clusters` / `dropped`
+   arrays → re-run that chunk once → still failing: release the lock and stop.
+   The orchestrator checks that every item id ends in exactly one cluster or the dropped list.
+   Ids missing from a chunk's receipt → re-run that chunk once; still missing → they stay out of
+   every cluster and out of step 8's clear, so they remain candidates for the next harvest.
+   Steps 1–4 run without stopping until the generic pick: no progress report, no question, no
+   threshold table before it.
+4. **Route** — the orchestrator computes per cluster:
+   - *Group* (any mode, no question, never shown for picking): count = distinct origin
+     **projects** of its items. ≥2 → **promoted** to that group's wiki. Below 2 → **kept**
+     (not written, not cleared), unless every item in it has a `date` more than 90 days before
+     today → **expired** (cleared in step 8, logged in step 9). An undated item never expires,
+     so its cluster is kept. `--min` and `-yolo` thresholds do not apply.
+   - *Generic* (into `knowledge` only, never a group wiki — even when every origin is in one
+     group): count = distinct origin `source` pages of its items (an item with `source` null
+     counts as its own origin), then:
+     - *Manual (default):* numbered clusters grouped by subject, pages of ~30 (`text`, count,
+       origin projects). The user replies with numbers or ranges (`3, 7, 12-15`), `next` for the
+       next page, or `done`. Clusters shown and not picked are skipped.
+     - *`-yolo`:* before anything is written, show how many clusters meet each threshold:
 
-     | Threshold | Clusters |
-     |---|---|
-     | ≥2 | 41 |
-     | ≥3 | 17 |
-     | ≥4 | 9 |
-     | ≥5 | 4 |
+       | Threshold | Clusters |
+       |---|---|
+       | ≥2 | 41 |
+       | ≥3 | 17 |
+       | ≥4 | 9 |
+       | ≥5 | 4 |
 
-     (counts illustrative). The user picks one; that batch is taken without per-item picking.
-     For the rest the user chooses: drop it, or continue into manual mode with what is left.
-   - *`--min <n>`:* no question at all. Every cluster with count ≥ n is picked. Every cluster
-     below n is **kept**: not shown, not written, not cleared in step 7, so its items stay as
-     candidates and can reach n origins at a later harvest, when a new source repeats the finding.
-     No cluster meets n → release the lock, report the cluster counts and stop without a commit.
-5. **Page writers** — one `page_writer` per subject in knowledge-wiki mode
-   (`agents/page_writer.md § Knowledge-wiki mode`), given the slug (`entities/<name>` for a tool,
-   library or platform, `concepts/<name>` for a technique — reuse an existing `knowledge` page or
-   alias first), the picked claims (each `text` with its `details`) and their origins as `<project>:wiki/sources/<page>.md`.
-   ≤10 in parallel, never two on one page.
-6. **Back-link** — only after that subject's writer returned a valid receipt, for every picked
-   item of it with a `source`: `scripts/wiki backlink <project> <source> wiki/<slug>`
-   (idempotent; adds `- [[knowledge:wiki/<slug>]]` under the source page's `## Knowledge`). A
-   failed writer's items get no back-link.
-7. **Clear** — write every id the harvest saw (picked, skipped and dropped) except the items of a
-   failed page writer and the items of clusters `--min` kept to a JSON array file and run `scripts/wiki clear-candidates --ids
-   <file.json>`; `removed` must equal the number of ids in that file. A failed writer's items
-   stay as candidates for the next harvest.
-8. **Index + overview** — `scripts/wiki index knowledge`, an `overview_writer` when pages changed,
-   `index` again (exit 1 → stop before the commit, as in § Ingest).
-9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) listing
-   picked, skipped and dropped items with their origin project (with `--min`, the threshold and
-   the number of clusters kept instead of the skipped list).
-10. **Commit** — one commit for the whole harvest: `git add projects/knowledge` plus every
-    origin project's `wiki/open-questions.md` and back-linked source pages, message
-    `knowledge: wiki harvest <n> picked`. Then `lock release`.
+       (counts illustrative). The user picks one; that batch is taken without per-item picking.
+       For the rest the user chooses: drop it, or continue into manual mode with what is left.
+     - *`--min <n>`:* no question at all. Every cluster with count ≥ n is picked. Every cluster
+       below n is **kept**: not shown, not written, not cleared in step 8, so its items stay as
+       candidates and can reach n origins at a later harvest, when a new source repeats the
+       finding.
+   Generic candidates never expire. Nothing picked, nothing promoted and nothing expired →
+   release the lock, report the cluster counts and stop without a commit.
+5. **Group wiki** — per group with a promoted cluster: `groups[<group>]` from step 1 is its
+   wiki; none → `scripts/project new <groupWikiName> --kind knowledge --group <group>` first
+   (`groupWikiName` = the group slugged — lowercase, non-alphanumeric runs → `-`, trimmed — plus
+   `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`). Then `scripts/wiki lock take <group wiki>
+   --session <id>`; `held: false` → that group's clusters stay as candidates (no page, no
+   back-link, not cleared), the other targets proceed, and the report names the group. A renamed
+   group keeps its wiki: the target is found by card (`group:`), never by name.
+6. **Page writers** — one `page_writer` per subject per target in knowledge-wiki mode
+   (`agents/page_writer.md § Knowledge-wiki mode`), given the target project (`knowledge` or the
+   group wiki), its `language`, the slug (`entities/<name>` for a tool, library or platform,
+   `concepts/<name>` for a technique or a group's shared process or convention — reuse an existing
+   page of that target or alias first), the picked or promoted claims (each `text` with its
+   `details`) and their origins as `<project>:wiki/sources/<page>.md`. ≤10 in parallel, never two
+   on one page.
+7. **Back-link** — only after that subject's writer returned a valid receipt, for every item of
+   it with a `source`: generic → `scripts/wiki backlink <project> <source> wiki/<slug>` (adds
+   `- [[knowledge:wiki/<slug>]]`); group → `scripts/wiki backlink <project> <source> <group
+   wiki>:wiki/<slug>` (adds `- [[<group wiki>:wiki/<slug>]]`). Idempotent; under the source
+   page's `## Knowledge`. A failed writer's items get no back-link.
+8. **Clear** — write every id the harvest saw — picked, skipped, dropped, promoted and expired —
+   except the items of a failed page writer, of clusters kept (`--min` below n, group below 2 and
+   not expired, `group: null` not expired), of a group whose lock was not held, and ids missing
+   from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
+   <file.json>` (clears from either section); `removed` must equal the number of ids in that
+   file. Kept and failed-writer items stay as candidates for the next harvest.
+9. **Index + overview + log** — per written target: `scripts/wiki index <target>`, an
+   `overview_writer` when pages changed, `index` again (exit 1 → stop before the commit, as in
+   § Ingest). Append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
+   run that reaches this step — `harvest-status` reads the harvest age there — listing picked,
+   skipped and dropped generic items with their origin project (with `--min`, the threshold and
+   the number of clusters kept instead of the skipped list), the group counts (promoted / kept per
+   group) and the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
+   entry listing what it received.
+10. **Commit** — one commit for the whole harvest: `git add projects/knowledge`, every written
+    group wiki's `projects/<group wiki>` (new ones included), and every origin project's
+    `wiki/open-questions.md` and back-linked source pages, message
+    `knowledge: wiki harvest <n> picked, <m> to group wikis` (`<m>` = group clusters promoted).
+    Then `lock release` on `knowledge` and on every group wiki locked in step 5.
 
-Report: clusters picked / skipped (or kept, with `--min`) / dropped, knowledge pages created/updated, back-links added,
-failures — each failed writer's subject, its items left as candidates (steps 6–7).
+Report: generic clusters picked / skipped (or kept, with `--min`) / dropped; group clusters
+promoted / kept / expired per group, group wikis created; pages created/updated per target,
+back-links added, failures — each failed writer's subject, its items left as candidates (steps
+7–8), each group whose lock was not held.
 
-Steps 6–7 edit other projects' `open-questions.md` and source pages while holding only the
-`knowledge` lock, not those projects' ingest locks. An ingest or query running in an origin project
-at the same time can race on those files (a lost candidate line or back-link); run the harvest
-when no other wiki session is writing.
+Steps 7–8 edit other projects' `open-questions.md` and source pages while holding only the target
+locks, not those projects' ingest locks. An ingest or query running in an origin project at the
+same time can race on those files (a lost candidate line or back-link); run the harvest when no
+other wiki session is writing.
 
 ## 6. Lint
 
@@ -400,5 +441,5 @@ fix the findings in the same run.
 - Does not backfill a whole project — that is `/pavilio-wiki-migrate`.
 - Does not ingest from a query, or create a wiki from a query.
 - Does not hand-edit `index.md` files — `scripts/wiki index` regenerates them.
-- Does not move knowledge candidates on its own — only the user-run harvest (§ 5) does.
+- Does not move knowledge or group candidates on its own — only the user-run harvest (§ 5) does.
 - Does not commit `wiki/.ingest.lock` or `wiki/raw/repos/` clones.
