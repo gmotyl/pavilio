@@ -73,6 +73,8 @@ function ancestors(path: string): string[] {
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
 }
 
+const commentsLabel = (n: number) => `${n} comment${n === 1 ? "" : "s"}`;
+
 const STATUS_LABEL: Record<string, string> = { M: "modified", A: "added", D: "deleted", R: "renamed", "?": "untracked" };
 
 export default function FileTree({ files, selected, reveal, onSelect, changedOnly = false, "aria-label": label = "Files" }: Props) {
@@ -144,9 +146,10 @@ export default function FileTree({ files, selected, reveal, onSelect, changedOnl
         >
           <span className={`ft-st ft-st-${st === "?" ? "U" : (st ?? "none")}`}>{st === "?" ? "U" : st}</span>
           <span className="ft-nm">{name}</span>
-          {!!file.comments && file.comments > 0 && (
-            <span className="ft-cm" title={`${file.comments} comment${file.comments === 1 ? "" : "s"}`}>
-              💬{file.comments}
+          {(file.comments ?? 0) > 0 && (
+            <span className="ft-cm" title={commentsLabel(file.comments!)}>
+              <span aria-hidden="true">💬{file.comments}</span>
+              <span className="sr-only">{commentsLabel(file.comments!)}</span>
             </span>
           )}
           {st && file.add != null && file.del != null && (

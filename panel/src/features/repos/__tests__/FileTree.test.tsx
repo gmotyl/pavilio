@@ -124,6 +124,17 @@ describe("FileTree", () => {
     expect(badge).toHaveTextContent("💬3");
     expect(badge).toHaveAttribute("title", "3 comments");
     expect(badge?.nextElementSibling).toHaveClass("ft-cnt");
+    // Read as words, like the folder dot: the emoji is hidden from screen readers.
+    expect(row).toHaveAccessibleName(expect.stringContaining("3 comments"));
+    expect(row).not.toHaveAccessibleName(expect.stringContaining("💬"));
+  });
+
+  it("a single comment reads as \"1 comment\"", () => {
+    render(<FileTree files={[{ path: "a.ts", status: "M", add: 1, del: 0, comments: 1 }]} onSelect={() => {}} />);
+    const row = screen.getByRole("button", { name: /a\.ts/ });
+    expect(row.querySelector(".ft-cm")).toHaveAttribute("title", "1 comment");
+    expect(row).toHaveAccessibleName(expect.stringContaining("1 comment"));
+    expect(row).not.toHaveAccessibleName(expect.stringContaining("1 comments"));
   });
 
   it("shows no comment badge without comments", () => {
