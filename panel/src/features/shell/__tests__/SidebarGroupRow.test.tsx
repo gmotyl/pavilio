@@ -284,6 +284,17 @@ describe("SidebarGroupRow", () => {
     expect(wrapper.style.padding).toBe("");
   });
 
+  it("group with only its wiki keeps the name aligned", () => {
+    shell.projects = () => [
+      ...ROWS,
+      { name: "metro-wiki", repos: [], kind: "knowledge", group: "metro" },
+    ];
+    setup();
+    const g = leading(groupRow("metro"));
+    expect(g.map((i) => i.kind)).toEqual(["chevron", "slot", "mark"]);
+    expect(g).toEqual(leading(screen.getByTestId("sidebar-project-row-pavilio")));
+  });
+
   it("members are indented under the group rule", () => {
     shell.sessions = () => [session("s1", "motyl")];
     setup();

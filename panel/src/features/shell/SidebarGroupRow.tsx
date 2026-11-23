@@ -96,11 +96,20 @@ export function SidebarGroupRow({
           data-deck="true"
           className="flex shrink-0"
         >
-          {counted[0] !== undefined && (
+          {counted[0] !== undefined ? (
             <ProjectMark
               project={counted[0]}
               size={tileSize}
               style={{ boxShadow: DECK_SHADOW }}
+            />
+          ) : (
+            // A wiki-only group has no icon; keep the mark's box so the name
+            // stays aligned with the project rows.
+            <span
+              data-testid="project-mark-placeholder"
+              aria-hidden="true"
+              className="shrink-0"
+              style={{ width: tileSize, height: tileSize }}
             />
           )}
         </span>

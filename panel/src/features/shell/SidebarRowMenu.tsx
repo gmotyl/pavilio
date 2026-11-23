@@ -168,9 +168,10 @@ async function failure(res: Response): Promise<string> {
 /**
  * Right-click menus for the sidebar's project and group rows: Group ▸
  * (existing groups, ✓ current, New group…, Remove from group) on a project;
- * Rename… and Collapse/Expand on a group. Inert on mobile. A group wiki (a
- * grouped `knowledge` project) has no Group ▸ entries: it lives in its group by
- * its card, so its menu has nothing to offer and does not open.
+ * Rename… and Collapse/Expand on a group. Inert on mobile. A knowledge wiki
+ * (`groupWiki`: a group's wiki or the shared ungrouped `knowledge`) has no
+ * Group ▸ entries: its group is what makes it a harvest target, fixed by its
+ * card, so its menu has nothing to offer and does not open.
  */
 export function useSidebarRowMenu({
   groups,

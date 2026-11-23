@@ -264,6 +264,13 @@ describe("LeftSidebar Research section", () => {
     expect(row("voice-cloning").style.opacity).toBe("");
   });
 
+  it("the shared knowledge row opens no group menu", () => {
+    setup();
+    // fireEvent returns false when a handler called preventDefault (a menu opened).
+    expect(fireEvent.contextMenu(row("edge-tts"))).toBe(false);
+    expect(fireEvent.contextMenu(row("knowledge"))).toBe(true);
+  });
+
   it("knowledge row: no age, no dim, no archive", () => {
     // Even with a date far in the past, the knowledge row never ages.
     shell.projects = () =>

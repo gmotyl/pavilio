@@ -646,7 +646,9 @@ export default function LeftSidebar() {
                     typeof project.group === "string" && project.group
                       ? project.group
                       : null,
-                    { groupWiki: isGroupWiki(project) },
+                    // Every knowledge wiki, the shared one included: its group
+                    // is fixed by its card (the server refuses a regroup).
+                    { groupWiki: kind === "knowledge" },
                   )
               : undefined
           }
