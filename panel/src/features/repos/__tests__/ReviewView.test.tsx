@@ -81,6 +81,7 @@ const CHANGED = [
   { path: "src/a.ts", status: "M", add: 2, del: 2 },
   { path: "src/gone.ts", status: "D", add: 0, del: 3 },
 ];
+const HEAD = "h".repeat(40);
 const comment = (over: Partial<ReviewComment> & { id: number }): ReviewComment => ({
   replyTo: null,
   path: "src/a.ts",
@@ -90,6 +91,8 @@ const comment = (over: Partial<ReviewComment> & { id: number }): ReviewComment =
   body: "Rename this?",
   createdAt: "2026-11-22T10:00:00Z",
   url: `https://github.com/gmotyl/pavilio/pull/1#discussion_r${over.id}`,
+  // The head `open` answers with by default: these line numbers match the shown diff.
+  commitId: HEAD,
   ...over,
 });
 // Two on src/a.ts (a thread on new line 15 with greg's reply), one on the deleted file.
@@ -122,7 +125,7 @@ const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts"
 function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list, comments }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
-    "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40), body: "PR body text" })),
+    "/api/prs/open": open ?? (() => jsonResponse({ head: HEAD, base: "b".repeat(40), body: "PR body text" })),
     "/api/prs/comments": comments ?? (() => jsonResponse([])),
     "/api/prs": list ?? { me: ME, prs, unavailable: [] },
     "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
@@ -461,6 +464,51 @@ describe("ReviewView", () => {
     expect(screen.queryByTestId("review-comments-note")).toBeNull();
     expect(calls(fetch, "/api/prs/comments")).toHaveLength(2);
     expect(counts()).toEqual(was);
+  });
+
+  it("comments made at the viewed head get markers and no stale note", async () => {
+    renderReview({ search: FILE_A, comments: () => jsonResponse(COMMENTS) });
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    await within(viewer).findByRole("button", { name: "2 comments on line 15" });
+    expect(screen.queryByTestId("review-stale-note")).toBeNull();
+  });
+
+  it("comments whose lines refer to another head get no markers and a note offering to re-open", async () => {
+    const NEWER = "n".repeat(40);
+    // The PR was pushed after `open`: comments now carry line numbers for the newer head.
+    const fresh = COMMENTS.map((c) => ({ ...c, commitId: NEWER }));
+    let head = HEAD;
+    const fetch = renderReview({
+      search: FILE_A,
+      open: () => jsonResponse({ head, base: "b".repeat(40), body: "PR body text" }),
+      comments: () => jsonResponse(fresh),
+    });
+    const note = await screen.findByTestId("review-stale-note");
+    expect(note).toHaveTextContent("This PR changed since it was opened — markers may be missing.");
+    expect(document.querySelector(".rv-main")!.contains(note)).toBe(true);
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    expect(before(note, viewer)).toBe(true);
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    expect(within(viewer).queryByRole("button", { name: /comments? on line/ })).toBeNull();
+    expect(within(screen.getByTestId("ft-file-src/a.ts")).queryByTitle(/comments?$/)).toBeNull();
+
+    expect(calls(fetch, "/api/prs/open")).toHaveLength(1);
+    head = NEWER;
+    fireEvent.click(within(note).getByRole("button", { name: "Re-open" }));
+    await waitFor(() => expect(calls(fetch, "/api/prs/open")).toHaveLength(2));
+    await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "2 comments on line 15" });
+    expect(screen.queryByTestId("review-stale-note")).toBeNull();
+  });
+
+  it("picking Description from deep in a diff opens it at the top", async () => {
+    renderReview({ search: FILE_A });
+    await waitFor(() => expect(screen.getByTestId("file-viewer")).toHaveTextContent("const area = width * height;"));
+    const main = document.querySelector<HTMLElement>(".rv-main")!;
+    // jsdom has no layout: stand in a real scroll offset.
+    Object.defineProperty(main, "scrollTop", { value: 900, writable: true, configurable: true });
+    fireEvent.click(descEntry());
+    await waitFor(() => expect(desc()).toHaveTextContent("PR body text"));
+    expect(main.scrollTop).toBe(0);
   });
 
   it("a late response for the previous PR never shows its files", async () => {

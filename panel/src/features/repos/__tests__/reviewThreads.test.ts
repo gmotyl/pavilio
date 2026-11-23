@@ -12,6 +12,7 @@ const c = (id: number, over: Partial<ReviewComment> = {}): ReviewComment => ({
   body: `c${id}`,
   createdAt: `2026-11-23T10:${String(id).padStart(2, "0")}:00Z`,
   url: `https://example.test/${id}`,
+  commitId: "head",
   ...over,
 });
 

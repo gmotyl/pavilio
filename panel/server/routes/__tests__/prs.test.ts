@@ -207,6 +207,7 @@ describe("/api/prs", () => {
         body: "nit",
         createdAt: "2026-11-22T00:00:00Z",
         url: "https://github.com/o/r/pull/3#discussion_r7",
+        commitId: "headsha",
       },
     ];
     provider.reviewComments.mockResolvedValue(comments);

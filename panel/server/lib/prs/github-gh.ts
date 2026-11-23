@@ -68,6 +68,9 @@ interface RawPr {
   url: string;
 }
 
+const COMMENT_FIELDS =
+  ".[] | {id, in_reply_to_id, path, line, side, user: {login: .user.login}, body, created_at, html_url, commit_id}";
+
 interface RawReviewComment {
   id: number;
   in_reply_to_id?: number | null;
@@ -78,6 +81,7 @@ interface RawReviewComment {
   body?: string | null;
   created_at: string;
   html_url: string;
+  commit_id: string;
 }
 
 const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
@@ -300,10 +304,11 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     async reviewComments(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
       const slug = (await assertGitHub(repoPath)).slice(`${GITHUB_HOST}/`.length);
-      // --jq '.[]' prints one object per line on every page, so pages concatenate without `][`.
+      // --jq '.[] | {...}' prints one object per line on every page, so pages concatenate without `][`.
+      // Project only the consumed fields: whole objects repeat `diff_hunk` and can overflow the runner's maxBuffer.
       // --hostname: an inherited GH_HOST must not send this to another host once origin proved github.com.
       const out = await gh(
-        ["api", "--hostname", GITHUB_HOST, "--paginate", `repos/${slug}/pulls/${n}/comments`, "--jq", ".[]"],
+        ["api", "--hostname", GITHUB_HOST, "--paginate", `repos/${slug}/pulls/${n}/comments`, "--jq", COMMENT_FIELDS],
         repoPath,
       );
       const comments: ReviewComment[] = [];
@@ -330,6 +335,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
           body: c.body ?? "",
           createdAt: c.created_at,
           url: c.html_url,
+          commitId: c.commit_id,
         });
       }
       return comments;

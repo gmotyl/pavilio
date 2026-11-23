@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChecksState, ReviewComment } from "../../../server/lib/prs/provider";
 import FileTree, { type TreeFile } from "./FileTree";
@@ -165,9 +165,16 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
     };
   }, [pr.repoPath, pr.number, commentsAttempt]);
 
-  const threads = useMemo(() => (Array.isArray(comments) ? groupThreads(comments) : null), [comments]);
-
   const ready = opened.status === "ready" ? opened : null;
+  const head = ready?.head;
+
+  // Comments load apart from `open`: after a push they can carry line numbers for a newer
+  // head than the diff shown. Only those made at the viewed head are overlaid.
+  const { threads, stale } = useMemo(() => {
+    if (!Array.isArray(comments) || !head) return { threads: null, stale: false };
+    const atHead = comments.filter((c) => c.commitId === head);
+    return { threads: groupThreads(atHead), stale: atHead.length < comments.length };
+  }, [comments, head]);
 
   useEffect(() => {
     if (changedOnly || !ready || whole) return;
@@ -239,6 +246,12 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
       cancelled = true;
     };
   }, [ready, selected, change, pr.repoPath]);
+
+  // Description opens at the top, not at the scroll offset of the diff left behind.
+  const mainRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (selected === null && mainRef.current) mainRef.current.scrollTop = 0;
+  }, [selected]);
 
   const select = (path: string | null) => {
     setScroll(null);
@@ -362,7 +375,23 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
           <hr className="rv-sep" />
           {tree}
         </div>
-        <div className="rv-main">
+        <div className="rv-main" ref={mainRef}>
+          {stale && (
+            <p className="rv-msg" role="status" data-testid="review-stale-note">
+              This PR changed since it was opened — markers may be missing.{" "}
+              <button
+                type="button"
+                data-testid="review-stale-reopen"
+                onClick={() => {
+                  // Both again: the diff moves to the new head, and comments older than it catch up.
+                  setAttempt((n) => n + 1);
+                  setCommentsAttempt((n) => n + 1);
+                }}
+              >
+                Re-open
+              </button>
+            </p>
+          )}
           {comments && !Array.isArray(comments) && (
             <p className="rv-msg" role="status" data-testid="review-comments-note">
               Couldn't load review comments ({comments.error}).{" "}

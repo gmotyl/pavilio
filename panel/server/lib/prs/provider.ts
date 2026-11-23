@@ -27,6 +27,8 @@ export interface ReviewComment {
   body: string;
   createdAt: string;
   url: string;
+  /** Head commit `line` refers to (GitHub `commit_id`); a different SHA than the viewed head means stale line numbers. */
+  commitId: string;
 }
 
 export type Unavailable = "gh-missing" | "gh-unauthenticated" | "not-github" | "failed";

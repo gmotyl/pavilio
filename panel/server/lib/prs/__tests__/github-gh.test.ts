@@ -228,6 +228,7 @@ describe("GitHubGhProvider", () => {
       body: "nit",
       created_at: "2026-11-20T10:00:00Z",
       html_url: "https://github.com/o/r/pull/40#discussion_r1",
+      commit_id: "headsha",
       ...over,
     });
     const lines = (...cs: object[]) => cs.map((c) => JSON.stringify(c)).join("\n") + (cs.length ? "\n" : "");
@@ -244,7 +245,16 @@ describe("GitHubGhProvider", () => {
 
       const gh = calls.find((c) => c.cmd === "gh")!;
       expect(gh.cwd).toBe(REPO);
-      expect(gh.args).toEqual(["api", "--hostname", "github.com", "--paginate", "repos/o/r/pulls/40/comments", "--jq", ".[]"]);
+      // Project only consumed fields: whole objects repeat `diff_hunk` and can overflow maxBuffer.
+      expect(gh.args).toEqual([
+        "api",
+        "--hostname",
+        "github.com",
+        "--paginate",
+        "repos/o/r/pulls/40/comments",
+        "--jq",
+        ".[] | {id, in_reply_to_id, path, line, side, user: {login: .user.login}, body, created_at, html_url, commit_id}",
+      ]);
       expect(comments).toEqual([
         {
           id: 1,
@@ -256,6 +266,7 @@ describe("GitHubGhProvider", () => {
           body: "nit",
           createdAt: "2026-11-20T10:00:00Z",
           url: "https://github.com/o/r/pull/40#discussion_r1",
+          commitId: "headsha",
         },
         expect.objectContaining({ id: 2, replyTo: 1, line: 7, side: "old", author: "bob", body: "agreed" }),
       ]);
