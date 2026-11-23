@@ -49,14 +49,17 @@ export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const { lastMessage } = useWebSocket();
 
-  // Each refetch outranks the ones before it: an older response arriving last must not win.
-  const latest = useRef(0);
+  // A success applies only over older ones; a failure keeps whatever was last applied.
+  const issued = useRef(0);
+  const applied = useRef(0);
   const fetchProjects = async () => {
-    const id = ++latest.current;
+    const id = ++issued.current;
     const res = await fetch("/api/projects");
     if (!res.ok) return;
     const body = await res.json();
-    if (id === latest.current) setProjects(body);
+    if (id < applied.current) return;
+    applied.current = id;
+    setProjects(body);
   };
 
   useEffect(() => {
