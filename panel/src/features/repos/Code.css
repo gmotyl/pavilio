@@ -125,7 +125,10 @@
 .cv-defs-list { display: flex; flex-direction: column; }
 .cv-defs-list button { padding: 3px 8px; text-align: left; font-family: var(--font-mono, monospace); }
 .cv-defs-list button:hover, .cv-defs-list button:focus-visible { background: var(--bg-hover); }
-.cv-viewer { flex: 1; min-height: 0; padding: 12px; overflow: auto; }
+.cv-viewer { flex: 1; min-height: 0; padding: 0 12px 12px; overflow: auto; }
+/* No top padding on the scroller: sticky top:0 pins at its padding edge, leaving a strip of code above
+   the header. The gap moves onto the child, which scrolls away. */
+.cv-viewer > * { margin-top: 12px; }
 .cv-msg { padding: 12px; font-size: 12.5px; color: var(--text-tertiary); }
 .cv-msg button { color: var(--accent); }
 

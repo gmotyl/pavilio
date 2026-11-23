@@ -106,7 +106,9 @@
   color: var(--text-tertiary);
 }
 .rv-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-.rv-main { min-width: 0; padding: 12px; overflow: auto; }
+.rv-main { min-width: 0; padding: 0 12px 12px; overflow: auto; }
+/* Top gap on the child, not the scroller, so the sticky file header pins flush (see .cv-viewer). */
+.rv-main > * { margin-top: 12px; }
 /* Stacked: bounded, so the pane itself scrolls and line jumps stay on screen. */
 .rv-stack .rv-main { max-height: max(320px, calc(100vh - 140px)); }
 .rv-msg { padding: 12px; font-size: 12.5px; color: var(--text-tertiary); }
