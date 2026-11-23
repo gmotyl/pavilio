@@ -160,7 +160,7 @@ describe("/api/prs", () => {
 
   it("rejects a PR number that is not a positive integer", async () => {
     const { gh, provider } = setup();
-    for (const number of [0, -1, 1.5, "3"]) {
+    for (const number of [0, -1, 1.5, "3", 99999999999999999999]) {
       const res = await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number });
       expect(res.status).toBe(400);
     }
@@ -219,7 +219,7 @@ describe("/api/prs", () => {
   it("GET /api/prs/comments rejects an invalid number", async () => {
     const { gh, provider } = setup();
     const app = appFor(provider);
-    for (const number of [undefined, "", "0", "-1", "1.5", "abc", "3x"]) {
+    for (const number of [undefined, "", "0", "-1", "1.5", "abc", "3x", "99999999999999999999"]) {
       const query = number === undefined ? { repo: gh } : { repo: gh, number };
       const res = await request(app).get("/api/prs/comments").query(query);
       expect(res.status).toBe(400);

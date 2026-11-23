@@ -258,7 +258,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     },
 
     async openPr(repoPath, n) {
-      if (!Number.isInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
+      if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
       const slug = await assertGitHub(repoPath);
       const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName,body"], repoPath)) as {
         baseRefName?: string;
@@ -298,10 +298,14 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     },
 
     async reviewComments(repoPath, n) {
-      if (!Number.isInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
+      if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
       const slug = (await assertGitHub(repoPath)).slice(`${GITHUB_HOST}/`.length);
       // --jq '.[]' prints one object per line on every page, so pages concatenate without `][`.
-      const out = await gh(["api", "--paginate", `repos/${slug}/pulls/${n}/comments`, "--jq", ".[]"], repoPath);
+      // --hostname: an inherited GH_HOST must not send this to another host once origin proved github.com.
+      const out = await gh(
+        ["api", "--hostname", GITHUB_HOST, "--paginate", `repos/${slug}/pulls/${n}/comments`, "--jq", ".[]"],
+        repoPath,
+      );
       const comments: ReviewComment[] = [];
       for (const text of out.split("\n")) {
         if (!text.trim()) continue;
@@ -310,6 +314,9 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
           c = JSON.parse(text) as RawReviewComment;
         } catch {
           throw new PrUnavailableError("failed", "gh api returned invalid JSON");
+        }
+        if (typeof c !== "object" || c === null || Array.isArray(c)) {
+          throw new PrUnavailableError("failed", "gh api returned a non-object comment");
         }
         // line is null once the commented code is gone from the PR (outdated).
         if (c.line == null) continue;

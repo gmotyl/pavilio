@@ -90,7 +90,7 @@ export function createPrsRouter(
   router.post("/open", async (req, res) => {
     const { repo, number } = req.body ?? {};
     if (typeof repo !== "string" || !repo.trim()) return res.status(400).json({ error: "repo required" });
-    if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
+    if (typeof number !== "number" || !Number.isSafeInteger(number) || number <= 0) {
       return res.status(400).json({ error: "number must be a positive integer" });
     }
     const target = linkedTarget(repo);
@@ -107,7 +107,9 @@ export function createPrsRouter(
     const repo = typeof req.query.repo === "string" ? req.query.repo : "";
     if (!repo.trim()) return res.status(400).json({ error: "repo required" });
     const raw = typeof req.query.number === "string" ? req.query.number : "";
-    if (!/^[1-9]\d*$/.test(raw)) return res.status(400).json({ error: "number must be a positive integer" });
+    if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+      return res.status(400).json({ error: "number must be a positive integer" });
+    }
     const target = linkedTarget(repo);
     if (!target) return res.status(400).json(NOT_LINKED);
 

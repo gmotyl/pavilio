@@ -244,7 +244,7 @@ describe("GitHubGhProvider", () => {
 
       const gh = calls.find((c) => c.cmd === "gh")!;
       expect(gh.cwd).toBe(REPO);
-      expect(gh.args).toEqual(["api", "--paginate", "repos/o/r/pulls/40/comments", "--jq", ".[]"]);
+      expect(gh.args).toEqual(["api", "--hostname", "github.com", "--paginate", "repos/o/r/pulls/40/comments", "--jq", ".[]"]);
       expect(comments).toEqual([
         {
           id: 1,
@@ -281,8 +281,34 @@ describe("GitHubGhProvider", () => {
       expect(await createGitHubGhProvider({ run }).reviewComments(REPO, 40)).toEqual([]);
     });
 
+    it("reviewComments rejects a line that is not JSON", async () => {
+      const { run } = commentsRunner(lines(raw()) + "{not json\n");
+      const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect((err as PrUnavailableError).reason).toBe("failed");
+    });
+
+    it("reviewComments rejects a line that is JSON but not an object", async () => {
+      for (const bad of ["null", "42", '"x"', "[]"]) {
+        const { run } = commentsRunner(lines(raw()) + bad + "\n");
+        const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
+        expect(err).toBeInstanceOf(PrUnavailableError);
+        expect((err as PrUnavailableError).reason).toBe("failed");
+      }
+    });
+
+    it("openPr rejects an unsafe or invalid PR number before running anything", async () => {
+      for (const n of [0, -1, 1.5, Number.NaN, 1e20]) {
+        const { run, calls } = commentsRunner("");
+        const err = await createGitHubGhProvider({ run }).openPr(REPO, n).catch((e) => e);
+        expect(err).toBeInstanceOf(PrUnavailableError);
+        expect((err as PrUnavailableError).reason).toBe("failed");
+        expect(calls).toHaveLength(0);
+      }
+    });
+
     it("reviewComments rejects an invalid PR number and a non-GitHub remote", async () => {
-      for (const n of [0, -1, 1.5, Number.NaN]) {
+      for (const n of [0, -1, 1.5, Number.NaN, 1e20]) {
         const { run, calls } = commentsRunner("");
         const err = await createGitHubGhProvider({ run }).reviewComments(REPO, n).catch((e) => e);
         expect(err).toBeInstanceOf(PrUnavailableError);
