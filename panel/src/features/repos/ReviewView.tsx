@@ -36,11 +36,13 @@ type Comments = ReviewComment[] | { error: string } | null;
 // One empty map: the comment lane stays put while comments load or after they fail.
 const NO_THREADS: Map<string, ReviewThread> = new Map();
 
-type Loaded = { path: string } & (
+type Fetched = { path: string } & (
   | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string; codeNote?: string }
   | { binary: true; tooLarge?: false }
   | { tooLarge: true; size?: number; binary?: false }
 );
+/** A file as loaded at one head: after a re-open to a newer head it is stale, never shown with that head's markers. */
+type Loaded = Fetched & { head: string };
 
 class HttpError extends Error {
   constructor(
@@ -106,7 +108,8 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   const [opened, setOpened] = useState<Opened>({ status: "loading" });
   const [description, setDescription] = useState<Description>(null);
   const [changedOnly, setChangedOnly] = useState(true);
-  const [whole, setWhole] = useState<TreeFile[] | { error: string } | null>(null);
+  // Listed at one head: a re-open to a newer head lists the repo again.
+  const [listed, setListed] = useState<{ head: string; files: TreeFile[] | { error: string } } | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [comments, setComments] = useState<Comments>(null);
   const [commentsAttempt, setCommentsAttempt] = useState(0);
@@ -167,6 +170,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
 
   const ready = opened.status === "ready" ? opened : null;
   const head = ready?.head;
+  const whole = listed && listed.head === head ? listed.files : null;
 
   // Comments load apart from `open`: after a push they can carry line numbers for a newer
   // head than the diff shown. Only those made at the viewed head are overlaid.
@@ -179,12 +183,13 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   useEffect(() => {
     if (changedOnly || !ready || whole) return;
     let cancelled = false;
+    const at = ready.head;
     // The SHA `open` resolved, not the PR ref: another tab re-opening the PR
     // moves the ref, and the review must stay on one revision.
     request(`/api/git/tree?repo=${q(pr.repoPath)}&ref=${q(ready.head)}`)
       .then(async (res) => ((await res.json()) as { files: TreeFile[] }).files)
-      .then((files) => !cancelled && setWhole(files))
-      .catch((e: unknown) => !cancelled && setWhole({ error: message(e) }));
+      .then((files) => !cancelled && setListed({ head: at, files }))
+      .catch((e: unknown) => !cancelled && setListed({ head: at, files: { error: message(e) } }));
     return () => {
       cancelled = true;
     };
@@ -220,7 +225,8 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
     if (!ready || !selected) return;
     let cancelled = false;
     const path = selected;
-    (async (): Promise<Loaded> => {
+    const at = ready.head;
+    (async (): Promise<Fetched> => {
       const diff = change
         ? await (await request(`/api/git/diff-ref?repo=${q(pr.repoPath)}&base=${q(ready.base)}&head=${q(ready.head)}&path=${q(path)}`)).text()
         : undefined;
@@ -240,8 +246,8 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
         throw e;
       }
     })()
-      .then((l) => !cancelled && setLoaded(l))
-      .catch((e: unknown) => !cancelled && setLoaded({ path, error: message(e) }));
+      .then((l) => !cancelled && setLoaded({ ...l, head: at }))
+      .catch((e: unknown) => !cancelled && setLoaded({ path, head: at, error: message(e) }));
     return () => {
       cancelled = true;
     };
@@ -259,7 +265,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   };
 
   const stack = width !== null && width < STACK_MAX_WIDTH;
-  const current = loaded && loaded.path === selected ? loaded : null;
+  const current = loaded && loaded.path === selected && loaded.head === head ? loaded : null;
   const scrollHere = scroll && scroll.file === selected ? scroll : null;
 
   let tree: ReactNode;
@@ -288,7 +294,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
         {!changedOnly && whole && !Array.isArray(whole) && (
           <p className="rv-msg" role="status">
             Couldn't list the repo at the PR head ({whole.error}).{" "}
-            <button type="button" data-testid="review-tree-retry" onClick={() => setWhole(null)}>
+            <button type="button" data-testid="review-tree-retry" onClick={() => setListed(null)}>
               Retry
             </button>
           </p>
@@ -352,7 +358,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
               <input type="checkbox" checked={changedOnly} onChange={(e) => {
                   setChangedOnly(e.target.checked);
                   // A failed listing is retried on the next untick rather than sticking.
-                  if (whole && !Array.isArray(whole)) setWhole(null);
+                  if (whole && !Array.isArray(whole)) setListed(null);
                 }} /> Changed files only
             </label>
           </div>

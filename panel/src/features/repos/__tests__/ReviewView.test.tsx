@@ -118,11 +118,12 @@ interface Setup {
   file?: FetchHandler;
   list?: FetchHandler;
   comments?: FetchHandler;
+  diffRef?: FetchHandler;
 }
 
 const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts", "+++ /dev/null", "@@ -1,3 +0,0 @@", "-one", "-two", "-three"].join("\n");
 
-function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list, comments }: Setup = {}) {
+function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list, comments, diffRef }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
     "/api/prs/open": open ?? (() => jsonResponse({ head: HEAD, base: "b".repeat(40), body: "PR body text" })),
@@ -130,7 +131,7 @@ function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open,
     "/api/prs": list ?? { me: ME, prs, unavailable: [] },
     "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
     "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
-    "/api/git/diff-ref": (url: string) => text(url.includes("gone.ts") ? GONE_DIFF : DIFF),
+    "/api/git/diff-ref": diffRef ?? ((url: string) => text(url.includes("gone.ts") ? GONE_DIFF : DIFF)),
     "/api/git/file": file ?? ((url: string) =>
       url.includes("logo.png")
         ? jsonResponse({ error: "binary file", binary: true }, { status: 415 })
@@ -498,6 +499,39 @@ describe("ReviewView", () => {
     await waitFor(() => expect(calls(fetch, "/api/prs/open")).toHaveLength(2));
     await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "2 comments on line 15" });
     expect(screen.queryByTestId("review-stale-note")).toBeNull();
+  });
+
+  it("Re-open to a new head refetches the shown file and the whole-repo tree for that head", async () => {
+    const NEWER = "n".repeat(40);
+    let head = HEAD;
+    // The new head's diff is held back: until it lands, the old diff must not show with new-head markers.
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const fetch = renderReview({
+      search: FILE_A,
+      open: () => jsonResponse({ head, base: "b".repeat(40), body: "PR body text" }),
+      comments: () => jsonResponse(COMMENTS.map((c) => ({ ...c, commitId: NEWER }))),
+      diffRef: async (url: string) => {
+        if (url.includes(`head=${NEWER}`)) await held;
+        return text(DIFF);
+      },
+    });
+    const note = await screen.findByTestId("review-stale-note");
+    await waitFor(() => expect(screen.getByTestId("file-viewer")).toHaveTextContent("const area = width * height;"));
+    // The whole-repo tree, listed at the first head.
+    fireEvent.click(within(treeArea()).getByRole("checkbox", { name: "Changed files only" }));
+    await waitFor(() => expect(screen.getByTestId("ft-file-README.md")).toBeInTheDocument());
+    expect(calls(fetch, "/api/git/tree").map(([u]) => String(u))).toEqual([expect.stringContaining(`ref=${HEAD}`)]);
+
+    head = NEWER;
+    fireEvent.click(within(note).getByRole("button", { name: "Re-open" }));
+    await waitFor(() => expect(calls(fetch, `/api/git/diff-ref`).some(([u]) => String(u).includes(`head=${NEWER}`))).toBe(true));
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+    expect(screen.getByText("Loading src/a.ts…")).toBeInTheDocument();
+    await waitFor(() => expect(calls(fetch, "/api/git/tree").some(([u]) => String(u).includes(`ref=${NEWER}`))).toBe(true));
+
+    await act(async () => release());
+    await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "2 comments on line 15" });
   });
 
   it("Re-open refetches comments that lag behind the viewed head", async () => {
