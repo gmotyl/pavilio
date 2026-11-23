@@ -1,3 +1,4 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
 import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { SpeakingToolbar } from "../projects/ViewerActions";
 import { docSpeechKey } from "../speech/docKey";
@@ -16,19 +17,43 @@ export function prSpeechKey(project: string, pr: Pick<PullRequest, "repo" | "num
   return docSpeechKey(`${project}//pr/${pr.repo}/${pr.number}`);
 }
 
-/** Code spans and fences (kept verbatim), or an HTML comment (dropped; an unclosed one runs to the end, as on GitHub). */
-const CODE_OR_COMMENT = /(`+)[\s\S]*?\1|(~{3,})[\s\S]*?\2|<!--[\s\S]*?(?:-->|$)/g;
+/** The slice of an mdast node this file reads. */
+interface MdNode {
+  type: string;
+  value?: string;
+  position?: { start: { offset?: number }; end: { offset?: number } };
+  children?: MdNode[];
+}
+
+/** Source ranges of the body's HTML comments, as the markdown parser reads them (escapes and code excluded). */
+function commentRanges(body: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const walk = (node: MdNode) => {
+    if (node.type === "html" && node.value?.trimStart().startsWith("<!--")) {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) out.push([start, end]);
+      return;
+    }
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(fromMarkdown(body));
+  return out;
+}
 
 /**
  * The PR body as the column renders AND speaks it — one text, so the toolbar,
  * the speech host and play-from-here always agree on its units:
- * - HTML comments go (PR templates hide their prompts in them; the renderer
- *   skips them too), except inside code;
+ * - HTML comments go (PR templates hide their prompts in them). They are found
+ *   by the markdown parser, so an escaped `\<!--` or a comment shown in code
+ *   stays exactly as written;
  * - a leading `---` is a horizontal rule in a PR body, not note frontmatter, so
  *   a blank first line keeps page speech from stripping the text after it.
  */
 export function prDescriptionSource(body: string): string {
-  const text = body.replace(CODE_OR_COMMENT, (m) => (m.startsWith("<!--") ? "" : m));
+  let text = body;
+  // Back to front, so earlier offsets stay valid.
+  for (const [start, end] of commentRanges(body).reverse()) text = text.slice(0, start) + text.slice(end);
   return /^\uFEFF?---/.test(text) ? `\n${text}` : text;
 }
 
