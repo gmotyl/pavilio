@@ -273,6 +273,15 @@ describe("FileViewer", () => {
     expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./short"]);
   });
 
+  it("a file too big to highlight links no specifiers, since comments are unknown", () => {
+    const pad = Array.from({ length: 5200 }, () => `const v = ${"1".repeat(90)};`);
+    const content = ["// see import x from './in-comment'", "import y from './real';", ...pad].join("\n");
+    expect(content.length).toBeGreaterThan(500_000);
+    const { container } = render(<FileViewer path="src/big.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect(container.querySelector('tr[data-line="2"]')).not.toBeNull();
+    expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);
+  });
+
   it("import specifiers stay plain outside TS/JS", () => {
     const { container } = render(<FileViewer path="src/x.py" content={"from os import path"} defaultMode="code" onIdentifierClick={vi.fn()} />);
     expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);

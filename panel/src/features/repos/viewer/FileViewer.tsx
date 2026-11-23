@@ -47,17 +47,21 @@ const MAX_HIGHLIGHT_CHARS = 500_000;
 // ts-nav only resolves these; elsewhere identifier links would lead nowhere.
 const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
 
-/** Highlight `lines` as one text so multi-line tokens (comments, template strings) stay right, then split back per line. */
-function highlightLines(lines: string[], lang: string | undefined): string[] {
+/**
+ * Highlight `lines` as one text so multi-line tokens (comments, template strings) stay right, then split back per line.
+ * `tokens` is false when the text rendered plain, so no token classes exist.
+ */
+function highlightLines(lines: string[], lang: string | undefined): { html: string[]; tokens: boolean } {
   // An empty text still highlights to one (empty) line; keep the counts equal.
-  if (lines.length === 0) return [];
+  if (lines.length === 0) return { html: [], tokens: true };
   const text = lines.join("\n");
-  if (!lang || text.length > MAX_HIGHLIGHT_CHARS) return lines.map(escapeHtml);
+  const plain = { html: lines.map(escapeHtml), tokens: false };
+  if (!lang || text.length > MAX_HIGHLIGHT_CHARS) return plain;
   let html: string;
   try {
     html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
   } catch {
-    return lines.map(escapeHtml);
+    return plain;
   }
   const out: string[] = [];
   const open: string[] = [];
@@ -77,7 +81,7 @@ function highlightLines(lines: string[], lang: string | undefined): string[] {
     }
   }
   out.push(cur + html.slice(last) + "</span>".repeat(open.length));
-  return out;
+  return { html: out, tokens: true };
 }
 
 const ENTITY_RE = /^&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i;
@@ -227,12 +231,17 @@ function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
 const attr = (s: string): string => escapeHtml(s).replace(/"/g, "&quot;");
 
 /** One line's final HTML: syntax colours, then word marks, search matches and clickable identifiers. */
-function lineHtml(base: string, text: string, opts: { words?: Range[]; term: string; symbols: boolean }): string {
+function lineHtml(
+  base: string,
+  text: string,
+  opts: { words?: Range[]; term: string; symbols: boolean; specs?: boolean },
+): string {
   let html = base;
   if (opts.words?.length) html = decorate(html, opts.words, () => '<mark class="fv-word">', "</mark>");
   html = decorate(html, matchRanges(text, opts.term), () => '<mark class="fv-hl">', "</mark>");
   if (opts.symbols && text.length <= MAX_SYMBOL_LINE) {
-    const spec = specifierRanges(text);
+    // Without comment classes a specifier inside a comment cannot be told apart: link none.
+    const spec = opts.specs === false ? { ranges: [], specs: [] } : specifierRanges(text);
     const ids = identifierRanges(text);
     // Unhighlighted text has no string classes to veto words inside a specifier.
     // Both range lists are sorted: walk them together.
@@ -267,7 +276,7 @@ function sideHtml(rows: Row[], side: "old" | "new", lang: string | undefined): M
   const picked = rows.filter((r): r is Extract<Row, { kind: "ctx" | "del" | "add" }> =>
     side === "old" ? r.kind === "ctx" || r.kind === "del" : r.kind === "ctx" || r.kind === "add",
   );
-  const html = highlightLines(picked.map((r) => r.text), lang);
+  const { html } = highlightLines(picked.map((r) => r.text), lang);
   const out = new Map<number, string>();
   picked.forEach((r, i) => out.set(side === "old" ? (r as { old: number }).old : (r as { new: number }).new, html[i]));
   return out;
@@ -381,9 +390,8 @@ export default function FileViewer({
   const codeHtml = useMemo(() => {
     if (shownMode !== "code" || !codeLines) return null;
     // Highlighted whole (multi-line tokens), decorated only as far as is mounted.
-    return highlightLines(codeLines, lang)
-      .slice(0, limit)
-      .map((h, i) => lineHtml(h, codeLines[i], { term, symbols }));
+    const { html, tokens } = highlightLines(codeLines, lang);
+    return html.slice(0, limit).map((h, i) => lineHtml(h, codeLines[i], { term, symbols, specs: tokens }));
   }, [shownMode, codeLines, lang, term, symbols, limit]);
 
   const marks = useMemo(() => (changed ? gutterMarks(rows) : new Map<number, GutterMark>()), [changed, rows]);
