@@ -21,6 +21,8 @@ import {
 } from "./diffModel";
 import { detectLang, escapeHtml } from "./highlight";
 import { CopyIconButton } from "../../shell/CopyIconButton";
+import type { ReviewThread } from "../reviewThreads";
+import CommentMarker from "./CommentMarker";
 import "./FileViewer.css";
 
 export interface FileViewerProps {
@@ -38,6 +40,12 @@ export interface FileViewerProps {
   scrollSide?: "old" | "new";
   /** Changes on every request so asking for the same line again re-scrolls and re-flashes. */
   scrollKey?: number | string;
+  /** Review threads keyed `"new:N"` / `"old:N"`. When given, every table gets a comment lane; absent, the markup is unchanged. */
+  comments?: Map<string, ReviewThread>;
+  /** The base speech key for the threads (`prSpeechKey`). */
+  commentSpeechKey?: string;
+  /** The signed-in login: their comments read as "you". */
+  me?: string | null;
 }
 
 const SPLIT_MIN_WIDTH = 720;
@@ -323,6 +331,9 @@ export default function FileViewer({
   scrollToLine,
   scrollSide = "new",
   scrollKey,
+  comments,
+  commentSpeechKey,
+  me,
 }: FileViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -456,9 +467,18 @@ export default function FileViewer({
     return flash && at !== undefined && at === flash.line ? ` fv-flash${flash.seq % 2 ? "" : " fv-flash-alt"}` : "";
   };
 
+  // The comment lane: one 22px column per side, only when the viewer has threads to show.
+  const laneCol = comments ? <col className="fv-cm-col" style={{ width: 22 }} /> : null;
+  /** The lane cell for a row: the first of `keys` with a thread gets its marker. */
+  const lane = (...keys: string[]) => {
+    if (!comments) return null;
+    const thread = keys.map((k) => comments.get(k)).find(Boolean);
+    return <td className="fv-cm">{thread && <CommentMarker thread={thread} speechKey={commentSpeechKey} me={me} />}</td>;
+  };
+  const diffCols = 4 + (comments ? (shownLayout === "split" ? 2 : 1) : 0);
   const foldRow = (it: Extract<Item, { kind: "fold" }>) => (
     <tr key={`f${it.id}`} className="fv-fold-row">
-      <td colSpan={4}>
+      <td colSpan={diffCols}>
         <button type="button" data-testid={`file-viewer-fold-${it.id}`} className="fv-fold" onClick={() => expand(it.id)}>
           ⋯ Expand {it.rows.length} unchanged lines
         </button>
@@ -467,7 +487,7 @@ export default function FileViewer({
   );
   const gapRow = (r: Extract<Row, { kind: "gap" }>, key: string) => (
     <tr key={key} className="fv-gap-row">
-      <td colSpan={4}>⋯ {r.count} unchanged lines</td>
+      <td colSpan={diffCols}>⋯ {r.count} unchanged lines</td>
     </tr>
   );
   const cell = (r: Row | undefined, side: "del" | "add") =>
@@ -480,6 +500,7 @@ export default function FileViewer({
     body = codeHtml ? (
       <table className="fv-table fv-code">
         <colgroup>
+          {laneCol}
           <col style={{ width: 6 }} />
           <col style={{ width: 46 }} />
           <col />
@@ -490,6 +511,7 @@ export default function FileViewer({
             const m = marks.get(n);
             return (
               <tr key={n} data-line={n} data-mark={m} className={`${m ? `fv-m-${m}` : ""}${flashCls(n)}`}>
+                {lane(`new:${n}`)}
                 <td className="fv-gm" title={m ? MARK_TITLE[m] : undefined} />
                 <td className="fv-no">{n}</td>
                 <td className="fv-cd" dangerouslySetInnerHTML={{ __html: html }} />
@@ -509,6 +531,7 @@ export default function FileViewer({
       body = (
         <table className="fv-table fv-unified">
           <colgroup>
+            {laneCol}
             <col style={{ width: 46 }} />
             <col style={{ width: 46 }} />
             <col style={{ width: 18 }} />
@@ -522,6 +545,7 @@ export default function FileViewer({
               const o = it.kind === "add" ? undefined : it.old;
               return (
                 <tr key={i} data-line={n} data-old-line={o} className={`fv-r-${it.kind}${flashCls(n, o)}`}>
+                  {lane(...(n !== undefined ? [`new:${n}`] : []), ...(o !== undefined ? [`old:${o}`] : []))}
                   <td className="fv-no">{it.kind === "add" ? "" : it.old}</td>
                   <td className="fv-no">{n ?? ""}</td>
                   <td className="fv-sg">{it.kind === "del" ? "−" : it.kind === "add" ? "+" : ""}</td>
@@ -536,8 +560,10 @@ export default function FileViewer({
       body = (
         <table className="fv-table fv-split">
           <colgroup>
+            {laneCol}
             <col style={{ width: 42 }} />
             <col />
+            {laneCol}
             <col style={{ width: 42 }} />
             <col />
           </colgroup>
@@ -549,8 +575,10 @@ export default function FileViewer({
                 const r = p.right as Extract<Row, { kind: "ctx" }>;
                 return (
                   <tr key={i} data-line={r.new} data-old-line={r.old} className={`fv-r-ctx${flashCls(r.new, r.old)}`}>
+                    {lane(`old:${r.old}`)}
                     <td className="fv-no">{r.old}</td>
                     <td className="fv-cd" dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} />
+                    {lane(`new:${r.new}`)}
                     <td className="fv-no">{r.new}</td>
                     <td className="fv-cd" dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} />
                   </tr>
@@ -560,8 +588,10 @@ export default function FileViewer({
               const a = p.add?.kind === "add" ? p.add : undefined;
               return (
                 <tr key={i} data-line={a?.new} data-old-line={d?.old} className={`fv-r-change${flashCls(a?.new, d?.old)}`}>
+                  {lane(...(d ? [`old:${d.old}`] : []))}
                   <td className={`fv-no ${d ? "fv-s-del" : "fv-s-empty"}`}>{d?.old ?? ""}</td>
                   {cell(d, "del")}
+                  {lane(...(a ? [`new:${a.new}`] : []))}
                   <td className={`fv-no ${a ? "fv-s-add" : "fv-s-empty"}`}>{a?.new ?? ""}</td>
                   {cell(a, "add")}
                 </tr>
