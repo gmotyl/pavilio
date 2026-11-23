@@ -242,10 +242,20 @@ describe("FileViewer", () => {
     expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./a", "./b"]);
   });
 
-  it("a block comment is scanned only up to a short bound, so an unclosed one cannot rescan the line", () => {
-    const content = [`const a = () => import(/* ${"x".repeat(300)} */ './far');`, `const b = () => import(/* ok */ './near');`].join("\n");
+  it("a long closed comment before a specifier still links it; a keyword inside a comment does not", () => {
+    const content = [
+      `const a = () => import(/* ${"x".repeat(300)} */ './far');`,
+      `const b = () => import(/* from './no' */ './near');`,
+      `/* import x from './quoted' */ const c = require(/* don't */ './c');`,
+    ].join("\n");
     const { container } = render(<FileViewer path="src/s.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
-    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./near"]);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./far", "./near", "./c"]);
+  });
+
+  it("an unclosed block comment links nothing after it on that line", () => {
+    const content = [`const a = () => import(/* './x' ; import y from './y';`, "*/ import z from './z';"].join("\n");
+    const { container } = render(<FileViewer path="src/s.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./z"]);
   });
 
   it("a line too long to scan (minified code) gets no links, others still do", () => {

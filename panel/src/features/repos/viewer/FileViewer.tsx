@@ -161,23 +161,35 @@ function identifierRanges(text: string): { ranges: Range[]; names: string[] } {
 
 // A module specifier: `from '…'`, `import '…'`, `import('…')`, `require('…')`. One line only.
 // Block comments may sit before the string, e.g. `import(/* webpackChunkName: "x" */ './y')`.
-// Bounded: an unclosed comment must not send every candidate to the end of the line.
-const SPECIFIER_GAP = String.raw`(?:\s|\/\*(?:[^*]|\*(?!\/)){0,200}\*\/)*`;
-const SPECIFIER = new RegExp(String.raw`(?:\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport)${SPECIFIER_GAP}(['"])([^'"\\\n]+)\1`, "g");
+const SPECIFIER_KEYWORD = /\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport/g;
+const SPECIFIER_STRING = /(['"])([^'"\\\n]+)\1/y;
 const IN_COMMENT = /\bhljs-comment\b/;
 // Longer lines (minified or generated code) get no links: scanning them is not worth a stalled tab.
 const MAX_SYMBOL_LINE = 2000;
 
+/** End of the whitespace and closed block comments from `at`; -1 when a comment never closes. */
+function skipTrivia(text: string, at: number): number {
+  for (;;) {
+    while (at < text.length && /\s/.test(text[at])) at++;
+    if (!text.startsWith("/*", at)) return at;
+    const close = text.indexOf("*/", at + 2);
+    if (close < 0) return -1;
+    at = close + 2;
+  }
+}
+
 /**
- * Quoted specifier ranges (quotes included) with the specifier text. One pass: a quote
- * scanner walks the line once, alongside the matches, to drop those inside a literal.
+ * Quoted specifier ranges (quotes included) with the specifier text. Forward-only: keywords,
+ * trivia and the quote scanner (which drops matches inside a literal) each walk the line once.
  */
 function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
   const ranges: Range[] = [];
   const specs: string[] = [];
   let quote = "";
   let i = 0;
-  for (const m of text.matchAll(SPECIFIER)) {
+  for (const m of text.matchAll(SPECIFIER_KEYWORD)) {
+    // Inside a comment or specifier already scanned.
+    if (m.index < i) continue;
     for (; i < m.index; i++) {
       const c = text[i];
       if (quote) {
@@ -187,9 +199,19 @@ function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
     }
     // `"imported from 'x'"` is text, not an import.
     if (quote) continue;
-    const end = m.index + m[0].length;
-    ranges.push([end - m[2].length - 2, end]);
-    specs.push(m[2]);
+    const at = skipTrivia(text, m.index + m[0].length);
+    // An unclosed comment runs to the end of the line: nothing after it links.
+    if (at < 0) break;
+    SPECIFIER_STRING.lastIndex = at;
+    const s = SPECIFIER_STRING.exec(text);
+    if (!s) {
+      // Comments skipped here hold no keyword worth a rescan.
+      i = Math.max(i, at);
+      continue;
+    }
+    i = at + s[0].length;
+    ranges.push([at, i]);
+    specs.push(s[2]);
   }
   return { ranges, specs };
 }
