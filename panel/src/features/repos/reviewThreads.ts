@@ -5,9 +5,14 @@ export interface ReviewThread {
   comments: ReviewComment[];
 }
 
-const byTime = (a: ReviewComment, b: ReviewComment) => a.createdAt.localeCompare(b.createdAt);
+// Ids tie-break equal timestamps so thread order never depends on input order.
+const byTime = (a: ReviewComment, b: ReviewComment) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id;
 
-/** path → ("new:14" | "old:14") → thread. Replies follow their root; orphans are dropped. */
+/**
+ * path → ("new:14" | "old:14") → thread. Replies follow their root; orphans are dropped.
+ * A reply's `replyTo` must name the thread's root comment, as GitHub guarantees;
+ * a reply to a reply has no root here and is dropped like an orphan.
+ */
 export function groupThreads(comments: ReviewComment[]): Map<string, Map<string, ReviewThread>> {
   const roots = new Map(comments.filter((c) => c.replyTo === null).map((c) => [c.id, c]));
   const out = new Map<string, Map<string, ReviewThread>>();

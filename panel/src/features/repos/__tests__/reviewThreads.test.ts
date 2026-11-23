@@ -10,7 +10,7 @@ const c = (id: number, over: Partial<ReviewComment> = {}): ReviewComment => ({
   side: "new",
   author: "octo",
   body: `c${id}`,
-  createdAt: `2026-11-23T10:0${id}:00Z`,
+  createdAt: `2026-11-23T10:${String(id).padStart(2, "0")}:00Z`,
   url: `https://example.test/${id}`,
   ...over,
 });
@@ -31,8 +31,7 @@ describe("reviewThreads", () => {
 
   it("groupThreads drops orphan replies", () => {
     const threads = groupThreads([c(2, { replyTo: 42 }), c(3, { replyTo: 42, path: "src/b.ts" })]);
-    expect(threads.get("src/a.ts")?.size ?? 0).toBe(0);
-    expect(threads.get("src/b.ts")?.size ?? 0).toBe(0);
+    expect(threads.size).toBe(0);
   });
 
   it("groupThreads merges roots on the same line", () => {
@@ -44,6 +43,14 @@ describe("reviewThreads", () => {
     expect(file.size).toBe(2);
     expect(file.get("new:14")!.comments.map((x) => x.id)).toEqual([1, 3, 5]);
     expect(file.get("old:14")!.comments.map((x) => x.id)).toEqual([2]);
+  });
+
+  it("groupThreads orders comments with the same time by id", () => {
+    const at = "2026-11-23T10:00:00Z";
+    const t = groupThreads([c(3, { replyTo: 1, createdAt: at }), c(2, { replyTo: 1, createdAt: at }), c(1, { createdAt: at })])
+      .get("src/a.ts")!
+      .get("new:14")!;
+    expect(t.comments.map((x) => x.id)).toEqual([1, 2, 3]);
   });
 
   it("commentCount sums a file's comments", () => {
