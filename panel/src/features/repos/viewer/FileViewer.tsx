@@ -167,13 +167,20 @@ const IN_COMMENT = /\bhljs-comment\b/;
 // Longer lines (minified or generated code) get no links: scanning them is not worth a stalled tab.
 const MAX_SYMBOL_LINE = 2000;
 
-/** End of the whitespace and closed block comments from `at`; -1 when a comment never closes. */
-function skipTrivia(text: string, at: number): number {
+/**
+ * End of the whitespace and closed block comments from `at`; -1 when a comment never closes.
+ * `open.from` caches the earliest search start with no `*\/` after it, so failed searches stay linear.
+ */
+function skipTrivia(text: string, at: number, open: { from: number }): number {
   for (;;) {
     while (at < text.length && /\s/.test(text[at])) at++;
     if (!text.startsWith("/*", at)) return at;
+    if (at + 2 >= open.from) return -1;
     const close = text.indexOf("*/", at + 2);
-    if (close < 0) return -1;
+    if (close < 0) {
+      open.from = at + 2;
+      return -1;
+    }
     at = close + 2;
   }
 }
@@ -187,6 +194,7 @@ function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
   const specs: string[] = [];
   let quote = "";
   let i = 0;
+  const open = { from: Infinity };
   for (const m of text.matchAll(SPECIFIER_KEYWORD)) {
     // Inside a comment or specifier already scanned.
     if (m.index < i) continue;
@@ -199,9 +207,9 @@ function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
     }
     // `"imported from 'x'"` is text, not an import.
     if (quote) continue;
-    const at = skipTrivia(text, m.index + m[0].length);
-    // An unclosed comment runs to the end of the line: nothing after it links.
-    if (at < 0) break;
+    const at = skipTrivia(text, m.index + m[0].length, open);
+    // `/*` may not open a comment (`/[from /*]/`): drop this candidate only. A real one is vetoed by its comment class.
+    if (at < 0) continue;
     SPECIFIER_STRING.lastIndex = at;
     const s = SPECIFIER_STRING.exec(text);
     if (!s) {

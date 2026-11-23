@@ -258,6 +258,12 @@ describe("FileViewer", () => {
     expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./z"]);
   });
 
+  it("a /* that is not a comment opener does not hide a later import on the line", () => {
+    const content = `const pattern = /[from /*]/; import './real';`;
+    const { container } = render(<FileViewer path="src/s.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./real"]);
+  });
+
   it("a line too long to scan (minified code) gets no links, others still do", () => {
     const minified = Array.from({ length: 400 }, (_, i) => `require('./m${i}');`).join("");
     const content = [minified, "import x from './short';"].join("\n");
