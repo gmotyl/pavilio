@@ -116,6 +116,19 @@ describe("RefSwitcher", () => {
       expect(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills")).toBeEnabled();
     });
 
+    it("a clone error belongs to its path, not a same-named repo at another path", async () => {
+      stubFetch({ "/api/git/clone": () => jsonResponse({ error: "boom" }, { status: 502 }) }, []);
+      const repos = [
+        { name: "infopoly-skills", path: GONE, present: false, cloneable: true },
+        { name: "infopoly-skills", path: "/elsewhere/infopoly-skills", present: false, cloneable: true },
+      ];
+      render(<RefSwitcher {...base} project="infopoly" repos={repos} />);
+      fireEvent.click(screen.getByTestId("repo-switcher"));
+      fireEvent.click(within(pop()).getAllByTestId("repo-switcher-clone-infopoly-skills")[0]);
+      expect(await within(pop()).findByRole("alert")).toHaveTextContent("boom");
+      expect(within(pop()).getAllByRole("alert")).toHaveLength(1);
+    });
+
     it("a clone error belongs to its project, not a same-named repo of the next one", async () => {
       stubFetch({ "/api/git/clone": () => jsonResponse({ error: "boom" }, { status: 502 }) }, []);
       const repos = missing(true);

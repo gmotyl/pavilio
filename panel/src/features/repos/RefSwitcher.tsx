@@ -183,11 +183,11 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
     setPicking(false);
   };
 
-  // Keyed by project too: another project may link a repo of the same name.
-  const cloneKey = (name: string) => `${project ?? ""}\0${name}`;
+  // The server's identity: project, name and path (repos.json may repeat a name, other projects too).
+  const cloneKey = (name: string, path: string) => `${project ?? ""}\0${name}\0${path}`;
   const clone = async ({ name, path }: RepoEntry) => {
     if (!project) return;
-    const key = cloneKey(name);
+    const key = cloneKey(name, path);
     setCloning((c) => ({ ...c, [key]: "busy" }));
     let error = "";
     try {
@@ -296,10 +296,10 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
             <div className="cv-sw-list" data-testid="repo-switcher-list">
               {repos.length === 0 && <p className="cv-msg">This project has no linked repositories.</p>}
               {repos.map((r) => (
-                <div key={r.name} className="cv-sw-group" role="group" aria-label={r.name}>
+                <div key={`${r.name}\0${r.path}`} className="cv-sw-group" role="group" aria-label={r.name}>
                   <div className="cv-sw-head">{r.name}</div>
                   {!r.present ? (
-                    <MissingRepo repo={r} canClone={!!project} state={cloning[cloneKey(r.name)]} onClone={() => clone(r)} />
+                    <MissingRepo repo={r} canClone={!!project} state={cloning[cloneKey(r.name, r.path)]} onClone={() => clone(r)} />
                   ) : !worktrees[r.name] ? (
                     <p className="cv-msg">Loading worktrees…</p>
                   ) : (
