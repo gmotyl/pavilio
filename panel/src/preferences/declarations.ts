@@ -29,7 +29,6 @@ import { definePreference, type PreferenceCodec, type PreferenceDef } from "./ty
 
 import type { SortDir, SortKey } from "../features/projects/fileListControls";
 import type { SidebarOrder } from "../features/shell/sidebarOrder";
-import type { RepoSearchScope } from "../features/projects/useRepoSearch";
 import type { GitViewMode } from "../features/git/useGitViewMode";
 import type { DrawerSide } from "../features/terminal/useTerminalDrawer";
 import type { TileLayout } from "../features/terminal/tileLayout";
@@ -326,6 +325,35 @@ export const DEFAULT_TASK_PROMPT =
  * voices.ts then adds no cycle.
  */
 export const DEFAULT_SPEECH_VOICE = "fr-FR-VivienneMultilingualNeural";
+
+/** Which view the project's Repos tab opens on. */
+export type ReposView = "review" | "code" | "prs";
+export const REPOS_VIEWS: readonly ReposView[] = ["review", "code", "prs"];
+
+/** The PRs view's filter: a preset chip plus an optional author narrowing it. */
+export type PrFilterPreset = "mine" | "review" | "all";
+export interface PrFilter {
+  preset: PrFilterPreset;
+  author: string | null;
+}
+const PR_FILTER_PRESETS: readonly string[] = ["mine", "review", "all"];
+
+/** Whole-value: an unknown preset or a non-string author reads as the default. */
+const prFilterCodec: PreferenceCodec<PrFilter> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.preset !== "string" ||
+      !PR_FILTER_PRESETS.includes(parsed.preset) ||
+      !(parsed.author === null || typeof parsed.author === "string")
+    ) {
+      throw new Error(`not a PR filter: ${raw}`);
+    }
+    return { preset: parsed.preset as PrFilterPreset, author: parsed.author };
+  },
+  serialize: (value) => JSON.stringify(value),
+};
 
 /** Engine id → voice id: one voice per engine (`speech.voice`, and each project's entry). */
 export type EngineVoices = Record<string, string>;
@@ -653,13 +681,6 @@ export const preferences = {
     codec: bool,
     portable: true,
   }),
-  repoSearchScope: definePreference<RepoSearchScope>({
-    key: "repos.searchScope", // was: panel-repo-search-scope
-    scope: "global",
-    default: "changed",
-    codec: oneOf<RepoSearchScope>(["changed", "branch-diff", "commits"]),
-    portable: true,
-  }),
   searchIncludeArchived: definePreference({
     key: "search.includeArchived", // was: panel-search-include-archived
     scope: "global",
@@ -732,24 +753,6 @@ export const preferences = {
     portable: true,
   }),
   /**
-   * One key per repository, not the hook's single JSON blob. A blob's inner
-   * keys can never run through `normalizeRepoScope`, so `~/git/prv/pavilio`
-   * and `/root/git/prv/pavilio` would stay two entries with opposite values —
-   * the exact collision repo scope exists to close, and the reason this is
-   * symmetric with `git.branchDiff.open` rather than shaped like the hook.
-   *
-   * Default `true`: `useCommitsOpenMap.isOpen` reads `map[repoPath] !== false`,
-   * so a repo with no entry is OPEN today. (Absent ≠ closed — the map merely
-   * starts `{}`.)
-   */
-  commitsOpen: definePreference({
-    key: "git.commitsOpen", // was: panel-commits-open (one blob keyed by repo path)
-    scope: "repo",
-    default: true,
-    codec: bool,
-    portable: true,
-  }),
-  /**
    * The width of every repo file tree — the changed-path list the git views
    * render beside a diff. One of those trees did store a width before: the
    * history tree, under the git-history-only `git.history.paneWidth`. The two
@@ -780,26 +783,29 @@ export const preferences = {
     codec: num,
     portable: true,
   }),
-  /** Empty means "nothing chosen yet" — the view then picks main/master/develop. */
-  branchDiffBase: definePreference({
-    key: "git.branchDiff.base", // was: panel-branch-diff-base-<repo>
-    scope: "repo",
-    default: "",
-    codec: str,
+
+  // ── Repos tab ────────────────────────────────────────────────────────────
+  /** Per project: one project is mostly reviewed, another mostly coded in. */
+  reposView: definePreference<ReposView>({
+    key: "repos.view", // was: nothing — new with the Repos tab views
+    scope: "project",
+    default: "code",
+    codec: oneOf(REPOS_VIEWS),
     portable: true,
   }),
-  branchDiffOpen: definePreference({
-    key: "git.branchDiff.open", // was: panel-branch-diff-open-<repo>
-    scope: "repo",
-    default: true,
-    codec: bool,
+  reposPrFilter: definePreference<PrFilter>({
+    key: "repos.prFilter", // was: nothing — new with the PRs view
+    scope: "project",
+    default: { preset: "review", author: null },
+    codec: prFilterCodec,
     portable: true,
   }),
-  worktreeExpanded: definePreference({
-    key: "git.worktree.expanded", // was: panel-worktree-expanded-<worktree path>
-    scope: "repo",
-    default: false,
-    codec: bool,
+  /** Split vs unified is a reading habit, not a property of the file. */
+  fileViewerDiffLayout: definePreference<"split" | "unified">({
+    key: "fileViewer.diffLayout", // was: nothing — new with the file viewer
+    scope: "global",
+    default: "split",
+    codec: oneOf(["split", "unified"] as const),
     portable: true,
   }),
 

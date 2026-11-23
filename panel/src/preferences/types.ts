@@ -127,11 +127,9 @@ export function normalizeRepoScope(repoPath: string): string {
  * moment the value was `undefined` rather than `""` — and it reaches here
  * `undefined` often, because `server/lib/discovery.ts` validates nothing: a
  * `repos.json` entry with no `path`, or a project with no `name`, ships
- * straight through to the client. The bare form has already cost two
- * regressions in this change — a TypeError during `GitBranchDiff`'s render
- * that took the whole RepoBlock subtree down, and a rejected `Promise.all`
- * that silently emptied `useRepoSearch` for every healthy repository beside
- * the malformed one. The parameter is `unknown` rather than `string` for the
+ * straight through to the client. The bare form crashes a render or rejects a
+ * `Promise.all` that empties results for every healthy entry beside the
+ * malformed one. The parameter is `unknown` rather than `string` for the
  * same reason: TypeScript believes the `?? ""` chains and the runtime does not.
  */
 export function isPreferenceScope(value: unknown): value is string {

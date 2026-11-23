@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BranchPicker from "../BranchPicker";
 
@@ -59,5 +59,168 @@ describe("BranchPicker", () => {
     await user.click(screen.getByText("main"));
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     expect(onChange).toHaveBeenCalledWith("feature/auth");
+  });
+
+  describe("popover placement", () => {
+    const rect = (left: number, right: number, top = 40, bottom = 60) =>
+      ({ left, right, top, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    it("renders outside the trigger's clipping ancestors with fixed positioning", async () => {
+      const user = userEvent.setup();
+      render(
+        <div data-testid="clip" style={{ overflow: "hidden", width: 120 }}>
+          <BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />
+        </div>
+      );
+      await user.click(screen.getByTestId("bp-toggle"));
+      const pop = screen.getByTestId("bp-popover");
+      expect(screen.getByTestId("clip").contains(pop)).toBe(false);
+      expect(pop.style.position).toBe("fixed");
+    });
+
+    it("right-aligned popover is clamped inside the viewport instead of spilling off its left edge", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" align="right" />);
+      const toggle = screen.getByTestId("bp-toggle");
+      toggle.getBoundingClientRect = () => rect(100, 150);
+      await user.click(toggle);
+      const pop = screen.getByTestId("bp-popover");
+      expect(parseFloat(pop.style.left)).toBeGreaterThanOrEqual(8);
+      expect(pop.style.top).toBe("64px");
+    });
+
+    it("right-aligned popover ends at the trigger's right edge when it fits", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" align="right" />);
+      const toggle = screen.getByTestId("bp-toggle");
+      toggle.getBoundingClientRect = () => rect(600, 700);
+      await user.click(toggle);
+      const pop = screen.getByTestId("bp-popover");
+      expect(parseFloat(pop.style.left) + parseFloat(pop.style.width)).toBe(700);
+    });
+
+    it("width never exceeds the viewport", async () => {
+      const user = userEvent.setup();
+      const prev = window.innerWidth;
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 200 });
+      try {
+        render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+        const toggle = screen.getByTestId("bp-toggle");
+        toggle.getBoundingClientRect = () => rect(20, 60);
+        await user.click(toggle);
+        const pop = screen.getByTestId("bp-popover");
+        expect(parseFloat(pop.style.width)).toBeLessThanOrEqual(184);
+        expect(parseFloat(pop.style.left)).toBeGreaterThanOrEqual(8);
+      } finally {
+        Object.defineProperty(window, "innerWidth", { configurable: true, value: prev });
+      }
+    });
+
+    it("long branch names ellipsize and keep the full name as a tooltip", async () => {
+      const user = userEvent.setup();
+      const long = "origin/dependabot/uv/uv-804f26c466-with-a-very-long-suffix";
+      render(<BranchPicker branches={[long]} value="main" onChange={() => {}} testIdPrefix="bp" />);
+      await user.click(screen.getByTestId("bp-toggle"));
+      const opt = screen.getByTestId(`bp-option-${long}`);
+      expect(opt).toHaveAttribute("title", long);
+      expect(opt.querySelector(".truncate")).toHaveTextContent(long);
+    });
+
+    it("a click inside the portalled popover does not close it", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+      await user.click(screen.getByTestId("bp-toggle"));
+      await user.click(screen.getByPlaceholderText("Filter branches..."));
+      expect(screen.getByTestId("bp-popover")).toBeInTheDocument();
+    });
+
+    it("closes when the trigger stops being laid out (its column hidden)", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+      const toggle = screen.getByTestId("bp-toggle");
+      toggle.getBoundingClientRect = () => rect(600, 700);
+      await user.click(toggle);
+      expect(screen.getByTestId("bp-popover")).toBeInTheDocument();
+      toggle.getBoundingClientRect = () => rect(0, 0, 0, 0);
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(screen.queryByTestId("bp-popover")).toBeNull();
+    });
+
+    const withViewportHeight = async (h: number, run: () => Promise<void>) => {
+      const prev = window.innerHeight;
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: h });
+      try {
+        await run();
+      } finally {
+        Object.defineProperty(window, "innerHeight", { configurable: true, value: prev });
+      }
+    };
+    const list = () => screen.getByTestId("bp-popover").lastElementChild as HTMLElement;
+
+    it("opens below with the full list when there is room", () =>
+      withViewportHeight(800, async () => {
+        const user = userEvent.setup();
+        render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+        const toggle = screen.getByTestId("bp-toggle");
+        toggle.getBoundingClientRect = () => rect(600, 700, 40, 60);
+        await user.click(toggle);
+        const pop = screen.getByTestId("bp-popover");
+        expect(pop.style.top).toBe("64px");
+        expect(pop.style.bottom).toBe("");
+        expect(list().style.maxHeight).toBe("240px");
+      }));
+
+    it("flips above the trigger near the viewport bottom", () =>
+      withViewportHeight(800, async () => {
+        const user = userEvent.setup();
+        render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+        const toggle = screen.getByTestId("bp-toggle");
+        toggle.getBoundingClientRect = () => rect(600, 700, 740, 760);
+        await user.click(toggle);
+        const pop = screen.getByTestId("bp-popover");
+        expect(pop.style.top).toBe("");
+        // 800 viewport − 740 trigger top + 4 gap.
+        expect(pop.style.bottom).toBe("64px");
+        expect(list().style.maxHeight).toBe("240px");
+      }));
+
+    it("caps the list to the larger side's room when neither side fits it", () =>
+      withViewportHeight(300, async () => {
+        const user = userEvent.setup();
+        render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+        const toggle = screen.getByTestId("bp-toggle");
+        toggle.getBoundingClientRect = () => rect(600, 700, 100, 120);
+        await user.click(toggle);
+        const pop = screen.getByTestId("bp-popover");
+        expect(pop.style.top).toBe("124px");
+        expect(parseFloat(list().style.maxHeight)).toBeLessThan(300 - 124 - 8);
+      }));
+
+    it("follows the trigger when the layout above it shifts while open", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);
+      const toggle = screen.getByTestId("bp-toggle");
+      toggle.getBoundingClientRect = () => rect(600, 700, 40, 60);
+      await user.click(toggle);
+      expect(screen.getByTestId("bp-popover").style.top).toBe("64px");
+      // A banner expands above: no scroll or resize event fires.
+      toggle.getBoundingClientRect = () => rect(600, 700, 90, 110);
+      await waitFor(() => expect(screen.getByTestId("bp-popover").style.top).toBe("114px"));
+    });
+
+    it("a click outside closes it", async () => {
+      const user = userEvent.setup();
+      render(
+        <div>
+          <span data-testid="elsewhere">x</span>
+          <BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />
+        </div>
+      );
+      await user.click(screen.getByTestId("bp-toggle"));
+      await user.click(screen.getByTestId("elsewhere"));
+      expect(screen.queryByTestId("bp-popover")).toBeNull();
+    });
   });
 });

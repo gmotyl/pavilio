@@ -1,34 +1,28 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   GitBranch,
   Upload,
   Check,
   ExternalLink,
   ArrowLeft,
-  Columns2,
-  AlignJustify,
   List,
   FolderTree,
   ChevronRight,
   ChevronDown,
   Folder,
 } from "lucide-react";
-import DiffView, { type DiffMode } from "./DiffView";
+import FileViewer, { type FileViewerProps } from "../repos/viewer/FileViewer";
+import { tooLargeMessage, tooLargeSize } from "../repos/tooLarge";
 import BranchPicker from "./BranchPicker";
 import CopyIconButton from "../shell/CopyIconButton";
 import FileChangeList from "./FileChangeList";
 import { buildFileTree, countFiles, type TreeNode } from "./file-tree";
 import { useGitViewMode, type GitViewMode } from "./useGitViewMode";
-import { useWebSocket } from "../realtime/useWebSocket";
+import { useGitChanges, type GitFile } from "./useGitChanges";
 import PaneResizer from "../shell/PaneResizer";
 import useResizablePane from "../shell/useResizablePane";
 import { TREE_BOUNDS } from "./repoTree";
 import { preferences } from "../../preferences/declarations";
-
-interface GitFile {
-  status: string;
-  path: string;
-}
 
 interface GitChangesProps {
   /** Absolute repo path, or undefined for the workspace repo */
@@ -76,6 +70,10 @@ export function statusColor(s: string) {
   return "var(--text-tertiary)";
 }
 
+/** Porcelain XY status → the viewer's single-letter status. */
+const viewerStatus = (s: string | undefined): FileViewerProps["status"] =>
+  !s ? null : s.includes("D") ? "D" : s === "??" || s.includes("A") ? "A" : "M";
+
 export default function GitChanges({
   repo,
   title,
@@ -92,109 +90,75 @@ export default function GitChanges({
   nested = false,
   advancedCommit = false,
 }: GitChangesProps) {
-  const [files, setFiles] = useState<GitFile[]>([]);
-  const [branch, setBranch] = useState("");
-  const [branches, setBranches] = useState<string[]>([]);
-  const [suggestion, setSuggestion] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [commitMsg, setCommitMsg] = useState("");
-  const [loading, setLoading] = useState("");
-  const [checkoutError, setCheckoutError] = useState("");
+  const {
+    files,
+    branch,
+    branches,
+    selected,
+    toggleFile,
+    commitMsg,
+    setCommitMsg,
+    loading,
+    checkoutError,
+    setCheckoutError,
+    actionError,
+    stageFiles,
+    commit: runCommit,
+    checkout: handleCheckout,
+  } = useGitChanges(repo);
   const [activeDiff, setActiveDiff] = useState<string | null>(null);
   const [diffContent, setDiffContent] = useState("");
-  const [diffMode, setDiffMode] = useState<DiffMode>("inline");
+  const [fileContent, setFileContent] = useState<string | undefined>(undefined);
+  // Set when the whole-file read refused the file and the diff can't stand in for it.
+  const [notice, setNotice] = useState<string | null>(null);
+  const openSeq = useRef(0);
   const [diffLoading, setDiffLoading] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   // Above the early returns below, where every hook has to be.
   const tree = useResizablePane(preferences.repoTreePaneWidth, TREE_BOUNDS);
 
-  const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
-
-  const fetchStatus = async () => {
-    const [statusRes, branchRes, suggestRes] = await Promise.all([
-      fetch(`/api/git/status${qs}`),
-      fetch(`/api/git/branch${qs}`),
-      fetch(`/api/git/suggest-message${qs}`),
-    ]);
-    if (statusRes.ok) setFiles(await statusRes.json());
-    if (branchRes.ok) setBranch((await branchRes.json()).branch);
-    if (suggestRes.ok) setSuggestion((await suggestRes.json()).suggestion);
-  };
-
-  const fetchBranches = async () => {
-    try {
-      const res = await fetch(`/api/git/branches${qs}`);
-      if (res.ok) {
-        const data = await res.json();
-        setBranches(data.branches);
-      }
-    } catch {}
-  };
-
-  const handleCheckout = async (targetBranch: string) => {
-    if (targetBranch === branch) return;
-    setCheckoutError("");
-    setLoading("switching");
-    try {
-      const res = await fetch("/api/git/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch: targetBranch, repo }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setBranch(data.branch);
-        await fetchStatus();
-        await fetchBranches();
-      } else {
-        setCheckoutError(data.error);
-      }
-    } catch (e: any) {
-      setCheckoutError(e.message || "Checkout failed");
-    }
-    setLoading("");
-  };
-
-  const { lastMessage } = useWebSocket();
-
-  useEffect(() => {
-    fetchStatus();
-    fetchBranches();
-  }, [repo]);
-
-  // A commit/push from anywhere — the Sync button, a background auto-sync tick, another
-  // client — leaves this list showing files that no longer differ. Only git-change is
-  // honoured: sync-status fires on every tick and would refetch for nothing.
-  useEffect(() => {
-    if (lastMessage?.type !== "git-change") return;
-    fetchStatus();
-    fetchBranches();
-  }, [lastMessage]);
-  useEffect(() => {
-    setCommitMsg(suggestion);
-  }, [suggestion]);
   useEffect(() => {
     onBranchChange?.(branch);
   }, [branch]);
 
-  const toggleFile = (path: string) => {
-    const next = new Set(selected);
-    next.has(path) ? next.delete(path) : next.add(path);
-    setSelected(next);
-  };
-
   const openDiff = async (path: string) => {
+    const seq = ++openSeq.current;
     setActiveDiff(path);
     onOpenFileChange?.(path);
     setDiffLoading(true);
-    try {
-      const res = await fetch(
-        `/api/git/diff?file=${encodeURIComponent(path)}${repo ? `&repo=${encodeURIComponent(repo)}` : ""}`,
-      );
-      if (res.ok) setDiffContent((await res.json()).diff);
-    } catch {
+    const repoQ = repo ? `&repo=${encodeURIComponent(repo)}` : "";
+    const status = files.find((f) => f.path === path)?.status;
+    const deleted = viewerStatus(status) === "D";
+    type Read = { content?: string; refused?: { status: number; size?: number } };
+    const [diff, read] = await Promise.all([
+      fetch(`/api/git/diff?file=${encodeURIComponent(path)}${repoQ}`)
+        .then(async (res) => (res.ok ? ((await res.json()).diff as string) : ""))
+        .catch(() => ""),
+      // The whole file feeds Code mode; binary (415) and oversized (413) files fall back to the diff alone.
+      deleted
+        ? ({} as Read)
+        : fetch(`/api/git/file?path=${encodeURIComponent(path)}${repoQ}`)
+            .then(async (res): Promise<Read> => {
+              if (res.ok) return { content: await res.text() };
+              if (res.status === 413) return { refused: { status: 413, size: await tooLargeSize(res) } };
+              return res.status === 415 ? { refused: { status: 415 } } : {};
+            })
+            .catch((): Read => ({})),
+    ]);
+    // A later click wins over a slower earlier response.
+    if (seq !== openSeq.current) return;
+    // An untracked file's "diff" is the file itself read as text: once the read
+    // refused it as binary or oversized, that diff is junk (or huge) too.
+    const untracked = status === "??";
+    const refused = read.refused;
+    if (refused && (refused.status === 415 ? !/^Binary files /m.test(diff) : untracked)) {
+      setNotice(refused.status === 415 ? `${path} is a binary file and can't be shown.` : tooLargeMessage(refused.size));
       setDiffContent("");
+    } else {
+      setNotice(null);
+      setDiffContent(diff);
     }
+    setFileContent(read.content);
     setDiffLoading(false);
   };
 
@@ -207,38 +171,8 @@ export default function GitChanges({
     }
   }, [openFile, files]);
 
-  const stageFiles = async (filesToStage: string[]) => {
-    setLoading("staging");
-    await fetch("/api/git/stage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files: filesToStage, repo }),
-    });
-    setSelected(new Set());
-    await fetchStatus();
-    setLoading("");
-  };
-
   const commit = async (push = false) => {
-    if (!commitMsg.trim()) return;
-    setLoading("committing");
-    await fetch("/api/git/commit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: commitMsg, repo }),
-    });
-    if (push) {
-      setLoading("pushing");
-      await fetch("/api/git/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo }),
-      });
-    }
-    setCommitMsg("");
-    setActiveDiff(null);
-    await fetchStatus();
-    setLoading("");
+    if (await runCommit(push)) setActiveDiff(null);
   };
 
   const [localViewMode, setLocalViewMode] = useGitViewMode();
@@ -556,62 +490,24 @@ export default function GitChanges({
             <ArrowLeft size={14} />
             Back
           </button>
-          <span
-            className="text-sm font-mono flex-1 truncate"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {activeDiff}
-          </span>
-          <div
-            className="flex rounded-md overflow-hidden"
-            style={{ border: "1px solid var(--border-default)" }}
-          >
-            <button
-              data-testid={`git-changes-mode-inline-${repo ?? "workspace"}`}
-              onClick={() => setDiffMode("inline")}
-              className="p-1.5 transition-colors"
-              style={{
-                background:
-                  diffMode === "inline" ? "var(--bg-active)" : "transparent",
-                color:
-                  diffMode === "inline"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-              }}
-              title="Inline diff"
-            >
-              <AlignJustify size={14} />
-            </button>
-            <button
-              data-testid={`git-changes-mode-side-by-side-${repo ?? "workspace"}`}
-              onClick={() => setDiffMode("side-by-side")}
-              className="p-1.5 transition-colors"
-              style={{
-                background:
-                  diffMode === "side-by-side"
-                    ? "var(--bg-active)"
-                    : "transparent",
-                color:
-                  diffMode === "side-by-side"
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-                borderLeft: "1px solid var(--border-default)",
-              }}
-              title="Side by side"
-            >
-              <Columns2 size={14} />
-            </button>
-          </div>
         </div>
         {diffLoading ? (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Loading diff...
           </p>
+        ) : notice ? (
+          <p className="text-sm" data-testid="git-changes-notice" style={{ color: "var(--text-muted)" }}>
+            {notice}
+          </p>
         ) : (
-          <DiffView
+          <FileViewer
+            key={activeDiff}
+            path={activeDiff}
             diff={diffContent}
-            mode={diffMode}
-            filename={activeDiff}
+            content={fileContent}
+            status={viewerStatus(files.find((f) => f.path === activeDiff)?.status)}
+            uncommitted
+            defaultMode="diff"
             highlight={highlight}
           />
         )}
@@ -685,6 +581,7 @@ export default function GitChanges({
               branches={branches}
               value={branch}
               onChange={handleCheckout}
+              disabled={!!loading}
               align="left"
               triggerClassName="text-xs px-2 py-0.5 rounded-full font-mono cursor-pointer flex items-center gap-1 transition-colors"
               triggerStyle={{
@@ -912,6 +809,12 @@ export default function GitChanges({
             </>
           )}
         </>
+      )}
+      {/* Outside the list: a push rejected after committing the last file still shows. */}
+      {actionError && (
+        <p role="alert" className="text-xs mt-2" style={{ color: "var(--red)" }}>
+          {actionError}
+        </p>
       )}
     </div>
   );

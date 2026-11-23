@@ -77,7 +77,6 @@ export function ProjectTabsMenu({ tabs, activeTab }: MenuProps) {
 
 interface BarProps {
   tabs: ProjectTab[];
-  searchActive: boolean;
   onToggleSearch: () => void;
   /**
    * Focus layout: no breadcrumb row above, so the row sticks to the very top
@@ -96,7 +95,6 @@ interface BarProps {
 
 export function ProjectTabsBar({
   tabs,
-  searchActive,
   onToggleSearch,
   focus = false,
   hamburgerInset = false,
@@ -150,16 +148,15 @@ export function ProjectTabsBar({
         data-testid="project-tabs-toggle-search"
         onClick={onToggleSearch}
         className="ml-auto hidden md:block px-2 py-1.5 rounded-md transition-colors"
-        style={{
-          color: searchActive ? "var(--accent)" : "var(--text-tertiary)",
-        }}
+        style={{ color: "var(--text-tertiary)" }}
         onMouseEnter={(e) =>
           (e.currentTarget.style.background = "var(--bg-hover)")
         }
         onMouseLeave={(e) =>
           (e.currentTarget.style.background = "transparent")
         }
-        title="Search (⌘P — repos tab: search repo files)"
+        // ⌘P is the code file search on the repos tab, not this.
+        title={tabs.some((t) => t.active && t.label === "repos") ? "Search notes" : "Search notes (⌘P)"}
       >
         <Search size={14} />
       </button>

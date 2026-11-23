@@ -40,8 +40,8 @@ function parsePorcelain(out: string): Stanza[] {
   return stanzas;
 }
 
-/** Linked worktrees of `repoPath`, excluding the main checkout, prunable and missing dirs. Never throws. */
-export function listRepoWorktrees(repoPath: string): RepoWorktree[] {
+/** Linked worktrees of `repoPath`, excluding prunable and missing dirs (and the main checkout unless `includeMain`). Never throws. */
+export function listRepoWorktrees(repoPath: string, { includeMain = false } = {}): RepoWorktree[] {
   let out: string;
   try {
     // gitSafeEnv: an inherited GIT_DIR would otherwise beat `-C` and list the wrong repo.
@@ -58,7 +58,7 @@ export function listRepoWorktrees(repoPath: string): RepoWorktree[] {
   }
   // The first stanza is always the main checkout.
   return parsePorcelain(out)
-    .slice(1)
+    .slice(includeMain ? 0 : 1)
     .filter((w) => !w.prunable && existsSync(w.path))
     .map(({ path, branch, head }) => ({ path, branch, head }));
 }

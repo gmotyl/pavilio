@@ -10,8 +10,8 @@ import { beforeEach, describe, expect, it } from "vitest";
  * It has happened twice already in this change, both times from the same place:
  * a route param reaches these call sites through a `name ?? ""` / `projectName`
  * chain that TypeScript sees as `string` while the value at runtime is
- * `undefined`. Once it crashed a render (`GitBranchDiff`), once it silently
- * emptied a result list (`useRepoSearch`). A bare `.trim()` on `undefined`
+ * `undefined`. Once it crashed a render, once it silently emptied a result
+ * list. A bare `.trim()` on `undefined`
  * throws a TypeError; the guarded form falls through to the declared default
  * and writes nothing, which is what a scope nobody resolved should do.
  *

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWebSocket } from "../realtime/useWebSocket";
 import type { ProjectKind } from "../../../server/lib/projects/kind";
 
@@ -7,6 +7,8 @@ export interface RepoEntry {
   path: string;
   /** Whether the `~`-expanded path is a directory on this machine (server-derived). */
   present: boolean;
+  /** repos.json names a remote, so the panel can clone it; the URL stays on the server. */
+  cloneable?: boolean;
 }
 
 export interface Project {
@@ -47,9 +49,17 @@ export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const { lastMessage } = useWebSocket();
 
+  // A success applies only over older ones; a failure keeps whatever was last applied.
+  const issued = useRef(0);
+  const applied = useRef(0);
   const fetchProjects = async () => {
+    const id = ++issued.current;
     const res = await fetch("/api/projects");
-    if (res.ok) setProjects(await res.json());
+    if (!res.ok) return;
+    const body = await res.json();
+    if (id < applied.current) return;
+    applied.current = id;
+    setProjects(body);
   };
 
   useEffect(() => {
@@ -63,7 +73,7 @@ export function useProjects() {
   }, []);
 
   useEffect(() => {
-    if (lastMessage?.type === "file-change") fetchProjects();
+    if (lastMessage?.type === "file-change" || lastMessage?.type === "projects-change") fetchProjects();
   }, [lastMessage]);
 
   return projects;

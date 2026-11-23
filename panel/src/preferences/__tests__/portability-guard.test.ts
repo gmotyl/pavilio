@@ -94,7 +94,9 @@ const FIXTURES: Record<string, Fixture> = {
   "shell.starredOrder": { value: ["pavilio", "anytts"] },
   "shell.starredCollapsed": { value: true },
   "shell.projectsCollapsed": { value: true },
-  "repos.searchScope": { value: "commits" },
+  "repos.view": { value: "prs", scopeArg: "pavilio" },
+  "repos.prFilter": { value: { preset: "mine", author: "gmotyl" }, scopeArg: "pavilio" },
+  "fileViewer.diffLayout": { value: "unified" },
   "search.includeArchived": { value: false },
 
   // ── Git ──────────────────────────────────────────────────────────────────
@@ -103,10 +105,6 @@ const FIXTURES: Record<string, Fixture> = {
   "alerts.durationSeconds": { value: 30 },
   "project.color": { value: "#112233", scopeArg: "pavilio" },
   "project.mark": { value: "emoji:🚀", scopeArg: "pavilio" },
-  "git.commitsOpen": { value: false, scopeArg: "~/git/prv/pavilio" },
-  "git.branchDiff.base": { value: "main", scopeArg: "~/git/prv/pavilio" },
-  "git.branchDiff.open": { value: false, scopeArg: "~/git/prv/pavilio" },
-  "git.worktree.expanded": { value: true, scopeArg: "~/git/prv/pavilio-prefs" },
 
   // ── Plans ────────────────────────────────────────────────────────────────
   "plans.taskPrompt": { value: "Finish {change}; stop when {path} is fully checked." },
@@ -273,8 +271,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(68);
-    expect(portable.length).toBe(54);
+    expect(ALL_PREFERENCES.length).toBe(66);
+    expect(portable.length).toBe(52);
     expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

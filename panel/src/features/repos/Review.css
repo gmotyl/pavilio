@@ -1,0 +1,151 @@
+/* Review view: PR switcher, compact PR header, tree | viewer | change rail. */
+.rv-sw {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+.rv-sw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 640px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.rv-sw-btn:hover { background: var(--bg-hover); }
+.rv-sw-tt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-sw-car { color: var(--text-muted); }
+.rv-sw-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: min(560px, 92vw);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+.rv-sw-list {
+  max-height: 380px;
+  overflow: auto;
+}
+
+.rv-head {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rv-head h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.rv-num { color: var(--text-tertiary); font-weight: 400; }
+.rv-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.rv-head-row b { color: var(--text-primary); font-weight: 600; }
+.rv-state {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--green-dim);
+  color: var(--green);
+  font-weight: 600;
+}
+.rv-state-draft { background: var(--bg-hover); color: var(--text-secondary); }
+.rv-ref {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--blue-dim);
+  color: var(--blue);
+  font-size: 11.5px;
+}
+.rv-ext { margin-left: auto; color: var(--accent); }
+
+.rv-body {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr) 210px;
+  height: calc(100vh - 160px);
+  min-height: 360px;
+}
+.rv-body.rv-norail { grid-template-columns: 250px minmax(0, 1fr); }
+.rv-body.rv-stack { grid-template-columns: minmax(0, 1fr); height: auto; }
+.rv-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-subtle);
+}
+.rv-stack .rv-side { max-height: 260px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+.rv-treehead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.rv-toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.rv-main { min-width: 0; padding: 0 12px 12px; overflow: auto; }
+/* Top gap on the child, not the scroller, so the sticky file header pins flush (see .cv-viewer). */
+.rv-main > * { margin-top: 12px; }
+/* Stacked: bounded, so the pane itself scrolls and line jumps stay on screen. */
+.rv-stack .rv-main { max-height: max(320px, calc(100vh - 140px)); }
+.rv-msg { padding: 12px; font-size: 12.5px; color: var(--text-tertiary); }
+.rv-msg button { color: var(--accent); }
+
+.rv-rail {
+  padding: 12px;
+  overflow: auto;
+  border-left: 1px solid var(--border-subtle);
+  font-size: 12.5px;
+}
+.rv-rail h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.rv-rail button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.rv-rail button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.rv-rail i { display: inline-block; flex: none; width: 3px; height: 10px; border-radius: 1px; }
+.rv-k-add { background: var(--green); }
+.rv-k-mod { background: var(--yellow); }
+.rv-k-del { background: var(--red); }
+.rv-ln { font: 11px var(--font-mono, monospace); color: var(--text-muted); }
+.rv-add { color: var(--green); }
+.rv-del { color: var(--red); }
+.rv-rail-empty { color: var(--text-muted); }
+
+/* Fallback before the body is measured. */
+@media (max-width: 1100px) {
+  .rv-rail { display: none; }
+  .rv-body { grid-template-columns: 250px minmax(0, 1fr); }
+}
+@media (max-width: 860px) {
+  .rv-body { grid-template-columns: minmax(0, 1fr); height: auto; }
+}

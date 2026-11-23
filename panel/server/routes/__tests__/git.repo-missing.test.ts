@@ -67,6 +67,11 @@ describe("git routes and a repo missing on this machine", () => {
       ["status", () => request(app()).get(`/api/git/status?repo=${q}`)],
       ["diff", () => request(app()).get(`/api/git/diff?file=a.txt&repo=${q}`)],
       [
+        "diff (against HEAD)",
+        () => request(app()).get(`/api/git/diff?file=a.txt&against=HEAD&repo=${q}`),
+      ],
+      ["tree", () => request(app()).get(`/api/git/tree?repo=${q}`)],
+      [
         "diff (sha)",
         () => request(app()).get(`/api/git/diff?file=a.txt&sha=abc&repo=${q}`),
       ],
@@ -77,18 +82,6 @@ describe("git routes and a repo missing on this machine", () => {
       ],
       ["branch", () => request(app()).get(`/api/git/branch?repo=${q}`)],
       ["branches", () => request(app()).get(`/api/git/branches?repo=${q}`)],
-      [
-        "branch-diff-files",
-        () =>
-          request(app()).get(`/api/git/branch-diff-files?base=main&repo=${q}`),
-      ],
-      [
-        "branch-diff",
-        () =>
-          request(app()).get(
-            `/api/git/branch-diff?file=a.txt&base=main&repo=${q}`,
-          ),
-      ],
       ["grep", () => request(app()).get(`/api/git/grep?q=foo&repo=${q}`)],
       ["worktrees", () => request(app()).get(`/api/git/worktrees?repo=${q}`)],
       [
@@ -134,11 +127,9 @@ describe("git routes and a repo missing on this machine", () => {
     }
 
     // A route's own required param is still checked before the repo dir.
-    const noBase = await request(app()).get(
-      `/api/git/branch-diff-files?repo=${q}`,
-    );
-    expect(noBase.status).toBe(400);
-    expect(noBase.body).toEqual({ error: "base parameter required" });
+    const noFile = await request(app()).get(`/api/git/diff?repo=${q}`);
+    expect(noFile.status).toBe(400);
+    expect(noFile.body).toEqual({ error: "file parameter required" });
   });
 
   it("a stat error other than not-found is not reported as repo-missing", async () => {

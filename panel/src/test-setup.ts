@@ -145,6 +145,8 @@ Object.defineProperty(window, "sessionStorage", {
 
 // jsdom does not implement scrollIntoView
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
+// ...nor Element.scrollTo
+window.Element.prototype.scrollTo = vi.fn() as unknown as Element["scrollTo"];
 
 /**
  * The document `GET /api/preferences.js` injects into a real page, empty.

@@ -1,0 +1,220 @@
+/* File viewer: diff (split/unified) and code modes. Colours come from the panel tokens. */
+.fv {
+  --fv-add-bg: var(--green-dim);
+  --fv-add-no: color-mix(in srgb, var(--green) 20%, transparent);
+  --fv-add-mark: color-mix(in srgb, var(--green) 38%, transparent);
+  --fv-del-bg: var(--red-dim);
+  --fv-del-no: color-mix(in srgb, var(--red) 20%, transparent);
+  --fv-del-mark: color-mix(in srgb, var(--red) 38%, transparent);
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-base);
+}
+
+.fv-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 8px 8px 0 0;
+}
+.fv-path {
+  font: 12.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fv-copy {
+  display: inline-flex;
+  flex: none;
+}
+.fv-path + .fv-copy { margin-left: -6px; }
+.fv-path b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.fv-stat {
+  font: 12px "JetBrains Mono", ui-monospace, monospace;
+}
+.fv-pa { color: var(--green); }
+.fv-pd { color: var(--red); }
+.fv-muted { color: var(--text-tertiary); }
+.fv-spacer { flex: 1; }
+
+.fv-seg {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.fv-seg button {
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fv-seg button + button { border-left: 1px solid var(--border-default); }
+.fv-seg button[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.fv-seg button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Code mode keeps the legend on the path's line: the path wraps within itself and the legend clips. */
+.fv-header:has(.fv-legend) { flex-wrap: nowrap; }
+.fv-header:has(.fv-legend) > .fv-seg { flex: none; }
+.fv-legend {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.fv-legend i {
+  display: inline-block;
+  width: 3px;
+  height: 11px;
+  vertical-align: -1px;
+  margin-right: 4px;
+  border-radius: 1px;
+}
+.fv-legend-added { background: var(--green); }
+.fv-legend-changed { background: var(--blue); }
+.fv-legend-removed { background: var(--red); }
+
+.fv-body { overflow-x: auto; }
+.fv-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fv-table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  font: 12.5px/1.6 "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-primary);
+}
+.fv-table td {
+  padding: 0 8px;
+  vertical-align: top;
+}
+.fv-table td.fv-cd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.fv-table td.fv-no {
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+  font-size: 11.5px;
+  padding-top: 1px;
+}
+.fv-table td.fv-sg {
+  text-align: center;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 0;
+}
+
+/* Unified rows */
+.fv-r-del td { background: var(--fv-del-bg); }
+.fv-r-del td.fv-no { background: var(--fv-del-no); }
+.fv-r-add td { background: var(--fv-add-bg); }
+.fv-r-add td.fv-no { background: var(--fv-add-no); }
+
+/* Split cells */
+.fv-split td.fv-cd:nth-child(2) { border-right: 1px solid var(--border-subtle); }
+td.fv-s-del { background: var(--fv-del-bg); }
+td.fv-no.fv-s-del { background: var(--fv-del-no); }
+td.fv-s-add { background: var(--fv-add-bg); }
+td.fv-no.fv-s-add { background: var(--fv-add-no); }
+td.fv-s-empty {
+  background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--text-primary) 2.5%, transparent) 5px 10px);
+}
+
+.fv mark {
+  color: inherit;
+  border-radius: 2px;
+}
+.fv-r-del mark.fv-word, td.fv-s-del mark.fv-word { background: var(--fv-del-mark); }
+.fv-r-add mark.fv-word, td.fv-s-add mark.fv-word { background: var(--fv-add-mark); }
+.fv mark.fv-hl {
+  background: color-mix(in srgb, var(--yellow) 38%, transparent);
+  color: var(--text-primary);
+}
+
+.fv-fold-row td, .fv-gap-row td { padding: 0; }
+.fv-fold {
+  width: 100%;
+  text-align: left;
+  padding: 3px 12px;
+  background: var(--blue-dim);
+  color: var(--blue);
+  font-size: 12px;
+  border-block: 1px solid var(--border-subtle);
+}
+.fv-fold:hover { background: color-mix(in srgb, var(--blue) 20%, transparent); }
+.fv-gap-row td {
+  padding: 3px 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: var(--bg-surface);
+  border-block: 1px solid var(--border-subtle);
+}
+
+/* Code mode gutter: green bar added, blue bar changed, red wedge where lines were removed. */
+.fv-code td.fv-gm { padding: 0; }
+.fv-m-added td.fv-gm { box-shadow: inset 3px 0 0 var(--green); }
+.fv-m-changed td.fv-gm { box-shadow: inset 3px 0 0 var(--blue); }
+.fv-m-removed td.fv-gm {
+  background: linear-gradient(to bottom right, var(--red) 0 50%, transparent 50%) top left / 7px 7px no-repeat;
+}
+.fv-m-added td.fv-cd, .fv-m-changed td.fv-cd { background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); }
+
+.fv-sym { cursor: pointer; }
+.fv-sym:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+@keyframes fv-flash {
+  from { background-color: var(--accent-dim); }
+  to { background-color: transparent; }
+}
+/* Identical twin: swapping the name restarts the animation on a repeat flash. */
+@keyframes fv-flash-alt {
+  from { background-color: var(--accent-dim); }
+  to { background-color: transparent; }
+}
+.fv-flash td { animation: fv-flash 1.3s ease-out; }
+.fv-flash.fv-flash-alt td { animation-name: fv-flash-alt; }
+@media (prefers-reduced-motion: reduce) {
+  .fv-flash td {
+    animation: none;
+    background-color: var(--accent-dim);
+  }
+}
+.fv-more {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--accent);
+  font-size: 12px;
+}
+.fv-more:hover { background: var(--bg-hover); }

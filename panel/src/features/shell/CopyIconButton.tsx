@@ -15,7 +15,7 @@ interface Props {
 /**
  * Tiny inline copy-to-clipboard icon meant to sit directly next to the text it
  * copies, so it's obvious what lands on the clipboard. Flips to a green check
- * for 1.5s on success; disabled when there's nothing to copy.
+ * for 1.5s on success, titled "Copy failed" on failure; disabled when there's nothing to copy.
  */
 export function CopyIconButton({
   value,
@@ -24,6 +24,7 @@ export function CopyIconButton({
   "data-testid": testid,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
     // Copying is never also a request to whatever the button happens to sit
@@ -37,7 +38,9 @@ export function CopyIconButton({
     // when the span is the link text, and a copy must not also follow it.
     event.stopPropagation();
     event.preventDefault();
-    if (!(await copyToClipboard(value))) return;
+    const ok = await copyToClipboard(value);
+    setFailed(!ok);
+    if (!ok) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -48,7 +51,7 @@ export function CopyIconButton({
       data-testid={testid}
       onClick={onClick}
       disabled={!value}
-      title={label}
+      title={failed ? "Copy failed" : label}
       aria-label={label}
       className="flex items-center p-0.5 rounded transition-colors disabled:opacity-30 disabled:cursor-default"
       style={{ color: copied ? "var(--green)" : "var(--text-muted)" }}

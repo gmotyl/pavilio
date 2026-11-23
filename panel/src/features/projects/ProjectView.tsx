@@ -2,9 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import { refreshFileIndex, useFileIndex } from "../explorer/useFileIndex";
-import { useGitViewMode } from "../git/useGitViewMode";
-import RepoBlock from "./RepoBlock";
-import ProjectSearchBar from "./ProjectSearchBar";
+import ReposTab from "../repos/ReposTab";
 import FileViewer from "./FileViewer";
 import SectionFilesList, { visibleSectionRows } from "./SectionFilesList";
 import { useFileListControls } from "./fileListControls";
@@ -25,11 +23,7 @@ import ScriptButton from "./ScriptButton";
 import { useWorkspaceScripts } from "./useWorkspaceScripts";
 import { ProjectTabsBar, ProjectTabsMenu } from "./ProjectTabs";
 import { useProjectTabs } from "./useProjectTabs";
-import { useProjectSearch } from "./useProjectSearch";
-import { useRepoSearch } from "./useRepoSearch";
 import { useFileViewer } from "./useFileViewer";
-import { useCommitsOpenMap } from "./useCommitsOpenMap";
-import { useRepoOpenFile } from "./useRepoOpenFile";
 import CollapsibleProjectMd from "./CollapsibleProjectMd";
 import ProjectGroupStrip from "./ProjectGroupStrip";
 import { ActionsSection } from "./ActionsSection";
@@ -109,43 +103,13 @@ export default function ProjectView() {
   const scrollContainerRef = useScrollContainer();
   useTabScrollMemory(name, section, scrollContainerRef ?? { current: null });
 
-  const [gitViewMode, setGitViewMode] = useGitViewMode();
-
-  const commitsOpen = useCommitsOpenMap();
-
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   useReposTabMemory(name, section, searchParams);
 
-  const isReposSearch = section === "repos";
-
-  const openSearchResult = useCallback(
-    (path: string) => {
-      navTo(`/view/${path}`);
-    },
-    [navTo],
-  );
-
-  const search = useProjectSearch({
-    project: name,
-    enabled: false, // notes search handled by QuickFinder; hook only drives repos-tab overlay
-    onOpenResult: openSearchResult,
-  });
-
+  // The repos tab has its own Ctrl+P search in Code; the tab-bar button opens the quick finder everywhere.
   const onToggleSearch = useCallback(() => {
-    if (isReposSearch) search.toggle();
-    else window.dispatchEvent(new Event("pavilio:open-quick-finder"));
-  }, [isReposSearch, search.toggle]);
-
-  const repoSearch = useRepoSearch({
-    active: isReposSearch,
-    repos: project?.repos,
-    query: search.query,
-  });
-
-  const { repoOpenFile, setRepoOpenFile } = useRepoOpenFile({
-    searchParams,
-    setSearchParams,
-  });
+    window.dispatchEvent(new Event("pavilio:open-quick-finder"));
+  }, []);
 
   const fileViewer = useFileViewer({ project: name, section });
   const { selectedFile, setSelectedFile } = fileViewer;
@@ -316,7 +280,6 @@ export default function ProjectView() {
       >
         <ProjectTabsBar
           tabs={tabs}
-          searchActive={isReposSearch && search.active}
           onToggleSearch={onToggleSearch}
           focus={focus.active}
           hamburgerInset={focus.active && !leftSidebar.expanded}
@@ -325,100 +288,9 @@ export default function ProjectView() {
         <PageSpeechRowHost />
       </div>
 
-      {isReposSearch && search.active && (
-        <ProjectSearchBar
-          projectName={name}
-          query={search.query}
-          onQueryChange={search.setQuery}
-          onClose={search.close}
-          inputRef={search.inputRef}
-          isReposSearch={isReposSearch}
-          results={search.results}
-          loading={search.loading}
-          selectedIdx={search.selectedIdx}
-          onSelectedIdxChange={search.setSelectedIdx}
-          onOpenResult={openSearchResult}
-          onKeyDown={search.handleKeyDown}
-          repoScope={repoSearch.scope}
-          onRepoScopeChange={repoSearch.setScope}
-          repoFilesCount={repoSearch.files.length}
-          repoGrepResults={repoSearch.grepResults}
-          repoGrepLoading={repoSearch.grepLoading}
-          onOpenRepoResult={(result) => {
-            setRepoOpenFile({
-              repo: result.project,
-              file: result.relativePath,
-              scope: repoSearch.scope,
-              highlight: search.query,
-            });
-            search.close();
-          }}
-        />
-      )}
-
       {/* Repos tab */}
-      {section === "repos" && !archived && project?.repos && (
-        <div className="space-y-6">
-          {project.repos.map((repo) => (
-            <RepoBlock
-              key={repo.path}
-              repo={repo}
-              viewMode={gitViewMode}
-              onViewModeChange={setGitViewMode}
-              repoOpenFile={repoOpenFile}
-              onSetRepoOpenFile={setRepoOpenFile}
-              branchFile={searchParams.get("branchfile")}
-              onBranchFileChange={(file) =>
-                setSearchParams(
-                  (prev) => {
-                    const p = new URLSearchParams(prev);
-                    if (file) p.set("branchfile", file);
-                    else p.delete("branchfile");
-                    return p;
-                  },
-                  { replace: true },
-                )
-              }
-              activeSha={searchParams.get("sha")}
-              activeFile={searchParams.get("gitfile")}
-              onActiveShaChange={(sha) =>
-                setSearchParams(
-                  (prev) => {
-                    const p = new URLSearchParams(prev);
-                    if (sha) p.set("sha", sha);
-                    else {
-                      p.delete("sha");
-                      p.delete("gitfile");
-                    }
-                    return p;
-                  },
-                  { replace: true },
-                )
-              }
-              onActiveFileChange={(file) =>
-                setSearchParams(
-                  (prev) => {
-                    const p = new URLSearchParams(prev);
-                    if (file) p.set("gitfile", file);
-                    else p.delete("gitfile");
-                    return p;
-                  },
-                  { replace: true },
-                )
-              }
-              commitsOpen={commitsOpen.isOpen(repo.path)}
-              onCommitsOpenChange={(open) =>
-                commitsOpen.setOpen(repo.path, open)
-              }
-              showListSidebar
-              liveHighlight={
-                search.active && search.query.trim().length >= 2
-                  ? search.query.trim()
-                  : undefined
-              }
-            />
-          ))}
-        </div>
+      {section === "repos" && !archived && name && project?.repos && (
+        <ReposTab project={name} repos={project.repos} />
       )}
 
       {/* iTerm tab */}
