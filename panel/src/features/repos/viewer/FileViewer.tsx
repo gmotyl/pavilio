@@ -20,6 +20,7 @@ import {
   type Row,
 } from "./diffModel";
 import { detectLang, escapeHtml } from "./highlight";
+import { CopyIconButton } from "../../shell/CopyIconButton";
 import "./FileViewer.css";
 
 export interface FileViewerProps {
@@ -532,6 +533,9 @@ export default function FileViewer({
           {path.slice(0, slash + 1)}
           <b>{path.slice(slash + 1)}</b>
         </span>
+        <span className="fv-copy">
+          <CopyIconButton value={path} label="Copy path" data-testid="file-viewer-copy-path" />
+        </span>
         {changed && (
           <span className="fv-stat">
             <span className="fv-pa">+{total.add}</span> <span className="fv-pd">−{total.del}</span>
@@ -588,6 +592,10 @@ export default function FileViewer({
             </span>
           )
         )}
+        <span className="fv-copy">
+          {/* Only the loaded whole file; a diff's hunks alone are not the file. */}
+          <CopyIconButton value={binary ? "" : (content ?? "")} label="Copy file content" data-testid="file-viewer-copy-content" />
+        </span>
       </div>
       <div ref={bodyRef} className="fv-body" data-testid="file-viewer-body" onClick={onBodyClick}>
         {body}

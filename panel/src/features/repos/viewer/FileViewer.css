@@ -31,6 +31,11 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.fv-copy {
+  display: inline-flex;
+  flex: none;
+}
+.fv-path + .fv-copy { margin-left: -6px; }
 .fv-path b {
   color: var(--text-primary);
   font-weight: 600;
