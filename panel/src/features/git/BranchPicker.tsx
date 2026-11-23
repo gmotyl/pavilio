@@ -4,20 +4,35 @@ import { ChevronDown, Search } from "lucide-react";
 
 const POPOVER_WIDTH = 320;
 const GUTTER = 8;
+const GAP = 4;
+const LIST_MAX = 240;
+// Filter row above the list; approximate, only used to size the list to the room left.
+const FILTER_ROW = 32;
 
 interface Place {
-  top: number;
+  /** Exactly one of top (opens below) / bottom (flipped above) is set. */
+  top?: number;
+  bottom?: number;
   left: number;
   width: number;
+  listMax: number;
 }
 
-/** Fixed-position box under the trigger, kept inside the viewport horizontally. */
-function placeUnder(trigger: DOMRect, align: "left" | "right"): Place {
+/**
+ * Fixed-position box under the trigger, flipped above when the room below cannot hold the list
+ * and above has more; kept inside the viewport horizontally, list capped to the chosen side's room.
+ */
+function placeFor(trigger: DOMRect, align: "left" | "right"): Place {
   const vw = window.innerWidth;
+  const vh = window.innerHeight;
   const width = Math.max(0, Math.min(POPOVER_WIDTH, vw - 2 * GUTTER));
   const wanted = align === "right" ? trigger.right - width : trigger.left;
   const left = Math.max(GUTTER, Math.min(wanted, vw - GUTTER - width));
-  return { top: trigger.bottom + 4, left, width };
+  const below = vh - trigger.bottom - GAP - GUTTER;
+  const above = trigger.top - GAP - GUTTER;
+  const flip = below < LIST_MAX + FILTER_ROW && above > below;
+  const listMax = Math.max(0, Math.min(LIST_MAX, (flip ? above : below) - FILTER_ROW));
+  return flip ? { bottom: vh - trigger.top + GAP, left, width, listMax } : { top: trigger.bottom + GAP, left, width, listMax };
 }
 
 interface BranchPickerProps {
@@ -84,9 +99,14 @@ export default function BranchPicker({
   // Portalled + fixed so an overflow-clipped or narrow ancestor never cuts the popover off.
   useLayoutEffect(() => {
     if (!open) return;
+    let last = "";
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect();
-      if (r) setPlace(placeUnder(r, align));
+      const key = r && `${r.top} ${r.bottom} ${r.left} ${r.right} ${window.innerWidth} ${window.innerHeight}`;
+      if (r && key !== last) {
+        last = key!;
+        setPlace(placeFor(r, align));
+      }
       return r;
     };
     // A trigger measuring 0×0 is no longer laid out (e.g. its column hidden by a media query).
@@ -97,7 +117,17 @@ export default function BranchPicker({
     place();
     window.addEventListener("resize", follow);
     window.addEventListener("scroll", follow, true);
+    // Layout shifts (a banner expanding above) fire neither event: re-measure each frame while open.
+    // An unlaid-out trigger is left to `follow`, which closes on the next scroll/resize.
+    let frame = 0;
+    const tick = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (r && (r.width || r.height)) place();
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", follow);
       window.removeEventListener("scroll", follow, true);
     };
@@ -149,7 +179,8 @@ export default function BranchPicker({
           className="z-50 rounded-lg overflow-hidden shadow-lg"
           style={{
             position: "fixed",
-            top: `${place.top}px`,
+            top: place.top === undefined ? undefined : `${place.top}px`,
+            bottom: place.bottom === undefined ? undefined : `${place.bottom}px`,
             left: `${place.left}px`,
             width: `${place.width}px`,
             background: "var(--bg-surface)",
@@ -172,7 +203,7 @@ export default function BranchPicker({
               <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{filtered.length}</span>
             )}
           </div>
-          <div ref={listRef} style={{ maxHeight: "240px", overflowY: "auto" }}>
+          <div ref={listRef} style={{ maxHeight: `${place.listMax}px`, overflowY: "auto" }}>
             {filtered.length === 0 ? (
               <div className="px-2 py-2 text-[11px]" style={{ color: "var(--text-muted)" }}>No matching branches</div>
             ) : (
