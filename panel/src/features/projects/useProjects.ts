@@ -65,7 +65,7 @@ export function useProjects() {
   }, []);
 
   useEffect(() => {
-    if (lastMessage?.type === "file-change") fetchProjects();
+    if (lastMessage?.type === "file-change" || lastMessage?.type === "projects-change") fetchProjects();
   }, [lastMessage]);
 
   return projects;

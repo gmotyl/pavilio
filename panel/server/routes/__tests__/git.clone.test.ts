@@ -25,6 +25,7 @@ vi.mock("fs/promises", async (importOriginal) => {
 });
 
 import gitRouter from "../git";
+import { broadcast } from "../../watcher";
 
 const app = () => makeApp(gitRouter, "/api/git");
 const git = (args: string[], cwd: string) => execFileSync("git", args, { cwd, stdio: "pipe", env: gitSafeEnv(), encoding: "utf-8" });
@@ -73,6 +74,8 @@ describe("POST /api/git/clone", () => {
     expect(res.body).toEqual({ ok: true, path: target });
     expect(readFileSync(join(target, "hello.txt"), "utf-8")).toBe("hi\n");
     expect(git(["remote", "get-url", "origin"], target).trim()).toBe(origin);
+    // Every tab refetches presence: the checkout may sit outside the watched projects dir.
+    expect(broadcast).toHaveBeenCalledWith({ type: "projects-change" });
     // The private staging dir is gone once the clone is published.
     expect(readdirSync(join(tmp, "srv", "deep"))).toEqual(["skills"]);
   });

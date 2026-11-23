@@ -808,6 +808,8 @@ router.post("/clone", async (req, res) => {
       cloning.delete(target);
     }
     broadcast({ type: "git-change" });
+    // Repo presence changed; the checkout may sit outside the watched projects dir.
+    broadcast({ type: "projects-change" });
     res.json({ ok: true, path: target });
   } catch (e: any) {
     sendGitError(res, e);
