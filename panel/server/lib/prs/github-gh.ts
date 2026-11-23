@@ -1,7 +1,13 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import { gitSafeEnv } from "../gitEnv.js";
-import { type ChecksState, type PrProvider, PrUnavailableError, type PullRequest } from "./provider.js";
+import {
+  type ChecksState,
+  type PrProvider,
+  PrUnavailableError,
+  type PullRequest,
+  type ReviewComment,
+} from "./provider.js";
 
 export interface RunResult {
   code: number;
@@ -60,6 +66,18 @@ interface RawPr {
   baseRefName: string;
   updatedAt: string;
   url: string;
+}
+
+interface RawReviewComment {
+  id: number;
+  in_reply_to_id?: number | null;
+  path: string;
+  line: number | null;
+  side?: string | null;
+  user?: { login?: string } | null;
+  body?: string | null;
+  created_at: string;
+  html_url: string;
 }
 
 const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
@@ -277,6 +295,37 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
         }
       }
       return { head, base: baseSha, body: view.body ?? "" };
+    },
+
+    async reviewComments(repoPath, n) {
+      if (!Number.isInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
+      const slug = (await assertGitHub(repoPath)).slice(`${GITHUB_HOST}/`.length);
+      // --jq '.[]' prints one object per line on every page, so pages concatenate without `][`.
+      const out = await gh(["api", "--paginate", `repos/${slug}/pulls/${n}/comments`, "--jq", ".[]"], repoPath);
+      const comments: ReviewComment[] = [];
+      for (const text of out.split("\n")) {
+        if (!text.trim()) continue;
+        let c: RawReviewComment;
+        try {
+          c = JSON.parse(text) as RawReviewComment;
+        } catch {
+          throw new PrUnavailableError("failed", "gh api returned invalid JSON");
+        }
+        // line is null once the commented code is gone from the PR (outdated).
+        if (c.line == null) continue;
+        comments.push({
+          id: c.id,
+          replyTo: c.in_reply_to_id ?? null,
+          path: c.path,
+          line: c.line,
+          side: c.side === "LEFT" ? "old" : "new",
+          author: c.user?.login ?? "",
+          body: c.body ?? "",
+          createdAt: c.created_at,
+          url: c.html_url,
+        });
+      }
+      return comments;
     },
   };
 }

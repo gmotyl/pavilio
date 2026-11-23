@@ -54,6 +54,7 @@ function setup() {
       throw new PrUnavailableError("not-github");
     }),
     openPr: vi.fn(async () => ({ head: "h", base: "b", body: "" })),
+    reviewComments: vi.fn(async () => []),
   } satisfies PrProvider;
   return { gh, gl, missing, provider };
 }
