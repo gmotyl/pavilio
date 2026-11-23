@@ -14,14 +14,20 @@ let origin = "";
 vi.mock("../../config", () => configMock(() => projectsDir));
 vi.mock("../../watcher", () => ({ broadcast: vi.fn() }));
 // A slow existence check widens the window two requests could both pass before either reserves.
-const slow = vi.hoisted(() => ({ lstatMs: 0 }));
+const slow = vi.hoisted(() => ({ lstatMs: 0, mkdtempDelays: [] as number[], mkdtempError: null as NodeJS.ErrnoException | null }));
 vi.mock("fs/promises", async (importOriginal) => {
   const real = await importOriginal<typeof import("fs/promises")>();
   const lstat = (async (...args: Parameters<typeof real.lstat>) => {
     if (slow.lstatMs) await new Promise((r) => setTimeout(r, slow.lstatMs));
     return real.lstat(...args);
   }) as typeof real.lstat;
-  return { ...real, default: { ...real, lstat }, lstat };
+  const mkdtemp = (async (...args: Parameters<typeof real.mkdtemp>) => {
+    if (slow.mkdtempError) throw slow.mkdtempError;
+    const ms = slow.mkdtempDelays.shift();
+    if (ms) await new Promise((r) => setTimeout(r, ms));
+    return real.mkdtemp(...args);
+  }) as typeof real.mkdtemp;
+  return { ...real, default: { ...real, lstat, mkdtemp }, lstat, mkdtemp };
 });
 
 import gitRouter from "../git";
@@ -56,6 +62,8 @@ beforeEach(() => {
 
 afterEach(() => {
   slow.lstatMs = 0;
+  slow.mkdtempDelays = [];
+  slow.mkdtempError = null;
   vi.unstubAllEnvs();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -163,9 +171,10 @@ describe("POST /api/git/clone", () => {
     const target = join(tmp, "out");
     const res = await cloneOne(target, join(tmp, "missing.git"));
     expect(res.status).toBe(502);
-    expect(res.body.error).toMatch(/does not exist|not appear to be a git repository|Could not read/i);
+    // A fixed client-safe message; git's own diagnostic stays in the server log.
+    expect(res.body).toEqual({ error: "git clone failed: repository not found" });
     expect(existsSync(target)).toBe(false);
-    expect(readdirSync(tmp).filter((n) => n.includes("clone"))).toEqual([]);
+    expect(readdirSync(tmp).filter((n) => n.startsWith(".pvc-"))).toEqual([]);
   });
 
   it("passes the remote as an argument, never through a shell or as an option", async () => {
@@ -247,19 +256,37 @@ describe("POST /api/git/clone", () => {
       expect(existsSync(join(fast, "hello.txt"))).toBe(true);
       expect(readdirSync(join(tmp, "new"))).toEqual(["b"]);
     });
+
+    it("a failed clone keeps a created parent another clone into it still needs", async () => {
+      fakeSsh();
+      const a = join(tmp, "new", "a");
+      const b = join(tmp, "new", "b");
+      linkRepos("alpha", [
+        { name: "a", path: a, remote: SSH_REMOTE },
+        { name: "b", path: b, remote: origin },
+      ]);
+      // b passes mkdir, then stalls before staging while a fails and prunes.
+      slow.mkdtempDelays = [0, 500];
+      const first = post({ project: "alpha", repo: "a", path: a }).then((r) => r);
+      await new Promise((r) => setTimeout(r, 20));
+      const second = post({ project: "alpha", repo: "b", path: b }).then((r) => r);
+      expect((await first).status).toBe(502);
+      expect((await second).status).toBe(200);
+      expect(existsSync(join(b, "hello.txt"))).toBe(true);
+    });
   });
 
   it("refuses transports other than https, ssh and file", async () => {
     const res = await cloneOne(join(tmp, "out"), "git://127.0.0.1:9/o/skills.git");
     expect(res.status).toBe(502);
-    expect(res.body.error).toMatch(/transport 'git' not allowed/);
+    expect(res.body.error).toBe("git clone failed: transport not allowed");
   });
 
   it("an inherited GIT_ALLOW_PROTOCOL cannot widen the transport allowlist", async () => {
     vi.stubEnv("GIT_ALLOW_PROTOCOL", "git:https:ssh:file");
     const res = await cloneOne(join(tmp, "out"), "git://127.0.0.1:9/o/skills.git");
     expect(res.status).toBe(502);
-    expect(res.body.error).toMatch(/transport 'git' not allowed/);
+    expect(res.body.error).toBe("git clone failed: transport not allowed");
   });
 
   it("removes the parent dirs it created when the clone fails", async () => {
@@ -277,4 +304,26 @@ describe("POST /api/git/clone", () => {
     expect(JSON.stringify(res.body)).not.toContain("bob:");
     expect(JSON.stringify(res.body)).not.toContain("t0ken");
   });
+
+  it("never echoes a signed query from a remote whose path holds an apostrophe", async () => {
+    const res = await cloneOne(join(tmp, "out"), "https://127.0.0.1:9/o/it's.git?sig=t0ken");
+    expect(res.status).toBe(502);
+    expect(JSON.stringify(res.body)).not.toContain("t0ken");
+  });
+
+  it("stages under a short fixed name, so a long target basename still fits", async () => {
+    const target = join(tmp, "s".repeat(250));
+    const res = await cloneOne(target, origin);
+    expect(res.status).toBe(200);
+    expect(existsSync(join(target, "hello.txt"))).toBe(true);
+  });
+
+  it("answers a local filesystem failure with 500, not a git failure", async () => {
+    slow.mkdtempError = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    const res = await cloneOne(join(tmp, "new", "out"), origin);
+    expect(res.status).toBe(500);
+    expect(res.body.error).not.toMatch(/git clone failed/);
+    expect(existsSync(join(tmp, "new"))).toBe(false);
+  });
+
 });

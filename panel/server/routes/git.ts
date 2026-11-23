@@ -743,10 +743,27 @@ const cloning = new Set<string>();
 const exists = (p: string) => lstat(p).then(() => true, () => false);
 
 /** Remove the now-empty dirs from `dir` up to `top` (the first dir this request made); stops at one still in use. */
-async function pruneEmpty(dir: string, top: string): Promise<void> {
+async function pruneEmpty(dir: string, top: string, self: string): Promise<void> {
   for (let d = dir; d === top || d.startsWith(top + sep); d = dirname(d)) {
+    // Another clone may have made `d` its parent and not staged into it yet.
+    if ([...cloning].some((t) => t !== self && t.startsWith(d + sep))) return;
     if (!(await rmdir(d).then(() => true, () => false))) return;
   }
+}
+
+/** Short client-safe causes; git's raw diagnostic may echo the remote and stays in the server log. */
+const CLONE_CAUSES: [RegExp, string][] = [
+  [/transport '[^']*' not allowed/i, "transport not allowed"],
+  [/permission denied \(publickey|authentication failed|could not read (username|password)|host key verification failed/i, "authentication failed"],
+  [/does not exist|not appear to be a git repository|repository not found|not found/i, "repository not found"],
+  [/could not resolve host|connection (refused|timed out)|network is unreachable|could not read from remote repository|unable to access/i, "remote unreachable"],
+];
+
+function cloneFailure(e: any): string {
+  if (e?.killed) return "git clone failed: timed out";
+  const raw = `${e?.stderr ?? ""}\n${e?.message ?? ""}`;
+  const cause = CLONE_CAUSES.find(([re]) => re.test(raw))?.[1];
+  return cause ? `git clone failed: ${cause}` : "git clone failed — see server log";
 }
 
 /**
@@ -781,14 +798,19 @@ router.post("/clone", async (req, res) => {
       // Cloned privately next to the target and renamed into place, so a failure never leaves a half-made checkout.
       let staging: string | undefined;
       let failure: { status: number; body: object } | undefined;
+      // Which step threw: git itself (502) or this disk staging/publishing (500).
+      let inGit = false;
       try {
-        staging = await mkdtemp(join(parent, `.${basename(target)}.clone-`));
+        // Short fixed prefix: a target name near the 255-byte limit must still fit.
+        staging = await mkdtemp(join(parent, ".pvc-"));
         // argv after `--`: the URL is never shell-parsed nor read as an option.
+        inGit = true;
         await execFileAsync("git", [...CLONE_CONFIG, "clone", "--", remote, staging], {
           cwd: parent,
           env: { ...gitSafeEnv(), GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: CLONE_PROTOCOLS },
           timeout: CLONE_TIMEOUT_MS,
         });
+        inGit = false;
         if (await exists(target)) failure = { status: 409, body: { code: "target-exists", path: target, error: `${target} already exists` } };
         else {
           await rename(staging, target);
@@ -796,12 +818,14 @@ router.post("/clone", async (req, res) => {
         }
       } catch (e: any) {
         const raw = String(e?.stderr ?? "").trim() || e?.message || String(e);
-        const detail = staging ? raw.split(staging).join(target) : raw;
-        failure = { status: 502, body: { error: redactUrlCredentials(`git clone failed: ${detail}`) } };
+        console.error(`[git] clone of ${project}/${repo} into ${target} failed:`, redactUrlCredentials(raw));
+        failure = inGit
+          ? { status: 502, body: { error: cloneFailure(e) } }
+          : { status: 500, body: { error: `clone could not be written to ${target}` } };
       }
       if (staging) await rm(staging, { recursive: true, force: true }).catch(() => {});
       if (failure) {
-        if (created) await pruneEmpty(parent, created);
+        if (created) await pruneEmpty(parent, created, target);
         return res.status(failure.status).json(failure.body);
       }
     } finally {
