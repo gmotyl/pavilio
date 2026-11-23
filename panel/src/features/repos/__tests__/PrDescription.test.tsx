@@ -19,11 +19,17 @@ vi.mock("../../speech/useMediaSessionTransport", () => ({ useMediaSessionTranspo
 vi.mock("../../speech/useSpeechKeys", () => ({ useSpeechKeys: () => {} }));
 vi.mock("../../realtime/useWebSocket", () => ({ useWebSocket: () => ({ lastMessage: null }) }));
 vi.mock("../../markdown/MarkdownRenderer", () => ({
-  default: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+  default: ({ content, untrusted }: { content: string; untrusted?: { linkBase: string } }) => (
+    <div data-testid="md" data-link-base={untrusted?.linkBase}>
+      {content}
+    </div>
+  ),
 }));
 
 import { SpeechHostProvider } from "../../speech/SpeechHostProvider";
-import PrDescription, { prSpeechKey } from "../PrDescription";
+import PrDescription, { prDescriptionSource, prSpeechKey } from "../PrDescription";
+import { pageHasSpeech, pageSpeechText } from "../../speech/pageText";
+import { docSpeechKeyFor } from "../../projects/docSpeech";
 import { pr } from "./prFixtures";
 
 const answerWaiting: AnswerWaitingPort = {
@@ -104,4 +110,69 @@ describe("PrDescription", () => {
     );
     expect(aside()).toHaveTextContent("Loading description…");
   });
+
+  it("renders the body as untrusted markdown resolved against the PR page", () => {
+    render(
+      <Host>
+        <PrDescription project="pavilio" pr={PR} body="Hi" />
+      </Host>,
+    );
+    expect(within(aside()).getByTestId("md")).toHaveAttribute("data-link-base", PR.url);
+  });
+
+  it("toolbar label is its own class, so markdown h4s keep prose styles", () => {
+    render(
+      <Host>
+        <PrDescription project="pavilio" pr={PR} body="Hi" />
+      </Host>,
+    );
+    expect(within(aside()).getByRole("heading", { name: "Description" })).toHaveClass("rv-desc-title");
+  });
+
+  it("a comment-only body (an untouched PR template) is no description", () => {
+    render(
+      <Host>
+        <PrDescription project="pavilio" pr={PR} body={"<!-- Describe your change -->\n<!-- Link the issue -->"} />
+      </Host>,
+    );
+    expect(aside()).toHaveTextContent("No description provided.");
+    expect(play()).toBeDisabled();
+  });
 });
+
+describe("prDescriptionSource", () => {
+  it("drops HTML comments, so speech never reads template prompts", () => {
+    const src = prDescriptionSource("Fixes it.\n\n<!-- Describe\nyour change -->\n\nDone.");
+    expect(src).not.toContain("Describe");
+    expect(src).toContain("Fixes it.");
+    expect(src).toContain("Done.");
+  });
+
+  it("keeps comments that are code examples", () => {
+    const fenced = "```html\n<!-- keep me -->\n```";
+    expect(prDescriptionSource(fenced)).toContain("<!-- keep me -->");
+    expect(prDescriptionSource("Use `<!-- x -->` here")).toContain("`<!-- x -->`");
+  });
+
+  it("text between leading horizontal rules is prose, not note frontmatter", () => {
+    const src = prDescriptionSource("---\nSummary of the change.\n---\n");
+    // The same text reaches the toolbar, the host and play-from-here, so all
+    // three keep the paragraph.
+    expect(pageSpeechText(src)).toContain("Summary of the change.");
+    expect(pageHasSpeech(src)).toBe(true);
+  });
+});
+
+describe("prSpeechKey", () => {
+  it("keeps the project for the voice but can never equal a workspace file's key", () => {
+    const key = prSpeechKey("pavilio", { repo: "web", number: 7 });
+    expect(key.startsWith("doc:pavilio/")).toBe(true);
+    const projects = "/h/projects";
+    for (const file of ["pavilio/prs/web/7.md", "pavilio/prs/web/7", "pavilio/pr/web/7"]) {
+      expect(docSpeechKeyFor(`${projects}/${file}`, projects)).not.toBe(key);
+    }
+    // A projects-relative path never carries an empty segment.
+    expect(key).toContain("//");
+  });
+});
+

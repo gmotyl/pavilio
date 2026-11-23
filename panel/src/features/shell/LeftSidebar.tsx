@@ -853,8 +853,7 @@ export default function LeftSidebar() {
           to="/"
           end
           data-testid="sidebar-home-link"
-          aria-label="Home"
-          className="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px] font-semibold"
+          className="flex flex-1 min-w-0 items-center gap-2 rounded-md px-2 py-1 text-[13px] font-semibold"
           style={({ isActive }) => ({
             color: "var(--text-primary)",
             background: isActive ? "var(--bg-active)" : "transparent",
@@ -862,8 +861,9 @@ export default function LeftSidebar() {
           })}
         >
           <HomeIcon size={13} aria-hidden="true" />
-          {/* The host pill is the label from md up; phones hide it (HostBadge), so they keep the word. */}
-          <span className="md:hidden">Home</span>
+          {/* The host pill is the visible label from md up; phones hide it (HostBadge), so
+              they see the word. Kept for screen readers everywhere: the name reads "Home <host>". */}
+          <span className="md:sr-only">Home</span>{" "}
           <HostBadge />
         </NavLink>
       </div>

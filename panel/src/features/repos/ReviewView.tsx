@@ -331,7 +331,9 @@ export default function ReviewView({ project, prs, filter, setFilter, params, se
 
   let body: ReactNode;
   if (!key) body = <p className="rv-msg">Pick a pull request from the switcher above.</p>;
-  else if (pr) body = <PrReview key={prKey(pr)} project={project} pr={pr} me={prs.me} params={params} setParams={setParams} />;
+  // Keyed by the clone, not the display name: a repo repointed under the same
+  // name with the same PR number is another PR, and must not keep this one's state.
+  else if (pr) body = <PrReview key={`${pr.repoPath}#${pr.number}`} project={project} pr={pr} me={prs.me} params={params} setParams={setParams} />;
   else if (prs.error)
     body = (
       <p className="rv-msg" role="alert">

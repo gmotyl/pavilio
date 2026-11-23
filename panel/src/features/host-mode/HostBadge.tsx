@@ -8,21 +8,23 @@ import { useHostMode } from "./useHostMode";
 export function HostBadge() {
   const { mode, hostname } = useHostMode();
   const isLocal = mode === "local";
+  const label = hostname || (isLocal ? "localhost" : "remote");
 
   return (
     <span
-      className="hidden md:inline-flex items-center gap-1.5 text-[10.5px] font-mono px-2 py-[2px] rounded-full"
+      className="hidden md:inline-flex min-w-0 max-w-full items-center gap-1.5 text-[10.5px] font-mono px-2 py-[2px] rounded-full"
       style={{
         background: isLocal ? "var(--green-dim)" : "var(--yellow-dim)",
         border: `1px solid ${isLocal ? "var(--green)" : "var(--yellow)"}`,
         color: isLocal ? "var(--green)" : "var(--yellow)",
       }}
-      title={isLocal ? "Local panel" : "Remote panel"}
+      title={`${isLocal ? "Local panel" : "Remote panel"} — ${label}`}
       data-testid="host-badge"
       data-host-mode={mode}
     >
       <span
-        className="inline-block rounded-full"
+        aria-hidden="true"
+        className="inline-block flex-none rounded-full"
         style={{
           width: 6,
           height: 6,
@@ -30,7 +32,7 @@ export function HostBadge() {
           boxShadow: `0 0 6px ${isLocal ? "var(--green)" : "var(--yellow)"}`,
         }}
       />
-      <span>{hostname || (isLocal ? "localhost" : "remote")}</span>
+      <span className="truncate">{label}</span>
     </span>
   );
 }
