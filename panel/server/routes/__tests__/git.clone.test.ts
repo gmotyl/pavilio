@@ -81,7 +81,9 @@ describe("POST /api/git/clone", () => {
   });
 
   it("expands ~ in the configured path like the repo-missing check", async () => {
+    // os.homedir() reads USERPROFILE on Windows.
     vi.stubEnv("HOME", tmp);
+    vi.stubEnv("USERPROFILE", tmp);
     const res = await cloneOne("~/code/skills", origin);
     expect(res.status).toBe(200);
     expect(existsSync(join(tmp, "code", "skills", "hello.txt"))).toBe(true);
