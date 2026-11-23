@@ -47,6 +47,28 @@ const TWO = thread([ROOT, REPLY]);
 const marker = () => screen.getByRole("button", { name: /comments? on line 14/ });
 const dialog = () => screen.getByRole("dialog", { name: /on line 14/ });
 
+/** The marker inline between two page controls, as in the viewer's table. */
+const Inline = () => (
+  <div>
+    <button type="button" data-testid="before">
+      before
+    </button>
+    <CommentMarker thread={TWO} speechKey={KEY} />
+    <button type="button" data-testid="after">
+      after
+    </button>
+  </div>
+);
+const TABBABLE = "button:not([disabled]), a[href]";
+/** jsdom has no native Tab: dispatch keydown and, unless a handler took it, step through document order. */
+const tab = (shift = false) => {
+  const from = document.activeElement as HTMLElement;
+  if (!fireEvent.keyDown(from, { key: "Tab", shiftKey: shift })) return;
+  const all = Array.from(document.querySelectorAll<HTMLElement>(TABBABLE));
+  const next = all[all.indexOf(from) + (shift ? -1 : 1)];
+  act(() => (next ? next.focus() : from.blur()));
+};
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   vi.setSystemTime(NOW);
@@ -194,21 +216,63 @@ describe("CommentMarker", () => {
     expect(dialog()).toBeInTheDocument();
   });
 
-  it("CommentMarker Tab from the popover's last control returns to the marker", () => {
+  it("CommentMarker Tab from the popover's last control closes it and moves past the marker", () => {
+    render(<Inline />);
+    act(() => marker().focus());
+    const link = within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" });
+    act(() => link.focus());
+    tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("after"));
+    expect(marker()).toHaveAttribute("aria-expanded", "false");
+    // Tab alone from here never re-opens it.
+    tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("CommentMarker Tab never cycles back into the popover", () => {
+    render(<Inline />);
+    act(() => screen.getByTestId("before").focus());
+    const seen: (Element | null)[] = [];
+    for (let i = 0; i < 8; i++) {
+      tab();
+      seen.push(document.activeElement);
+    }
+    const inPop = (el: Element | null) => !!el?.closest('[role="dialog"]');
+    const firstOut = seen.findIndex((el, i) => i > 0 && inPop(seen[i - 1]) && !inPop(el));
+    // Into the popover once, out to the element after the marker, and never back in.
+    expect(seen[0]).toBe(marker());
+    expect(inPop(seen[1])).toBe(true);
+    expect(seen[firstOut]).toBe(screen.getByTestId("after"));
+    expect(seen.slice(firstOut).some(inPop)).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("CommentMarker Tab off the last control with nothing after leaves focus on the closed marker", () => {
     render(<CommentMarker thread={TWO} speechKey={KEY} />);
     act(() => marker().focus());
     const link = within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" });
     act(() => link.focus());
-    fireEvent.keyDown(link, { key: "Tab" });
+    tab();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(marker());
-    expect(dialog()).toBeInTheDocument();
+  });
+
+  it("CommentMarker Shift+Tab from the first control returns to the marker", () => {
+    render(<Inline />);
+    act(() => marker().focus());
+    const play = within(dialog()).getByRole("button", { name: "Play thread" });
+    act(() => play.focus());
+    tab(true);
+    expect(document.activeElement).toBe(marker());
   });
 
   it("CommentMarker footer links only to http(s) urls", () => {
     render(<CommentMarker thread={thread([comment({ url: "javascript:alert(1)" })])} speechKey={KEY} />);
     fireEvent.focus(marker());
     const footer = dialog().querySelector("footer")!;
-    expect(footer).toHaveTextContent("Read-only · Reply on GitHub ↗");
+    expect(footer).toHaveTextContent("Read-only · Reply on GitHub");
+    expect(footer).not.toHaveTextContent("↗");
     expect(within(footer).queryByRole("link")).toBeNull();
     expect(footer.querySelector("a")).toBeNull();
   });

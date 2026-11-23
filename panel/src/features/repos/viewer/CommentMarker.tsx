@@ -35,6 +35,18 @@ function popPosition(marker: DOMRect, pop: { width: number; height: number }): P
 /** Only http(s) urls become links: a comment url is provider data, not trusted markup. */
 const safeHref = (url: string): string | null => (/^https?:\/\//i.test(url) ? url : null);
 const FOCUSABLE = "button, a[href]";
+/** Page-wide tabbable controls, for stepping past the marker as if the popover sat inline. */
+const TABBABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** The first tabbable element after `marker` in document order, outside `pop`. */
+function nextTabbable(marker: HTMLElement, pop: HTMLElement | null): HTMLElement | null {
+  for (const el of document.querySelectorAll<HTMLElement>(TABBABLE)) {
+    if (el.tabIndex < 0 || marker.contains(el) || pop?.contains(el)) continue;
+    if (marker.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) return el;
+  }
+  return null;
+}
 
 const initials = (login: string): string => login.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
 const plural = (n: number) => `${n} comment${n === 1 ? "" : "s"}`;
@@ -58,6 +70,8 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   const popRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const over = useRef({ marker: false, pop: false });
+  /** Set while focus is handed back to the marker after closing: that focus must not re-open it. */
+  const quietFocus = useRef(false);
 
   const { comments, anchor } = thread;
   const n = comments.length;
@@ -85,6 +99,12 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
 
   useEffect(() => cancelClose, [cancelClose]);
 
+  const focusMarkerClosed = useCallback(() => {
+    quietFocus.current = true;
+    markerRef.current?.focus();
+    quietFocus.current = false;
+  }, []);
+
   // Escape closes it wherever focus is: a hover-opened popover never had focus.
   useEffect(() => {
     if (!open) return;
@@ -92,7 +112,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
       if (e.key !== "Escape") return;
       const inside = popRef.current?.contains(document.activeElement);
       close();
-      if (inside) markerRef.current?.focus();
+      if (inside) focusMarkerClosed();
     };
     // A tap elsewhere closes a popover opened by tapping (touch has no pointerleave).
     const onDown = (e: globalThis.PointerEvent) => {
@@ -105,7 +125,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("pointerdown", onDown, true);
     };
-  }, [open, close]);
+  }, [open, close, focusMarkerClosed]);
 
   // Measure after each render while open, and follow scroll (the viewer scrolls inside its host).
   useLayoutEffect(() => {
@@ -169,6 +189,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
       <button
         ref={markerRef}
         type="button"
+        data-testid="comment-marker"
         className={`fv-cmbtn${open ? " open" : ""}`}
         aria-label={`${plural(n)} on line ${line}`}
         aria-haspopup="dialog"
@@ -178,6 +199,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
         onPointerLeave={leave("marker")}
         onFocus={() => {
           cancelClose();
+          if (quietFocus.current) return;
           setOpen(true);
         }}
         onBlur={onBlur}
@@ -200,15 +222,23 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
             onPointerLeave={leave("pop")}
             onBlur={onBlur}
             onKeyDown={(e) => {
-              // The portal sits at the end of <body>: Shift+Tab off the first control and Tab off the
-              // last both go back to the marker instead of leaving the page's tab order.
+              // The portal sits at the end of <body>, so tab order acts as if it sat inline after the
+              // marker: Shift+Tab off the first control returns to the marker (popover stays open); Tab
+              // off the last closes it and moves past the marker — never back in (no keyboard trap).
               if (e.key !== "Tab") return;
               const all = popRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
               if (!all?.length) return;
               const edge = e.shiftKey ? all[0] : all[all.length - 1];
               if (e.target !== edge) return;
               e.preventDefault();
-              markerRef.current?.focus();
+              if (e.shiftKey) {
+                markerRef.current?.focus();
+                return;
+              }
+              const next = markerRef.current ? nextTabbable(markerRef.current, popRef.current) : null;
+              close();
+              if (next) next.focus();
+              else focusMarkerClosed();
             }}
             // React events from a portal bubble through the React tree: keep them out of the viewer's body click.
             onClick={(e) => e.stopPropagation()}
@@ -216,7 +246,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
             <header>
               <b>Line {line}</b> · {plural(n)}
               {speechKey && (
-                <button type="button" className="fv-cmplay fv-cmplay-all" aria-label="Play thread" onClick={playAll}>
+                <button type="button" data-testid="comment-play-thread" className="fv-cmplay fv-cmplay-all" aria-label="Play thread" onClick={playAll}>
                   {n >= 2 ? "▷ Play all" : "▷ Play"}
                 </button>
               )}
@@ -229,7 +259,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
                   </span>
                   <b>{me && c.author === me ? "you" : c.author}</b> · {updatedAgo(c.createdAt)}
                   {speechKey && n >= 2 && (
-                    <button type="button" className="fv-cmplay" aria-label="Play comment" onClick={() => playOne(i)}>
+                    <button type="button" data-testid={`comment-play-${c.id}`} className="fv-cmplay" aria-label="Play comment" onClick={() => playOne(i)}>
                       ▷
                     </button>
                   )}
@@ -246,7 +276,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
                   Reply on GitHub ↗
                 </a>
               ) : (
-                "Reply on GitHub ↗"
+                "Reply on GitHub"
               )}
             </footer>
           </div>,
