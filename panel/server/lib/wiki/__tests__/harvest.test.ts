@@ -328,4 +328,26 @@ describe("harvest", () => {
       ["keep group", "group"],
     ]);
   });
+
+  it("knowledge candidate ids are stable when a group section is added", () => {
+    const line = "- 2026-10-20 — vitest pools share state (from [[wiki/sources/a]])";
+    project("metro-app", [line]);
+    write("projects/metro-app/PROJECT.md", "---\ngroup: metro\n---\n");
+    const idOf = () =>
+      listCandidates(root).items.find((i) => i.scope === "generic" && i.text === "vitest pools share state")!.id;
+    const before = idOf();
+    const group = ["## Group candidates", "- 2026-10-21 — metro uses one SSO", ""];
+    const knowledge = ["## Knowledge candidates", line, ""];
+    const head = ["# Open questions", "", "## Gaps", "- 2026-10-20 — gap one", ""];
+
+    // Group section after Knowledge.
+    write("projects/metro-app/wiki/open-questions.md", [...head, ...knowledge, ...group].join("\n"));
+    expect(listCandidates(root).items.map((i) => i.scope).sort()).toEqual(["generic", "group"]);
+    expect(idOf()).toBe(before);
+
+    // Group section before Knowledge.
+    write("projects/metro-app/wiki/open-questions.md", [...head, ...group, ...knowledge].join("\n"));
+    expect(listCandidates(root).items.map((i) => i.scope).sort()).toEqual(["generic", "group"]);
+    expect(idOf()).toBe(before);
+  });
 });
