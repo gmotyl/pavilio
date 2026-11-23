@@ -11,6 +11,7 @@ export interface RepoEntry {
   name: string;
   path: string; // exactly as written in repos.json
   present: boolean; // the expanded path is a directory on this machine, re-derived on every read
+  remote?: string; // clone URL from repos.json, when given
   openspec?: OpenSpecConfig;
 }
 
@@ -142,6 +143,7 @@ export function readRepos(dir: string, name: string): RepoEntry[] {
             try {
               const openspec = parseOpenSpecConfig(r);
               const entry: RepoEntry = { name: r.name, path: r.path, present };
+              if (typeof r.remote === "string" && r.remote.trim()) entry.remote = r.remote.trim();
               if (openspec) entry.openspec = openspec;
               return [entry];
             } catch (err) {

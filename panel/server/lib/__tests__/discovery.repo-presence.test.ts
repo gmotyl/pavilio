@@ -42,6 +42,20 @@ describe("readProject repo presence", () => {
     expect(repos()).toEqual([{ name: "repo", path: repoDir, present: true }]);
   });
 
+  it("carries a non-blank string remote through, trimmed; drops anything else", () => {
+    const gone = join(scratch, "gone");
+    writeRepos([
+      { name: "a", path: gone, remote: "  git@example.com:o/a.git " },
+      { name: "b", path: gone, remote: "   " },
+      { name: "c", path: gone, remote: 42 },
+    ]);
+    expect(repos()).toEqual([
+      { name: "a", path: gone, present: false, remote: "git@example.com:o/a.git" },
+      { name: "b", path: gone, present: false },
+      { name: "c", path: gone, present: false },
+    ]);
+  });
+
   it("keeps a missing entry in file order with present false", () => {
     const here = join(scratch, "here");
     const gone = join(scratch, "gone");

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { jsonResponse, stubFetch } from "../../../test-utils";
 import RefSwitcher from "../RefSwitcher";
@@ -62,5 +62,56 @@ describe("RefSwitcher", () => {
     expect(within(pop()).queryByTestId("compare-with-option-only-in-main")).toBeNull();
     fireEvent.keyDown(within(pop()).getByRole("searchbox", { name: "Filter branches" }), { key: "Enter" });
     expect(props.onCompare).not.toHaveBeenCalled();
+  });
+
+  describe("missing repo clone", () => {
+    const GONE = "/srv/git/infopoly/infopoly-skills";
+    const base = { worktrees: {}, repo: null, wt: null, onPick: vi.fn() };
+    const missing = (remote?: string) => [{ name: "infopoly-skills", path: GONE, present: false, ...(remote ? { remote } : {}) }];
+
+    it("offers Clone next to Not on this machine when repos.json names a remote", () => {
+      stubFetch({}, []);
+      render(<RefSwitcher {...base} project="infopoly" repos={missing("git@github.com:o/skills.git")} />);
+      fireEvent.click(screen.getByTestId("repo-switcher"));
+      const group = within(pop()).getByRole("group", { name: "infopoly-skills" });
+      expect(group).toHaveTextContent("Not on this machine");
+      expect(within(group).getByTestId("repo-switcher-clone-infopoly-skills")).toHaveTextContent("Clone");
+    });
+
+    it("shows no Clone button without a remote (no URL is guessed)", () => {
+      stubFetch({}, []);
+      render(<RefSwitcher {...base} project="infopoly" repos={missing()} />);
+      fireEvent.click(screen.getByTestId("repo-switcher"));
+      expect(within(pop()).queryByTestId("repo-switcher-clone-infopoly-skills")).toBeNull();
+    });
+
+    it("posts the project and repo name, then refreshes the project list", async () => {
+      const fetch = stubFetch({ "/api/git/clone": { ok: true, path: GONE }, "/api/projects": [] }, []);
+      const refreshed = vi.fn();
+      window.addEventListener("pavilio:projects-refresh", refreshed);
+      try {
+        render(<RefSwitcher {...base} project="infopoly" repos={missing("git@github.com:o/skills.git")} />);
+        fireEvent.click(screen.getByTestId("repo-switcher"));
+        fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));
+        await waitFor(() => expect(refreshed).toHaveBeenCalled());
+        const call = fetch.mock.calls.find(([u]) => String(u) === "/api/git/clone");
+        expect(call?.[1]?.method).toBe("POST");
+        expect(JSON.parse(String(call?.[1]?.body))).toEqual({ project: "infopoly", repo: "infopoly-skills" });
+      } finally {
+        window.removeEventListener("pavilio:projects-refresh", refreshed);
+      }
+    });
+
+    it("shows the server's error inline when the clone fails", async () => {
+      stubFetch(
+        { "/api/git/clone": () => jsonResponse({ error: "git clone failed: Permission denied (publickey)" }, { status: 502 }) },
+        [],
+      );
+      render(<RefSwitcher {...base} project="infopoly" repos={missing("git@github.com:o/skills.git")} />);
+      fireEvent.click(screen.getByTestId("repo-switcher"));
+      fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));
+      expect(await within(pop()).findByRole("alert")).toHaveTextContent("Permission denied (publickey)");
+      expect(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills")).toBeEnabled();
+    });
   });
 });

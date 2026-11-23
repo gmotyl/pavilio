@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RepoEntry } from "../projects/useProjects";
+import { refreshProjects, type RepoEntry } from "../projects/useProjects";
 import "./Code.css";
 
 export interface Worktree {
@@ -55,6 +55,8 @@ export function useWorktrees(repos: RepoEntry[]): WorktreeMap {
 }
 
 interface Props {
+  /** Owning project; with a repo's `remote`, a missing repo can be cloned. */
+  project?: string;
   repos: RepoEntry[];
   worktrees: WorktreeMap;
   /** Open repo name and worktree path (null = its main checkout). */
@@ -77,7 +79,7 @@ const homeIndex = (list: Worktree[], linked: string | undefined) => Math.max(0, 
 const branchLabel = (w: Worktree | undefined) => (w ? (w.branch ?? `detached ${w.head.slice(0, 7)}`) : null);
 
 /** Context-slot button + popover: repos grouped, each with its main checkout then its worktrees. */
-export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare }: Props) {
+export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPick, root = null, compare = null, onCompare }: Props) {
   const [open, setOpen] = useState(false);
   // Picking a ref to compare with: the branch list takes over the popover body.
   const [picking, setPicking] = useState(false);
@@ -85,6 +87,7 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
   // Keyed by the checkout they were listed for, so another checkout never shows (or picks) them.
   const [listed, setListed] = useState<{ root: string; branches: string[] } | null>(null);
   const [dirty, setDirty] = useState<Record<string, number>>({});
+  const [cloning, setCloning] = useState<Record<string, "busy" | { error: string }>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -143,6 +146,24 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
   const close = () => {
     setOpen(false);
     setPicking(false);
+  };
+
+  const clone = async (name: string) => {
+    if (!project) return;
+    setCloning((c) => ({ ...c, [name]: "busy" }));
+    let error = "";
+    try {
+      const res = await fetch("/api/git/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project, repo: name }),
+      });
+      if (!res.ok) error = ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `HTTP ${res.status}`;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    if (!error) await refreshProjects();
+    setCloning(({ [name]: _, ...rest }) => (error ? { ...rest, [name]: { error } } : rest));
   };
   const branches = listed && listed.root === root ? listed.branches : [];
   const shown = filter ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())) : branches;
@@ -239,12 +260,33 @@ export default function RefSwitcher({ repos, worktrees, repo, wt, onPick, root =
                 <div key={r.name} className="cv-sw-group" role="group" aria-label={r.name}>
                   <div className="cv-sw-head">{r.name}</div>
                   {!r.present ? (
-                    <button type="button" className="cv-sw-row" data-testid={`repo-switcher-missing-${r.name}`} disabled>
-                      <span className="cv-sw-path" title={r.path}>
-                        {r.path}
-                      </span>
-                      <span className="cv-sw-missing">Not on this machine</span>
-                    </button>
+                    <>
+                      <div className="cv-sw-missing-row">
+                        <button type="button" className="cv-sw-row" data-testid={`repo-switcher-missing-${r.name}`} disabled>
+                          <span className="cv-sw-path" title={r.path}>
+                            {r.path}
+                          </span>
+                          <span className="cv-sw-missing">Not on this machine</span>
+                        </button>
+                        {project && r.remote && (
+                          <button
+                            type="button"
+                            className="cv-sw-clone"
+                            data-testid={`repo-switcher-clone-${r.name}`}
+                            title={`git clone ${r.remote} ${r.path}`}
+                            disabled={cloning[r.name] === "busy"}
+                            onClick={() => clone(r.name)}
+                          >
+                            {cloning[r.name] === "busy" ? "Cloning…" : "Clone"}
+                          </button>
+                        )}
+                      </div>
+                      {typeof cloning[r.name] === "object" && (
+                        <p className="cv-sw-clone-err" role="alert">
+                          {(cloning[r.name] as { error: string }).error}
+                        </p>
+                      )}
+                    </>
                   ) : !worktrees[r.name] ? (
                     <p className="cv-msg">Loading worktrees…</p>
                   ) : (

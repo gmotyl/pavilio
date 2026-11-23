@@ -2,10 +2,11 @@ import { Router, type Response } from "express";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import { readFileSync, realpathSync, statSync } from "fs";
-import { lstat, readFile } from "fs/promises";
-import { isAbsolute, join, posix, relative, resolve, sep } from "path";
+import { lstat, mkdir, readFile } from "fs/promises";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
+import { isLiveProject, readRepos } from "../lib/discovery.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
 import { expandHome } from "../lib/paths.js";
 
@@ -721,6 +722,44 @@ router.post("/push", (req, res) => {
     git("push", repo);
     broadcast({ type: "git-change" });
     res.json({ ok: true });
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
+const CLONE_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Clone a linked repo that is missing here. Only `{ project, repo }` names come from the client;
+ * the URL and target are the project's repos.json entry, so no caller-chosen URL or path is cloned.
+ */
+router.post("/clone", async (req, res) => {
+  try {
+    const { project, repo } = req.body || {};
+    if (typeof project !== "string" || typeof repo !== "string" || !project || !repo)
+      return res.status(400).json({ error: "project and repo required" });
+    const { projectsDir } = getConfig();
+    if (!isLiveProject(projectsDir, project)) return res.status(404).json({ error: `unknown project: ${project}` });
+    const entry = readRepos(join(projectsDir, project), project).find((r) => r.name === repo);
+    if (!entry) return res.status(404).json({ error: `${project} links no repo named ${repo}` });
+    if (!entry.remote) return res.status(409).json({ code: "no-remote", error: `${repo} has no remote in repos.json` });
+    const target = resolve(expandHome(entry.path));
+    if (await lstat(target).then(() => true, () => false))
+      return res.status(409).json({ code: "target-exists", path: target, error: `${target} already exists` });
+    await mkdir(dirname(target), { recursive: true });
+    try {
+      // argv after `--`: the URL is never shell-parsed nor read as an option.
+      await execFileAsync("git", ["clone", "--", entry.remote, target], {
+        cwd: dirname(target),
+        env: { ...gitSafeEnv(), GIT_TERMINAL_PROMPT: "0" },
+        timeout: CLONE_TIMEOUT_MS,
+      });
+    } catch (e: any) {
+      const detail = String(e?.stderr ?? "").trim() || e?.message || String(e);
+      return res.status(502).json({ error: `git clone failed: ${detail}` });
+    }
+    broadcast({ type: "git-change" });
+    res.json({ ok: true, path: target });
   } catch (e: any) {
     sendGitError(res, e);
   }

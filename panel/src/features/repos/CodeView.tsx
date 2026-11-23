@@ -387,7 +387,7 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
 }
 
 /** Browse a linked repo or one of its worktrees: switcher in the context slot, search + tree, viewer, outline. */
-export default function CodeView({ repos, params, setParams, contextSlot, searchRequest, onSearchHandled }: ReposViewProps) {
+export default function CodeView({ project, repos, params, setParams, contextSlot, searchRequest, onSearchHandled }: ReposViewProps) {
   const worktrees = useWorktrees(repos);
   const named = params.get("repo");
   // Older links carry the repo's path instead of its name.
@@ -439,6 +439,7 @@ export default function CodeView({ repos, params, setParams, contextSlot, search
       {contextSlot &&
         createPortal(
           <RefSwitcher
+            project={project}
             repos={repos}
             worktrees={worktrees}
             repo={repo?.name ?? null}
