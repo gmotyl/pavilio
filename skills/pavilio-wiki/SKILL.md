@@ -171,8 +171,10 @@ Per URL:
 Pick one session id for the whole run (harness session id, else `$PAVILIO_TERMINAL_ID`, else
 `<hostname>-<epoch>`). Read `scripts/wiki config` once for `writerModel`.
 Resolve the group once: `group:` from `projects/<p>/PROJECT.md` frontmatter (trimmed; missing or
-empty → ungrouped). Grouped → `members` = every `projects/*/PROJECT.md` (not `archived/`) whose
-trimmed `group:` equals it, minus `kind: knowledge` cards (group wikis).
+empty → ungrouped). A project that is itself a group wiki (`kind: knowledge` with `group:`) counts
+as ungrouped — no `group` / `members` inputs, no `## Group candidates`. Grouped → `members` =
+every `projects/*/PROJECT.md` (not `archived/`) whose trimmed `group:` equals it, minus
+`kind: knowledge` cards (group wikis).
 
 1. **Gitignore** — ensure `wiki/.gitignore` lists `.ingest.lock*` and `raw/repos/`.
 2. **Lock** — `scripts/wiki lock take <p> --session <id>`. `busy: true` → retry once after a few
@@ -230,7 +232,10 @@ trimmed `group:` equals it, minus `kind: knowledge` cards (group wikis).
     (repo pages carry `commit` instead).
 11. **Log** — append the ingest entry (`PAGES.md § log.md`); append every `generic:` finding under
     `## Knowledge candidates` in `wiki/open-questions.md`; grouped project → every `group:` finding
-    under `## Group candidates`, same bullet format, the section added after
+    under `## Group candidates`. Each item is one plain dated bullet,
+    `- YYYY-MM-DD — <finding> (from [[wiki/sources/<slug>]])` (`PAGES.md § Open questions`), with
+    no `generic:` / `group:` prefix: the harvest reads the date only from the start of the bullet,
+    so a prefix loses it and a group candidate never expires (§ 5 step 4). The section is added after
     `## Knowledge candidates` when missing (ungrouped → never write it, ignore `group:` items);
     every `contradictions` item under `## Gaps`, and every `collisions` item under `## Gaps`
     prefixed `Term collision:` (one word, two meanings — a glossary `_Avoid_` note or a rename

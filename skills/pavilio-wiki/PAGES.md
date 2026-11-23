@@ -164,7 +164,7 @@ description: "Gaps the wiki could not answer and knowledge waiting for a home"
 
 `## Group candidates` exists only in a grouped project's file (card has `group:`): findings true
 across the group's projects but not outside them, same format as `## Knowledge candidates`.
-Ungrouped → the section is never written.
+Ungrouped → leave `## Group candidates` out of the skeleton above; the section is never written.
 
 Append only; create the file with this skeleton when missing. People delete resolved items. A
 candidate's indented sub-lines are part of it: the harvest reads them as its `details` and clears
