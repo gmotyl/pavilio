@@ -32,6 +32,10 @@ function popPosition(marker: DOMRect, pop: { width: number; height: number }): P
   return { top, left };
 }
 
+/** Only http(s) urls become links: a comment url is provider data, not trusted markup. */
+const safeHref = (url: string): string | null => (/^https?:\/\//i.test(url) ? url : null);
+const FOCUSABLE = "button, a[href]";
+
 const initials = (login: string): string => login.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
 const plural = (n: number) => `${n} comment${n === 1 ? "" : "s"}`;
 
@@ -59,6 +63,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   const n = comments.length;
   const line = anchor.line;
   const bodies = comments.map((c) => prDescriptionSource(c.body));
+  const href = safeHref(comments[0].url);
 
   const cancelClose = useCallback(() => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -72,6 +77,9 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   }, [cancelClose]);
   const scheduleClose = useCallback(() => {
     cancelClose();
+    // Keyboard focus on the marker or inside the popover holds it open: the pointer only borrowed it.
+    const a = document.activeElement;
+    if (a && (markerRef.current?.contains(a) || popRef.current?.contains(a))) return;
     closeTimer.current = setTimeout(close, CLOSE_DELAY_MS);
   }, [cancelClose, close]);
 
@@ -139,7 +147,7 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   // The popover lives in a portal: Tab from the marker steps into it rather than past it.
   const onMarkerKey = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.key !== "Tab" || e.shiftKey || !open) return;
-    const first = popRef.current?.querySelector<HTMLElement>("button, a[href]");
+    const first = popRef.current?.querySelector<HTMLElement>(FOCUSABLE);
     if (!first) return;
     e.preventDefault();
     first.focus();
@@ -192,11 +200,15 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
             onPointerLeave={leave("pop")}
             onBlur={onBlur}
             onKeyDown={(e) => {
-              // Shift+Tab off the first control goes back to the marker.
-              if (e.key === "Tab" && e.shiftKey && e.target === popRef.current?.querySelector("button, a[href]")) {
-                e.preventDefault();
-                markerRef.current?.focus();
-              }
+              // The portal sits at the end of <body>: Shift+Tab off the first control and Tab off the
+              // last both go back to the marker instead of leaving the page's tab order.
+              if (e.key !== "Tab") return;
+              const all = popRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
+              if (!all?.length) return;
+              const edge = e.shiftKey ? all[0] : all[all.length - 1];
+              if (e.target !== edge) return;
+              e.preventDefault();
+              markerRef.current?.focus();
             }}
             // React events from a portal bubble through the React tree: keep them out of the viewer's body click.
             onClick={(e) => e.stopPropagation()}
@@ -229,9 +241,13 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
             ))}
             <footer>
               Read-only ·{" "}
-              <a href={comments[0].url} target="_blank" rel="noreferrer noopener">
-                Reply on GitHub ↗
-              </a>
+              {href ? (
+                <a href={href} target="_blank" rel="noreferrer noopener">
+                  Reply on GitHub ↗
+                </a>
+              ) : (
+                "Reply on GitHub ↗"
+              )}
             </footer>
           </div>,
           document.body,

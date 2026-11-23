@@ -161,4 +161,55 @@ describe("CommentMarker", () => {
       text: `kwojcik: ${ROOT.body}\n\ngmotyl: It does.`,
     });
   });
+  it("CommentMarker one-comment thread has a single Play, speaking the thread", () => {
+    render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    const pop = dialog();
+    const play = within(pop).getByRole("button", { name: "Play thread" });
+    expect(play).toHaveTextContent("▷ Play");
+    expect(play).not.toHaveTextContent("Play all");
+    expect(within(pop).queryByRole("button", { name: "Play comment" })).toBeNull();
+    fireEvent.click(play);
+    expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/t/990`, text: `kwojcik: ${ROOT.body}` });
+  });
+
+  it("CommentMarker without a speech key renders no Play buttons", () => {
+    render(<CommentMarker thread={TWO} />);
+    fireEvent.focus(marker());
+    expect(within(dialog()).queryByRole("button", { name: /Play/ })).toBeNull();
+  });
+
+  it("CommentMarker keeps a keyboard-opened popover open when the pointer leaves", () => {
+    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    act(() => marker().focus());
+    fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
+    fireEvent.pointerLeave(marker(), { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(500));
+    expect(dialog()).toBeInTheDocument();
+    // Focus inside the popover holds it open too.
+    act(() => within(dialog()).getByRole("button", { name: "Play thread" }).focus());
+    fireEvent.pointerEnter(dialog(), { pointerType: "mouse" });
+    fireEvent.pointerLeave(dialog(), { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(500));
+    expect(dialog()).toBeInTheDocument();
+  });
+
+  it("CommentMarker Tab from the popover's last control returns to the marker", () => {
+    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    act(() => marker().focus());
+    const link = within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" });
+    act(() => link.focus());
+    fireEvent.keyDown(link, { key: "Tab" });
+    expect(document.activeElement).toBe(marker());
+    expect(dialog()).toBeInTheDocument();
+  });
+
+  it("CommentMarker footer links only to http(s) urls", () => {
+    render(<CommentMarker thread={thread([comment({ url: "javascript:alert(1)" })])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    const footer = dialog().querySelector("footer")!;
+    expect(footer).toHaveTextContent("Read-only · Reply on GitHub ↗");
+    expect(within(footer).queryByRole("link")).toBeNull();
+    expect(footer.querySelector("a")).toBeNull();
+  });
 });

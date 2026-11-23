@@ -130,6 +130,17 @@ describe("FileViewer comment lane", () => {
     expect(markers()).toHaveLength(2);
   });
 
+  it("FileViewer stacks both sides' markers on a unified context row", () => {
+    render(viewer({ comments: new Map([["new:13", thread("new", 13)], ["old:13", thread("old", 13, 2)]]) }));
+    unified();
+    const ctx = body().querySelector('tr.fv-r-ctx[data-line="13"][data-old-line="13"]')!;
+    const cells = ctx.querySelectorAll("td.fv-cm");
+    expect(cells).toHaveLength(1);
+    const btns = [...cells[0].querySelectorAll("button.fv-cmbtn")].map((b) => b.getAttribute("aria-label"));
+    expect(btns).toEqual(["1 comment on line 13", "2 comments on line 13"]);
+    expect(markers()).toHaveLength(2);
+  });
+
   it("FileViewer splits markers by side in split view", () => {
     const comments = new Map([...COMMENTS, ["new:13", thread("new", 13)]]);
     const { container } = render(viewer({ comments }));

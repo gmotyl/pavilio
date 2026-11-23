@@ -469,11 +469,17 @@ export default function FileViewer({
 
   // The comment lane: one 22px column per side, only when the viewer has threads to show.
   const laneCol = comments ? <col className="fv-cm-col" style={{ width: 22 }} /> : null;
-  /** The lane cell for a row: the first of `keys` with a thread gets its marker. */
+  /** The lane cell for a row: every one of `keys` with a thread gets a marker, stacked (a unified context row can carry both sides). */
   const lane = (...keys: string[]) => {
     if (!comments) return null;
-    const thread = keys.map((k) => comments.get(k)).find(Boolean);
-    return <td className="fv-cm">{thread && <CommentMarker thread={thread} speechKey={commentSpeechKey} me={me} />}</td>;
+    return (
+      <td className="fv-cm">
+        {keys.map((k) => {
+          const thread = comments.get(k);
+          return thread && <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />;
+        })}
+      </td>
+    );
   };
   const diffCols = 4 + (comments ? (shownLayout === "split" ? 2 : 1) : 0);
   const foldRow = (it: Extract<Item, { kind: "fold" }>) => (
