@@ -11,7 +11,7 @@ export interface RepoEntry {
   name: string;
   path: string; // exactly as written in repos.json
   present: boolean; // the expanded path is a directory on this machine, re-derived on every read
-  remote?: string; // clone URL from repos.json, when given, with http(s) userinfo stripped
+  cloneable?: boolean; // repos.json names a remote; the URL itself never leaves the server
   openspec?: OpenSpecConfig;
 }
 
@@ -118,67 +118,58 @@ export function readProject(root: string, name: string): Project {
 const rawRemote = (r: { remote?: unknown }): string | undefined =>
   typeof r.remote === "string" && r.remote.trim() ? r.remote.trim() : undefined;
 
-/** Drop `user[:password]@` from every http(s) URL in `text`, so tokens never leave the server. */
-export const redactUrlCredentials = (text: string): string => text.replace(/\b(https?:\/\/)[^/@\s]+@/gi, "$1");
+/** Drop `user[:password]@` and `?query#fragment` from every http(s) URL in `text`, so tokens never leave the server. */
+export const redactUrlCredentials = (text: string): string =>
+  text.replace(/\b(https?:\/\/)[^/@\s]+@/gi, "$1").replace(/\b(https?:\/\/[^\s?#'"]*)[?#][^\s'"]*/gi, "$1");
 
-/** The unredacted remote of `<dir>/repos.json` entry `name`, for git itself; never send it to a client. */
-export function linkedRemote(dir: string, name: string): string | undefined {
-  try {
-    const raw = JSON.parse(readFileSync(join(dir, "repos.json"), "utf-8"));
-    const hit = Array.isArray(raw) ? raw.find((r) => r?.name === name) : undefined;
-    return hit ? rawRemote(hit) : undefined;
-  } catch {
-    return undefined;
-  }
+/** A validated repos.json entry with its unredacted remote, for git itself; never send `remote` to a client. */
+export interface LinkedRepo {
+  entry: RepoEntry;
+  remote?: string;
 }
 
 /** `<dir>/repos.json` entries; a malformed file or entry is warned about and skipped. */
-export function readRepos(dir: string, name: string): RepoEntry[] {
+export function readLinkedRepos(dir: string, name: string): LinkedRepo[] {
   const reposPath = join(dir, "repos.json");
-  let repos: RepoEntry[] = [];
-  if (existsSync(reposPath)) {
-    try {
-      const raw = JSON.parse(readFileSync(reposPath, "utf-8"));
-      repos = Array.isArray(raw)
-        ? raw.flatMap((r) => {
-            // Per-entry: a malformed `openspec` config on ONE repo must not
-            // drop every other repo in the array — skip just that entry.
-            // A blank path resolves to the server cwd: it would count as present
-            // and its git calls would land in the workspace repository.
-            if (
-              typeof r?.name !== "string" ||
-              typeof r?.path !== "string" ||
-              r.path.trim() === ""
-            ) {
-              console.warn(
-                `[discovery] ${name}/repos.json: skipping repo entry without a string name or a non-empty string path:`,
-                JSON.stringify(r),
-              );
-              return [];
-            }
-            const present = isDirectoryOnThisMachine(r.path);
-            try {
-              const openspec = parseOpenSpecConfig(r);
-              const entry: RepoEntry = { name: r.name, path: r.path, present };
-              const remote = rawRemote(r);
-              if (remote) entry.remote = redactUrlCredentials(remote);
-              if (openspec) entry.openspec = openspec;
-              return [entry];
-            } catch (err) {
-              console.warn(
-                `[discovery] ${name}/repos.json: invalid openspec config for repo ${String(r?.name)}:`,
-                (err as Error).message,
-              );
-              return [];
-            }
-          })
-        : [];
-    } catch (err) {
-      console.warn(`[discovery] ${name}/repos.json: invalid JSON:`, (err as Error).message);
-    }
+  if (!existsSync(reposPath)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(reposPath, "utf-8"));
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((r, i): LinkedRepo[] => {
+      // Per-entry: a malformed `openspec` config on ONE repo must not
+      // drop every other repo in the array — skip just that entry.
+      // A blank path resolves to the server cwd: it would count as present
+      // and its git calls would land in the workspace repository.
+      if (typeof r?.name !== "string" || typeof r?.path !== "string" || r.path.trim() === "") {
+        // Index and name only: the raw entry may carry a credentialed remote.
+        console.warn(
+          `[discovery] ${name}/repos.json: skipping repo entry without a string name or a non-empty string path: #${i}`,
+          typeof r?.name === "string" ? r.name : "",
+        );
+        return [];
+      }
+      try {
+        const openspec = parseOpenSpecConfig(r);
+        const entry: RepoEntry = { name: r.name, path: r.path, present: isDirectoryOnThisMachine(r.path) };
+        const remote = rawRemote(r);
+        if (remote) entry.cloneable = true;
+        if (openspec) entry.openspec = openspec;
+        return [remote ? { entry, remote } : { entry }];
+      } catch (err) {
+        console.warn(
+          `[discovery] ${name}/repos.json: invalid openspec config for repo ${String(r?.name)}:`,
+          (err as Error).message,
+        );
+        return [];
+      }
+    });
+  } catch (err) {
+    console.warn(`[discovery] ${name}/repos.json: invalid JSON:`, (err as Error).message);
+    return [];
   }
-  return repos;
 }
+
+export const readRepos = (dir: string, name: string): RepoEntry[] => readLinkedRepos(dir, name).map((r) => r.entry);
 
 /**
  * A live project by name: a project dir under projectsDir that, through any symlink,

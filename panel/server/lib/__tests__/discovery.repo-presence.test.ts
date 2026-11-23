@@ -42,28 +42,26 @@ describe("readProject repo presence", () => {
     expect(repos()).toEqual([{ name: "repo", path: repoDir, present: true }]);
   });
 
-  it("carries a non-blank string remote through, trimmed; drops anything else", () => {
+  it("flags a non-blank string remote as cloneable and never sends the URL", () => {
     const gone = join(scratch, "gone");
     writeRepos([
-      { name: "a", path: gone, remote: "  git@example.com:o/a.git " },
+      { name: "a", path: gone, remote: "  https://bob:s3cret@github.com/o/a.git?sig=t0k " },
       { name: "b", path: gone, remote: "   " },
       { name: "c", path: gone, remote: 42 },
     ]);
     expect(repos()).toEqual([
-      { name: "a", path: gone, present: false, remote: "git@example.com:o/a.git" },
+      { name: "a", path: gone, present: false, cloneable: true },
       { name: "b", path: gone, present: false },
       { name: "c", path: gone, present: false },
     ]);
   });
 
-  it("strips userinfo from an http(s) remote before it leaves the server; scp-style ssh stays", () => {
-    const gone = join(scratch, "gone");
-    writeRepos([
-      { name: "a", path: gone, remote: "https://bob:s3cret@github.com/o/a.git" },
-      { name: "b", path: gone, remote: "http://tok@host/o/b.git" },
-      { name: "c", path: gone, remote: "git@github.com:o/c.git" },
-    ]);
-    expect(repos().map((r) => r.remote)).toEqual(["https://github.com/o/a.git", "http://host/o/b.git", "git@github.com:o/c.git"]);
+  it("never logs a skipped entry's remote", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    writeRepos([{ name: "x", path: "", remote: "https://bob:s3cret@host/o/x.git?sig=t0k" }]);
+    expect(repos()).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/s3cret|t0k/);
   });
 
   it("keeps a missing entry in file order with present false", () => {

@@ -7,8 +7,8 @@ export interface RepoEntry {
   path: string;
   /** Whether the `~`-expanded path is a directory on this machine (server-derived). */
   present: boolean;
-  /** Clone URL from repos.json, when given. */
-  remote?: string;
+  /** repos.json names a remote, so the panel can clone it; the URL stays on the server. */
+  cloneable?: boolean;
 }
 
 export interface Project {

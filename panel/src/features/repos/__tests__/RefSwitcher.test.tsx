@@ -67,15 +67,17 @@ describe("RefSwitcher", () => {
   describe("missing repo clone", () => {
     const GONE = "/srv/git/infopoly/infopoly-skills";
     const base = { worktrees: {}, repo: null, wt: null, onPick: vi.fn() };
-    const missing = (remote?: string) => [{ name: "infopoly-skills", path: GONE, present: false, ...(remote ? { remote } : {}) }];
+    const missing = (cloneable = false) => [{ name: "infopoly-skills", path: GONE, present: false, ...(cloneable ? { cloneable } : {}) }];
 
     it("offers Clone next to Not on this machine when repos.json names a remote", () => {
       stubFetch({}, []);
-      render(<RefSwitcher {...base} project="infopoly" repos={missing("git@github.com:o/skills.git")} />);
+      render(<RefSwitcher {...base} project="infopoly" repos={missing(true)} />);
       fireEvent.click(screen.getByTestId("repo-switcher"));
       const group = within(pop()).getByRole("group", { name: "infopoly-skills" });
       expect(group).toHaveTextContent("Not on this machine");
-      expect(within(group).getByTestId("repo-switcher-clone-infopoly-skills")).toHaveTextContent("Clone");
+      const button = within(group).getByTestId("repo-switcher-clone-infopoly-skills");
+      expect(button).toHaveTextContent("Clone");
+      expect(button.getAttribute("title") ?? "").not.toContain("git@");
     });
 
     it("shows no Clone button without a remote (no URL is guessed)", () => {
@@ -85,18 +87,18 @@ describe("RefSwitcher", () => {
       expect(within(pop()).queryByTestId("repo-switcher-clone-infopoly-skills")).toBeNull();
     });
 
-    it("posts the project and repo name, then refreshes the project list", async () => {
+    it("posts the project, repo name and path, then refreshes the project list", async () => {
       const fetch = stubFetch({ "/api/git/clone": { ok: true, path: GONE }, "/api/projects": [] }, []);
       const refreshed = vi.fn();
       window.addEventListener("pavilio:projects-refresh", refreshed);
       try {
-        render(<RefSwitcher {...base} project="infopoly" repos={missing("git@github.com:o/skills.git")} />);
+        render(<RefSwitcher {...base} project="infopoly" repos={missing(true)} />);
         fireEvent.click(screen.getByTestId("repo-switcher"));
         fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));
         await waitFor(() => expect(refreshed).toHaveBeenCalled());
         const call = fetch.mock.calls.find(([u]) => String(u) === "/api/git/clone");
         expect(call?.[1]?.method).toBe("POST");
-        expect(JSON.parse(String(call?.[1]?.body))).toEqual({ project: "infopoly", repo: "infopoly-skills" });
+        expect(JSON.parse(String(call?.[1]?.body))).toEqual({ project: "infopoly", repo: "infopoly-skills", path: GONE });
       } finally {
         window.removeEventListener("pavilio:projects-refresh", refreshed);
       }
@@ -107,7 +109,7 @@ describe("RefSwitcher", () => {
         { "/api/git/clone": () => jsonResponse({ error: "git clone failed: Permission denied (publickey)" }, { status: 502 }) },
         [],
       );
-      render(<RefSwitcher {...base} project="infopoly" repos={missing("git@github.com:o/skills.git")} />);
+      render(<RefSwitcher {...base} project="infopoly" repos={missing(true)} />);
       fireEvent.click(screen.getByTestId("repo-switcher"));
       fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));
       expect(await within(pop()).findByRole("alert")).toHaveTextContent("Permission denied (publickey)");
@@ -116,7 +118,7 @@ describe("RefSwitcher", () => {
 
     it("a clone error belongs to its project, not a same-named repo of the next one", async () => {
       stubFetch({ "/api/git/clone": () => jsonResponse({ error: "boom" }, { status: 502 }) }, []);
-      const repos = missing("git@github.com:o/skills.git");
+      const repos = missing(true);
       const { rerender } = render(<RefSwitcher {...base} project="infopoly" repos={repos} />);
       fireEvent.click(screen.getByTestId("repo-switcher"));
       fireEvent.click(within(pop()).getByTestId("repo-switcher-clone-infopoly-skills"));

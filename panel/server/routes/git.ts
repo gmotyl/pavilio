@@ -2,11 +2,11 @@ import { Router, type Response } from "express";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import { readFileSync, realpathSync, statSync } from "fs";
-import { lstat, mkdir, readFile, rm } from "fs/promises";
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "path";
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir } from "fs/promises";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "path";
 import { getConfig } from "../config.js";
 import { broadcast } from "../watcher.js";
-import { isLiveProject, linkedRemote, readRepos, redactUrlCredentials } from "../lib/discovery.js";
+import { isLiveProject, readLinkedRepos, readRepos, redactUrlCredentials } from "../lib/discovery.js";
 import { gitSafeEnv } from "../lib/gitEnv.js";
 import { expandHome } from "../lib/paths.js";
 
@@ -729,53 +729,80 @@ router.post("/push", (req, res) => {
 
 const CLONE_TIMEOUT_MS = 10 * 60_000;
 // Transports a linked repo may name; anything else (git://, ext::, …) is refused.
+// Set in the child env too: an inherited GIT_ALLOW_PROTOCOL would otherwise override the -c allowlist.
+const CLONE_PROTOCOLS = "https:ssh:file";
 const CLONE_CONFIG = [
   "protocol.allow=never",
-  "protocol.https.allow=always",
-  "protocol.ssh.allow=always",
-  "protocol.file.allow=always",
+  ...CLONE_PROTOCOLS.split(":").map((p) => `protocol.${p}.allow=always`),
   // No tty to answer a host-key or passphrase prompt; GIT_SSH_COMMAND, when set, still wins.
   "core.sshCommand=ssh -o BatchMode=yes",
 ].flatMap((c) => ["-c", c]);
 /** Targets with a clone running; a second request would race the existence check. */
 const cloning = new Set<string>();
 
+const exists = (p: string) => lstat(p).then(() => true, () => false);
+
+/** Remove the now-empty dirs from `dir` up to `top` (the first dir this request made); stops at one still in use. */
+async function pruneEmpty(dir: string, top: string): Promise<void> {
+  for (let d = dir; d === top || d.startsWith(top + sep); d = dirname(d)) {
+    if (!(await rmdir(d).then(() => true, () => false))) return;
+  }
+}
+
 /**
- * Clone a linked repo that is missing here. Only `{ project, repo }` names come from the client;
- * the URL and target are the project's repos.json entry, so no caller-chosen URL or path is cloned.
+ * Clone a linked repo that is missing here. The client names one repos.json entry by
+ * `{ project, repo, path }`; URL and target both come from that single validated entry,
+ * so no caller-chosen URL or path is cloned.
  */
 router.post("/clone", async (req, res) => {
   try {
-    const { project, repo } = req.body || {};
-    if (typeof project !== "string" || typeof repo !== "string" || !project || !repo)
-      return res.status(400).json({ error: "project and repo required" });
+    const { project, repo, path } = req.body || {};
+    if ([project, repo, path].some((v) => typeof v !== "string" || !v))
+      return res.status(400).json({ error: "project, repo and path required" });
     const { projectsDir } = getConfig();
     if (!isLiveProject(projectsDir, project)) return res.status(404).json({ error: `unknown project: ${project}` });
-    const projectDir = join(projectsDir, project);
-    const entry = readRepos(projectDir, project).find((r) => r.name === repo);
-    if (!entry) return res.status(404).json({ error: `${project} links no repo named ${repo}` });
-    const remote = linkedRemote(projectDir, repo);
+    const hits = readLinkedRepos(join(projectsDir, project), project).filter((r) => r.entry.name === repo && r.entry.path === path);
+    if (!hits.length) return res.status(404).json({ error: `${project} links no repo named ${repo} at ${path}` });
+    if (hits.length > 1)
+      return res.status(409).json({ code: "ambiguous-repo", error: `${project} links ${repo} at ${path} more than once` });
+    const { remote } = hits[0];
     if (!remote) return res.status(409).json({ code: "no-remote", error: `${repo} has no remote in repos.json` });
-    const target = resolve(expandHome(entry.path));
+    const target = resolve(expandHome(path));
     if (cloning.has(target))
       return res.status(409).json({ code: "clone-in-progress", path: target, error: `${target} is already being cloned` });
-    if (await lstat(target).then(() => true, () => false))
-      return res.status(409).json({ code: "target-exists", path: target, error: `${target} already exists` });
+    // Reserved before the first await, so a concurrent request sees it.
     cloning.add(target);
     try {
-      // The first dir mkdir made, if any: removed again when the clone fails.
-      const created = await mkdir(dirname(target), { recursive: true });
+      if (await exists(target))
+        return res.status(409).json({ code: "target-exists", path: target, error: `${target} already exists` });
+      const parent = dirname(target);
+      // The first dir mkdir made, if any: pruned again (only while empty) when the clone fails.
+      const created = await mkdir(parent, { recursive: true });
+      // Cloned privately next to the target and renamed into place, so a failure never leaves a half-made checkout.
+      let staging: string | undefined;
+      let failure: { status: number; body: object } | undefined;
       try {
+        staging = await mkdtemp(join(parent, `.${basename(target)}.clone-`));
         // argv after `--`: the URL is never shell-parsed nor read as an option.
-        await execFileAsync("git", [...CLONE_CONFIG, "clone", "--", remote, target], {
-          cwd: dirname(target),
-          env: { ...gitSafeEnv(), GIT_TERMINAL_PROMPT: "0" },
+        await execFileAsync("git", [...CLONE_CONFIG, "clone", "--", remote, staging], {
+          cwd: parent,
+          env: { ...gitSafeEnv(), GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: CLONE_PROTOCOLS },
           timeout: CLONE_TIMEOUT_MS,
         });
+        if (await exists(target)) failure = { status: 409, body: { code: "target-exists", path: target, error: `${target} already exists` } };
+        else {
+          await rename(staging, target);
+          staging = undefined;
+        }
       } catch (e: any) {
-        if (created) await rm(created, { recursive: true, force: true }).catch(() => {});
-        const detail = String(e?.stderr ?? "").trim() || e?.message || String(e);
-        return res.status(502).json({ error: redactUrlCredentials(`git clone failed: ${detail}`) });
+        const raw = String(e?.stderr ?? "").trim() || e?.message || String(e);
+        const detail = staging ? raw.split(staging).join(target) : raw;
+        failure = { status: 502, body: { error: redactUrlCredentials(`git clone failed: ${detail}`) } };
+      }
+      if (staging) await rm(staging, { recursive: true, force: true }).catch(() => {});
+      if (failure) {
+        if (created) await pruneEmpty(parent, created);
+        return res.status(failure.status).json(failure.body);
       }
     } finally {
       cloning.delete(target);

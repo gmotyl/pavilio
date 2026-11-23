@@ -55,7 +55,7 @@ export function useWorktrees(repos: RepoEntry[]): WorktreeMap {
 }
 
 interface Props {
-  /** Owning project; with a repo's `remote`, a missing repo can be cloned. */
+  /** Owning project; with a cloneable repo, a missing repo can be cloned. */
   project?: string;
   repos: RepoEntry[];
   worktrees: WorktreeMap;
@@ -80,7 +80,7 @@ const branchLabel = (w: Worktree | undefined) => (w ? (w.branch ?? `detached ${w
 
 type CloneState = "busy" | { error: string } | undefined;
 
-/** A linked repo absent here: its path, and Clone when repos.json names a remote. */
+/** A linked repo absent here: its path, and Clone when repos.json names a remote (never sent to the client). */
 function MissingRepo({ repo: r, canClone, state, onClone }: { repo: RepoEntry; canClone: boolean; state: CloneState; onClone: () => void }) {
   return (
     <>
@@ -91,12 +91,12 @@ function MissingRepo({ repo: r, canClone, state, onClone }: { repo: RepoEntry; c
           </span>
           <span className="cv-sw-missing">Not on this machine</span>
         </button>
-        {canClone && r.remote && (
+        {canClone && r.cloneable && (
           <button
             type="button"
             className="cv-sw-clone"
             data-testid={`repo-switcher-clone-${r.name}`}
-            title={`git clone ${r.remote} ${r.path}`}
+            title={`Clone into ${r.path}`}
             disabled={state === "busy"}
             onClick={onClone}
           >
@@ -185,7 +185,7 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
 
   // Keyed by project too: another project may link a repo of the same name.
   const cloneKey = (name: string) => `${project ?? ""}\0${name}`;
-  const clone = async (name: string) => {
+  const clone = async ({ name, path }: RepoEntry) => {
     if (!project) return;
     const key = cloneKey(name);
     setCloning((c) => ({ ...c, [key]: "busy" }));
@@ -194,7 +194,7 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
       const res = await fetch("/api/git/clone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project, repo: name }),
+        body: JSON.stringify({ project, repo: name, path }),
       });
       if (!res.ok) error = ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `HTTP ${res.status}`;
     } catch (e) {
@@ -299,7 +299,7 @@ export default function RefSwitcher({ project, repos, worktrees, repo, wt, onPic
                 <div key={r.name} className="cv-sw-group" role="group" aria-label={r.name}>
                   <div className="cv-sw-head">{r.name}</div>
                   {!r.present ? (
-                    <MissingRepo repo={r} canClone={!!project} state={cloning[cloneKey(r.name)]} onClone={() => clone(r.name)} />
+                    <MissingRepo repo={r} canClone={!!project} state={cloning[cloneKey(r.name)]} onClone={() => clone(r)} />
                   ) : !worktrees[r.name] ? (
                     <p className="cv-msg">Loading worktrees…</p>
                   ) : (
