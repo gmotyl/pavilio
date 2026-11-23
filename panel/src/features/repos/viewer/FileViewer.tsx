@@ -158,6 +158,22 @@ function identifierRanges(text: string): { ranges: Range[]; names: string[] } {
   return { ranges, names };
 }
 
+// A module specifier: `from '…'`, `import '…'`, `import('…')`, `require('…')`. One line only.
+const SPECIFIER = /(?:\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport)\s*(['"])([^'"\\\n]+)\1/g;
+const IN_COMMENT = /\bhljs-comment\b/;
+
+/** Quoted specifier ranges (quotes included) with the specifier text. */
+function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
+  const ranges: Range[] = [];
+  const specs: string[] = [];
+  for (const m of text.matchAll(SPECIFIER)) {
+    const end = m.index + m[0].length;
+    ranges.push([end - m[2].length - 2, end]);
+    specs.push(m[2]);
+  }
+  return { ranges, specs };
+}
+
 const attr = (s: string): string => escapeHtml(s).replace(/"/g, "&quot;");
 
 /** One line's final HTML: syntax colours, then word marks, search matches and clickable identifiers. */
@@ -166,13 +182,26 @@ function lineHtml(base: string, text: string, opts: { words?: Range[]; term: str
   if (opts.words?.length) html = decorate(html, opts.words, () => '<mark class="fv-word">', "</mark>");
   html = decorate(html, matchRanges(text, opts.term), () => '<mark class="fv-hl">', "</mark>");
   if (opts.symbols) {
-    const { ranges, names } = identifierRanges(text);
+    const spec = specifierRanges(text);
+    const ids = identifierRanges(text);
+    // Unhighlighted text has no string classes to veto words inside a specifier.
+    const keep = ids.ranges.map(([a, b]) => !spec.ranges.some(([s, e]) => a < e && b > s));
+    const ranges = ids.ranges.filter((_, i) => keep[i]);
+    const names = ids.names.filter((_, i) => keep[i]);
     html = decorate(
       html,
       ranges,
       (i) => `<span class="fv-sym" data-sym="${attr(names[i])}" data-col="${ranges[i][0] + 1}" title="Go to definition">`,
       "</span>",
       (classes) => classes.some((c) => NOT_CODE.test(c)),
+    );
+    // data-col is the first character inside the quotes: ts-nav resolves the specifier there.
+    html = decorate(
+      html,
+      spec.ranges,
+      (i) => `<span class="fv-sym fv-spec" data-sym="${attr(spec.specs[i])}" data-col="${spec.ranges[i][0] + 2}" title="Open module">`,
+      "</span>",
+      (classes) => classes.some((c) => IN_COMMENT.test(c)),
     );
   }
   return html;

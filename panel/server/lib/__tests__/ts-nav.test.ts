@@ -64,6 +64,35 @@ describe("ts-nav", () => {
     expect(await nav.definition(REPO, "src/main.ts", 3, 22)).toEqual([{ path: "src/shapes.ts", line: 1, col: 18 }]);
   });
 
+  it("resolves a relative import specifier to the imported file's first line", async () => {
+    nav = createTsNav();
+    // Inside `"./shapes"` in `import { area, type Shape } from "./shapes";`
+    expect(await nav.definition(REPO, "src/main.ts", 1, 38)).toEqual([{ path: "src/shapes.ts", line: 1, col: 1 }]);
+  });
+
+  it("resolves export-from, dynamic import and require specifiers, and an index file", async () => {
+    nav = createTsNav();
+    const root = tempRepo({
+      "tsconfig.json": { compilerOptions: { ...COMPILER, allowJs: true }, include: ["src"] },
+      "src/lib/index.ts": "export const x = 1;\n",
+      "src/a.ts": 'export { x } from "./lib";\nexport const later = () => import("./lib");\n',
+      "src/c.js": 'const lib = require("./lib");\n',
+    });
+    const at = { path: "src/lib/index.ts", line: 1, col: 1 };
+    expect(await nav.definition(root, "src/a.ts", 1, 21)).toEqual([at]);
+    expect(await nav.definition(root, "src/a.ts", 2, 37)).toEqual([at]);
+    expect(await nav.definition(root, "src/c.js", 1, 23)).toEqual([at]);
+  });
+
+  it("an unresolvable specifier has no definition", async () => {
+    nav = createTsNav();
+    const root = tempRepo({
+      "tsconfig.json": { compilerOptions: COMPILER, include: ["src"] },
+      "src/a.ts": 'import { y } from "./nope";\n',
+    });
+    expect(await nav.definition(root, "src/a.ts", 1, 22)).toEqual([]);
+  });
+
   it("returns no locations for whitespace", async () => {
     nav = createTsNav();
     expect(await nav.definition(REPO, "src/main.ts", 3, 21)).toEqual([]);

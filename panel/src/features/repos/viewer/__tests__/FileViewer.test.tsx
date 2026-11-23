@@ -192,6 +192,42 @@ describe("FileViewer", () => {
     expect(onIdentifierClick).toHaveBeenCalledWith({ line: 15, col: 22 }, "height");
   });
 
+  it("import specifiers are clickable in Code and click at a column inside the string", () => {
+    const onIdentifierClick = vi.fn();
+    const content = [
+      "import { AuthService } from './auth.service';",
+      'import type { M } from "../../interfaces/modules/module-metadata.interface";',
+      "export * from './lib';",
+      "import './side-effect';",
+      "const lazy = () => import('./lazy');",
+      "const cjs = require('./cjs');",
+      "// import nope from './in-comment';",
+      "const s = 'not a specifier';",
+    ].join("\n");
+    const { container } = render(<FileViewer path="src/auth/auth.controller.ts" content={content} defaultMode="code" onIdentifierClick={onIdentifierClick} />);
+    const specs = [...container.querySelectorAll<HTMLElement>(".fv-spec")];
+    expect(specs.map((s) => s.dataset.sym)).toEqual([
+      "./auth.service",
+      "../../interfaces/modules/module-metadata.interface",
+      "./lib",
+      "./side-effect",
+      "./lazy",
+      "./cjs",
+    ]);
+    expect(specs[0]).toHaveTextContent("'./auth.service'");
+    expect(specs[0]).toHaveAttribute("title", "Open module");
+    fireEvent.click(specs[0]);
+    // Column of the first character inside the quotes.
+    expect(onIdentifierClick).toHaveBeenLastCalledWith({ line: 1, col: 30 }, "./auth.service");
+    fireEvent.click(specs[1]);
+    expect(onIdentifierClick).toHaveBeenLastCalledWith({ line: 2, col: 25 }, "../../interfaces/modules/module-metadata.interface");
+  });
+
+  it("import specifiers stay plain outside TS/JS", () => {
+    const { container } = render(<FileViewer path="src/x.py" content={"from os import path"} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);
+  });
+
   it("scrollToLine into a fold in Diff expands it and flashes the line", () => {
     const { rerender, container } = render(changed());
     const body = screen.getByTestId("file-viewer-body");

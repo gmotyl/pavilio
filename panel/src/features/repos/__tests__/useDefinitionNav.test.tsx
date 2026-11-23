@@ -41,6 +41,21 @@ describe("useDefinitionNav", () => {
     expect(back()).toBeEnabled();
   });
 
+  it("clicking an import specifier opens the resolved file at line 1, and Back returns", async () => {
+    const { fetch } = await openB(at({ path: "src/a.ts", line: 1, col: 1 }));
+    const spec = screen.getByTestId("file-viewer-body").querySelector<HTMLElement>('tr[data-line="1"] .fv-spec')!;
+    expect(spec).toHaveTextContent('"y"');
+    fireEvent.click(spec);
+
+    await waitFor(() => expect(header()).toHaveTextContent("src/a.ts"));
+    expect(calls(fetch, "/api/code/definition")).toEqual([
+      `/api/code/definition?repo=${encodeURIComponent(MAIN)}&path=${encodeURIComponent("src/b.ts")}&line=1&col=16`,
+    ]);
+    expect(search().get("line")).toBe("1");
+    fireEvent.click(back());
+    await waitFor(() => expect(header()).toHaveTextContent("src/b.ts"));
+  });
+
   it("Back returns to the previous location", async () => {
     await openB(at({ path: "src/a.ts", line: 15, col: 7 }));
     fireEvent.click(sym(3, "inner")!);
