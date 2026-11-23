@@ -70,13 +70,18 @@ const USAGE = `usage: scripts/wiki <command> [args]
                                             group}]}: the ## Knowledge candidates (scope generic) and
                                             ## Group candidates (scope group, group = the project's
                                             current group: or null) of every non-archived wiki
-                                            except kind: knowledge ones; source is wiki/sources/… or null
+                                            except kind: knowledge ones (and, as a stopgap for
+                                            legacy cards without kind:, the project named
+                                            knowledge); source is wiki/sources/… or null
   clear-candidates --ids <file.json>        {removed}: drop exactly those candidate lines
                                             (file holds a JSON array of ids)
-  backlink <p> <source page> <target>       {added}: - [[knowledge:<target>]] under the page's
-                                            ## Knowledge (created at the end when absent)
-  harvest-status                            {lastRun, daysAgo, waiting}: newest harvest entry in
-                                            knowledge/wiki/log.md (null = never), candidates waiting
+  backlink <p> <source page> <target>       {added}: - [[<project>:wiki/<slug>]] under the page's
+                                            ## Knowledge (created at the end when absent);
+                                            target is wiki/<slug> (= knowledge:wiki/<slug>) or
+                                            <project>:wiki/<slug> for a group wiki
+  harvest-status                            {lastRun, daysAgo, waiting, waitingGroup}: newest harvest
+                                            entry in knowledge/wiki/log.md (null = never),
+                                            candidates waiting, of which from ## Group candidates
   targets                                   {global, groups: {<group>: <project>}}: the harvest
                                             targets — non-archived kind: knowledge projects, keyed
                                             by group: (none → global) | exit 1 {error} when ambiguous
@@ -349,7 +354,7 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       return ok({ ...clearCandidates(workspaceRoot, readIds(resolve(deps.cwd, file))) });
     }
     case "backlink": {
-      const [p, page, target] = only(parsed, 3, "backlink <p> <source page> <knowledge target>");
+      const [p, page, target] = only(parsed, 3, "backlink <p> <source page> <[project:]wiki/<slug>>");
       projectDir(workspaceRoot, p);
       return ok({ ...addBacklink(workspaceRoot, p, page, target) });
     }

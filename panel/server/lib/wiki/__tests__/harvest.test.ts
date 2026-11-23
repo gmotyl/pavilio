@@ -175,13 +175,52 @@ describe("harvest", () => {
     );
   });
 
+  it("addBacklink writes a group-wiki target", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/vat]]\n");
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/vat")).toEqual({ added: true });
+    const once = read("projects/alpha/wiki/sources/a.md");
+    expect(once).toBe(
+      "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/vat]]\n- [[metro-wiki:wiki/concepts/vat]]\n",
+    );
+    expect(addBacklink(root, "alpha", "wiki/sources/a", "[[metro-wiki:wiki/concepts/vat.md]]")).toEqual({
+      added: false,
+    });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(once);
+    for (const bad of ["../x:wiki/concepts/vat", "a/b:wiki/concepts/vat", ":wiki/concepts/vat", "metro-wiki:"]) {
+      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", bad)).toThrow();
+    }
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(once);
+  });
+
+  it("addBacklink keeps knowledge default for bare targets", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n\n## Knowledge\n- [[metro-wiki:wiki/concepts/x]]\n");
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toEqual({ added: true });
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "knowledge:wiki/concepts/x")).toEqual({ added: false });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(
+      "body\n\n## Knowledge\n- [[metro-wiki:wiki/concepts/x]]\n- [[knowledge:wiki/concepts/x]]\n",
+    );
+  });
+
+  it("harvestStatus counts group candidates separately", () => {
+    project("alpha", ["- 2026-10-20 — one", "- 2026-10-20 — two", "", "## Group candidates", "- g one", "- g two"]);
+    project("beta", ["- 2026-10-21 — three"]);
+    expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({
+      lastRun: null,
+      daysAgo: null,
+      waiting: 5,
+      waitingGroup: 2,
+    });
+  });
+
   it("harvest-status reports never", () => {
     project("alpha", ["- 2026-10-20 — one"]);
     const today = new Date(2026, 9, 22);
-    expect(harvestStatus(root, today)).toEqual({ lastRun: null, daysAgo: null, waiting: 1 });
+    expect(harvestStatus(root, today)).toEqual({ lastRun: null, daysAgo: null, waiting: 1, waitingGroup: 0 });
     write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
     write("projects/knowledge/wiki/log.md", "# Log\n\n## 2026-10-20 14:05 ingest (explicit)\n- sources: x\n");
-    expect(harvestStatus(root, today)).toEqual({ lastRun: null, daysAgo: null, waiting: 1 });
+    expect(harvestStatus(root, today)).toEqual({ lastRun: null, daysAgo: null, waiting: 1, waitingGroup: 0 });
   });
 
   it("harvest-status counts days and waiting items", () => {
@@ -192,13 +231,13 @@ describe("harvest", () => {
       "projects/knowledge/wiki/log.md",
       "# Log\n\n## [2026-10-01] harvest\n- picked: a\n\n## [2026-10-12] harvest\n- picked: b\n\n## 2026-10-15 09:00 ingest (explicit)\n",
     );
-    expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-12", daysAgo: 10, waiting: 3 });
+    expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-12", daysAgo: 10, waiting: 3, waitingGroup: 0 });
   });
 
   it("harvest-status clamps a future harvest to zero days", () => {
     write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
     write("projects/knowledge/wiki/log.md", "# Log\n\n## [2026-10-25] harvest\n- picked: a\n");
-    expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-25", daysAgo: 0, waiting: 0 });
+    expect(harvestStatus(root, new Date(2026, 9, 22))).toEqual({ lastRun: "2026-10-25", daysAgo: 0, waiting: 0, waitingGroup: 0 });
   });
 
   it("knowledgeTargets maps ungrouped and grouped knowledge projects", () => {

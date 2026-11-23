@@ -45,7 +45,14 @@ export type Candidate = {
   group: string | null;
 };
 
-export type HarvestStatus = { lastRun: string | null; daysAgo: number | null; waiting: number };
+export type HarvestStatus = {
+  lastRun: string | null;
+  daysAgo: number | null;
+  /** Every candidate waiting, generic and group. */
+  waiting: number;
+  /** The share of `waiting` from `## Group candidates`. */
+  waitingGroup: number;
+};
 
 /** Where the harvest writes: the ungrouped knowledge project, and one knowledge project per group. */
 export type KnowledgeTargets = { global: string | null; groups: Record<string, string> };
@@ -69,6 +76,7 @@ function knownProjects(projectsDir: string): string[] {
 function candidateProjects(workspaceRoot: string): string[] {
   const projectsDir = join(workspaceRoot, "projects");
   return knownProjects(projectsDir)
+    // By-name `knowledge` exclusion: a stopgap for legacy knowledge cards without `kind:`.
     .filter((name) => name !== KNOWLEDGE_PROJECT && projectKind(projectsDir, name) !== "knowledge")
     .filter((name) => isDir(join(projectsDir, name, "wiki")));
 }
@@ -223,19 +231,28 @@ export function clearCandidates(workspaceRoot: string, ids: string[]): { removed
   return { removed };
 }
 
-/** A knowledge link target without `.md`, `[[…]]` or the `knowledge:` prefix. */
-function normalizeTarget(target: string): string {
-  return target
-    .trim()
-    .replace(/^\[\[/, "")
-    .replace(/\]\]$/, "")
-    .replace(/^knowledge:/, "")
-    .replace(/\.md$/, "");
+/** A link target page without `.md`. */
+const normalizePage = (page: string) => page.trim().replace(/\.md$/, "");
+
+/**
+ * `wiki/<slug>` (the `knowledge` project) or `<project>:wiki/<slug>`, optionally in `[[…]]` and
+ * with `.md` → the target project and page. A malformed project name throws.
+ */
+function parseTarget(target: string): { project: string; page: string } {
+  const bare = target.trim().replace(/^\[\[/, "").replace(/\]\]$/, "");
+  const colon = bare.indexOf(":");
+  if (colon === -1) return { project: KNOWLEDGE_PROJECT, page: normalizePage(bare) };
+  const project = bare.slice(0, colon).trim();
+  if (!project || project === "." || project.includes("..") || /[/\\\s]/.test(project)) {
+    throw new Error(`invalid target project: ${JSON.stringify(project)}`);
+  }
+  return { project, page: normalizePage(bare.slice(colon + 1)) };
 }
 
 /**
- * `scripts/wiki backlink`: add `- [[knowledge:<target>]]` under the source page's `## Knowledge`
- * heading, created at the end when absent. A page that already links the target is left alone.
+ * `scripts/wiki backlink`: add `- [[<target project>:<page>]]` (`knowledge` for a bare `wiki/…`
+ * target) under the source page's `## Knowledge` heading, created at the end when absent. A page
+ * that already links the target is left alone.
  */
 export function addBacklink(
   workspaceRoot: string,
@@ -251,17 +268,17 @@ export function addBacklink(
     throw new Error(`source page must be inside projects/${project}/wiki/: ${sourcePage}`);
   }
   if (!existsSync(path)) throw new Error(`no source page: projects/${project}/${rel}`);
-  const wanted = normalizeTarget(target);
-  if (!wanted) throw new Error("backlink needs a knowledge target");
-  const link = `- [[knowledge:${wanted}]]`;
+  const wanted = parseTarget(target);
+  if (!wanted.page) throw new Error("backlink needs a knowledge target");
+  const link = `- [[${wanted.project}:${wanted.page}]]`;
 
   const text = readFileSync(path, "utf8");
   const lines = text.split("\n");
   const range = sectionRange(lines, KNOWLEDGE_HEADING);
   if (range) {
     const section = lines.slice(range[0], range[1]).join("\n");
-    for (const m of section.matchAll(/\[\[knowledge:([^\]|#]+)/g)) {
-      if (normalizeTarget(m[1]) === wanted) return { added: false };
+    for (const m of section.matchAll(/\[\[([^\]|#:]+):([^\]|#]+)/g)) {
+      if (m[1].trim() === wanted.project && normalizePage(m[2]) === wanted.page) return { added: false };
     }
     let at = range[1];
     while (at > range[0] && lines[at - 1].trim() === "") at--;
@@ -289,9 +306,14 @@ function daysBetween(from: string, to: string): number {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** `scripts/wiki harvest-status`: the newest harvest in `knowledge/wiki/log.md` and the backlog size. */
+/**
+ * `scripts/wiki harvest-status`: the newest harvest in `knowledge/wiki/log.md` and the backlog
+ * size, with the group share split out.
+ */
 export function harvestStatus(workspaceRoot: string, today: Date): HarvestStatus {
-  const waiting = listCandidates(workspaceRoot).items.length;
+  const { items } = listCandidates(workspaceRoot);
+  const waiting = items.length;
+  const waitingGroup = items.filter((i) => i.scope === "group").length;
   const log = join(workspaceRoot, "projects", KNOWLEDGE_PROJECT, "wiki", "log.md");
   let lastRun: string | null = null;
   if (existsSync(log)) {
@@ -300,8 +322,8 @@ export function harvestStatus(workspaceRoot: string, today: Date): HarvestStatus
       if (m && (lastRun === null || m[1] > lastRun)) lastRun = m[1];
     }
   }
-  if (lastRun === null) return { lastRun: null, daysAgo: null, waiting };
+  if (lastRun === null) return { lastRun: null, daysAgo: null, waiting, waitingGroup };
   const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
   // A log dated ahead of the local clock reads as "today", never as negative days.
-  return { lastRun, daysAgo: Math.max(0, daysBetween(lastRun, todayStr)), waiting };
+  return { lastRun, daysAgo: Math.max(0, daysBetween(lastRun, todayStr)), waiting, waitingGroup };
 }

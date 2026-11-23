@@ -257,9 +257,15 @@ describe("wiki cli", () => {
       json: { added: false },
     });
     expect((await cli(["backlink", "demo", "../escape.md", "wiki/concepts/vitest"])).code).toBe(1);
+    expect(await cli(["backlink", "demo", "wiki/sources/a.md", "metro-wiki:wiki/concepts/vat"])).toMatchObject({
+      code: 0,
+      json: { added: true },
+    });
+    expect(readFileSync(join(project, "wiki/sources/a.md"), "utf8")).toContain("- [[metro-wiki:wiki/concepts/vat]]\n");
+    expect((await cli(["backlink", "demo", "wiki/sources/a.md", "../x:wiki/concepts/vat"])).code).toBe(1);
 
     const status = await cli(["harvest-status"], { now: () => new Date(2026, 9, 22) });
-    expect(status).toMatchObject({ code: 0, json: { lastRun: null, daysAgo: null, waiting: 1 } });
+    expect(status).toMatchObject({ code: 0, json: { lastRun: null, daysAgo: null, waiting: 1, waitingGroup: 0 } });
   });
 
   it("pending takes --only more than once", async () => {
