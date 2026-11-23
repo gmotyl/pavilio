@@ -8,6 +8,9 @@ import ReposTab from "../ReposTab";
 import type { PrsResponse } from "../usePrs";
 import { ME, PRS, pr } from "./prFixtures";
 
+// Opening a PR mounts the Review view; its description needs the speech host (PrDescription.test).
+vi.mock("../PrDescription", () => ({ default: () => null }));
+
 const REPOS = [{ name: "pavilio", path: "/root/git/prv/pavilio", present: true }];
 
 function Search() {

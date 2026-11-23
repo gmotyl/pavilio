@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ChecksState } from "../../../server/lib/prs/provider";
-import ChangeRail from "./ChangeRail";
 import FileTree, { type TreeFile } from "./FileTree";
+import PrDescription from "./PrDescription";
 import PrSwitcher from "./PrSwitcher";
 import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
@@ -12,7 +12,7 @@ import { tooLargeMessage, tooLargeSize } from "./tooLarge";
 import FileViewer from "./viewer/FileViewer";
 import "./Review.css";
 
-const RAIL_MIN_WIDTH = 1100;
+const DESC_MIN_WIDTH = 1100;
 const STACK_MAX_WIDTH = 860;
 
 interface ChangedFile {
@@ -26,6 +26,9 @@ type Opened =
   | { status: "loading" }
   | { status: "error"; stage: "open" | "changed" | "history"; error: string }
   | { status: "ready"; head: string; base: string; changed: ChangedFile[] };
+
+/** The PR description: null while `open` is in flight, failed when it errored before answering. */
+type Description = string | null | { failed: true };
 
 type Loaded = { path: string } & (
   | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string; codeNote?: string }
@@ -84,6 +87,7 @@ function PrHeader({ pr, me }: { pr: PullRequest; me: string | null }) {
 }
 
 interface ReviewProps {
+  project: string;
   pr: PullRequest;
   me: string | null;
   params: URLSearchParams;
@@ -91,9 +95,10 @@ interface ReviewProps {
 }
 
 /** One PR's review; keyed by PR so switching starts from a clean slate and drops stale responses. */
-function PrReview({ pr, me, params, setParams }: ReviewProps) {
+function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   const [attempt, setAttempt] = useState(0);
   const [opened, setOpened] = useState<Opened>({ status: "loading" });
+  const [description, setDescription] = useState<Description>(null);
   const [changedOnly, setChangedOnly] = useState(true);
   const [whole, setWhole] = useState<TreeFile[] | { error: string } | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -109,22 +114,29 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
     let cancelled = false;
     let stage: "open" | "changed" = "open";
     setOpened({ status: "loading" });
+    // A retry asks again for a description that failed; one already shown stays.
+    setDescription((d) => (typeof d === "string" ? d : null));
+    let answered = false;
     (async () => {
       const res = await request("/api/prs/open", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo: pr.repoPath, number: pr.number }),
       });
-      const { head, base } = (await res.json()) as { head: string; base: string };
+      const { head, base, body } = (await res.json()) as { head: string; base: string; body?: string };
       // Unmounted for another PR: skip the follow-up request.
       if (cancelled) return;
+      answered = true;
+      setDescription(body ?? "");
       stage = "changed";
       const changed = (await (await request(`/api/git/changed?repo=${q(pr.repoPath)}&base=${q(base)}&head=${q(head)}`)).json()) as ChangedFile[];
       if (!cancelled) setOpened({ status: "ready", head, base, changed });
     })().catch(async (e: unknown) => {
       // No merge base: a shallow clone missing history; re-opening deepens it, a plain retry would not.
       const code = e instanceof HttpError ? ((await e.res.json().catch(() => null)) as { code?: string } | null)?.code : undefined;
-      if (!cancelled) setOpened({ status: "error", stage: code === "no-merge-base" ? "history" : stage, error: message(e) });
+      if (cancelled) return;
+      setOpened({ status: "error", stage: code === "no-merge-base" ? "history" : stage, error: message(e) });
+      if (!answered) setDescription((d) => (typeof d === "string" ? d : { failed: true }));
     });
     return () => {
       cancelled = true;
@@ -199,15 +211,8 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
     setScroll(null);
     setParams({ file: path, line: null });
   };
-  const jump = (line: number, side: "old" | "new") => {
-    if (!selected) return;
-    setScroll((s) => ({ line, side, key: (s?.key ?? 0) + 1, file: selected }));
-    // The file too: a line alone would land on whatever file opens first later.
-    // `line` in the URL counts new-side lines; a removed row has none to share.
-    setParams({ file: selected, line: side === "new" ? String(line) : null });
-  };
 
-  const showRail = width === null || width >= RAIL_MIN_WIDTH;
+  const showDesc = width === null || width >= DESC_MIN_WIDTH;
   const stack = width !== null && width < STACK_MAX_WIDTH;
   const current = loaded && loaded.path === selected ? loaded : null;
   const scrollHere = scroll && (scroll.file === null || scroll.file === selected) ? scroll : null;
@@ -282,7 +287,7 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
       <PrHeader pr={pr} me={me} />
       <div
         ref={bodyRef}
-        className={`rv-body${showRail ? "" : " rv-norail"}${stack ? " rv-stack" : ""}`}
+        className={`rv-body${showDesc ? "" : " rv-nodesc"}${stack ? " rv-stack" : ""}`}
         data-testid="review-body"
       >
         <div className="rv-side" data-testid="review-tree">
@@ -301,13 +306,13 @@ function PrReview({ pr, me, params, setParams }: ReviewProps) {
           {tree}
         </div>
         <div className="rv-main">{viewer}</div>
-        {showRail && <ChangeRail diff={current && !current.binary && !current.tooLarge ? current.diff : undefined} deleted={change?.status === "D"} onJump={jump} />}
+        {showDesc && <PrDescription project={project} pr={pr} body={typeof description === "object" && description !== null ? undefined : description} />}
       </div>
     </>
   );
 }
 
-/** Read-only PR review: switcher in the context slot, header, changed-files tree, viewer and change rail. */
+/** Read-only PR review: switcher in the context slot, header, changed-files tree, viewer and PR description. */
 export default function ReviewView({ project, prs, filter, setFilter, params, setParams, contextSlot }: ReposViewProps) {
   const key = params.get("pr");
   const pr = key ? prs.all.find((p) => prKey(p) === key) : undefined;
@@ -326,7 +331,7 @@ export default function ReviewView({ project, prs, filter, setFilter, params, se
 
   let body: ReactNode;
   if (!key) body = <p className="rv-msg">Pick a pull request from the switcher above.</p>;
-  else if (pr) body = <PrReview key={prKey(pr)} pr={pr} me={prs.me} params={params} setParams={setParams} />;
+  else if (pr) body = <PrReview key={prKey(pr)} project={project} pr={pr} me={prs.me} params={params} setParams={setParams} />;
   else if (prs.error)
     body = (
       <p className="rv-msg" role="alert">

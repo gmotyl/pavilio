@@ -242,9 +242,11 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     async openPr(repoPath, n) {
       if (!Number.isInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
       const slug = await assertGitHub(repoPath);
-      const base = (
-        await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName", "--jq", ".baseRefName"], repoPath)
-      ).trim();
+      const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName,body"], repoPath)) as {
+        baseRefName?: string;
+        body?: string;
+      };
+      const base = (view.baseRefName ?? "").trim();
       if (!base) throw new PrUnavailableError("failed", `PR #${n} has no base branch`);
       const headRef = `refs/pavilio/pr/${n}`;
       const baseRef = `refs/pavilio/pr-base/${n}`;
@@ -274,7 +276,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
           await fetch([`--deepen=${DEEPEN_BY}`]);
         }
       }
-      return { head, base: baseSha };
+      return { head, base: baseSha, body: view.body ?? "" };
     },
   };
 }

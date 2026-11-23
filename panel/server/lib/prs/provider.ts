@@ -21,7 +21,8 @@ export type Unavailable = "gh-missing" | "gh-unauthenticated" | "not-github" | "
 export interface PrProvider {
   whoami(): Promise<string>;
   listOpen(repoPath: string): Promise<PullRequest[]>;
-  openPr(repoPath: string, n: number): Promise<{ head: string; base: string }>;
+  /** Fetches the PR's head and base into private refs; `body` is the PR description (markdown, "" when none). */
+  openPr(repoPath: string, n: number): Promise<{ head: string; base: string; body: string }>;
 }
 
 /** Strip `user:secret@` from any URL in `text`: git and gh echo the origin URL in errors. */

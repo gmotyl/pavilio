@@ -7,6 +7,14 @@ import { writePreference } from "../../../preferences/store";
 import ReposTab from "../ReposTab";
 import { ME, PRS, pr } from "./prFixtures";
 
+// The description's speech needs the panel's speech host; PrDescription.test
+// covers that. Here only what the review hands it matters.
+vi.mock("../PrDescription", () => ({
+  default: ({ body }: { body: string | null | undefined }) => (
+    <aside aria-label="Pull request description">{body === undefined ? "failed" : body === null ? "loading" : body}</aside>
+  ),
+}));
+
 const REPO_PATH = "/root/git/prv/pavilio";
 const REPOS = [{ name: "pavilio", path: REPO_PATH, present: true }];
 
@@ -81,7 +89,7 @@ const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts"
 function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
-    "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40) })),
+    "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40), body: "PR body text" })),
     "/api/prs": list ?? { me: ME, prs, unavailable: [] },
     "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
     "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
@@ -114,7 +122,7 @@ function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open,
 const calls = (fetch: ReturnType<typeof stubFetch>, fragment: string) =>
   fetch.mock.calls.filter(([u]) => String(u).includes(fragment));
 const treeArea = () => screen.getByTestId("review-tree");
-const rail = () => screen.queryByRole("complementary", { name: "Changes in this file" });
+const desc = () => screen.queryByRole("complementary", { name: "Pull request description" });
 const loaded = () => waitFor(() => expect(screen.getByTestId("ft-file-src/a.ts")).toBeInTheDocument());
 
 beforeEach(() => {
@@ -181,7 +189,7 @@ describe("ReviewView", () => {
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 
-  it("renders tree, viewer in Diff and the change rail", async () => {
+  it("renders tree, viewer in Diff and the PR description", async () => {
     const fetch = renderReview();
     await loaded();
     const tree = treeArea();
@@ -198,12 +206,8 @@ describe("ReviewView", () => {
     expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
     expect(within(tree).getByTestId("ft-file-src/a.ts")).toHaveAttribute("aria-current", "true");
 
-    const r = await waitFor(() => {
-      const el = rail()!;
-      expect(within(el).getAllByRole("button")).toHaveLength(2);
-      return el;
-    });
-    expect(within(r).getAllByRole("button").map((b) => b.textContent)).toEqual(["L15+2 −1", "L29−1"]);
+    await waitFor(() => expect(desc()).toHaveTextContent("PR body text"));
+    expect(screen.queryByRole("complementary", { name: "Changes in this file" })).toBeNull();
   });
 
   it("unticking changed-only lists the whole repo at the PR head", async () => {
@@ -237,37 +241,6 @@ describe("ReviewView", () => {
     expect(await screen.findByText("This file is too large to display (2.5 MB).")).toBeInTheDocument();
   });
 
-  it("rail entry scrolls the viewer to its line", async () => {
-    renderReview();
-    await loaded();
-    // The rail mounts before the file's diff arrives; wait for its entries, not just the rail.
-    const r = await waitFor(() => {
-      const el = rail()!;
-      within(el).getByRole("button", { name: /^L29/ });
-      return el;
-    });
-    const scroll = vi.mocked(Element.prototype.scrollTo);
-    const outer = vi.mocked(HTMLElement.prototype.scrollIntoView);
-    scroll.mockClear();
-    outer.mockClear();
-    fireEvent.click(within(r).getByRole("button", { name: /^L29/ }));
-    // A pure removal lands on the removed row itself, not the line after it.
-    const row = screen.getByTestId("file-viewer-body").querySelector('tr[data-old-line="29"]')!;
-    expect(row).toHaveTextContent("removed 29");
-    await waitFor(() => expect(row).toHaveClass("fv-flash"));
-    // Only the viewer pane scrolls; the page around it stays put.
-    expect(scroll).toHaveBeenCalledTimes(1);
-    expect(scroll.mock.contexts[0]).toHaveClass("rv-main");
-    expect(outer).not.toHaveBeenCalled();
-    // URL `line` counts new-side lines only.
-    expect(screen.getByTestId("search").textContent).not.toContain("line=");
-    // The default file is written with the line, so the link survives a change of first file.
-    expect(screen.getByTestId("search").textContent).toContain(`file=${encodeURIComponent("src/a.ts")}`);
-
-    fireEvent.click(within(r).getByRole("button", { name: /^L29/ }));
-    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
-  });
-
   it("fetch failure shows Retry in the tree area", async () => {
     let fail = true;
     renderReview({
@@ -277,28 +250,31 @@ describe("ReviewView", () => {
     expect(alert).toHaveTextContent("Couldn't fetch this PR's branch");
     expect(screen.getByTestId("review-header")).toHaveTextContent("PR 1 #1");
     expect(screen.queryByTestId("file-viewer")).toBeNull();
+    expect(desc()).toHaveTextContent("failed");
 
     fail = false;
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     await loaded();
     expect(within(treeArea()).queryByRole("alert")).toBeNull();
+    // The retried answer carried no body: the PR has no description.
+    expect(desc()).toBeEmptyDOMElement();
   });
 
-  it("rail hides below 1100px and columns stack below 860px", async () => {
+  it("description hides below 1100px and columns stack below 860px", async () => {
     renderReview();
     await loaded();
     const body = screen.getByTestId("review-body");
     DrivenResizeObserver.resize(1300);
-    await waitFor(() => expect(rail()).not.toBeNull());
+    await waitFor(() => expect(desc()).not.toBeNull());
     expect(body).not.toHaveClass("rv-stack");
 
     DrivenResizeObserver.resize(1000);
-    expect(rail()).toBeNull();
-    expect(body).toHaveClass("rv-norail");
+    expect(desc()).toBeNull();
+    expect(body).toHaveClass("rv-nodesc");
     expect(body).not.toHaveClass("rv-stack");
 
     DrivenResizeObserver.resize(800);
-    expect(rail()).toBeNull();
+    expect(desc()).toBeNull();
     expect(body).toHaveClass("rv-stack");
   });
 
@@ -338,14 +314,6 @@ describe("ReviewView", () => {
     expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
     expect(viewer).toHaveTextContent("three");
     expect(calls(fetch, "/api/git/file").filter(([u]) => String(u).includes("gone.ts"))).toHaveLength(0);
-  });
-
-  it("rail offers no jump into a fully deleted file", async () => {
-    renderReview({ search: "?view=review&pr=pavilio%231&file=src%2Fgone.ts" });
-    await waitFor(() => expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("src/gone.ts"));
-    const r = await waitFor(() => rail()!);
-    await waitFor(() => expect(r).toHaveTextContent("File deleted"));
-    expect(within(r).queryAllByRole("button")).toHaveLength(0);
   });
 
   it("switcher closes on Escape and on an outside click", async () => {
