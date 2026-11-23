@@ -233,6 +233,24 @@ describe("FileViewer", () => {
     expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./real"]);
   });
 
+  it("a dynamic import with a bundler comment before its specifier still links it", () => {
+    const content = [
+      `const a = () => import(/* webpackChunkName: "a" */ './a');`,
+      "const b = () => import(/* webpackPrefetch: true */ /* x */ './b');",
+    ].join("\n");
+    const { container } = render(<FileViewer path="src/s.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./a", "./b"]);
+  });
+
+  it("a line too long to scan (minified code) gets no links, others still do", () => {
+    const minified = Array.from({ length: 400 }, (_, i) => `require('./m${i}');`).join("");
+    const content = [minified, "import x from './short';"].join("\n");
+    const { container } = render(<FileViewer path="dist/app.js" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
+    const first = container.querySelector('tr[data-line="1"]')!;
+    expect(first.querySelectorAll(".fv-sym")).toHaveLength(0);
+    expect([...container.querySelectorAll<HTMLElement>(".fv-spec")].map((s) => s.dataset.sym)).toEqual(["./short"]);
+  });
+
   it("import specifiers stay plain outside TS/JS", () => {
     const { container } = render(<FileViewer path="src/x.py" content={"from os import path"} defaultMode="code" onIdentifierClick={vi.fn()} />);
     expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);

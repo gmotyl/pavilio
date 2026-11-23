@@ -160,29 +160,32 @@ function identifierRanges(text: string): { ranges: Range[]; names: string[] } {
 }
 
 // A module specifier: `from '…'`, `import '…'`, `import('…')`, `require('…')`. One line only.
-const SPECIFIER = /(?:\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport)\s*(['"])([^'"\\\n]+)\1/g;
+// Block comments may sit before the string, e.g. `import(/* webpackChunkName: "x" */ './y')`.
+const SPECIFIER_GAP = String.raw`(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/)*`;
+const SPECIFIER = new RegExp(String.raw`(?:\bfrom|\bimport\s*\(|\brequire\s*\(|\bimport)${SPECIFIER_GAP}(['"])([^'"\\\n]+)\1`, "g");
 const IN_COMMENT = /\bhljs-comment\b/;
+// Longer lines (minified or generated code) get no links: scanning them is not worth a stalled tab.
+const MAX_SYMBOL_LINE = 2000;
 
-/** Whether `at` sits inside a '…', "…" or `…` literal opened earlier on the line. */
-function insideString(text: string, at: number): boolean {
-  let quote = "";
-  for (let i = 0; i < at; i++) {
-    const c = text[i];
-    if (quote) {
-      if (c === "\\") i++;
-      else if (c === quote) quote = "";
-    } else if (c === "'" || c === '"' || c === "`") quote = c;
-  }
-  return quote !== "";
-}
-
-/** Quoted specifier ranges (quotes included) with the specifier text. */
+/**
+ * Quoted specifier ranges (quotes included) with the specifier text. One pass: a quote
+ * scanner walks the line once, alongside the matches, to drop those inside a literal.
+ */
 function specifierRanges(text: string): { ranges: Range[]; specs: string[] } {
   const ranges: Range[] = [];
   const specs: string[] = [];
+  let quote = "";
+  let i = 0;
   for (const m of text.matchAll(SPECIFIER)) {
+    for (; i < m.index; i++) {
+      const c = text[i];
+      if (quote) {
+        if (c === "\\") i++;
+        else if (c === quote) quote = "";
+      } else if (c === "'" || c === '"' || c === "`") quote = c;
+    }
     // `"imported from 'x'"` is text, not an import.
-    if (insideString(text, m.index)) continue;
+    if (quote) continue;
     const end = m.index + m[0].length;
     ranges.push([end - m[2].length - 2, end]);
     specs.push(m[2]);
@@ -197,11 +200,16 @@ function lineHtml(base: string, text: string, opts: { words?: Range[]; term: str
   let html = base;
   if (opts.words?.length) html = decorate(html, opts.words, () => '<mark class="fv-word">', "</mark>");
   html = decorate(html, matchRanges(text, opts.term), () => '<mark class="fv-hl">', "</mark>");
-  if (opts.symbols) {
+  if (opts.symbols && text.length <= MAX_SYMBOL_LINE) {
     const spec = specifierRanges(text);
     const ids = identifierRanges(text);
     // Unhighlighted text has no string classes to veto words inside a specifier.
-    const keep = ids.ranges.map(([a, b]) => !spec.ranges.some(([s, e]) => a < e && b > s));
+    // Both range lists are sorted: walk them together.
+    let j = 0;
+    const keep = ids.ranges.map(([a, b]) => {
+      while (j < spec.ranges.length && spec.ranges[j][1] <= a) j++;
+      return !(j < spec.ranges.length && spec.ranges[j][0] < b);
+    });
     const ranges = ids.ranges.filter((_, i) => keep[i]);
     const names = ids.names.filter((_, i) => keep[i]);
     html = decorate(
