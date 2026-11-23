@@ -257,7 +257,10 @@ export function clearCandidates(workspaceRoot: string, ids: string[]): { removed
 /** A link target page without `.md`. */
 const normalizePage = (page: string) => page.trim().replace(/\.md$/, "");
 
-/** The renderer's `<project>:` prefix (`wikilinks.ts`); `..` is refused on top. */
+/**
+ * The renderer's `<project>:` prefix (`wikilinks.ts`): one path segment — no `/` or `\`, and
+ * never `.` or `..` (it starts with a letter or digit), so `foo..bar` is a valid slug.
+ */
 const TARGET_PROJECT = /^[A-Za-z0-9][\w.-]*$/;
 const TARGET_PAGE = /^wiki\/[^[\]|#\r\n]+$/;
 
@@ -265,8 +268,7 @@ const TARGET_PAGE = /^wiki\/[^[\]|#\r\n]+$/;
  * `wiki/<slug>` (the `knowledge` project) or `<project>:wiki/<slug>` (`knowledge` or a group
  * wiki), optionally in `[[…]]` and with `.md` → the target project and page, as the renderer
  * (`parseWikiLink`) reads the link written for it. A project name the renderer would not read as
- * a prefix (or holding `..`), or a page outside `wiki/` or with an empty, `.` or `..` segment
- * throws.
+ * a prefix, or a page outside `wiki/` or with an empty, `.` or `..` segment throws.
  */
 function parseTarget(target: string): { project: string; page: string } {
   const bare = target.trim().replace(/^\[\[/, "").replace(/\]\]$/, "");
@@ -274,7 +276,7 @@ function parseTarget(target: string): { project: string; page: string } {
   const project = colon === -1 ? KNOWLEDGE_PROJECT : bare.slice(0, colon).trim();
   const rawPage = colon === -1 ? bare : bare.slice(colon + 1);
   const link =
-    TARGET_PROJECT.test(project) && !project.includes("..") && TARGET_PAGE.test(normalizePage(rawPage))
+    TARGET_PROJECT.test(project) && TARGET_PAGE.test(normalizePage(rawPage))
       ? parseWikiLink(`${project}:${rawPage.trim()}`)
       : null;
   if (!link || link.project !== project || !link.target.startsWith("wiki/")) {
@@ -286,7 +288,8 @@ function parseTarget(target: string): { project: string; page: string } {
 /**
  * `scripts/wiki backlink`: add `- [[<target project>:<page>]]` (`knowledge` for a bare `wiki/…`
  * target) under the source page's `## Knowledge` heading, created at the end when absent. A page
- * that already links the target is left alone.
+ * that already links the target is left alone. The target project must be one of
+ * `knowledgeTargets` (the global wiki or a group wiki); ambiguous targets throw.
  */
 export function addBacklink(
   workspaceRoot: string,
@@ -303,6 +306,13 @@ export function addBacklink(
   }
   if (!existsSync(path)) throw new Error(`no source page: projects/${project}/${rel}`);
   const wanted = parseTarget(target);
+  const targets = knowledgeTargets(workspaceRoot);
+  const allowed = [targets.global, ...Object.values(targets.groups)].filter((t): t is string => t !== null);
+  if (!allowed.includes(wanted.project)) {
+    throw new Error(
+      `${wanted.project} is not a knowledge target (targets: ${allowed.join(", ") || "none"})`,
+    );
+  }
   const link = `- [[${wanted.project}:${wanted.page}]]`;
 
   const text = readFileSync(path, "utf8");

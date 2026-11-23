@@ -235,6 +235,13 @@ describe("wiki cli", () => {
   });
 
   it("cli dispatches the harvest commands", async () => {
+    for (const [name, card] of [
+      ["knowledge", "---\nkind: knowledge\n---\n"],
+      ["metro-wiki", "---\nkind: knowledge\ngroup: metro\n---\n"],
+    ]) {
+      mkdirSync(join(root, "projects", name), { recursive: true });
+      writeFileSync(join(root, "projects", name, "PROJECT.md"), card);
+    }
     write("wiki/open-questions.md", "## Gaps\n- g\n\n## Knowledge candidates\n- 2026-10-20 — one (from [[wiki/sources/a]])\n- 2026-10-20 — two\n");
     const listed = await cli(["candidates"]);
     expect(listed.code).toBe(0);
@@ -263,6 +270,10 @@ describe("wiki cli", () => {
     });
     expect(readFileSync(join(project, "wiki/sources/a.md"), "utf8")).toContain("- [[metro-wiki:wiki/concepts/vat]]\n");
     expect((await cli(["backlink", "demo", "wiki/sources/a.md", "../x:wiki/concepts/vat"])).code).toBe(1);
+    expect(await cli(["backlink", "demo", "wiki/sources/a.md", "demo:wiki/concepts/vat"])).toMatchObject({
+      code: 1,
+      json: { error: expect.stringMatching(/not a knowledge target/) },
+    });
 
     const status = await cli(["harvest-status"], { now: () => new Date(2026, 9, 22) });
     expect(status).toMatchObject({ code: 0, json: { lastRun: null, daysAgo: null, waiting: 1, waitingGroup: 0 } });

@@ -22,6 +22,14 @@ function write(rel: string, text: string) {
 
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 
+/** The knowledge targets backlinks may point at: `knowledge` (global) plus group wikis. */
+function knowledgeWikis(groups: Record<string, string> = { metro: "metro-wiki" }) {
+  write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
+  for (const [group, name] of Object.entries(groups)) {
+    write(`projects/${name}/PROJECT.md`, `---\nkind: knowledge\ngroup: ${group}\n---\n`);
+  }
+}
+
 /** A project with a PROJECT.md and an open-questions.md holding the given candidate lines. */
 function project(name: string, candidates: string[], base = "projects") {
   write(`${base}/${name}/PROJECT.md`, "# p\n");
@@ -156,6 +164,7 @@ describe("harvest", () => {
 
   it("backlink is idempotent", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
     write("projects/alpha/wiki/sources/a.md", "---\ntype: source\n---\nbody\n\n## Knowledge\n- [[knowledge:wiki/concepts/x]]\n");
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/vitest")).toEqual({ added: true });
     const once = read("projects/alpha/wiki/sources/a.md");
@@ -168,6 +177,7 @@ describe("harvest", () => {
 
   it("backlink creates the Knowledge section", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
     write("projects/alpha/wiki/sources/a.md", "---\ntype: source\n---\nbody\n\n## Knowledge candidates\nnot this one");
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/entities/uv")).toEqual({ added: true });
     expect(read("projects/alpha/wiki/sources/a.md")).toBe(
@@ -177,6 +187,7 @@ describe("harvest", () => {
 
   it("addBacklink writes a group-wiki target", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
     write("projects/alpha/wiki/sources/a.md", "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/vat]]\n");
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/vat")).toEqual({ added: true });
     const once = read("projects/alpha/wiki/sources/a.md");
@@ -195,12 +206,12 @@ describe("harvest", () => {
 
   it("addBacklink rejects malformed targets", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis({ metro: "metro-wiki", bank: "Metro_Bank.v2-wiki", dots: "foo..bar" });
     const text = "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/vat]]\n";
     write("projects/alpha/wiki/sources/a.md", text);
     const bad = [
       ".:wiki/concepts/vat",
       "..:wiki/concepts/vat",
-      "x..y:wiki/concepts/vat",
       "metro wiki:wiki/concepts/vat",
       "metro\\wiki:wiki/concepts/vat",
       "metro$wiki:wiki/concepts/vat",
@@ -213,16 +224,62 @@ describe("harvest", () => {
       "metro-wiki:wiki/a|b",
     ];
     for (const target of bad) {
-      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", target), target).toThrow(/backlink target/);
+      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", target), target).toThrow(/invalid backlink target/);
     }
     expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "Metro_Bank.v2-wiki:wiki/concepts/vat")).toEqual({
       added: true,
     });
+    // `..` inside one segment is a valid slug (`isValidProjectSlug`, the renderer): not traversal.
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "foo..bar:wiki/concepts/vat")).toEqual({ added: true });
+    expect(read("projects/alpha/wiki/sources/a.md")).toContain("- [[foo..bar:wiki/concepts/vat]]\n");
+  });
+
+  it("addBacklink only links to knowledge targets", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    write("projects/beta/PROJECT.md", "# p\n");
+    write("projects/gone-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: gone\n---\n");
+    write(".projects.local.md", "| Project | Type |\n| --- | --- |\n\n## Archived Projects\n\n| gone-wiki | private |\n");
+    const text = "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/vat]]\n";
+    write("projects/alpha/wiki/sources/a.md", text);
+    // No knowledge project at all: even a bare (`knowledge`) target is refused.
+    expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toThrow(/not a knowledge target/);
+    knowledgeWikis();
+    for (const target of [
+      "beta:wiki/concepts/x", // an ordinary project
+      "alpha:wiki/concepts/x", // the source project itself
+      "ghost:wiki/concepts/x", // no such project
+      "gone-wiki:wiki/concepts/x", // registry-archived knowledge wiki
+    ]) {
+      expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", target), target).toThrow(/not a knowledge target/);
+    }
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/x")).toEqual({ added: true });
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toEqual({ added: true });
+  });
+
+  it("addBacklink refuses a bare target when the global wiki is not knowledge", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    write("projects/kb/PROJECT.md", "---\nkind: knowledge\n---\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n");
+    expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toThrow(/not a knowledge target/);
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "kb:wiki/concepts/x")).toEqual({ added: true });
+  });
+
+  it("addBacklink fails on ambiguous knowledge targets", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
+    write("projects/metro-kb/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    write("projects/alpha/wiki/sources/a.md", "body\n");
+    expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/x")).toThrow(
+      /ambiguous knowledge target: metro-kb, metro-wiki/,
+    );
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe("body\n");
   });
 
   it("addBacklink keeps knowledge default for bare targets", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
     write("projects/alpha/wiki/sources/a.md", "body\n\n## Knowledge\n- [[metro-wiki:wiki/concepts/x]]\n");
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toEqual({ added: true });
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "knowledge:wiki/concepts/x")).toEqual({ added: false });
@@ -327,6 +384,7 @@ describe("harvest", () => {
 
   it("addBacklink agrees with the renderer on what links the target", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
     const text = "body\n\n## Knowledge\n- [[knowledge:wiki/concepts/x.MD]]\n- [[ metro-wiki:wiki\\concepts\\y|Y]]\n";
     write("projects/alpha/wiki/sources/a.md", text);
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toEqual({ added: false });
