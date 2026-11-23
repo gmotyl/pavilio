@@ -392,11 +392,12 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
   const named = params.get("repo");
   // Older links carry the repo's path instead of its name. A name several entries share
   // means the present one, which is the one a defaulted tab pinned.
-  const byName = named
-    ? (repos.find((r) => r.name === named && r.present) ?? repos.find((r) => r.name === named) ?? repos.find((r) => r.path === named))
-    : undefined;
+  const lookup = (key: string) =>
+    repos.find((r) => r.name === key && r.present) ?? repos.find((r) => r.name === key) ?? repos.find((r) => r.path === key);
+  const byName = named ? lookup(named) : undefined;
   const repo = byName ?? repos.find((r) => r.present);
-  const legacy = !!byName && byName.name !== named;
+  // Rewrite a path only when its name leads back to the same entry; else keep the path.
+  const legacy = !!byName && byName.name !== named && lookup(byName.name) === byName;
   const unknown = !!named && repos.length > 0 && !byName;
   const asked = params.get("wt");
   const listed = repo ? worktrees[repo.name] : undefined;

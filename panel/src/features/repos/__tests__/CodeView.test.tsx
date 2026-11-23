@@ -247,6 +247,18 @@ describe("CodeView", () => {
     expect(screen.queryByText("pavilio is not on this machine. Pick another repository above.")).toBeNull();
   });
 
+  it("a legacy path of a missing checkout whose name a present one shares stays on the missing checkout", async () => {
+    const [pavilio] = REPOS;
+    renderCode(`?view=code&repo=${encodeURIComponent(MISSING)}&file=src/b.ts`, {}, [{ name: "pavilio", path: MISSING, present: false }, pavilio]);
+    expect(await screen.findByText("pavilio is not on this machine. Pick another repository above.")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(search().get("repo")).toBe(MISSING);
+    expect(screen.getByText("pavilio is not on this machine. Pick another repository above.")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-viewer-header")).toBeNull();
+  });
+
   it("a repo picked while a clone is pending stays picked when the clone lands", async () => {
     const notes = { name: "notes", path: MISSING, present: false, cloneable: true };
     const [pavilio, , site] = REPOS;
