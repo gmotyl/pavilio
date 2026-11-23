@@ -266,6 +266,31 @@ describe("harvest", () => {
     expect(addBacklink(root, "alpha", "wiki/sources/a.md", "kb:wiki/concepts/x")).toEqual({ added: true });
   });
 
+  it("addBacklink keeps an existing link to a non-target as a no-op", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
+    write("projects/old-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: old\n---\n");
+    write(".projects.local.md", "| Project | Type |\n| --- | --- |\n\n## Archived Projects\n\n| old-wiki | private |\n");
+    const text = "body\n\n## Knowledge\n- [[old-wiki:wiki/concepts/x]]\n";
+    write("projects/alpha/wiki/sources/a.md", text);
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "old-wiki:wiki/concepts/x")).toEqual({ added: false });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
+    // A new link to it is still refused.
+    expect(() => addBacklink(root, "alpha", "wiki/sources/a.md", "old-wiki:wiki/concepts/y")).toThrow(
+      /not a knowledge target/,
+    );
+  });
+
+  it("addBacklink keeps an existing link as a no-op in an ambiguous workspace", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
+    write("projects/metro-kb/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
+    const text = "body\n\n## Knowledge\n- [[metro-wiki:wiki/concepts/x]]\n";
+    write("projects/alpha/wiki/sources/a.md", text);
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "metro-wiki:wiki/concepts/x")).toEqual({ added: false });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(text);
+  });
+
   it("addBacklink fails on ambiguous knowledge targets", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
     knowledgeWikis();

@@ -288,8 +288,9 @@ function parseTarget(target: string): { project: string; page: string } {
 /**
  * `scripts/wiki backlink`: add `- [[<target project>:<page>]]` (`knowledge` for a bare `wiki/…`
  * target) under the source page's `## Knowledge` heading, created at the end when absent. A page
- * that already links the target is left alone. The target project must be one of
- * `knowledgeTargets` (the global wiki or a group wiki); ambiguous targets throw.
+ * that already links the target is left alone (even when that project is no longer a target).
+ * A new link's project must be one of `knowledgeTargets` (the global wiki or a group wiki);
+ * ambiguous targets throw.
  */
 export function addBacklink(
   workspaceRoot: string,
@@ -306,6 +307,20 @@ export function addBacklink(
   }
   if (!existsSync(path)) throw new Error(`no source page: projects/${project}/${rel}`);
   const wanted = parseTarget(target);
+  const link = `- [[${wanted.project}:${wanted.page}]]`;
+
+  const text = readFileSync(path, "utf8");
+  const lines = text.split("\n");
+  const range = sectionRange(lines, KNOWLEDGE_HEADING);
+  // A link already present stays a no-op even when its project is no longer a target (archived,
+  // renamed, ambiguous): ingest re-appends existing lines and must not lose them.
+  if (range) {
+    const section = lines.slice(range[0], range[1]).join("\n");
+    for (const m of section.matchAll(/\[\[([^\]]*)\]\]/g)) {
+      const link = parseWikiLink(m[1]);
+      if (link?.project === wanted.project && link.target === wanted.page) return { added: false };
+    }
+  }
   const targets = knowledgeTargets(workspaceRoot);
   const allowed = [targets.global, ...Object.values(targets.groups)].filter((t): t is string => t !== null);
   if (!allowed.includes(wanted.project)) {
@@ -313,17 +328,7 @@ export function addBacklink(
       `${wanted.project} is not a knowledge target (targets: ${allowed.join(", ") || "none"})`,
     );
   }
-  const link = `- [[${wanted.project}:${wanted.page}]]`;
-
-  const text = readFileSync(path, "utf8");
-  const lines = text.split("\n");
-  const range = sectionRange(lines, KNOWLEDGE_HEADING);
   if (range) {
-    const section = lines.slice(range[0], range[1]).join("\n");
-    for (const m of section.matchAll(/\[\[([^\]]*)\]\]/g)) {
-      const link = parseWikiLink(m[1]);
-      if (link?.project === wanted.project && link.target === wanted.page) return { added: false };
-    }
     let at = range[1];
     while (at > range[0] && lines[at - 1].trim() === "") at--;
     lines.splice(at, 0, link);

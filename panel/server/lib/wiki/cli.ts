@@ -78,7 +78,10 @@ const USAGE = `usage: scripts/wiki <command> [args]
   backlink <p> <source page> <target>       {added}: - [[<project>:wiki/<slug>]] under the page's
                                             ## Knowledge (created at the end when absent);
                                             target is wiki/<slug> (= knowledge:wiki/<slug>) or
-                                            <project>:wiki/<slug> for a group wiki
+                                            <project>:wiki/<slug> for a group wiki; a new link's
+                                            project must be a current knowledge target (global
+                                            or a group wiki, see targets), else exit 1; a link
+                                            already there is {added:false} either way
   harvest-status                            {lastRun, daysAgo, waiting, waitingGroup}: newest harvest
                                             entry in knowledge/wiki/log.md (null = never),
                                             candidates waiting, of which from ## Group candidates
