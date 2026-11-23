@@ -225,7 +225,7 @@ export function ViewerActions({
  * open key. A new `text` for the same key does not restart it; the next Play
  * speaks whatever was loaded at that moment.
  */
-function SpeakingToolbar({
+export function SpeakingToolbar({
   speech,
   testIdPrefix,
   children,

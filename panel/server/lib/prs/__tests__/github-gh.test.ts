@@ -190,7 +190,7 @@ describe("GitHubGhProvider", () => {
     const { run, calls } = fakeRunner((cmd, args) => {
       const o = origin(cmd, args);
       if (o) return o;
-      if (cmd === "gh") return ok("release\n");
+      if (cmd === "gh") return ok(JSON.stringify({ baseRefName: "release", body: "## Why\nFixes it." }));
       if (args[0] === "fetch") return ok("");
       if (args.join(" ") === "rev-parse --is-shallow-repository") return ok("false\n");
       if (args[0] === "rev-parse" && args.some((a) => a.startsWith("refs/pavilio/pr/231"))) return ok("a".repeat(40) + "\n");
@@ -199,7 +199,8 @@ describe("GitHubGhProvider", () => {
     });
 
     const shas = await createGitHubGhProvider({ run }).openPr(REPO, 231);
-    expect(shas).toEqual({ head: "a".repeat(40), base: "b".repeat(40) });
+    // The description rides along: the review shows it beside the diff.
+    expect(shas).toEqual({ head: "a".repeat(40), base: "b".repeat(40), body: "## Why\nFixes it." });
 
     const fetch = calls.find((c) => c.cmd === "git" && c.args[0] === "fetch")!;
     expect(fetch.cwd).toBe(REPO);
@@ -224,7 +225,7 @@ describe("GitHubGhProvider", () => {
       return fakeRunner((cmd, args) => {
         const o = origin(cmd, args);
         if (o) return o;
-        if (cmd === "gh") return ok("release\n");
+        if (cmd === "gh") return ok(JSON.stringify({ baseRefName: "release", body: "" }));
         if (args[0] === "fetch") {
           if (args.some((a) => a.startsWith("--deepen="))) deepens++;
           return ok("");
@@ -239,7 +240,7 @@ describe("GitHubGhProvider", () => {
 
     it("deepens the PR fetch until base and head share a merge base", async () => {
       const { run, calls } = shallowRunner(2);
-      expect(await createGitHubGhProvider({ run }).openPr(REPO, 231)).toEqual({ head: "a".repeat(40), base: "b".repeat(40) });
+      expect(await createGitHubGhProvider({ run }).openPr(REPO, 231)).toEqual({ head: "a".repeat(40), base: "b".repeat(40), body: "" });
       const deepen = deepenFetches(calls);
       expect(deepen).toHaveLength(2);
       // Same private refspecs as the first fetch: still no remote-tracking update.
@@ -255,7 +256,7 @@ describe("GitHubGhProvider", () => {
 
     it("stops deepening after a bounded number of rounds", async () => {
       const { run, calls } = shallowRunner(Infinity);
-      expect(await createGitHubGhProvider({ run }).openPr(REPO, 231)).toEqual({ head: "a".repeat(40), base: "b".repeat(40) });
+      expect(await createGitHubGhProvider({ run }).openPr(REPO, 231)).toEqual({ head: "a".repeat(40), base: "b".repeat(40), body: "" });
       expect(deepenFetches(calls).length).toBeGreaterThan(0);
       expect(deepenFetches(calls).length).toBeLessThanOrEqual(5);
     });

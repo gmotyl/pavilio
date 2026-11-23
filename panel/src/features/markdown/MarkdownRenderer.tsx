@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { Children, cloneElement, isValidElement, lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -21,6 +21,24 @@ interface MarkdownRendererProps {
   content: string;
   /** Current file path relative to projectsDir, e.g. "my-project/PROJECT.md" */
   basePath?: string;
+  /**
+   * Markdown written by a third party (a GitHub PR body): no raw HTML, no
+   * wikilinks, and every link and image resolved against `linkBase` (the page
+   * the text came from) and opened outside the panel — never a panel route.
+   */
+  untrusted?: { linkBase: string };
+}
+
+/** `url` made safe (`defaultUrlTransform`) and absolute against `base`; "" when it can't be. */
+function resolveUntrustedUrl(url: string, base: string): string {
+  const safe = defaultUrlTransform(url);
+  if (!safe) return "";
+  try {
+    const resolved = new URL(safe, base);
+    return resolved.protocol === "http:" || resolved.protocol === "https:" || resolved.protocol === "mailto:" ? resolved.href : "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -222,7 +240,44 @@ function useMissingWikiLinks(targets: string): ReadonlySet<string> {
   return missing;
 }
 
-export default function MarkdownRenderer({ content, basePath }: MarkdownRendererProps) {
+export default function MarkdownRenderer({ content, basePath, untrusted }: MarkdownRendererProps) {
+  if (untrusted) return <UntrustedMarkdown content={content} linkBase={untrusted.linkBase} />;
+  return <TrustedMarkdown content={content} basePath={basePath} />;
+}
+
+/**
+ * Third-party markdown. Raw HTML is skipped outright (comments included), the
+ * wikilink plugin is off, and URLs go through `resolveUntrustedUrl`, so a link
+ * can neither run script nor land on a panel route. Fenced code is highlighted
+ * but gets none of the trusted overrides (copy buttons, mermaid diagrams).
+ */
+function UntrustedMarkdown({ content, linkBase }: { content: string; linkBase: string }) {
+  const components = useMemo<Components>(
+    () => ({
+      a: ({ href, children, node: _node, ...props }) => (
+        <a {...props} href={href || undefined} target="_blank" rel="noopener noreferrer">
+          {children}
+        </a>
+      ),
+    }),
+    [],
+  );
+  return (
+    <div className="prose prose-invert prose-zinc max-w-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }]]}
+        skipHtml
+        urlTransform={(url) => resolveUntrustedUrl(url, linkBase)}
+        components={components}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function TrustedMarkdown({ content, basePath }: { content: string; basePath?: string }) {
   const navigate = useNavigate();
   const targets = useMemo(() => wikiLinkTargets(content, basePath), [content, basePath]);
   const missingWikiLinks = useMissingWikiLinks(targets);

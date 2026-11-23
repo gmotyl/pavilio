@@ -53,7 +53,7 @@ function setup() {
       if (p === gh) return [pr(gh, 1, "2026-11-20T00:00:00Z"), pr(gh, 2, "2026-11-21T00:00:00Z")];
       throw new PrUnavailableError("not-github");
     }),
-    openPr: vi.fn(async () => ({ head: "h", base: "b" })),
+    openPr: vi.fn(async () => ({ head: "h", base: "b", body: "" })),
   } satisfies PrProvider;
   return { gh, gl, missing, provider };
 }
@@ -165,7 +165,7 @@ describe("/api/prs", () => {
     const { gh, provider } = setup();
     const res = await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ head: "h", base: "b" });
+    expect(res.body).toEqual({ head: "h", base: "b", body: "" });
     expect(provider.openPr).toHaveBeenCalledWith(gh, 3);
   });
 

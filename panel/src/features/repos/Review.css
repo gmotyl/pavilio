@@ -1,4 +1,4 @@
-/* Review view: PR switcher, compact PR header, tree | viewer | change rail. */
+/* Review view: PR switcher, compact PR header, tree | viewer | PR description. */
 .rv-sw {
   position: relative;
   display: flex;
@@ -81,11 +81,11 @@
 
 .rv-body {
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr) 210px;
+  grid-template-columns: 270px minmax(0, 1fr) minmax(300px, 30%);
   height: calc(100vh - 160px);
   min-height: 360px;
 }
-.rv-body.rv-norail { grid-template-columns: 250px minmax(0, 1fr); }
+.rv-body.rv-nodesc { grid-template-columns: 250px minmax(0, 1fr); }
 .rv-body.rv-stack { grid-template-columns: minmax(0, 1fr); height: auto; }
 .rv-side {
   display: flex;
@@ -114,36 +114,26 @@
 .rv-msg { padding: 12px; font-size: 12.5px; color: var(--text-tertiary); }
 .rv-msg button { color: var(--accent); }
 
-.rv-rail {
-  padding: 12px;
+.rv-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  /* Left: room for the 22px play-from-here button and its 4px gap. */
+  padding: 12px 14px 12px 26px;
   overflow: auto;
   border-left: 1px solid var(--border-subtle);
-  font-size: 12.5px;
+  font-size: 13px;
+  line-height: 1.55;
 }
-.rv-rail h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-.rv-rail button {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  width: 100%;
-  padding: 4px 8px;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  text-align: left;
-}
-.rv-rail button:hover { background: var(--bg-hover); color: var(--text-primary); }
-.rv-rail i { display: inline-block; flex: none; width: 3px; height: 10px; border-radius: 1px; }
-.rv-k-add { background: var(--green); }
-.rv-k-mod { background: var(--yellow); }
-.rv-k-del { background: var(--red); }
-.rv-ln { font: 11px var(--font-mono, monospace); color: var(--text-muted); }
-.rv-add { color: var(--green); }
-.rv-del { color: var(--red); }
-.rv-rail-empty { color: var(--text-muted); }
+.rv-desc-title { margin: 0 auto 0 0; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.rv-desc > .flex { gap: 6px; }
+.rv-desc-empty { color: var(--text-muted); }
+
 
 /* Fallback before the body is measured. */
 @media (max-width: 1100px) {
-  .rv-rail { display: none; }
+  .rv-desc { display: none; }
   .rv-body { grid-template-columns: 250px minmax(0, 1fr); }
 }
 @media (max-width: 860px) {

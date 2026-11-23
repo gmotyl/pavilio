@@ -112,7 +112,17 @@ describe("LeftSidebar Home link and folds", () => {
       const home = screen.getByTestId("sidebar-home-link");
       expect(home.parentElement).toBe(first);
       expect(home.getAttribute("href")).toBe("/");
-      expect(home.textContent).toBe("Home");
+      // The host pill stands in for the "Home" label from md up (phones hide
+      // the pill and show the word). The name starts with "Home" and also holds
+      // the pill's visible text, so voice control finds the link by either.
+      const badge = home.querySelector<HTMLElement>('[data-testid="host-badge"]')!;
+      expect(badge).not.toBeNull();
+      expect(home).not.toHaveAttribute("aria-label");
+      expect(home).toHaveAccessibleName(`Home ${badge.textContent}`);
+      // Long hostnames shrink and truncate inside the row instead of spilling out.
+      expect(home).toHaveClass("min-w-0");
+      expect(badge).toHaveClass("min-w-0");
+      expect(badge.querySelector(".truncate")).not.toBeNull();
       unmount();
     }
   });
