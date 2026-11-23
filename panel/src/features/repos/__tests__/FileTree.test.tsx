@@ -100,6 +100,14 @@ describe("FileTree", () => {
     expect(screen.getByRole("button", { name: /a\.ts/ })).not.toHaveAttribute("aria-current");
   });
 
+  it("opens the revealed file's folders without selecting it", () => {
+    render(<FileTree files={FILES} reveal="src/lib/deep.ts" onSelect={() => {}} />);
+    expect(folder("src")).toHaveAttribute("aria-expanded", "true");
+    expect(folder("lib")).toHaveAttribute("aria-expanded", "true");
+    expect(folder("docs")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /deep\.ts/ })).not.toHaveAttribute("aria-current");
+  });
+
   it("keeps a folder the user collapsed closed while the selection is unchanged", () => {
     const { rerender } = render(<FileTree files={FILES} selected="src/lib/deep.ts" onSelect={() => {}} />);
     fireEvent.click(folder("lib"));

@@ -23,6 +23,8 @@ interface DirNode {
 interface Props {
   files: TreeFile[];
   selected?: string;
+  /** Opens this file's folders when nothing is selected, so the list doesn't start fully collapsed. */
+  reveal?: string;
   onSelect: (path: string) => void;
   changedOnly?: boolean;
   "aria-label"?: string;
@@ -73,15 +75,16 @@ function ancestors(path: string): string[] {
 
 const STATUS_LABEL: Record<string, string> = { M: "modified", A: "added", D: "deleted", R: "renamed", "?": "untracked" };
 
-export default function FileTree({ files, selected, onSelect, changedOnly = false, "aria-label": label = "Files" }: Props) {
+export default function FileTree({ files, selected, reveal, onSelect, changedOnly = false, "aria-label": label = "Files" }: Props) {
   const tree = useMemo(() => buildTree(changedOnly ? files.filter(isChanged) : files), [files, changedOnly]);
-  const [open, setOpen] = useState<Set<string>>(() => new Set(selected ? ancestors(selected) : []));
+  const shown = selected ?? reveal;
+  const [open, setOpen] = useState<Set<string>>(() => new Set(shown ? ancestors(shown) : []));
 
   useEffect(() => {
-    if (!selected) return;
-    const need = ancestors(selected);
+    if (!shown) return;
+    const need = ancestors(shown);
     setOpen((prev) => (need.every((p) => prev.has(p)) ? prev : new Set([...prev, ...need])));
-  }, [selected]);
+  }, [shown]);
 
   const toggle = (path: string) =>
     setOpen((prev) => {

@@ -5,14 +5,29 @@ import { jsonResponse, stubFetch, type FetchHandler } from "../../../test-utils"
 import { preferences } from "../../../preferences/declarations";
 import { writePreference } from "../../../preferences/store";
 import ReposTab from "../ReposTab";
+import { prSpeechKey } from "../PrDescription";
+import type { PullRequest } from "../usePrs";
+import type { ReviewComment } from "../../../../server/lib/prs/provider";
 import { ME, PRS, pr } from "./prFixtures";
 
 // The description's speech needs the panel's speech host; PrDescription.test
-// covers that. Here only what the review hands it matters.
-vi.mock("../PrDescription", () => ({
-  default: ({ body }: { body: string | null | undefined }) => (
-    <aside aria-label="Pull request description">{body === undefined ? "failed" : body === null ? "loading" : body}</aside>
-  ),
+// covers that (Play, play-from-here, the empty body). Here only what the review hands it matters.
+vi.mock("../PrDescription", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../PrDescription")>();
+  return {
+    ...real,
+    default: ({ project, pr: p, body }: { project: string; pr: PullRequest; body: string | null | undefined }) => (
+      <section aria-label="Pull request description" data-speech-key={real.prSpeechKey(project, p)}>
+        {body === undefined ? "failed" : body === null ? "loading" : body}
+      </section>
+    ),
+  };
+});
+// Comment markers speak through the panel's one host; only the call matters here.
+const speech = vi.hoisted(() => ({ speakDocument: vi.fn() }));
+vi.mock("../../speech/SpeechHostProvider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../speech/SpeechHostProvider")>()),
+  usePageSpeech: () => speech,
 }));
 
 const REPO_PATH = "/root/git/prv/pavilio";
@@ -66,6 +81,23 @@ const CHANGED = [
   { path: "src/a.ts", status: "M", add: 2, del: 2 },
   { path: "src/gone.ts", status: "D", add: 0, del: 3 },
 ];
+const comment = (over: Partial<ReviewComment> & { id: number }): ReviewComment => ({
+  replyTo: null,
+  path: "src/a.ts",
+  line: 15,
+  side: "new",
+  author: "anna",
+  body: "Rename this?",
+  createdAt: "2026-11-22T10:00:00Z",
+  url: `https://github.com/gmotyl/pavilio/pull/1#discussion_r${over.id}`,
+  ...over,
+});
+// Two on src/a.ts (a thread on new line 15 with greg's reply), one on the deleted file.
+const COMMENTS = [
+  comment({ id: 1 }),
+  comment({ id: 2, replyTo: 1, author: ME, body: "Done.", createdAt: "2026-11-22T11:00:00Z" }),
+  comment({ id: 3, path: "src/gone.ts", line: 2, side: "old", author: "bob", body: "Why?" }),
+];
 const TREE = { files: [{ path: "README.md", status: null }, { path: "src/a.ts", status: null }, { path: "src/b.ts", status: null }] };
 
 const text = (body: string, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/plain" } });
@@ -82,14 +114,16 @@ interface Setup {
   tree?: FetchHandler;
   file?: FetchHandler;
   list?: FetchHandler;
+  comments?: FetchHandler;
 }
 
 const GONE_DIFF = ["diff --git a/src/gone.ts b/src/gone.ts", "--- a/src/gone.ts", "+++ /dev/null", "@@ -1,3 +0,0 @@", "-one", "-two", "-three"].join("\n");
 
-function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list }: Setup = {}) {
+function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open, changed, tree, file, list, comments }: Setup = {}) {
   const fetch = stubFetch({
     // Before "/api/prs": the first matching fragment wins.
     "/api/prs/open": open ?? (() => jsonResponse({ head: "h".repeat(40), base: "b".repeat(40), body: "PR body text" })),
+    "/api/prs/comments": comments ?? (() => jsonResponse([])),
     "/api/prs": list ?? { me: ME, prs, unavailable: [] },
     "/api/git/changed": changed ?? (() => jsonResponse(CHANGED)),
     "/api/git/tree": tree ?? (() => jsonResponse(TREE)),
@@ -122,13 +156,17 @@ function renderReview({ search = "?view=review&pr=pavilio%231", prs = PRS, open,
 const calls = (fetch: ReturnType<typeof stubFetch>, fragment: string) =>
   fetch.mock.calls.filter(([u]) => String(u).includes(fragment));
 const treeArea = () => screen.getByTestId("review-tree");
-const desc = () => screen.queryByRole("complementary", { name: "Pull request description" });
+const desc = () => screen.queryByRole("region", { name: "Pull request description" });
+const descEntry = () => within(treeArea()).getByRole("button", { name: "Description" });
+const FILE_A = "?view=review&pr=pavilio%231&file=src%2Fa.ts";
+const before = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 const loaded = () => waitFor(() => expect(screen.getByTestId("ft-file-src/a.ts")).toBeInTheDocument());
 
 beforeEach(() => {
   DrivenResizeObserver.all = [];
   vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
   vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  speech.speakDocument.mockClear();
   writePreference(preferences.reposPrFilter, { preset: "mine", author: null }, "pavilio");
 });
 
@@ -189,8 +227,8 @@ describe("ReviewView", () => {
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 
-  it("renders tree, viewer in Diff and the PR description", async () => {
-    const fetch = renderReview();
+  it("renders tree and the linked file's viewer in Diff", async () => {
+    const fetch = renderReview({ search: FILE_A });
     await loaded();
     const tree = treeArea();
     expect(tree).toHaveTextContent("at feat/1");
@@ -205,8 +243,7 @@ describe("ReviewView", () => {
     expect(within(viewer).getByTestId("file-viewer-header")).toHaveTextContent("src/a.ts");
     expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
     expect(within(tree).getByTestId("ft-file-src/a.ts")).toHaveAttribute("aria-current", "true");
-
-    await waitFor(() => expect(desc()).toHaveTextContent("PR body text"));
+    expect(desc()).toBeNull();
     expect(screen.queryByRole("complementary", { name: "Changes in this file" })).toBeNull();
   });
 
@@ -225,7 +262,7 @@ describe("ReviewView", () => {
   });
 
   it("code mode reads the file at the PR head", async () => {
-    const fetch = renderReview();
+    const fetch = renderReview({ search: FILE_A });
     await loaded();
     const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
     fireEvent.click(within(viewer).getByRole("button", { name: "Code" }));
@@ -250,6 +287,8 @@ describe("ReviewView", () => {
     expect(alert).toHaveTextContent("Couldn't fetch this PR's branch");
     expect(screen.getByTestId("review-header")).toHaveTextContent("PR 1 #1");
     expect(screen.queryByTestId("file-viewer")).toBeNull();
+    // The Description entry doesn't wait for the branch.
+    expect(descEntry()).toHaveAttribute("aria-current", "true");
     expect(desc()).toHaveTextContent("failed");
 
     fail = false;
@@ -260,22 +299,124 @@ describe("ReviewView", () => {
     expect(desc()).toBeEmptyDOMElement();
   });
 
-  it("description hides below 1100px and columns stack below 860px", async () => {
+  it("Review has no description column at any width", async () => {
     renderReview();
     await loaded();
     const body = screen.getByTestId("review-body");
-    DrivenResizeObserver.resize(1300);
-    await waitFor(() => expect(desc()).not.toBeNull());
-    expect(body).not.toHaveClass("rv-stack");
-
-    DrivenResizeObserver.resize(1000);
-    expect(desc()).toBeNull();
-    expect(body).toHaveClass("rv-nodesc");
-    expect(body).not.toHaveClass("rv-stack");
-
-    DrivenResizeObserver.resize(800);
-    expect(desc()).toBeNull();
+    for (const width of [1300, 1000, 800]) {
+      DrivenResizeObserver.resize(width);
+      expect(screen.queryByRole("complementary")).toBeNull();
+      expect(body.querySelector(".rv-desc")).toBeNull();
+      expect(body).not.toHaveClass("rv-nodesc");
+      // The description lives in the viewer, not beside it.
+      expect(desc()?.closest(".rv-main")).not.toBeNull();
+      expect(body.children).toHaveLength(2);
+    }
     expect(body).toHaveClass("rv-stack");
+    DrivenResizeObserver.resize(1300);
+    expect(body).not.toHaveClass("rv-stack");
+  });
+
+  it("Review opens on the Description entry", async () => {
+    // An old link's line without a file is ignored.
+    const fetch = renderReview({ search: "?view=review&pr=pavilio%231&line=15" });
+    await loaded();
+    const entry = descEntry();
+    expect(entry).toHaveAttribute("aria-current", "true");
+    const sep = within(treeArea()).getByRole("separator");
+    const files = within(treeArea()).getByRole("navigation", { name: "Pull request files" });
+    expect(before(entry, sep) && before(sep, files)).toBe(true);
+    expect(within(files).getByTestId("ft-file-src/a.ts")).not.toHaveAttribute("aria-current");
+
+    await waitFor(() => expect(desc()).toHaveTextContent("PR body text"));
+    expect(desc()).toHaveAttribute("data-speech-key", prSpeechKey("pavilio", PRS[0]));
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+    expect(calls(fetch, "/api/git/diff-ref")).toHaveLength(0);
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("Description entry stays first with the whole-repo tree", async () => {
+    renderReview();
+    await loaded();
+    fireEvent.click(within(treeArea()).getByRole("checkbox", { name: "Changed files only" }));
+    const readme = await waitFor(() => screen.getByTestId("ft-file-README.md"));
+    const entry = descEntry();
+    expect(entry).toHaveAttribute("aria-current", "true");
+    const sep = within(treeArea()).getByRole("separator");
+    expect(before(entry, sep) && before(sep, readme)).toBe(true);
+    const rows = within(treeArea()).getAllByRole("button");
+    expect(rows[0]).toBe(entry);
+  });
+
+  it("Review opens the linked file when the URL names one", async () => {
+    // Comments never answer: the tree and diff must not wait for them.
+    renderReview({ search: FILE_A, comments: () => new Promise<Response>(() => {}) });
+    await loaded();
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    expect(within(viewer).getByTestId("file-viewer-header")).toHaveTextContent("src/a.ts");
+    expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    expect(screen.getByTestId("ft-file-src/a.ts")).toHaveAttribute("aria-current", "true");
+    expect(descEntry()).not.toHaveAttribute("aria-current");
+    expect(desc()).toBeNull();
+  });
+
+  it("Picking Description clears file and line", async () => {
+    renderReview({ search: `${FILE_A}&line=15` });
+    await waitFor(() => screen.getByTestId("file-viewer"));
+    fireEvent.click(descEntry());
+    const search = screen.getByTestId("search").textContent ?? "";
+    expect(search).toContain("pr=pavilio%231");
+    expect(search).not.toContain("file=");
+    expect(search).not.toContain("line=");
+    expect(descEntry()).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("ft-file-src/a.ts")).not.toHaveAttribute("aria-current");
+    expect(desc()).toHaveTextContent("PR body text");
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+  });
+
+  it("Review shows comment counts in the file list and markers in the viewer", async () => {
+    const fetch = renderReview({ search: FILE_A, comments: () => jsonResponse(COMMENTS) });
+    await waitFor(() => expect(within(screen.getByTestId("ft-file-src/a.ts")).getByTitle("2 comments")).toBeInTheDocument());
+    expect(within(screen.getByTestId("ft-file-src/gone.ts")).getByTitle("1 comment")).toBeInTheDocument();
+    expect(calls(fetch, "/api/prs/comments").map(([u]) => u)).toEqual([`/api/prs/comments?repo=${encodeURIComponent(REPO_PATH)}&number=1`]);
+
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    const marker = await within(viewer).findByRole("button", { name: "2 comments on line 15" });
+    // Only this file's threads: the deleted file's comment isn't here.
+    expect(within(viewer).getAllByRole("button", { name: /comments? on line/ })).toHaveLength(1);
+    fireEvent.focus(marker);
+    const pop = await screen.findByRole("dialog", { name: "Comments on line 15" });
+    // `me` reaches the marker: greg's reply reads as "you".
+    expect(pop).toHaveTextContent("you");
+    expect(pop).toHaveTextContent("anna");
+    fireEvent.click(within(pop).getByRole("button", { name: "Play thread" }));
+    expect(speech.speakDocument).toHaveBeenCalledWith(expect.objectContaining({ key: `${prSpeechKey("pavilio", PRS[0])}/t/1` }));
+  });
+
+  it("Review keeps the diff when comments fail and offers Retry", async () => {
+    let fail = true;
+    const fetch = renderReview({
+      search: FILE_A,
+      comments: () => (fail ? jsonResponse({ error: "boom" }, { status: 502 }) : jsonResponse(COMMENTS)),
+    });
+    const note = await screen.findByTestId("review-comments-note");
+    expect(note).toHaveTextContent("Couldn't load review comments");
+    const main = document.querySelector(".rv-main")!;
+    expect(main.contains(note)).toBe(true);
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    expect(before(note, viewer)).toBe(true);
+    await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
+    expect(within(viewer).queryByRole("button", { name: /comments? on line/ })).toBeNull();
+
+    const counts = () => [calls(fetch, "/api/prs/open").length, calls(fetch, "/api/git/changed").length, calls(fetch, "/api/git/diff-ref").length];
+    const was = counts();
+    fail = false;
+    fireEvent.click(within(note).getByRole("button", { name: "Retry" }));
+    await within(screen.getByTestId("file-viewer")).findByRole("button", { name: "2 comments on line 15" });
+    expect(screen.queryByTestId("review-comments-note")).toBeNull();
+    expect(calls(fetch, "/api/prs/comments")).toHaveLength(2);
+    expect(counts()).toEqual(was);
   });
 
   it("a late response for the previous PR never shows its files", async () => {
@@ -383,7 +524,7 @@ describe("ReviewView", () => {
   });
 
   it("a changed file too large to read whole keeps its patch", async () => {
-    renderReview({ file: () => jsonResponse({ error: "file too large", tooLarge: true, size: 9 * 1024 * 1024 }, { status: 413 }) });
+    renderReview({ search: FILE_A, file: () => jsonResponse({ error: "file too large", tooLarge: true, size: 9 * 1024 * 1024 }, { status: 413 }) });
     await loaded();
     const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
     expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");

@@ -42,7 +42,7 @@ function commentRanges(body: string): Array<[number, number]> {
 }
 
 /**
- * The PR body as the column renders AND speaks it — one text, so the toolbar,
+ * The PR body as the viewer renders AND speaks it — one text, so the toolbar,
  * the speech host and play-from-here always agree on its units:
  * - HTML comments go (PR templates hide their prompts in them). They are found
  *   by the markdown parser, so an escaped `\<!--` or a comment shown in code
@@ -64,16 +64,17 @@ interface Props {
   body: string | null | undefined;
 }
 
-/** The review's right column: the PR description, rendered and readable aloud like a notes page. */
+/** The review viewer's Description entry: the PR description, rendered and readable aloud like a notes page. */
 export default function PrDescription({ project, pr, body }: Props) {
   const source = typeof body === "string" ? prDescriptionSource(body) : body;
   const speech = { key: prSpeechKey(project, pr), text: source ?? "" };
   return (
-    <aside className="rv-desc" aria-label="Pull request description">
+    <section className="rv-descview" aria-label="Pull request description">
       <SpeakingToolbar speech={speech} testIdPrefix="pr-description">
         {(play) => (
           <>
             <h4 className="rv-desc-title">Description</h4>
+            <span className="rv-desc-num">PR #{pr.number}</span>
             {play}
           </>
         )}
@@ -89,6 +90,6 @@ export default function PrDescription({ project, pr, body }: Props) {
           <MarkdownRenderer content={source} untrusted={{ linkBase: pr.url }} />
         </PagePlayFromHere>
       )}
-    </aside>
+    </section>
   );
 }
