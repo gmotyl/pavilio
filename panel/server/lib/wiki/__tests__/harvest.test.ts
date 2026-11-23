@@ -68,7 +68,16 @@ describe("harvest", () => {
     project("alpha", ["- 2026-10-20 — a bare finding"]);
     const { items } = listCandidates(root);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ project: "alpha", text: "a bare finding", date: "2026-10-20", source: null });
+    expect(items[0]).toEqual({
+      id: items[0].id,
+      project: "alpha",
+      text: "a bare finding",
+      details: [],
+      date: "2026-10-20",
+      source: null,
+      scope: "generic",
+      group: null,
+    });
   });
 
   it("clear-candidates removes only the given lines", () => {
@@ -231,5 +240,53 @@ describe("harvest", () => {
     project("kb", ["- 2026-10-20 — ungrouped knowledge line"]);
     write("projects/kb/PROJECT.md", "---\nkind: knowledge\n---\n");
     expect(listCandidates(root).items.map((i) => i.project)).toEqual(["alpha"]);
+  });
+
+  it("listCandidates reads group candidates with scope and group", () => {
+    project("metro-app", ["- 2026-10-20 — generic line (from [[wiki/sources/a]])", "- 2026-10-20 — same"]);
+    write("projects/metro-app/PROJECT.md", "---\ngroup: metro\n---\n");
+    write(
+      "projects/metro-app/wiki/open-questions.md",
+      read("projects/metro-app/wiki/open-questions.md") +
+        ["## Group candidates", "- 2026-10-21 — metro uses one SSO (from [[wiki/sources/b]])", "  - detail", "- 2026-10-20 — same", ""].join("\n"),
+    );
+    const { items } = listCandidates(root);
+    expect(items.map((i) => [i.text, i.scope, i.group])).toEqual([
+      ["generic line", "generic", null],
+      ["same", "generic", null],
+      ["metro uses one SSO", "group", "metro"],
+      ["same", "group", "metro"],
+    ]);
+    const sso = items.find((i) => i.text === "metro uses one SSO")!;
+    expect(sso).toMatchObject({ project: "metro-app", date: "2026-10-21", source: "wiki/sources/b", details: ["- detail"] });
+    expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
+  });
+
+  it("group item of an ungrouped project has group null", () => {
+    project("alpha", []);
+    write(
+      "projects/alpha/wiki/open-questions.md",
+      read("projects/alpha/wiki/open-questions.md") + "## Group candidates\n- 2026-10-21 — was grouped once\n",
+    );
+    expect(listCandidates(root).items).toMatchObject([{ text: "was grouped once", scope: "group", group: null }]);
+  });
+
+  it("clearCandidates removes from both sections", () => {
+    project("metro-app", ["- 2026-10-20 — keep generic", "- 2026-10-20 — drop generic", "  - its detail"]);
+    write("projects/metro-app/PROJECT.md", "---\ngroup: metro\n---\n");
+    write(
+      "projects/metro-app/wiki/open-questions.md",
+      read("projects/metro-app/wiki/open-questions.md") +
+        ["## Group candidates", "- 2026-10-21 — drop group", "  - group detail", "- 2026-10-21 — keep group", ""].join("\n"),
+    );
+    const items = listCandidates(root).items;
+    const drop = items.filter((i) => i.text.startsWith("drop")).map((i) => i.id);
+    expect(clearCandidates(root, drop)).toEqual({ removed: 2 });
+    const text = read("projects/metro-app/wiki/open-questions.md");
+    expect(text).not.toMatch(/drop|detail/);
+    expect(listCandidates(root).items.map((i) => [i.text, i.scope])).toEqual([
+      ["keep generic", "generic"],
+      ["keep group", "group"],
+    ]);
   });
 });

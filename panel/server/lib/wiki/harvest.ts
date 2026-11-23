@@ -10,7 +10,7 @@ import { readActiveProjects, readArchivedProjects } from "../registry";
 
 /**
  * The deterministic half of the knowledge harvest: list and clear the `## Knowledge candidates`
- * of every project wiki, back-link a project source page to a knowledge page, and report how long
+ * and `## Group candidates` of every project wiki, back-link a project source page to a knowledge page, and report how long
  * ago the last harvest ran. The skill does the picking and the page writing.
  */
 
@@ -18,6 +18,9 @@ import { readActiveProjects, readArchivedProjects } from "../registry";
 export const KNOWLEDGE_PROJECT = "knowledge";
 
 const CANDIDATES_HEADING = "## Knowledge candidates";
+const GROUP_CANDIDATES_HEADING = "## Group candidates";
+
+export type CandidateScope = "generic" | "group";
 const KNOWLEDGE_HEADING = "## Knowledge";
 
 export type Candidate = {
@@ -36,6 +39,10 @@ export type Candidate = {
   date: string | null;
   /** The cited source page as a project-root path without `.md` (`wiki/sources/…`), or null. */
   source: string | null;
+  /** `generic` from `## Knowledge candidates`, `group` from `## Group candidates`. */
+  scope: CandidateScope;
+  /** For a group item, the origin project's current `group:` (null when it has none any more); null for generic. */
+  group: string | null;
 };
 
 export type HarvestStatus = { lastRun: string | null; daysAgo: number | null; waiting: number };
@@ -125,7 +132,13 @@ function lineHash(line: string, occurrence: number): string {
 }
 
 /** `- 2026-10-20 — <finding> (from [[wiki/sources/…]])`; date and source are optional. */
-function parseCandidate(project: string, line: string, occurrence: number): Candidate {
+function parseCandidate(
+  project: string,
+  line: string,
+  occurrence: number,
+  scope: CandidateScope,
+  group: string | null,
+): Candidate {
   let rest = line.replace(/\r$/, "").replace(/^\s*[-*]\s+/, "");
   const dated = /^(\d{4}-\d{2}-\d{2})\s*(?:[—–:-]\s*)?/.exec(rest);
   const date = dated ? dated[1] : null;
@@ -133,7 +146,7 @@ function parseCandidate(project: string, line: string, occurrence: number): Cand
   const cited = /\[\[(wiki\/sources\/[^\]|#]+)(?:[|#][^\]]*)?\]\]/.exec(rest);
   const source = cited ? cited[1].trim().replace(/\.md$/, "") : null;
   const text = rest.replace(/\s*\(from \[\[[^\]]*\]\]\)\s*$/, "").trim();
-  return { id: `${project}#${lineHash(line, occurrence)}`, project, text, details: [], date, source };
+  return { id: `${project}#${lineHash(line, occurrence)}`, project, text, details: [], date, source, scope, group };
 }
 
 type Found = { /** Line indexes of the bullet and its indented sub-lines. */ indexes: number[]; item: Candidate };
@@ -144,25 +157,36 @@ function dedent(lines: string[]): string[] {
   return lines.map((l) => l.slice(indent));
 }
 
-/** Every candidate of one project, with the lines it spans in `open-questions.md`. */
+/**
+ * Every candidate of one project — `## Knowledge candidates` then `## Group candidates` — with the
+ * lines it spans in `open-questions.md`. Occurrences are counted across both sections, so an
+ * identical line in each still gets its own id.
+ */
 function projectCandidates(workspaceRoot: string, project: string): { lines: string[]; found: Found[] } {
   const path = openQuestionsPath(workspaceRoot, project);
   if (!existsSync(path)) return { lines: [], found: [] };
   const lines = readFileSync(path, "utf8").split("\n");
-  const range = sectionRange(lines, CANDIDATES_HEADING);
-  if (!range) return { lines, found: [] };
   const found: Found[] = [];
   const seen = new Map<string, number>();
-  for (let i = range[0]; i < range[1]; i++) {
-    if (!isItem(lines[i])) continue;
-    const key = lines[i].replace(/\r$/, "");
-    const occurrence = seen.get(key) ?? 0;
-    seen.set(key, occurrence + 1);
-    const item = parseCandidate(project, lines[i], occurrence);
-    const indexes = [i];
-    while (i + 1 < range[1] && isContinuation(lines[i + 1])) indexes.push(++i);
-    item.details = dedent(indexes.slice(1).map((at) => lines[at].replace(/\r$/, "").trimEnd()));
-    found.push({ indexes, item });
+  const sections: [string, CandidateScope][] = [
+    [CANDIDATES_HEADING, "generic"],
+    [GROUP_CANDIDATES_HEADING, "group"],
+  ];
+  for (const [heading, scope] of sections) {
+    const range = sectionRange(lines, heading);
+    if (!range) continue;
+    const group = scope === "group" ? projectGroup(join(workspaceRoot, "projects"), project) : null;
+    for (let i = range[0]; i < range[1]; i++) {
+      if (!isItem(lines[i])) continue;
+      const key = lines[i].replace(/\r$/, "");
+      const occurrence = seen.get(key) ?? 0;
+      seen.set(key, occurrence + 1);
+      const item = parseCandidate(project, lines[i], occurrence, scope, group);
+      const indexes = [i];
+      while (i + 1 < range[1] && isContinuation(lines[i + 1])) indexes.push(++i);
+      item.details = dedent(indexes.slice(1).map((at) => lines[at].replace(/\r$/, "").trimEnd()));
+      found.push({ indexes, item });
+    }
   }
   return { lines, found };
 }

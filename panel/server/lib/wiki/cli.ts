@@ -66,8 +66,10 @@ const USAGE = `usage: scripts/wiki <command> [args]
                                             | exit 2 {ask, reason} for a URL without
                                             an id | exit 1 {raw: "", title, warning} on a stub
   clone-repo <p> <url>                      {clonePath, commitSha, action}
-  candidates                                {items: [{id, project, text, details, date, source}]}: the
-                                            ## Knowledge candidates of every non-archived wiki
+  candidates                                {items: [{id, project, text, details, date, source, scope,
+                                            group}]}: the ## Knowledge candidates (scope generic) and
+                                            ## Group candidates (scope group, group = the project's
+                                            current group: or null) of every non-archived wiki
                                             except kind: knowledge ones; source is wiki/sources/… or null
   clear-candidates --ids <file.json>        {removed}: drop exactly those candidate lines
                                             (file holds a JSON array of ids)
