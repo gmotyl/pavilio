@@ -70,7 +70,8 @@ is optional, and only its `## Archived Projects` rows are refused.
    § Writers → Language) before composing the answer and pass it to any writer you spawn.
 2. Walk `CONVENTIONS.md § Reading ladder`. Enter `wiki/repos/<repo>/` only for a code question.
    Claims taken from a `kind: research` project are labelled `(research, unverified)` unless this
-   project is research too (ladder step 6).
+   project is research too (ladder step 6). A grouped project reads its group wiki (step 6b)
+   before the shared `knowledge` wiki (step 7), citing `<group-wiki>:wiki/…`.
 3. Answer citing every page used as a panel link — `[<title>](<link>)`, the link from
    `scripts/wiki panel-link <p>/wiki/<page>.md` (projects-relative path; a record such as
    `<p>/progress/<file>.md` gets a `/view/…` link). Never a bare path or a hand-encoded URL. If the

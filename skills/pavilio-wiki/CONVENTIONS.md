@@ -181,9 +181,15 @@ It is the budget, not a minimum — stop as soon as the question is answered.
    taken from it is labelled `(research, unverified)` in the answer, unless the reader is itself
    a research project.
 
+6b. The group wiki — only when the project's card has `group:` and that group has a wiki
+   (`scripts/wiki targets` → `groups[<group>]`; no entry → skip). Read it (`index.md` → ≤2 section
+   indexes → ≤2 pages) when the topic is shared across the group (domain, process, conventions)
+   or the project's wiki did not answer. Cite it as `<group-wiki>:wiki/…`. Ungrouped projects
+   skip this step.
+
 7. The shared `knowledge` wiki (`projects/knowledge/wiki/`: `index.md` → ≤2 section indexes → ≤2
    pages) when the topic is a tool, library, platform or technique rather than this project's own
    decisions, or when the project's wiki did not answer. Cite it as `knowledge:wiki/…`.
 
-No `wiki/` → read `CONTEXT.md` whole, as before, then step 7 when it applies. Readers other than
-`/pavilio-wiki` queries walk the ladder without logging, writing or taking the lock.
+No `wiki/` → read `CONTEXT.md` whole, as before, then steps 6b and 7 when they apply. Readers
+other than `/pavilio-wiki` queries walk the ladder without logging, writing or taking the lock.
