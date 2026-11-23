@@ -112,7 +112,10 @@ describe("LeftSidebar Home link and folds", () => {
       const home = screen.getByTestId("sidebar-home-link");
       expect(home.parentElement).toBe(first);
       expect(home.getAttribute("href")).toBe("/");
-      expect(home.textContent).toBe("Home");
+      // The host pill stands in for the "Home" label (which stays for phones,
+      // where the pill is hidden); the link keeps "Home" as its name.
+      expect(home).toHaveAccessibleName("Home");
+      expect(home.querySelector('[data-testid="host-badge"]')).not.toBeNull();
       unmount();
     }
   });

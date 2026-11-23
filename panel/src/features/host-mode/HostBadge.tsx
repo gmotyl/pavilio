@@ -1,6 +1,6 @@
 import { useHostMode } from "./useHostMode";
 
-// Small pill rendered in the breadcrumb header. Green when the panel
+// Small pill rendered as the sidebar Home row's label. Green when the panel
 // was opened from the same machine ("local"), yellow when from a
 // remote device ("remote"). Hidden on mobile viewports — phones reach
 // the panel by QR pairing, so the answer is always "remote" there and

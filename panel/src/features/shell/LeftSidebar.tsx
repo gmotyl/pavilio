@@ -63,6 +63,7 @@ import {
   matchProjectFromPath,
   matchProjectFromViewPath,
 } from "../projects/matchProjectFromPath";
+import { HostBadge } from "../host-mode/HostBadge";
 
 /** A section heading, optionally a ▾/▸ fold toggle with a count and a new button. */
 function SectionHeader({
@@ -852,6 +853,7 @@ export default function LeftSidebar() {
           to="/"
           end
           data-testid="sidebar-home-link"
+          aria-label="Home"
           className="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px] font-semibold"
           style={({ isActive }) => ({
             color: "var(--text-primary)",
@@ -860,7 +862,9 @@ export default function LeftSidebar() {
           })}
         >
           <HomeIcon size={13} aria-hidden="true" />
-          <span>Home</span>
+          {/* The host pill is the label from md up; phones hide it (HostBadge), so they keep the word. */}
+          <span className="md:hidden">Home</span>
+          <HostBadge />
         </NavLink>
       </div>
       {starredProjects.length > 0 && (

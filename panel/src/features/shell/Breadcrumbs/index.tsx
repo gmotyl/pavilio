@@ -12,7 +12,6 @@ import {
   BreadcrumbActionsContext,
   BreadcrumbActionsProvider,
 } from "./BreadcrumbActionsProvider";
-import { HostBadge } from "../../host-mode/HostBadge";
 import { nameColor, usePanelTheme } from "../../projects/nameColor";
 import { useProjectColors } from "../../terminal/useProjectColors";
 
@@ -192,8 +191,6 @@ export function Breadcrumbs({ trailing }: BreadcrumbsProps = {}) {
       >
         <Home size={14} />
       </Link>
-
-      <HostBadge />
 
       {crumbs.map((crumb, index) => {
         const isLast = index === crumbs.length - 1;
