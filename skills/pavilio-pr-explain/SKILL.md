@@ -78,10 +78,10 @@ call or read any other plugin's story tooling.
 
 ## 2. Pin head and base
 
-Run `git -C <path> fetch origin --quiet` first.
+Run `git -C <path> fetch origin --no-tags --quiet` first (`--no-tags`: no local tag is written, per rule 3).
 
 - **PR:** `gh pr view <n> -R <owner/name> --json number,title,url,state,headRefName,baseRefName,mergeCommit`.
-  - `head`: `git fetch origin pull/<n>/head --quiet && git rev-parse FETCH_HEAD` (full SHA; works
+  - `head`: `git fetch origin pull/<n>/head --no-tags --quiet && git rev-parse FETCH_HEAD` (full SHA; works
     for open, merged and closed PRs, and on `gh` versions without a `headRefOid` field).
   - `base` = `origin/<baseRefName>`. The change is `git diff <base>...<head>` (from the merge-base).
     For a PR merged since, the merge-base can be the head itself; then use the merge base the PR
