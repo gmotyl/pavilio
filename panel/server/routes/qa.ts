@@ -2,14 +2,14 @@ import { Router } from "express";
 import { lstat, realpath, rm, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
-import { isPathUnder } from "../lib/mockup-import.js";
 import { requireProject } from "./mockups.js";
 
 /**
  * Delete one QA artifact of a project: a story or review file, or a whole run
  * folder. Nothing else under `qa/` (REVIEW_RULES.md, a run's own files, dot
- * files) can go through here. Plain filesystem removal — no git command runs;
- * auto-sync picks the deletion up like any other change.
+ * files) can go through here, and only at its canonical path: symlinks (the
+ * leaf or any parent dir) are never followed. Plain filesystem removal — no
+ * git command runs; auto-sync picks the deletion up like any other change.
  */
 const router = Router();
 
@@ -42,20 +42,23 @@ router.delete("/:project/qa/*path", requireProject, async (req, res) => {
   const link = await lstat(target).catch(() => null);
   if (!link) return res.status(404).json({ error: "Not found" });
 
-  // Follow symlinks before deciding: the real target must sit inside qa/.
+  // Resolve every symlink on the way and require the real path to be exactly
+  // `<real project>/qa/<kind>/<name>`. A symlinked `qa/`, `qa/<kind>/` (e.g.
+  // reviews -> runs) or leaf — even one pointing elsewhere inside qa/ — fails
+  // this, so only the artifact at its own canonical path is ever removed.
   let real: string;
   try {
-    const qaRoot = join(await realpath(projectDir), "qa");
+    const expected = join(await realpath(projectDir), "qa", shape.kind, shape.name);
     real = await realpath(target);
-    if (real === qaRoot || !isPathUnder(real, qaRoot)) {
-      return res.status(400).json({ error: "Path is outside the project's qa folder" });
+    if (real !== expected) {
+      return res.status(400).json({ error: "Not a deletable QA path" });
     }
   } catch {
     // A dangling symlink: realpath cannot resolve it.
     return res.status(404).json({ error: "Not found" });
   }
-  // A symlink is never deleted, even one pointing inside qa/: only the
-  // artifact itself is a valid target.
+  // Belt and braces: a leaf symlink cannot resolve to its own path, but never
+  // delete one regardless.
   if (link.isSymbolicLink()) {
     return res.status(400).json({ error: "Not a deletable QA path" });
   }

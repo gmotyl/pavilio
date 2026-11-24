@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import http from "http";
 import type { AddressInfo } from "net";
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
@@ -61,13 +61,13 @@ const del = (path: string) => request(app()).delete(`/api/projects/p/qa/${path}`
  * DELETE with the path sent byte-for-byte. supertest goes through WHATWG URL,
  * which collapses `..`, `%2e%2e` and `.` segments before the server sees them.
  */
-async function rawDel(path: string): Promise<number> {
+async function rawDel(path: string, project = "p"): Promise<number> {
   const server = app().listen(0);
   try {
     const { port } = server.address() as AddressInfo;
     return await new Promise<number>((done, fail) => {
       const req = http.request(
-        { host: "127.0.0.1", port, method: "DELETE", path: `/api/projects/p/qa/${path}` },
+        { host: "127.0.0.1", port, method: "DELETE", path: `/api/projects/${project}/qa/${path}` },
         (res) => {
           res.resume();
           done(res.statusCode ?? 0);
@@ -156,6 +156,36 @@ describe("DELETE /api/projects/:project/qa/*path", () => {
     }
     expect(tree()).toEqual(before);
     expect(existsSync(join(projectDir(), "PROJECT.md"))).toBe(true);
+  });
+
+  it("refuses a target reached through a symlinked parent dir", async () => {
+    // qa/reviews -> qa/runs: reviews/a.md would really be runs/a.md.
+    rmSync(join(qaDir(), "reviews"), { recursive: true });
+    symlinkSync(join(qaDir(), "runs"), join(qaDir(), "reviews"));
+    writeFileSync(join(qaDir(), "runs", "a.md"), "not a review");
+    const before = tree();
+    expect((await del("reviews/a.md")).status).toBe(400);
+    expect(existsSync(join(qaDir(), "runs", "a.md"))).toBe(true);
+    expect(tree()).toEqual(before);
+  });
+
+  it("refuses a symlink inside qa that points inside qa", async () => {
+    symlinkSync(join(qaDir(), "REVIEW_RULES.md"), join(qaDir(), "stories", "rules.md"));
+    symlinkSync(join(qaDir(), "runs", "2026-11-20-x"), join(qaDir(), "runs", "alias"));
+    const before = tree();
+    expect((await del("stories/rules.md")).status).toBe(400);
+    expect((await del("runs/alias")).status).toBe(400);
+    expect(existsSync(join(qaDir(), "REVIEW_RULES.md"))).toBe(true);
+    expect(existsSync(join(qaDir(), "runs", "2026-11-20-x", "run.md"))).toBe(true);
+    expect(tree()).toEqual(before);
+  });
+
+  it("refuses an encoded .. project name", async () => {
+    const before = tree();
+    for (const project of ["%2e%2e", "%2E%2E", "..%2Fp", "%2e%2e%2fp"]) {
+      expect(await rawDel("stories/pavilio-pr-237.md", project), project).toBe(400);
+    }
+    expect(tree()).toEqual(before);
   });
 
   it("404 for a missing target", async () => {
