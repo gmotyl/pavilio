@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Stats } from "fs";
 import { lstat, realpath, rm, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
@@ -16,14 +17,19 @@ const router = Router();
 
 type Shape = { kind: "stories" | "reviews" | "runs"; name: string };
 
-/** One path segment that is a name: no separators, not `.`/`..`, not a dot file. */
+/**
+ * One path segment that is a name: no separators, not `.`/`..`, not a dot file.
+ * A `..` inside a name (`a..b.md`) is no traversal: it is no segment of its own.
+ */
 const SEGMENT = /^[^./\\][^/\\]*$/;
+
+const notFound = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
 
 /** The accepted shape of `parts`, or null for anything else. */
 function parseShape(parts: string[]): Shape | null {
   if (parts.length !== 2) return null;
   const [kind, name] = parts;
-  if (!SEGMENT.test(name) || name.includes("..")) return null;
+  if (!SEGMENT.test(name)) return null;
   if (kind === "stories" || kind === "reviews") {
     return name.endsWith(".md") && name.length > 3 ? { kind, name } : null;
   }
@@ -40,8 +46,14 @@ router.delete("/:project/qa/*path", requireProject, async (req, res) => {
   const projectDir = resolve(getConfig().projectsDir, req.params.project as string);
   const target = join(projectDir, "qa", shape.kind, shape.name);
 
-  const link = await lstat(target).catch(() => null);
-  if (!link) return res.status(404).json({ error: "Not found" });
+  let link: Stats;
+  try {
+    link = await lstat(target);
+  } catch (err) {
+    if (notFound(err)) return res.status(404).json({ error: "Not found" });
+    console.error("[qa] delete failed:", err);
+    return res.status(500).json({ error: "Could not delete" });
+  }
 
   // Resolve every symlink on the way and require the real path to be exactly
   // `<real project>/qa/<kind>/<name>`. A symlinked `qa/`, `qa/<kind>/` (e.g.
@@ -54,9 +66,11 @@ router.delete("/:project/qa/*path", requireProject, async (req, res) => {
     if (real !== expected) {
       return res.status(400).json({ error: "Not a deletable QA path" });
     }
-  } catch {
+  } catch (err) {
     // A dangling symlink: realpath cannot resolve it.
-    return res.status(404).json({ error: "Not found" });
+    if (notFound(err)) return res.status(404).json({ error: "Not found" });
+    console.error("[qa] delete failed:", err);
+    return res.status(500).json({ error: "Could not delete" });
   }
   // Belt and braces: a leaf symlink cannot resolve to its own path, but never
   // delete one regardless.

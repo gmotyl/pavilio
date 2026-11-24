@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import http from "http";
 import type { AddressInfo } from "net";
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 
@@ -111,6 +111,13 @@ describe("DELETE /api/projects/:project/qa/*path", () => {
     expect(existsSync(join(qaDir(), "runs"))).toBe(true);
   });
 
+  it("deletes a story whose name holds .. inside it", async () => {
+    writeFileSync(join(qaDir(), "stories", "a..b.md"), "story");
+    const res = await del("stories/a..b.md");
+    expect(res.status).toBe(204);
+    expect(existsSync(join(qaDir(), "stories", "a..b.md"))).toBe(false);
+  });
+
   it("refuses paths outside the three shapes", async () => {
     // A run's file, a symlink escaping qa/, and wrong-kind targets too.
     mkdirSync(join(projectDir(), "outside"), { recursive: true });
@@ -197,6 +204,20 @@ describe("DELETE /api/projects/:project/qa/*path", () => {
     expect((await del("runs/2026-01-01-nope")).status).toBe(404);
     const unknown = await request(app()).delete("/api/projects/ghost/qa/stories/x.md");
     expect(unknown.status).toBe(404);
+  });
+
+  // root reads through a 000 dir, so the EACCES this needs never happens.
+  it.skipIf(process.getuid?.() === 0)("an unreadable target is a 500, not a 404", async () => {
+    const stories = join(qaDir(), "stories");
+    chmodSync(stories, 0o600);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await del("stories/pavilio-pr-237.md")).status).toBe(500);
+    } finally {
+      chmodSync(stories, 0o755);
+      error.mockRestore();
+    }
+    expect(existsSync(join(stories, "pavilio-pr-237.md"))).toBe(true);
   });
 
   it("runs no git command", async () => {
