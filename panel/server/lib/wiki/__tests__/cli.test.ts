@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFile } from "child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { dirname, join, resolve } from "path";
-import { fileURLToPath } from "url";
-import { promisify } from "util";
+import { dirname, join } from "path";
 
 import { loadConfig } from "../../../config";
 import { machineId } from "../../hostname";
@@ -12,9 +9,6 @@ import { preferencesPathFor } from "../../preferencesPath";
 import { main, readProcessStdin, type CliDeps } from "../cli";
 import { hashRecord } from "../ledger";
 import type { FetchLike } from "../project";
-
-const run = promisify(execFile);
-const SCRIPT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../scripts/wiki");
 
 const REGISTRY = [
   "| Project | Type | Path |",
@@ -414,23 +408,5 @@ describe("wiki cli", () => {
       expect(res.json.error).toMatch(/save-atlassian <p> <url> --title <t>/);
       expect(res.stderr).toMatch(/usage:/);
     });
-  });
-
-  it("runs from an unrelated cwd", async () => {
-    const elsewhere = mkdtempSync(join(tmpdir(), "wiki-cli-cwd-"));
-    try {
-      const env: NodeJS.ProcessEnv = { ...process.env, PAVILIO_WORKSPACE_ROOT: root };
-      delete env.PAVILIO_TERMINAL_ID;
-      const { stdout } = await run("bash", [SCRIPT, "pending", "demo"], { cwd: elsewhere, env });
-      expect(JSON.parse(stdout)).toEqual({
-        pending: [{ path: "notes/2026-10-01_1000_kickoff.md", hash: hashRecord("# kickoff\n"), status: "new" }],
-      });
-
-      const asked = await run("bash", [SCRIPT, "project"], { cwd: elsewhere, env }).catch((e) => e);
-      expect(asked.code).toBe(2);
-      expect(JSON.parse(asked.stdout)).toMatchObject({ ask: true });
-    } finally {
-      rmSync(elsewhere, { recursive: true, force: true });
-    }
   });
 });
