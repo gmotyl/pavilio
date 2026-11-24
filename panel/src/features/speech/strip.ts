@@ -44,8 +44,16 @@ export const MAX_SPOKEN_CODE_CHARS = 24;
 /** A fence line: ``` or ~~~ (up to three leading spaces), plus an info string. */
 const FENCE_RE = /^ {0,3}(`{3,}|~{3,})\s*(.*)$/;
 
-/** Inline code span, single line only — a multi-line span is a fenced block's job. */
-const INLINE_CODE_RE = /`+([^`\n]+)`+/g;
+/**
+ * Inline code span, single line only — a multi-line span is a fenced block's job.
+ * As in CommonMark, a span closes only on a backtick run of exactly its opening
+ * run's length: a run of any other length is literal, so a stray ``` in prose
+ * cannot pair with a later single backtick and swallow the words between them.
+ * Group 2 is the content.
+ */
+const INLINE_CODE_RE = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g;
+/** A backtick run left over once the spans are taken out: literal, and nothing a voice should read. */
+const STRAY_BACKTICKS_RE = /`+/g;
 
 /**
  * One unbroken name: word characters joined by the separators that join names
@@ -576,7 +584,10 @@ function reduceAddresses(line: string): string {
  * span with no spaces in it the proxy is simply wrong.
  */
 function reduceInlineCode(line: string): string {
-  return line.replace(INLINE_CODE_RE, (_match, code: string) => {
+  const unstrayed = outsideCodeSpans(line, (text) => text.replace(STRAY_BACKTICKS_RE, ""));
+  return unstrayed.replace(INLINE_CODE_RE, (_match, _run: string, padded: string) => {
+    // CommonMark drops one space each side when both are there (`` `a` `` → `a`).
+    const code = /^ .* $/.test(padded) && padded.trim() !== "" ? padded.slice(1, -1) : padded;
     if (isWholePath(code)) return elideLongPaths(code);
     if (SINGLE_TOKEN_RE.test(code)) return code;
     return code.length > MAX_SPOKEN_CODE_CHARS ? SENTINEL.expr : code;

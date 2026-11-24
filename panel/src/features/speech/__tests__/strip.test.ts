@@ -271,6 +271,15 @@ describe("stripToSpeakableText", () => {
     ["a long spaced span is an expression", "Call `const x = await synth(a, b, c, d)` first.", "Call ⟦expr⟧ first."],
     ["an over-long call chain is named, not dropped", 'Call `units.map((u) => u.text).join(" ")` before speaking.', "Call ⟦expr⟧ before speaking."],
     ["a response that is only an expression says nothing", '`units.map((u) => u.text).join(" ")`', ""],
+    // A span closes only on a run of its own length (CommonMark): a stray run
+    // of another length is literal, and must not pair up with a later single
+    // backtick and swallow the prose between them. A real PR review reply.
+    [
+      "a stray triple backtick is literal, not a span opener",
+      "The test runs a comment that starts with a ```suggestion block through the real `stripToSpeakableText` and asserts the trailing prose survives.",
+      "The test runs a comment that starts with a suggestion block through the real stripToSpeakableText and asserts the trailing prose survives.",
+    ],
+    ["a double-backtick span may hold a single backtick", "Wrap it as `` a`b `` first.", "Wrap it as a`b first."],
   ])("inline code: %s", (_label, markdown, spoken) => {
     expect(stripToSpeakableText(markdown)).toBe(spoken);
   });

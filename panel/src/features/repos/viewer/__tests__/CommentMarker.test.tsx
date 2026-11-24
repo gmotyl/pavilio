@@ -14,6 +14,7 @@ vi.mock("../../../markdown/MarkdownRenderer", () => ({
   ),
 }));
 
+import { preparePage } from "../../../speech/pageText";
 import { stripToSpeakableText } from "../../../speech/strip";
 import CommentMarker from "../CommentMarker";
 
@@ -213,6 +214,39 @@ describe("CommentMarker", () => {
     expect(spoken).not.toContain("const prod");
     expect(spoken).toContain("gmotyl:");
     expect(spoken).toContain("It does.");
+  });
+
+  it("CommentMarker Play all speaks every sentence of real review comments through the page pipeline", () => {
+    // PR #238's own thread: a Kilo finding (TL;DR/WARNING labels, inline code,
+    // a path) and the reply that quotes a ```suggestion fence inline.
+    const KILO = comment({
+      author: "kilo-code-bot[bot]",
+      body:
+        "**TL;DR:** If a note starts with a code sample, Play can read the code and skip the words that explain it.\n\n" +
+        "**WARNING:** Prefixing the body with `author: ` on the same line (here and in Play All) hides a leading Markdown fence from `strip.ts`'s line-anchored matcher. " +
+        "The closing fence is then treated as a new opening fence, so trailing prose and potentially later replies are swallowed.",
+    });
+    const FIXED = comment({
+      id: 991,
+      replyTo: 990,
+      author: "gmotyl",
+      createdAt: "2026-11-23T11:00:00Z",
+      body:
+        "Fixed in 78476b3. Speech text is now `author:` + blank line + body, in Play and Play all, so `strip.ts`'s line-anchored fence matcher sees a leading fence. " +
+        "The test runs a comment that starts with a ```suggestion block through the real `stripToSpeakableText` and asserts the trailing prose and the reply survive.",
+    });
+    render(<CommentMarker thread={thread([KILO, FIXED])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    const units = preparePage(speech.speakDocument.mock.calls[0][0].text).units.map((u) => u.text);
+    const spoken = units.join(" ");
+    expect(units[0]).toBe("kilo-code-bot[bot]:");
+    expect(spoken).toContain("TL;DR: If a note starts with a code sample, Play can read the code and skip the words that explain it.");
+    expect(spoken).toContain("so trailing prose and potentially later replies are swallowed.");
+    expect(spoken).toContain("gmotyl:");
+    expect(spoken).toContain(
+      "The test runs a comment that starts with a suggestion block through the real stripToSpeakableText and asserts the trailing prose and the reply survive.",
+    );
   });
 
   it("CommentMarker stops the speech it started when it unmounts", () => {
