@@ -3,8 +3,10 @@ import { dirname, join } from "path";
 
 import { addProjectToRegistry } from "../registry";
 import { assertContainedDir, isDanglingLink } from "../wiki/contained-dir";
+import { KNOWLEDGE_PROJECT, knowledgeTargetsIn } from "../wiki/harvest";
 import { renderIndexes } from "../wiki/index-md";
 import { WIKI_GITIGNORE_LINES } from "../wiki/lock";
+import { GROUP_NAME_MAX, parseGroupName, rewriteGroup } from "./group";
 import type { ProjectKind } from "./kind";
 import { isValidProjectSlug } from "./slug";
 
@@ -18,19 +20,30 @@ import { isValidProjectSlug } from "./slug";
  * | research  | the same, plus `topic`/`created` frontmatter and `wiki/raw/`             |
  * | knowledge | `PROJECT.md`, `wiki/` skeleton, registry row                             |
  *
+ * A `group` adds `group: <group>` to the card frontmatter of any kind; a grouped knowledge
+ * project is that group's wiki, and its overview line says so.
+ *
  * A folder that exists without `PROJECT.md` (notes waiting for a card) only gets the parts it
  * lacks: an existing file is never rewritten, and an existing dir gets no `.gitkeep`. Research code
  * lives in the spikes repo (`scripts/project spike-repo`), not in the project folder; a legacy
  * `spikes/` dir is left as it is.
  */
 
-export type ScaffoldInput = { projectsDir: string; name: string; kind: ProjectKind; topic?: string; today: string };
+export type ScaffoldInput = {
+  projectsDir: string;
+  name: string;
+  kind: ProjectKind;
+  topic?: string;
+  group?: string;
+  today: string;
+};
 export type ScaffoldResult =
   | { ok: true; created: string[] } // project-relative paths written
   | { ok: false; ask: true; reason: "exists" | "archived" };
 
 function projectCard(input: ScaffoldInput): string {
   const { name, kind, topic, today } = input;
+  const group = input.group?.trim();
   const frontmatter = [`kind: ${kind}`];
   if (kind === "research") {
     // JSON string = a double-quoted YAML scalar, safe for any topic text.
@@ -40,7 +53,9 @@ function projectCard(input: ScaffoldInput): string {
     kind === "research"
       ? `Research project: ${topic ?? "[topic]"}. External material lives in \`wiki/raw/\`, code in the spikes repo (\`scripts/project spike-repo ${name}\`).`
       : kind === "knowledge"
-        ? "Workspace-wide knowledge: generic findings promoted from project wikis."
+        ? group
+          ? `Group knowledge for ${group}: findings shared by its projects, promoted from their wikis.`
+          : "Workspace-wide knowledge: generic findings promoted from project wikis."
         : "[2-3 sentences: what the project is, for whom, where Greg fits.]";
   const seeAlso =
     kind === "knowledge"
@@ -62,7 +77,8 @@ function projectCard(input: ScaffoldInput): string {
     );
   }
   lines.push("## See also", "", ...seeAlso, "");
-  return lines.join("\n");
+  const card = lines.join("\n");
+  return group ? rewriteGroup(card, group) : card;
 }
 
 function statusCard(input: ScaffoldInput): string {
@@ -102,18 +118,23 @@ function wikiOverview(input: ScaffoldInput): string {
   ].join("\n");
 }
 
-const OPEN_QUESTIONS = [
-  "---",
-  "type: open-questions",
-  'description: "Gaps the wiki could not answer and knowledge waiting for a home"',
-  "---",
-  "# Open questions",
-  "",
-  "## Gaps",
-  "",
-  "## Knowledge candidates",
-  "",
-].join("\n");
+/** A grouped non-knowledge project also collects group-scoped findings; a group wiki does not. */
+function openQuestions(input: ScaffoldInput): string {
+  const grouped = Boolean(input.group?.trim()) && input.kind !== "knowledge";
+  return [
+    "---",
+    "type: open-questions",
+    'description: "Gaps the wiki could not answer and knowledge waiting for a home"',
+    "---",
+    "# Open questions",
+    "",
+    "## Gaps",
+    "",
+    "## Knowledge candidates",
+    "",
+    ...(grouped ? ["## Group candidates", ""] : []),
+  ].join("\n");
+}
 
 function emptyIndex(): string {
   const rendered = renderIndexes([]);
@@ -133,7 +154,7 @@ function skeleton(input: ScaffoldInput): { files: [string, string][]; keptDirs: 
     ["wiki/index.md", emptyIndex()],
     ["wiki/overview.md", wikiOverview(input)],
     ["wiki/log.md", ""],
-    ["wiki/open-questions.md", OPEN_QUESTIONS],
+    ["wiki/open-questions.md", openQuestions(input)],
     ["wiki/.gitignore", WIKI_GITIGNORE_LINES.join("\n") + "\n"],
   );
   keptDirs.push("wiki/sources", "wiki/entities", "wiki/concepts");
@@ -159,9 +180,26 @@ function assertWritable(projectsDir: string, name: string, files: [string, strin
 }
 
 /**
+ * Refuse a knowledge project whose harvest target is taken — `knowledge` for no group, one wiki
+ * per group: a second one makes `scripts/wiki targets` ambiguous and blocks every harvest.
+ */
+function assertFreeKnowledgeTarget(projectsDir: string, group: string | null): void {
+  const targets = knowledgeTargetsIn(projectsDir);
+  const taken = group === null ? targets.global : (targets.groups[group] ?? null);
+  if (taken === null) return;
+  throw new Error(
+    group === null
+      ? `the workspace already has its ungrouped knowledge wiki: ${taken}`
+      : `group ${group} already has a knowledge wiki: ${taken}`,
+  );
+}
+
+/**
  * Create the skeleton of project `name` under `projectsDir` and add its registry row. Asks (writes
  * nothing) when the project already has a card or the name is taken under `archived/`. Throws on
- * a name that is not a slug and on a research project without a topic.
+ * a name that is not a slug, on a research project without a topic, on an empty or over-long
+ * group, on a grouped `knowledge`, on an ungrouped knowledge project not named `knowledge`, and
+ * on a knowledge project whose harvest target (the ungrouped one, or its group's) already exists.
  */
 export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const { projectsDir, name } = input;
@@ -169,9 +207,25 @@ export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   if (input.kind === "research" && !input.topic?.trim()) {
     throw new Error("a topic is required for research projects (--topic \"…\")");
   }
+  if (input.group !== undefined && !input.group.trim()) throw new Error("--group must not be empty");
+  if (input.group !== undefined && parseGroupName(input.group) === undefined) {
+    throw new Error(`--group must be one line of at most ${GROUP_NAME_MAX} characters`);
+  }
+  if (name === KNOWLEDGE_PROJECT && input.group !== undefined) {
+    throw new Error(`${KNOWLEDGE_PROJECT} is the workspace-wide knowledge wiki and takes no --group`);
+  }
   const projectDir = join(projectsDir, name);
   if (existsSync(join(projectDir, "PROJECT.md"))) return { ok: false, ask: true, reason: "exists" };
   if (existsSync(join(projectsDir, "archived", name))) return { ok: false, ask: true, reason: "archived" };
+  if (input.kind === "knowledge") {
+    const group = input.group?.trim() || null;
+    // The harvest locks, logs and commits the ungrouped wiki by name: any other name would take
+    // the global slot and block both the harvest and a later `knowledge`.
+    if (group === null && name !== KNOWLEDGE_PROJECT) {
+      throw new Error(`an ungrouped knowledge wiki must be named ${KNOWLEDGE_PROJECT} (or pass --group)`);
+    }
+    assertFreeKnowledgeTarget(projectsDir, group);
+  }
 
   const { files, keptDirs } = skeleton(input);
   assertWritable(projectsDir, name, files, keptDirs);

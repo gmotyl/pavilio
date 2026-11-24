@@ -27,7 +27,8 @@ import { buildWikiTree } from "../lib/wiki/tree.js";
 import { scaffoldProject } from "../lib/projects/scaffold.js";
 import { isValidProjectSlug, slugifyProjectTitle } from "../lib/projects/slug.js";
 import { localISODate } from "../lib/dateLocal.js";
-import { readGroup, rewriteGroup } from "../lib/projects/group.js";
+import { parseGroupName, readGroup, rewriteGroup } from "../lib/projects/group.js";
+import { projectKind } from "../lib/projects/kind.js";
 import { splitFrontmatter } from "../lib/projects/frontmatter.js";
 import { commitPaths } from "../lib/projects/commitPaths.js";
 
@@ -864,12 +865,7 @@ function writeAndCommit(edits: [string, string][], message: string): void {
 }
 
 // undefined = invalid: not a string/null, contains a line break, or longer than 64 chars.
-const groupName = (v: unknown): string | null | undefined => {
-  if (v === null) return null;
-  if (typeof v !== "string" || /[\r\n]/.test(v)) return undefined;
-  const t = v.trim();
-  return t.length > 64 ? undefined : t || null;
-};
+const groupName = parseGroupName;
 
 // Literal path; a project can never be named "groups" + "/rename" as `/:name` takes one segment.
 router.post("/groups/rename", (req, res) => {
@@ -908,6 +904,11 @@ router.put("/:name/group", (req, res) => {
   if (group === undefined) return res.status(400).json({ error: "group must be null or a single-line string of at most 64 chars" });
   const card = liveCard(req.params.name);
   if (!card) return res.status(404).json({ error: "Project not found" });
+  // A knowledge wiki's group is what makes it the global (`knowledge`) or one group's harvest
+  // target; regrouping it would leave a target missing or doubled.
+  if (projectKind(getConfig().projectsDir, req.params.name) === "knowledge") {
+    return res.status(409).json({ error: "A knowledge wiki keeps its group: it is a harvest target" });
+  }
   const text = readFileSync(card, "utf-8");
   const next = rewriteGroup(text, group);
   if (next !== text) {

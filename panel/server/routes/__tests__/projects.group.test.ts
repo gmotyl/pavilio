@@ -135,4 +135,23 @@ describe("project group endpoints", () => {
     expect(count()).toBe(before);
     expect(git("status", "--porcelain")).toBe("");
   });
+  it("put group refuses a knowledge wiki, grouped or not", async () => {
+    for (const [name, group] of [["knowledge", undefined], ["old-wiki", "Old"]] as const) {
+      mkdirSync(join(ws.dir(), name), { recursive: true });
+      const fm = group ? `group: ${group}\n` : "";
+      writeFileSync(join(ws.dir(), name, "PROJECT.md"), `---\nkind: knowledge\n${fm}---\n# ${name}\n`);
+    }
+    git("add", "-A");
+    git("commit", "-q", "-m", "wikis");
+    const before = count();
+    for (const [name, group] of [["knowledge", "Old"], ["old-wiki", "Other"], ["old-wiki", null]] as const) {
+      const res = await request(app()).put(`/api/projects/${name}/group`).send({ group });
+      expect(res.status, `${name} → ${group}`).toBe(409);
+      expect(res.body.error).toMatch(/knowledge/);
+    }
+    expect(read("knowledge")).not.toContain("group:");
+    expect(read("old-wiki")).toContain("group: Old\n");
+    expect(count()).toBe(before);
+    expect(git("status", "--porcelain")).toBe("");
+  });
 });

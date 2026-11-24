@@ -163,7 +163,9 @@ skip the step when none are pending.
    1. Refresh the lock.
    2. Run these steps of `pavilio-wiki SKILL.md § 4. Ingest § Sequence` for the batch:
       **Source writers**, **Index**, **Record**, **Log** (entry headed `ingest (migrate)`, pages
-      line omitted; `generic:` items into `open-questions.md`), **Commit**. Wait for every source
+      line omitted; `generic:` items under `## Knowledge candidates` and, grouped project,
+      `group:` items under `## Group candidates` in `open-questions.md`, as its step 11 says),
+      **Commit**. Wait for every source
       writer's receipt before **Index** — never commit with a writer still running.
    3. Commit message: `<p>: wiki migrate batch <k>/<n> (<m> records)`.
    4. Batch number divisible by 5, or the last batch → flush (step 5) before the next batch.

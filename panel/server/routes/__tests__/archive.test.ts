@@ -61,6 +61,61 @@ describe("archive routes", () => {
     expect(res.status).toBe(409);
   });
 
+  it("409s restoring a knowledge wiki whose harvest target is taken", async () => {
+    const card = (rel: string, fm: string) => {
+      mkdirSync(join(projects.dir(), rel), { recursive: true });
+      writeFileSync(join(projects.dir(), rel, "PROJECT.md"), `---\n${fm}---\n# ${rel}\n`);
+    };
+    card("archived/metro-wiki", "kind: knowledge\ngroup: metro\n");
+    card("metro-wiki-2", "kind: knowledge\ngroup: metro\n");
+    card("archived/other-wiki", "kind: knowledge\ngroup: other\n");
+    const app = makeApp(archiveRouter, "/api/archive");
+    const res = await request(app).post("/api/archive/metro-wiki/restore");
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/metro-wiki-2/);
+    expect(existsSync(join(projects.dir(), "archived", "metro-wiki", "PROJECT.md"))).toBe(true);
+    expect(existsSync(join(projects.dir(), "metro-wiki"))).toBe(false);
+    expect((await request(app).post("/api/archive/other-wiki/restore")).status).toBe(200);
+  });
+
+  it("409s restoring an ungrouped knowledge wiki not named knowledge, even with the slot free", async () => {
+    mkdirSync(join(projects.dir(), "archived", "kb"), { recursive: true });
+    writeFileSync(join(projects.dir(), "archived", "kb", "PROJECT.md"), "---\nkind: knowledge\n---\n# kb\n");
+    const res = await request(makeApp(archiveRouter, "/api/archive")).post("/api/archive/kb/restore");
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/must be named knowledge/);
+    expect(existsSync(join(projects.dir(), "archived", "kb", "PROJECT.md"))).toBe(true);
+    expect(existsSync(join(projects.dir(), "kb"))).toBe(false);
+  });
+
+  it("409s restoring an archived knowledge card that has a group, of any kind", async () => {
+    const app = makeApp(archiveRouter, "/api/archive");
+    for (const kind of ["knowledge", "project"]) {
+      mkdirSync(join(projects.dir(), "archived", "knowledge"), { recursive: true });
+      writeFileSync(
+        join(projects.dir(), "archived", "knowledge", "PROJECT.md"),
+        `---\nkind: ${kind}\ngroup: metro\n---\n# knowledge\n`,
+      );
+      const res = await request(app).post("/api/archive/knowledge/restore");
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/takes no group/);
+      expect(existsSync(join(projects.dir(), "archived", "knowledge", "PROJECT.md"))).toBe(true);
+      expect(existsSync(join(projects.dir(), "knowledge"))).toBe(false);
+    }
+  });
+
+  it("restores the archived ungrouped knowledge wiki when the slot is free", async () => {
+    mkdirSync(join(projects.dir(), "archived", "knowledge"), { recursive: true });
+    writeFileSync(
+      join(projects.dir(), "archived", "knowledge", "PROJECT.md"),
+      "---\nkind: knowledge\n---\n# knowledge\n",
+    );
+    const res = await request(makeApp(archiveRouter, "/api/archive")).post("/api/archive/knowledge/restore");
+    expect(res.status).toBe(200);
+    expect(existsSync(join(projects.dir(), "knowledge", "PROJECT.md"))).toBe(true);
+    expect(existsSync(join(projects.dir(), "archived", "knowledge"))).toBe(false);
+  });
+
   it("lists archived projects with archivedAt", async () => {
     seedProject("archived/beta");
     seedProject("archived/gamma");

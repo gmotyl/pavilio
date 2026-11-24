@@ -13,6 +13,8 @@ tool's `model`; elsewhere the harness's small-model tier).
 - `url` — external material only (an article, a YouTube transcript, a clone): the original's URL,
   as the orchestrator gives it, already normalised and with any userinfo (`user:token@`) stripped
   (a local-path or `file://` clone has none); never write credentials onto a page
+- `group`, `members` — grouped projects only: the project's `group:` and the group's member
+  projects (group wikis excluded). Absent → the project is ungrouped; return no `group` items
 - `language` — optional: the wiki's language, from the project's `wiki_language`; absent means English. Write all prose, headings and descriptions in it; keep frontmatter keys, slugs, link targets, URLs, code identifiers and the titles of external sources unchanged; the fixed `From …` / `Original:` labels may be translated, but the `[[…]]` target, the URL and the line placement stay exactly as specified
 
 The orchestrator passes these in the prompt; there is no input file to read.
@@ -49,6 +51,10 @@ One file, `page`, shaped per `skills/pavilio-wiki/PAGES.md § Source page`; link
   text in the body — its frontmatter entry is what counts it toward a page.
 - A finding that is true outside this project (a library's behaviour, a platform limit, a general
   technique) is still written on the page and also returned as a `generic` item.
+- Given a `group`: a finding true across the group's `members` but not outside them (a shared
+  client or domain fact, a shared process, a shared convention) is still written on the page and
+  also returned as a `group` item. A fact about this project alone is neither. One finding is
+  either `generic` or `group`, never both — true outside the group → `generic`.
 - An input with no durable knowledge → still write a short page (`description` says so) with empty
   lists.
 
@@ -62,9 +68,14 @@ Reply with exactly one JSON object and nothing else:
   "page": "wiki/sources/progress-2026-10-19-tts-relay-node20.md",
   "input": "progress/2026-10-19-tts-relay-node20.md",
   "slugs": ["concepts/speech-relay", "entities/edge-tts"],
-  "generic": ["Edge TTS handshake returns 403 unless the UA is Edge >= 137"]
+  "generic": ["Edge TTS handshake returns 403 unless the UA is Edge >= 137"],
+  "group": []
 }
 ```
+
+`group` only when the orchestrator passed a `group`; otherwise omit it or leave it empty. The
+orchestrator appends `generic` items under `## Knowledge candidates` and `group` items under
+`## Group candidates` in `wiki/open-questions.md`.
 
 `slugs` are namespaced (`entities/<name>`, `concepts/<name>`) and match the page's frontmatter.
 On failure: `{"status": "error", "input": "<path>", "error": "<one line>"}`.

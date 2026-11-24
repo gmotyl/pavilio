@@ -147,7 +147,10 @@ type SidebarProject = {
   name: string;
   kind?: ProjectKind;
   lastActivity?: string | null;
-  /** Project group from PROJECT.md; only `project`-kind rows are grouped. */
+  /**
+   * Project group from PROJECT.md; `project` rows and the group wiki (a
+   * `knowledge` row) are grouped, a `research` row ignores it.
+   */
   group?: string | null;
 };
 
@@ -156,6 +159,18 @@ const STALE_AFTER_DAYS = 30;
 
 function kindOf(project: SidebarProject): ProjectKind {
   return project.kind ?? "project";
+}
+
+/**
+ * A group wiki: a `knowledge` project with a group. It sits in its group,
+ * pinned first, not draggable, and is neither the group icon nor counted.
+ */
+function isGroupWiki(project: SidebarProject): boolean {
+  return (
+    kindOf(project) === "knowledge" &&
+    typeof project.group === "string" &&
+    project.group !== ""
+  );
 }
 
 /**
@@ -400,8 +415,9 @@ export default function LeftSidebar() {
   );
 
   // Starred keeps every kind; the rest split by kind — `project` into
-  // Projects, `research` and `knowledge` into Research. A row with no kind
-  // (an older server) is a project.
+  // Projects, `research` and `knowledge` into Research, except a group wiki
+  // (grouped `knowledge`), which joins its group in Projects. A row with no
+  // kind (an older server) is a project.
   const visibleProjects = projects.filter((p) => !archivedNames.has(p.name));
   const starredProjects = visibleProjects.filter((p) => isFavorite(p.name));
   const unstarred = visibleProjects.filter((p) => !isFavorite(p.name));
@@ -411,11 +427,11 @@ export default function LeftSidebar() {
   // group (Research and groups ignore it, as before).
   const otherProjects = visibleProjects.filter(
     (p) =>
-      kindOf(p) === "project" &&
+      (kindOf(p) === "project" || isGroupWiki(p)) &&
       (!isFavorite(p.name) || (typeof p.group === "string" && p.group !== "")),
   );
   const researchProjects = unstarred
-    .filter((p) => kindOf(p) !== "project")
+    .filter((p) => kindOf(p) !== "project" && !isGroupWiki(p))
     .sort(compareResearch);
 
   // The same reveal one level up: a project listed under a collapsed Research
@@ -630,6 +646,9 @@ export default function LeftSidebar() {
                     typeof project.group === "string" && project.group
                       ? project.group
                       : null,
+                    // Every knowledge wiki, the shared one included: its group
+                    // is fixed by its card (the server refuses a regroup).
+                    { groupWiki: kind === "knowledge" },
                   )
               : undefined
           }
@@ -896,7 +915,7 @@ export default function LeftSidebar() {
           icon={FolderOpen}
           label="Projects"
           testId="sidebar-section-projects"
-          count={otherProjects.length}
+          count={otherProjects.filter((p) => !isGroupWiki(p)).length}
           collapse={{
             collapsed: projectsHidden,
             onToggle: toggleProjects,
@@ -912,14 +931,19 @@ export default function LeftSidebar() {
                   ? renderProjectRow(p, dragRowProps(`p:${node.name}`, null))
                   : null;
               }
-              const members = node.members
+              // The group wiki is pinned first and not draggable, so no
+              // member can be dropped above it.
+              const all = node.members
                 .map((m) => projectsByName.get(m))
                 .filter((p) => p !== undefined);
+              const wikis = all.filter(isGroupWiki);
+              const members = [...wikis, ...all.filter((p) => !isGroupWiki(p))];
               return (
                 <SidebarGroupRow
                   key={`g:${node.name}`}
                   name={node.name}
                   members={members.map((p) => p.name)}
+                  wikis={wikis.map((p) => p.name)}
                   sessionIds={members.flatMap((p) =>
                     (sessionsByProject.get(p.name) ?? []).map((s) => s.id),
                   )}
@@ -934,7 +958,9 @@ export default function LeftSidebar() {
                   }
                 >
                   {members.map((p) =>
-                    renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
+                    isGroupWiki(p)
+                      ? renderProjectRow(p)
+                      : renderProjectRow(p, dragRowProps(`p:${p.name}`, node.name)),
                   )}
                 </SidebarGroupRow>
               );

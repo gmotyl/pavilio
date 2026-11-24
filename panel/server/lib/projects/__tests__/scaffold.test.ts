@@ -130,6 +130,75 @@ describe("scaffoldProject", () => {
     expect(projectKind(projectsDir, "knowledge")).toBe("knowledge");
   });
 
+  it("scaffold writes group into the card frontmatter", () => {
+    const result = scaffoldProject({ projectsDir, name: "acme", kind: "project", group: "metro", today: "2026-10-22" });
+    expect(result.ok).toBe(true);
+    const card = read("acme/PROJECT.md");
+    expect(card.startsWith("---\nkind: project\ngroup: metro\n---\n")).toBe(true);
+    expect(card).toContain("[2-3 sentences: what the project is, for whom, where Greg fits.]");
+    expect(projectKind(projectsDir, "acme")).toBe("project");
+    expect(read("acme/wiki/open-questions.md")).toMatch(/## Gaps[\s\S]*## Knowledge candidates[\s\S]*## Group candidates/);
+
+    const plain = scaffoldProject({ projectsDir, name: "solo", kind: "project", today: "2026-10-22" });
+    expect(plain.ok).toBe(true);
+    expect(read("solo/PROJECT.md")).not.toContain("group:");
+    expect(read("solo/wiki/open-questions.md")).not.toContain("## Group candidates");
+  });
+
+  it("scaffold refuses a second knowledge wiki for one group, writing nothing", () => {
+    expect(scaffoldProject({ projectsDir, name: "metro-wiki", kind: "knowledge", group: "metro", today: "2026-10-22" }).ok).toBe(true);
+    expect(() =>
+      scaffoldProject({ projectsDir, name: "metro-kb", kind: "knowledge", group: "metro", today: "2026-10-22" }),
+    ).toThrow(/metro-wiki/);
+    expect(existsSync(join(projectsDir, "metro-kb"))).toBe(false);
+    expect(scaffoldProject({ projectsDir, name: "other-wiki", kind: "knowledge", group: "other", today: "2026-10-22" }).ok).toBe(true);
+  });
+
+  it("scaffold refuses a second ungrouped knowledge wiki", () => {
+    expect(scaffoldProject({ projectsDir, name: "knowledge", kind: "knowledge", today: "2026-10-22" }).ok).toBe(true);
+    expect(() => scaffoldProject({ projectsDir, name: "kb", kind: "knowledge", today: "2026-10-22" })).toThrow(/knowledge/);
+    expect(existsSync(join(projectsDir, "kb"))).toBe(false);
+  });
+
+  it("scaffold refuses an ungrouped knowledge wiki not named knowledge, even in an empty workspace", () => {
+    expect(() => scaffoldProject({ projectsDir, name: "notes", kind: "knowledge", today: "2026-10-22" })).toThrow(
+      /knowledge/,
+    );
+    expect(existsSync(join(projectsDir, "notes"))).toBe(false);
+    expect(scaffoldProject({ projectsDir, name: "knowledge", kind: "knowledge", today: "2026-10-22" }).ok).toBe(true);
+  });
+
+  it("scaffold refuses a grouped project named knowledge", () => {
+    for (const kind of ["knowledge", "project"] as const) {
+      expect(() => scaffoldProject({ projectsDir, name: "knowledge", kind, group: "metro", today: "2026-10-22" })).toThrow(
+        /knowledge/,
+      );
+    }
+    expect(existsSync(join(projectsDir, "knowledge"))).toBe(false);
+  });
+
+  it("scaffold rejects a group name the panel cannot rename", () => {
+    for (const group of ["a".repeat(65), "two\nlines"]) {
+      expect(() => scaffoldProject({ projectsDir, name: "acme", kind: "project", group, today: "2026-10-22" })).toThrow(/group/);
+    }
+    expect(existsSync(join(projectsDir, "acme"))).toBe(false);
+  });
+
+  it("grouped knowledge scaffold uses the group overview line", () => {
+    const result = scaffoldProject({ projectsDir, name: "metro-wiki", kind: "knowledge", group: "metro", today: "2026-10-22" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect([...result.created].sort()).toEqual(["PROJECT.md", ...WIKI_SKELETON].sort());
+    expect(existsSync(join(projectsDir, "metro-wiki/spikes"))).toBe(false);
+    const card = read("metro-wiki/PROJECT.md");
+    expect(card).toContain("kind: knowledge\n");
+    expect(card).toContain("group: metro\n");
+    expect(card).toContain("Group knowledge for metro: findings shared by its projects, promoted from their wikis.");
+    expect(card).not.toContain("Workspace-wide knowledge");
+    expect(read("metro-wiki/wiki/open-questions.md")).not.toContain("## Group candidates");
+    expect(projectKind(projectsDir, "metro-wiki")).toBe("knowledge");
+  });
+
   it("refuses an existing project card", () => {
     write("acme/PROJECT.md", "# Acme\n");
     const result = scaffoldProject({ projectsDir, name: "acme", kind: "project", today: "2026-10-22" });

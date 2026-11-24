@@ -9,7 +9,7 @@ import { readWikiConfig, type WikiConfig } from "./config";
 import { preferencesFileFor } from "../../config";
 import { fetchArticle } from "./fetch-article";
 import { fetchYoutube, UvMissingError, type Runner } from "./fetch-youtube";
-import { addBacklink, clearCandidates, harvestStatus, listCandidates } from "./harvest";
+import { addBacklink, clearCandidates, harvestStatus, knowledgeTargets, listCandidates } from "./harvest";
 import { buildIndex } from "./index-md";
 import { pendingRecords, recordIngested } from "./ledger";
 import { lintDiagrams } from "./diagrams";
@@ -66,15 +66,32 @@ const USAGE = `usage: scripts/wiki <command> [args]
                                             | exit 2 {ask, reason} for a URL without
                                             an id | exit 1 {raw: "", title, warning} on a stub
   clone-repo <p> <url>                      {clonePath, commitSha, action}
-  candidates                                {items: [{id, project, text, details, date, source}]}: the
-                                            ## Knowledge candidates of every non-archived wiki
-                                            except knowledge; source is wiki/sources/… or null
+  candidates                                {items: [{id, project, text, details, date, source, scope,
+                                            group}]}: the ## Knowledge candidates (scope generic) and
+                                            ## Group candidates (scope group, group = the project's
+                                            current group: or null) of every non-archived wiki
+                                            except kind: knowledge ones (and, as a stopgap for
+                                            legacy cards without kind:, the project named
+                                            knowledge); source is wiki/sources/… or null
   clear-candidates --ids <file.json>        {removed}: drop exactly those candidate lines
                                             (file holds a JSON array of ids)
-  backlink <p> <source page> <target>       {added}: - [[knowledge:<target>]] under the page's
-                                            ## Knowledge (created at the end when absent)
-  harvest-status                            {lastRun, daysAgo, waiting}: newest harvest entry in
-                                            knowledge/wiki/log.md (null = never), candidates waiting
+  backlink <p> <source page> <target>       {added}: - [[<project>:wiki/<slug>]] under the page's
+                                            ## Knowledge (created at the end when absent);
+                                            target is wiki/<slug> (= knowledge:wiki/<slug>) or
+                                            <project>:wiki/<slug> for a group wiki; a new link's
+                                            project must be a current knowledge target (global
+                                            or a group wiki, see targets), else exit 1; a link
+                                            already there is {added:false} either way
+  backlink --keep <p> <source page> <target>
+                                            the same without the knowledge-target check, for
+                                            ingest re-appending links it captured before a
+                                            rewrite (syntax, path and dedupe checks still apply)
+  harvest-status                            {lastRun, daysAgo, waiting, waitingGroup}: newest harvest
+                                            entry in knowledge/wiki/log.md (null = never),
+                                            candidates waiting, of which from ## Group candidates
+  targets                                   {global, groups: {<group>: <project>}}: the harvest
+                                            targets — non-archived kind: knowledge projects, keyed
+                                            by group: (none → global) | exit 1 {error} when ambiguous
 
 <p> is a project dir under <workspace>/projects/. Paths in receipts are wiki-relative except
 pending/record paths (project-relative). Exit: 0 ok, 1 error {error}, 2 ask the user.
@@ -118,7 +135,13 @@ class UnknownCommand extends Error {}
 
 type Parsed = { positional: string[]; flags: Map<string, string[]> };
 
-/** `--flag value` and `--flag=value`; a flag without a value is an error. Repeats are kept in order. */
+/** Flags that take no value: present → `"true"`. */
+const SWITCHES = new Set(["keep"]);
+
+/**
+ * `--flag value` and `--flag=value`; a flag without a value is an error. Repeats are kept in order.
+ * A switch (`SWITCHES`) takes no value and refuses `=value`.
+ */
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
   const flags = new Map<string, string[]>();
@@ -130,6 +153,11 @@ function parseArgs(args: string[]): Parsed {
       continue;
     }
     const eq = arg.indexOf("=");
+    if (SWITCHES.has(eq === -1 ? arg.slice(2) : arg.slice(2, eq))) {
+      if (eq !== -1) throw new CliError(`${arg.slice(0, eq)} takes no value`);
+      add(arg.slice(2), "true");
+      continue;
+    }
     if (eq !== -1) {
       add(arg.slice(2, eq), arg.slice(eq + 1));
       continue;
@@ -344,9 +372,15 @@ async function dispatch(command: string, args: string[], deps: CliDeps, workspac
       return ok({ ...clearCandidates(workspaceRoot, readIds(resolve(deps.cwd, file))) });
     }
     case "backlink": {
-      const [p, page, target] = only(parsed, 3, "backlink <p> <source page> <knowledge target>");
+      const [p, page, target] = only(parsed, 3, "backlink [--keep] <p> <source page> <[project:]wiki/<slug>>", [
+        "keep",
+      ]);
       projectDir(workspaceRoot, p);
-      return ok({ ...addBacklink(workspaceRoot, p, page, target) });
+      return ok({ ...addBacklink(workspaceRoot, p, page, target, { keep: flag("keep") === "true" }) });
+    }
+    case "targets": {
+      only(parsed, 0, "no arguments");
+      return ok({ ...knowledgeTargets(workspaceRoot) });
     }
     case "harvest-status": {
       only(parsed, 0, "no arguments");

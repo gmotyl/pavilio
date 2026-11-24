@@ -35,6 +35,10 @@ function Harness({
   return (
     <>
       <div data-testid="woozle" onContextMenu={(e) => m.onProjectContextMenu(e, "woozle", "InfoPoly")} />
+      <div
+        data-testid="metro-wiki"
+        onContextMenu={(e) => m.onProjectContextMenu(e, "metro-wiki", "metro", { groupWiki: true })}
+      />
       <div data-testid="pavilio" onContextMenu={(e) => m.onProjectContextMenu(e, "pavilio", null)} />
       <div data-testid="g" onContextMenu={(e) => m.onGroupContextMenu(e, "InfoPoly", () => {})} />
       {m.element}
@@ -62,6 +66,16 @@ function prompt(value: string) {
 }
 
 describe("SidebarRowMenu", () => {
+  it("group wiki row menu omits group actions", () => {
+    render(<Harness />);
+    fireEvent.contextMenu(screen.getByTestId("metro-wiki"));
+    expect(
+      screen.queryAllByRole("menuitem").filter((el) => el.textContent?.includes("Group")),
+    ).toEqual([]);
+    expect(screen.queryByRole("menu", { name: "Group" })).toBeNull();
+    expect(screen.queryByText("Remove from group")).toBeNull();
+  });
+
   it("project menu lists groups with current checked", () => {
     render(<Harness />);
     fireEvent.contextMenu(screen.getByTestId("woozle"));

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
 import { localISODate } from "../dateLocal";
+import { GROUP_NAME_MAX, parseGroupName } from "./group";
 import { PROJECT_KINDS, type ProjectKind } from "./kind";
 import { scaffoldProject } from "./scaffold";
 import { ensureSpikeRepo } from "./spikeRepo";
@@ -20,11 +21,17 @@ import { loadSpikesRoot } from "./spikesRoot";
 
 const USAGE = `usage: scripts/project <command> [args]
 
-  new <name> [--kind project|research|knowledge] [--topic "…"]
+  new <name> [--kind project|research|knowledge] [--topic "…"] [--group <group>]
                                             {created}: project-relative paths written
                                             | exit 2 {ask, reason: exists | archived}
                                             <name>: a slug, [a-z0-9][a-z0-9._-]*; --topic is
-                                            required for --kind research
+                                            required for --kind research; --group
+                                            writes group: <group> into the card (a
+                                            grouped knowledge project is that
+                                            group's wiki), one line, 1-64 chars;
+                                            an ungrouped knowledge project not named
+                                            knowledge, or one whose target (no
+                                            group, or its group) exists → error
   spike-repo <name>                         {path, repo: created | existing, registered}
                                             creates or reuses the git repo
                                             <research.spikesRoot>/<name> and lists it in
@@ -58,7 +65,10 @@ class CliError extends Error {}
 
 type Parsed = { positional: string[]; flags: Map<string, string> };
 
-/** `--flag value` and `--flag=value`; a flag without a value is an error. */
+/**
+ * `--flag value` and `--flag=value`; a flag without a value is an error, and so is a next arg
+ * that is itself an option (`--group --kind …`) — pass such a value as `--flag=--value`.
+ */
 function parseArgs(args: string[]): Parsed {
   const positional: string[] = [];
   const flags = new Map<string, string>();
@@ -74,7 +84,7 @@ function parseArgs(args: string[]): Parsed {
       continue;
     }
     const value = args[i + 1];
-    if (value === undefined) throw new CliError(`${arg} needs a value`);
+    if (value === undefined || value.startsWith("--")) throw new CliError(`${arg} needs a value`);
     flags.set(arg.slice(2), value);
     i++;
   }
@@ -87,7 +97,7 @@ function runNew(args: string[], deps: CliDeps, workspaceRoot: string): Outcome {
   const parsed = parseArgs(args);
   if (parsed.positional.length !== 1) throw new CliError("expected new <name>");
   for (const key of parsed.flags.keys()) {
-    if (key !== "kind" && key !== "topic") throw new CliError(`unknown flag --${key}`);
+    if (key !== "kind" && key !== "topic" && key !== "group") throw new CliError(`unknown flag --${key}`);
   }
   const kind = parsed.flags.get("kind") ?? "project";
   if (!(PROJECT_KINDS as readonly string[]).includes(kind)) {
@@ -97,11 +107,17 @@ function runNew(args: string[], deps: CliDeps, workspaceRoot: string): Outcome {
   if (topic !== undefined && kind !== "research") {
     deps.stderr.write("project: --topic is only recorded for --kind research\n");
   }
+  const group = parsed.flags.get("group");
+  if (group !== undefined && !group.trim()) throw new CliError("--group must not be empty");
+  if (group !== undefined && parseGroupName(group) === undefined) {
+    throw new CliError(`--group must be one line of at most ${GROUP_NAME_MAX} characters`);
+  }
   const result = scaffoldProject({
     projectsDir: join(workspaceRoot, "projects"),
     name: parsed.positional[0],
     kind: kind as ProjectKind,
     topic,
+    group: group?.trim(),
     today: (deps.today ?? localISODate)(),
   });
   if (!result.ok) return { code: 2, body: { ask: true, reason: result.reason } };

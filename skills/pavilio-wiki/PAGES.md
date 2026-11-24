@@ -60,7 +60,8 @@ checklists. Code detail is allowed here; it is cited from `repos/` pages, not co
 Once a harvest took one of its findings, the page ends with the back-links `scripts/wiki
 backlink` appends (never written by hand or by `source_writer`). `source_writer` rewrites the
 whole page and drops the section; ingest keeps it by capturing these lines before the rewrite and
-re-appending each with `scripts/wiki backlink` after it (`SKILL.md § 4. Ingest`, step 5):
+re-appending each with `scripts/wiki backlink --keep` after it (`SKILL.md § 4. Ingest`, step 5;
+`--keep` skips the knowledge-target check, so a link to a since-archived wiki is kept):
 
 ```markdown
 ## Knowledge
@@ -157,7 +158,14 @@ description: "Gaps the wiki could not answer and knowledge waiting for a home"
 
 ## Knowledge candidates
 - 2026-10-20 — <generic finding> (from [[wiki/sources/progress-2026-10-19-tts-relay-node20]])
+
+## Group candidates
+- 2026-10-20 — <group-scoped finding> (from [[wiki/sources/note-2026-10-20-vat-check]])
 ```
+
+`## Group candidates` exists only in a grouped project's file (card has `group:`): findings true
+across the group's projects but not outside them, same format as `## Knowledge candidates`.
+Ungrouped → leave `## Group candidates` out of the skeleton above; the section is never written.
 
 Append only; create the file with this skeleton when missing. People delete resolved items. A
 candidate's indented sub-lines are part of it: the harvest reads them as its `details` and clears
@@ -185,16 +193,41 @@ run after them:
 - gap: yes                                         # only when recorded
 ```
 
-The knowledge harvest appends to `knowledge/wiki/log.md` (`scripts/wiki harvest-status` reads the
-newest `harvest` heading for the harvest age):
+The knowledge harvest appends to `knowledge/wiki/log.md` on every run that writes
+(`scripts/wiki harvest-status` reads the newest `harvest` heading for the harvest age):
 
 ```markdown
-## 2026-10-22 16:40 harvest (manual | -yolo ≥3)
+## 2026-10-22 16:40 harvest (manual | -yolo ≥3 | --min 3)
 - picked: concepts/sse-backpressure ← pavilio [[pavilio:wiki/sources/progress-2026-10-19-relay]]
 - skipped: "Node 20 fetch drops keep-alive" ← motyl
+- kept: 12 clusters below 3                          # --min only, instead of skipped
 - dropped: "Client X renews in Q3" ← alokai          # prefilter: not generic
+- group metro: 2 promoted → metro-wiki (created), 5 kept, 1 dropped
+- group infopoly: 1 promoted → infopoly-wiki, 3 kept, 0 dropped
+- group alokai: lock not held                        # skipped: nothing counted or cleared
+- expired: "Metro VAT check needs country prefix" ← metro-bank (2026-07-01)
 - pages: entities/edge-tts (created), concepts/sse-backpressure (updated)
 - backlinks: 5
+```
+
+`group <g>:` — one line per group with group candidates: clusters promoted (≥2 member projects)
+and the target wiki, `(created)` when this harvest scaffolded it, clusters kept, and items
+dropped (`single-project`, cleared) — unless the group is lock not held (SKILL.md § Knowledge harvest,
+step 5: it had a promoted cluster but its wiki could not be created or its lock was taken and
+not held); then just `group <g>: lock not held` — no counts, nothing cleared, every candidate of
+the group (drops and expired included) kept for the next harvest. A group with no promoted
+cluster takes no lock and gets the normal line. `expired:` —
+each group candidate cleared because its cluster stayed below 2 projects with every item dated
+more than 90 days back, or because it has no `source` inside a promoted cluster and its date is
+more than 90 days back, with origin project and date.
+
+Each group wiki the harvest wrote gets its own entry in its `wiki/log.md`:
+
+```markdown
+## 2026-10-22 16:40 harvest
+- promoted: concepts/vat-validation ← metro, metro-bank
+- pages: concepts/vat-validation (created)
+- backlinks: 2
 ```
 
 Omit lines that would be empty.

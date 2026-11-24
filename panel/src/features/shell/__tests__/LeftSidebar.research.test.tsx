@@ -16,6 +16,7 @@ type Row = {
   repos: unknown[];
   kind: ProjectKind;
   lastActivity: string | null;
+  group?: string;
 };
 
 const shell = vi.hoisted(() => ({
@@ -167,6 +168,22 @@ describe("LeftSidebar Research section", () => {
     expect(namesIn(section("projects"))).toEqual(["atlas", "vector"]);
   });
 
+  it("grouped knowledge project renders inside its group, not Research", () => {
+    shell.projects = () => [
+      ...ROWS,
+      { name: "metro", repos: [], kind: "project", lastActivity: null, group: "metro" },
+      { name: "metro-wiki", repos: [], kind: "knowledge", lastActivity: null, group: "metro" },
+    ];
+    setup();
+    const research = section("research");
+    expect(namesIn(research)).toContain("knowledge");
+    expect(namesIn(research)).not.toContain("metro-wiki");
+    expect(namesIn(screen.getByTestId("sidebar-group-members-metro"))).toEqual([
+      "metro-wiki",
+      "metro",
+    ]);
+  });
+
   it("Research order: knowledge first, then lastActivity desc", () => {
     setup();
     expect(namesIn(section("research"))).toEqual([
@@ -245,6 +262,13 @@ describe("LeftSidebar Research section", () => {
     expect(screen.getByTestId("sidebar-project-age-voice-cloning").textContent).toBe("41d");
     expect(row("voice-cloning").getAttribute("data-dimmed")).toBe("false");
     expect(row("voice-cloning").style.opacity).toBe("");
+  });
+
+  it("the shared knowledge row opens no group menu", () => {
+    setup();
+    // fireEvent returns false when a handler called preventDefault (a menu opened).
+    expect(fireEvent.contextMenu(row("edge-tts"))).toBe(false);
+    expect(fireEvent.contextMenu(row("knowledge"))).toBe(true);
   });
 
   it("knowledge row: no age, no dim, no archive", () => {
