@@ -359,7 +359,8 @@ wiki, group findings never to `knowledge`.
      `source` reach no page writer, so they stay **kept** (not cleared), each **expired** once its
      `date` is more than 90 days before today. Below 2 → **kept**
      (not written, not cleared), unless every item in it has a `date` more than 90 days before
-     today → **expired** (cleared in step 8, logged in step 9). An undated item never expires,
+     today → **expired** (cleared in step 8, logged in step 9 — unless its group is *lock not
+     held*, step 5: then it stays a candidate). An undated item never expires,
      so its cluster is kept. `--min` and `-yolo` thresholds do not apply.
    - *Generic* (into `knowledge` only, never a group wiki — even when every origin is in one
      group): count = distinct origin `source` pages of its items (an item with `source` null
@@ -386,7 +387,8 @@ wiki, group findings never to `knowledge`.
    Generic candidates never expire. `--min` only: nothing to write or clear — no generic cluster
    meets n, no id was dropped, no group cluster is promoted and none expired → release the lock,
    report the cluster counts and stop without a commit. Dropped ids are cleared whenever the run
-   goes on, whatever the group routing did. Manual and `-yolo` runs always go on to steps 8–10,
+   goes on, whatever the group routing did — except a group chunk's drops when that group is
+   *lock not held* (step 5). Manual and `-yolo` runs always go on to steps 8–10,
    even with nothing picked: skipped and dropped ids are cleared, the log written and committed.
 5. **Group wiki** — per group with a promoted cluster: `groups[<group>]` from step 1 is its
    wiki; none → `scripts/project new <groupWikiName> --kind knowledge "--group=<group>"` first
@@ -398,7 +400,9 @@ wiki, group findings never to `knowledge`.
    that group as a lock not held (below). Then `scripts/wiki lock take <group wiki>
    --session <id>`; `held: false` → that group's clusters stay as candidates (no page, no
    back-link, not cleared — dropped ids of its chunks included), the other targets proceed, and
-   the report names the group. A renamed
+   the report names the group. **Lock not held** means exactly this step-5 failure: a group with
+   a promoted cluster whose wiki could not be created, or whose `lock take` returned
+   `held: false`. A group with no promoted cluster takes no lock and is never lock not held. A renamed
    group keeps its wiki: the target is found by card (`group:`), never by name.
 6. **Page writers** — one `page_writer` per subject per target in knowledge-wiki mode
    (`agents/page_writer.md § Knowledge-wiki mode`), given the target project (`knowledge` or the
@@ -423,15 +427,16 @@ wiki, group findings never to `knowledge`.
    not be created (step 5) — its prefilter-dropped ids included — and ids missing from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
    <file.json>` (clears from either section); `removed` must equal the number of ids in that
    file. Kept and failed-writer items stay as candidates for the next harvest. A group chunk's
-   `single-project` drop is cleared now, like any drop — no 90-day wait — when that group's lock
-   was held; a group whose lock was not held keeps every candidate, its drops included.
+   `single-project` drop is cleared now, like any drop — no 90-day wait. Drops and expired items
+   of a group are cleared unless that group is lock not held (step 5), which keeps every
+   candidate, drops and expired included.
 9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
    run that reaches this step — `harvest-status` reads the harvest age there — listing picked,
    skipped and dropped generic items with their origin project (with `--min`, the threshold and
    the number of clusters kept instead of the skipped list), the group counts (promoted / kept /
-   dropped per group whose lock was held: its `single-project` drops are cleared too; a group
-   whose lock was not held is listed as `lock not held`, with no counts and nothing cleared) and
-   the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
+   dropped per group: its `single-project` drops are cleared and counted too, unless the group is
+   lock not held (step 5) — then its line reads `lock not held`, with no counts and nothing
+   cleared) and the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
    entry listing what it received.
 10. **Commit** — one commit for the whole harvest: `git add projects/knowledge`, every written
     group wiki's `projects/<group wiki>` (new ones included), and every origin project's
