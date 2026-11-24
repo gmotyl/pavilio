@@ -56,7 +56,7 @@ const REPLY = comment({
 const thread = (comments: ReviewComment[]): ReviewThread => ({ anchor: { side: "new", line: 14 }, comments });
 const TWO = thread([ROOT, REPLY]);
 
-const marker = () => screen.getByRole("button", { name: /comments? on line 14/ });
+const marker = () => screen.getByRole("button", { name: /^\d+ comments? on line 14$/ });
 const dialog = () => screen.getByRole("dialog", { name: /on line 14/ });
 
 /** The marker inline between two page controls, as in the viewer's table. */
@@ -119,12 +119,12 @@ describe("CommentMarker", () => {
     expect(marker().parentElement?.contains(pop)).toBe(false);
     expect(pop.parentElement).toBe(document.body);
     expect(pop.querySelector("header")).toHaveTextContent("Line 14 · 2 comments");
-    expect(within(pop).getByRole("button", { name: "Play thread" })).toHaveTextContent("Play all");
+    expect(within(pop).getByRole("button", { name: "Play all comments on line 14" })).toHaveTextContent("Play all");
     const msgs = pop.querySelectorAll(".fv-cmmsg");
     expect(msgs).toHaveLength(2);
     expect(msgs[0]).toHaveTextContent("KW");
     expect(msgs[0]).toHaveTextContent("kwojcik · 2 h ago");
-    expect(within(msgs[0] as HTMLElement).getByRole("button", { name: "Play comment" })).toHaveAttribute("data-icon", "play");
+    expect(within(msgs[0] as HTMLElement).getByRole("button", { name: "Play comment by kwojcik" })).toHaveAttribute("data-icon", "play");
     // `me` reads as "you".
     expect(msgs[1]).toHaveTextContent("you · 1 h ago");
     expect(msgs[1]).not.toHaveTextContent("gmotyl");
@@ -206,13 +206,13 @@ describe("CommentMarker", () => {
     const SUGGEST = comment({ body: "```suggestion\nconst prod = true;\n```\nPlease rename this flag." });
     render(<CommentMarker thread={thread([SUGGEST, REPLY])} speechKey={KEY} />);
     fireEvent.focus(marker());
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     const spoken = stripToSpeakableText(speech.speakDocument.mock.calls[0][0].text);
     expect(spoken).toContain("kwojcik:");
     expect(spoken).not.toContain("const prod");
     expect(spoken).toContain("Please rename this flag.");
     expect(spoken).toContain("It does.");
-    fireEvent.click(within(dialog()).getAllByRole("button", { name: "Play comment" })[0]);
+    fireEvent.click(within(dialog()).getAllByRole("button", { name: /^Play comment by / })[0]);
     expect(stripToSpeakableText(speech.speakDocument.mock.calls[1][0].text)).toContain("Please rename this flag.");
   });
 
@@ -220,7 +220,7 @@ describe("CommentMarker", () => {
     const OPEN = comment({ body: "```suggestion\nconst prod = true;" });
     render(<CommentMarker thread={thread([OPEN, REPLY])} speechKey={KEY} />);
     fireEvent.focus(marker());
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     const spoken = stripToSpeakableText(speech.speakDocument.mock.calls[0][0].text);
     expect(spoken).toContain("kwojcik:");
     expect(spoken).not.toContain("const prod");
@@ -249,7 +249,7 @@ describe("CommentMarker", () => {
     });
     render(<CommentMarker thread={thread([KILO, FIXED])} speechKey={KEY} />);
     fireEvent.focus(marker());
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     const units = preparePage(speech.speakDocument.mock.calls[0][0].text).units.map((u) => u.text);
     const spoken = units.join(" ");
     expect(units[0]).toBe("kilo-code-bot[bot]:");
@@ -264,8 +264,8 @@ describe("CommentMarker", () => {
   it("CommentMarker stops the speech it started when it unmounts", () => {
     const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
     fireEvent.focus(marker());
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
-    fireEvent.click(within(dialog()).getAllByRole("button", { name: "Play comment" })[1]);
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
+    fireEvent.click(within(dialog()).getAllByRole("button", { name: /^Play comment by / })[1]);
     expect(speech.stopDocument).not.toHaveBeenCalled();
     unmount();
     expect(speech.stopDocument).toHaveBeenCalledWith(`${KEY}/t/990`);
@@ -282,7 +282,7 @@ describe("CommentMarker", () => {
   it("CommentMarker Play speaks one comment under its key", () => {
     render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
     fireEvent.focus(marker());
-    const [first, second] = within(dialog()).getAllByRole("button", { name: "Play comment" });
+    const [first, second] = within(dialog()).getAllByRole("button", { name: /^Play comment by / });
     fireEvent.click(first);
     expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/c/990`, text: `kwojcik:\n\n${ROOT.body}` });
     fireEvent.click(second);
@@ -292,7 +292,7 @@ describe("CommentMarker", () => {
   it("CommentMarker Play all speaks the thread in order", () => {
     render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
     fireEvent.focus(marker());
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     expect(speech.speakDocument).toHaveBeenCalledTimes(1);
     expect(speech.speakDocument).toHaveBeenCalledWith({
       key: `${KEY}/t/990`,
@@ -306,7 +306,7 @@ describe("CommentMarker", () => {
     // groupThreads sorts by time: the two conversations interleave.
     render(<CommentMarker thread={thread([ROOT, OTHER, REPLY, OTHER_REPLY])} speechKey={KEY} />);
     fireEvent.focus(marker());
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     expect(speech.speakDocument).toHaveBeenCalledTimes(1);
     expect(speech.speakDocument).toHaveBeenCalledWith({
       key: `${KEY}/t/990`,
@@ -318,23 +318,36 @@ describe("CommentMarker", () => {
     render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} />);
     fireEvent.focus(marker());
     const pop = dialog();
-    const play = within(pop).getByRole("button", { name: "Play thread" });
+    // Its name is the one comment it reads, and holds the visible "Play" (WCAG 2.5.3).
+    const play = within(pop).getByRole("button", { name: "Play comment by kwojcik" });
     expect(play).toHaveTextContent(/^Play$/);
     expect(play).not.toHaveTextContent("Play all");
-    expect(within(pop).queryByRole("button", { name: "Play comment" })).toBeNull();
+    expect(within(pop).getAllByRole("button", { name: /^Play/ })).toHaveLength(1);
     fireEvent.click(play);
     expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/t/990`, text: `kwojcik:\n\n${ROOT.body}` });
   });
 
+  it("CommentMarker Play names hold their visible text and tell the comments apart", () => {
+    host.states.set(`${KEY}/t/990`, "paused");
+    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    fireEvent.focus(marker());
+    const all = screen.getByTestId("comment-play-thread");
+    expect(all).toHaveTextContent("Resume");
+    expect(all).toHaveAccessibleName("Resume all comments on line 14");
+    // Named as the popover shows the author: "you" for the signed-in login.
+    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Play comment by kwojcik");
+    expect(screen.getByTestId("comment-play-991")).toHaveAccessibleName("Play comment by you");
+  });
+
   // Each Play reads its own key's run off the host, as the page's speech row does.
   it.each([
-    ["empty", "Play comment", "play", undefined],
-    ["ready", "Play comment", "play", undefined],
-    ["heard", "Play comment", "play", undefined],
-    ["preparing", "Play comment — waiting for the voice", "play", "preparing"],
-    ["stalled", "Pause comment — waiting for the voice", "pause", "stalled"],
-    ["speaking", "Pause comment", "pause", "speaking"],
-    ["paused", "Resume comment", "resume", "paused"],
+    ["empty", "Play comment by gmotyl", "play", undefined],
+    ["ready", "Play comment by gmotyl", "play", undefined],
+    ["heard", "Play comment by gmotyl", "play", undefined],
+    ["preparing", "Play comment by gmotyl — waiting for the voice", "play", "preparing"],
+    ["stalled", "Pause comment by gmotyl — waiting for the voice", "pause", "stalled"],
+    ["speaking", "Pause comment by gmotyl", "pause", "speaking"],
+    ["paused", "Resume comment by gmotyl", "resume", "paused"],
   ])("CommentMarker comment Play while its key is %s reads %s", (state, label, icon, lit) => {
     host.states.set(`${KEY}/c/991`, state);
     render(<CommentMarker thread={TWO} speechKey={KEY} />);
@@ -346,8 +359,8 @@ describe("CommentMarker", () => {
     if (lit) expect(button).toHaveAttribute("data-speech", lit);
     else expect(button).not.toHaveAttribute("data-speech");
     // Only its own key: the other comment and the thread stay idle.
-    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Play comment");
-    expect(screen.getByTestId("comment-play-thread")).toHaveAccessibleName("Play thread");
+    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Play comment by kwojcik");
+    expect(screen.getByTestId("comment-play-thread")).toHaveAccessibleName("Play all comments on line 14");
   });
 
   it("CommentMarker shows the red pause while the run waits on synthesis, then the pause once audio plays", () => {
@@ -366,11 +379,11 @@ describe("CommentMarker", () => {
     host.states.set(key, "speaking");
     rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
     expect(play).toHaveAttribute("data-speech", "speaking");
-    expect(play).toHaveAccessibleName("Pause thread");
+    expect(play).toHaveAccessibleName("Pause all comments on line 14");
     host.states.set(key, "heard");
     rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
     expect(play).not.toHaveAttribute("data-speech");
-    expect(play).toHaveAccessibleName("Play thread");
+    expect(play).toHaveAccessibleName("Play all comments on line 14");
     expect(play).toHaveTextContent("Play all");
   });
 
@@ -401,7 +414,7 @@ describe("CommentMarker", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(speech.stopDocument).not.toHaveBeenCalled();
     fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
-    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Pause comment");
+    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Pause comment by kwojcik");
     unmount();
   });
 
@@ -419,7 +432,7 @@ describe("CommentMarker", () => {
     act(() => vi.advanceTimersByTime(500));
     expect(dialog()).toBeInTheDocument();
     // Focus inside the popover holds it open too.
-    act(() => within(dialog()).getByRole("button", { name: "Play thread" }).focus());
+    act(() => within(dialog()).getByRole("button", { name: "Play all comments on line 14" }).focus());
     fireEvent.pointerEnter(dialog(), { pointerType: "mouse" });
     fireEvent.pointerLeave(dialog(), { pointerType: "mouse" });
     act(() => vi.advanceTimersByTime(500));
@@ -471,7 +484,7 @@ describe("CommentMarker", () => {
   it("CommentMarker Shift+Tab from the first control returns to the marker", () => {
     render(<Inline />);
     act(() => marker().focus());
-    const play = within(dialog()).getByRole("button", { name: "Play thread" });
+    const play = within(dialog()).getByRole("button", { name: "Play all comments on line 14" });
     act(() => play.focus());
     tab(true);
     expect(document.activeElement).toBe(marker());

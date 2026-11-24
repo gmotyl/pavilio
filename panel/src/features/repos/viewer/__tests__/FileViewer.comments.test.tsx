@@ -311,7 +311,7 @@ describe("FileViewer comment lane", () => {
 
   const playThread16 = () => {
     fireEvent.focus(body().querySelector<HTMLButtonElement>('tr[data-line="16"] .fv-cmbtn')!);
-    fireEvent.click(screen.getByRole("button", { name: "Play thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Play all comments on line 16" }));
     expect(speech.speakDocument).toHaveBeenCalledWith(expect.objectContaining({ key: "pavilio//pr/gmotyl/pavilio/7/t/160" }));
   };
 

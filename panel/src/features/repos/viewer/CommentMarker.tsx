@@ -255,8 +255,13 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   const playOne = (i: number) => speechKey && speak(commentKey(i), spoken(i));
   const playAll = () => speechKey && speak(threadKey, groups.flatMap((g) => g.items.map(spoken)).join("\n\n"));
 
-  /** The control's look and press for `key`: Play starts it, a run in hand pauses, a held one resumes. */
-  const control = (key: string, what: "comment" | "thread", play: () => void) => {
+  /** How the popover names an author: "you" for the signed-in login. */
+  const who = (c: ReviewComment) => (me && c.author === me ? "you" : c.author);
+  /**
+   * The control's look and press for `key`: Play starts it, a run in hand pauses, a held one resumes.
+   * `what` completes its name after the verb; the name starts with the button's visible text (WCAG 2.5.3).
+   */
+  const control = (key: string, what: string, play: () => void) => {
     const state = host.stateFor(key);
     const intent = playIntent(state);
     const waiting = WAITING.has(state);
@@ -342,7 +347,8 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
               <b>Line {line}</b> · {plural(n)}
               {speechKey &&
                 (() => {
-                  const c = control(threadKey, "thread", playAll);
+                  // "Play all comments on line L"; a one-comment thread's lone Play names that comment.
+                  const c = control(threadKey, n >= 2 ? `all comments on line ${line}` : `comment by ${who(comments[0])}`, playAll);
                   return (
                     <button type="button" data-testid="comment-play-thread" className="fv-cmplay fv-cmplay-all speech-bar-primary" aria-label={c.label} title={c.label} {...c.props}>
                       {c.icon}
@@ -363,11 +369,11 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
                           <span className="fv-cmav" style={{ background: hue(c.author) }} aria-hidden="true">
                             {initials(c.author)}
                           </span>
-                          <b>{me && c.author === me ? "you" : c.author}</b> · {updatedAgo(c.createdAt)}
+                          <b>{who(c)}</b> · {updatedAgo(c.createdAt)}
                           {speechKey &&
                             n >= 2 &&
                             (() => {
-                              const p = control(commentKey(i), "comment", () => playOne(i));
+                              const p = control(commentKey(i), `comment by ${who(c)}`, () => playOne(i));
                               return (
                                 <button type="button" data-testid={`comment-play-${c.id}`} className="fv-cmplay speech-bar-primary" aria-label={p.label} title={p.label} {...p.props}>
                                   {p.icon}

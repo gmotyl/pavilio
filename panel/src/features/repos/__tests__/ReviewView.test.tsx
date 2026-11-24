@@ -443,7 +443,7 @@ describe("ReviewView", () => {
     // `me` reaches the marker: greg's reply reads as "you".
     expect(pop).toHaveTextContent("you");
     expect(pop).toHaveTextContent("anna");
-    fireEvent.click(within(pop).getByRole("button", { name: "Play thread" }));
+    fireEvent.click(within(pop).getByRole("button", { name: "Play all comments on line 15" }));
     expect(speech.speakDocument).toHaveBeenCalledWith(expect.objectContaining({ key: `${prSpeechKey("pavilio", PRS[0])}/t/1` }));
   });
 
