@@ -501,9 +501,11 @@ async function renameSource(root: string, path: string, revs: string[]): Promise
 /**
  * Unified diff of one path over `revs`. A pathspec of just the destination hides
  * a rename's source from detection, so an added file is retried with its source.
+ * Context is pinned at three lines (git's and GitHub's default): a user's
+ * `diff.context` must not drop the unchanged lines review comments anchor to.
  */
 async function pathDiff(root: string, path: string, revs: string[]): Promise<string> {
-  const base = ["diff", "--no-color", "--no-ext-diff", "-M", ...revs, "--"];
+  const base = ["diff", "--no-color", "--no-ext-diff", "-M", "-U3", ...revs, "--"];
   const diff = (await gitArgv([...base, path], root)).toString("utf-8");
   if (!/^new file mode /m.test(diff)) return diff;
   const src = await renameSource(root, path, revs);

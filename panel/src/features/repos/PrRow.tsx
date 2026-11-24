@@ -43,7 +43,7 @@ export function updatedAgo(iso: string, now = Date.now()): string {
 }
 
 // Stable per login, so a person keeps their colour across rows and sessions.
-function hue(login: string): string {
+export function hue(login: string): string {
   let h = 0;
   for (const ch of login) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return `hsl(${h} 65% 68%)`;

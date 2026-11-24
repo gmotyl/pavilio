@@ -189,6 +189,9 @@ export function Layout({ children }: LayoutProps) {
         data-testid="layout-sidebar-left"
         data-panel-region="sidebar-left"
         className={`sidebar sidebar-left flex-shrink-0 relative ${!left.expanded ? "sidebar-collapsed" : ""}`}
+        // Collapsed it is only moved out of sight (0px wide, or translated off a phone's
+        // edge): inert keeps its controls out of the tab order and away from focus.
+        inert={!left.expanded}
         style={{
           order: LAYOUT_ORDER.sidebarLeft,
           // No width at all on a phone: there the sidebar is a fixed overlay
@@ -295,6 +298,8 @@ export function Layout({ children }: LayoutProps) {
         data-testid="layout-sidebar-right"
         data-panel-region="sidebar-right"
         className={`sidebar sidebar-right flex-shrink-0 relative ${!right.expanded ? "sidebar-collapsed" : ""}`}
+        // Inert when collapsed, as the left aside above.
+        inert={!right.expanded}
         style={{
           order: LAYOUT_ORDER.sidebarRight,
           width: sidebarWidth(rightPane, right.expanded),

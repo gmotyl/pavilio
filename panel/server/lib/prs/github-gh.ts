@@ -1,7 +1,13 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import { gitSafeEnv } from "../gitEnv.js";
-import { type ChecksState, type PrProvider, PrUnavailableError, type PullRequest } from "./provider.js";
+import {
+  type ChecksState,
+  type PrProvider,
+  PrUnavailableError,
+  type PullRequest,
+  type ReviewComment,
+} from "./provider.js";
 
 export interface RunResult {
   code: number;
@@ -60,6 +66,22 @@ interface RawPr {
   baseRefName: string;
   updatedAt: string;
   url: string;
+}
+
+const COMMENT_FIELDS =
+  ".[] | {id, in_reply_to_id, path, line, side, user: {login: .user.login}, body, created_at, html_url, commit_id}";
+
+interface RawReviewComment {
+  id: number;
+  in_reply_to_id?: number | null;
+  path: string;
+  line: number | null;
+  side?: string | null;
+  user?: { login?: string } | null;
+  body?: string | null;
+  created_at: string;
+  html_url: string;
+  commit_id: string;
 }
 
 const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
@@ -240,7 +262,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     },
 
     async openPr(repoPath, n) {
-      if (!Number.isInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
+      if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
       const slug = await assertGitHub(repoPath);
       const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName,body"], repoPath)) as {
         baseRefName?: string;
@@ -277,6 +299,46 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
         }
       }
       return { head, base: baseSha, body: view.body ?? "" };
+    },
+
+    async reviewComments(repoPath, n) {
+      if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
+      const slug = (await assertGitHub(repoPath)).slice(`${GITHUB_HOST}/`.length);
+      // --jq '.[] | {...}' prints one object per line on every page, so pages concatenate without `][`.
+      // Project only the consumed fields: whole objects repeat `diff_hunk` and can overflow the runner's maxBuffer.
+      // --hostname: an inherited GH_HOST must not send this to another host once origin proved github.com.
+      const out = await gh(
+        ["api", "--hostname", GITHUB_HOST, "--paginate", `repos/${slug}/pulls/${n}/comments`, "--jq", COMMENT_FIELDS],
+        repoPath,
+      );
+      const comments: ReviewComment[] = [];
+      for (const text of out.split("\n")) {
+        if (!text.trim()) continue;
+        let c: RawReviewComment;
+        try {
+          c = JSON.parse(text) as RawReviewComment;
+        } catch {
+          throw new PrUnavailableError("failed", "gh api returned invalid JSON");
+        }
+        if (typeof c !== "object" || c === null || Array.isArray(c)) {
+          throw new PrUnavailableError("failed", "gh api returned a non-object comment");
+        }
+        // line is null once the commented code is gone from the PR (outdated).
+        if (c.line == null) continue;
+        comments.push({
+          id: c.id,
+          replyTo: c.in_reply_to_id ?? null,
+          path: c.path,
+          line: c.line,
+          side: c.side === "LEFT" ? "old" : "new",
+          author: c.user?.login ?? "",
+          body: c.body ?? "",
+          createdAt: c.created_at,
+          url: c.html_url,
+          commitId: c.commit_id,
+        });
+      }
+      return comments;
     },
   };
 }

@@ -25,8 +25,10 @@ interface MarkdownRendererProps {
    * Markdown written by a third party (a GitHub PR body): no raw HTML, no
    * wikilinks, and every link and image resolved against `linkBase` (the page
    * the text came from) and opened outside the panel — never a panel route.
+   * `imageBase`, when given, is what images resolve against instead (a file's
+   * raw bytes, where `linkBase` is its HTML page).
    */
-  untrusted?: { linkBase: string };
+  untrusted?: { linkBase: string; imageBase?: string };
 }
 
 /** `url` made safe (`defaultUrlTransform`) and absolute against `base`; "" when it can't be. */
@@ -241,7 +243,7 @@ function useMissingWikiLinks(targets: string): ReadonlySet<string> {
 }
 
 export default function MarkdownRenderer({ content, basePath, untrusted }: MarkdownRendererProps) {
-  if (untrusted) return <UntrustedMarkdown content={content} linkBase={untrusted.linkBase} />;
+  if (untrusted) return <UntrustedMarkdown content={content} linkBase={untrusted.linkBase} imageBase={untrusted.imageBase} />;
   return <TrustedMarkdown content={content} basePath={basePath} />;
 }
 
@@ -251,7 +253,7 @@ export default function MarkdownRenderer({ content, basePath, untrusted }: Markd
  * can neither run script nor land on a panel route. Fenced code is highlighted
  * but gets none of the trusted overrides (copy buttons, mermaid diagrams).
  */
-function UntrustedMarkdown({ content, linkBase }: { content: string; linkBase: string }) {
+function UntrustedMarkdown({ content, linkBase, imageBase }: { content: string; linkBase: string; imageBase?: string }) {
   const components = useMemo<Components>(
     () => ({
       a: ({ href, children, node: _node, ...props }) => (
@@ -268,7 +270,7 @@ function UntrustedMarkdown({ content, linkBase }: { content: string; linkBase: s
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }]]}
         skipHtml
-        urlTransform={(url) => resolveUntrustedUrl(url, linkBase)}
+        urlTransform={(url, key) => resolveUntrustedUrl(url, key === "src" && imageBase ? imageBase : linkBase)}
         components={components}
       >
         {content}

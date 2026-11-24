@@ -57,8 +57,8 @@ function Host({ children }: { children: ReactNode }) {
 }
 
 const PR = pr({ number: 7 });
-const aside = () => screen.getByRole("complementary", { name: "Pull request description" });
-const play = () => within(aside()).getByTestId("pr-description-play");
+const view = () => screen.getByRole("region", { name: "Pull request description" });
+const play = () => within(view()).getByTestId("pr-description-play");
 
 beforeEach(() => {
   stub.host = makeSpeech();
@@ -74,8 +74,8 @@ describe("PrDescription", () => {
         <PrDescription project="pavilio" pr={PR} body={"## Why\n\nFixes the thing."} />
       </Host>,
     );
-    expect(within(aside()).getByRole("heading", { name: "Description" })).toBeInTheDocument();
-    expect(within(aside()).getByTestId("md")).toHaveTextContent("Fixes the thing.");
+    expect(within(view()).getByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(within(view()).getByTestId("md")).toHaveTextContent("Fixes the thing.");
   });
 
   it("Play reads the description in the project's voice", () => {
@@ -92,14 +92,28 @@ describe("PrDescription", () => {
     expect(play()).toHaveAccessibleName("Stop");
   });
 
-  it("says so when the PR has no description, and offers no Play", () => {
+  it("Description shows No description provided for an empty body", () => {
     render(
       <Host>
         <PrDescription project="pavilio" pr={PR} body="" />
       </Host>,
     );
-    expect(aside()).toHaveTextContent("No description provided.");
+    expect(view()).toHaveTextContent("No description provided.");
     expect(play()).toBeDisabled();
+  });
+
+  it("is a viewer section with its title bar, Play and play-from-here", () => {
+    render(
+      <Host>
+        <PrDescription project="pavilio" pr={PR} body={"Fixes the thing.\n\nAnd another."} />
+      </Host>,
+    );
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(view().tagName).toBe("SECTION");
+    expect(view()).toHaveClass("rv-descview");
+    expect(within(view()).getByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(play()).toBeEnabled();
+    expect(view().querySelector("[data-play-from-here]")).not.toBeNull();
   });
 
   it("shows a loading line until the body arrives", () => {
@@ -108,7 +122,7 @@ describe("PrDescription", () => {
         <PrDescription project="pavilio" pr={PR} body={null} />
       </Host>,
     );
-    expect(aside()).toHaveTextContent("Loading description…");
+    expect(view()).toHaveTextContent("Loading description…");
   });
 
   it("renders the body as untrusted markdown resolved against the PR page", () => {
@@ -117,7 +131,7 @@ describe("PrDescription", () => {
         <PrDescription project="pavilio" pr={PR} body="Hi" />
       </Host>,
     );
-    expect(within(aside()).getByTestId("md")).toHaveAttribute("data-link-base", PR.url);
+    expect(within(view()).getByTestId("md")).toHaveAttribute("data-link-base", PR.url);
   });
 
   it("toolbar label is its own class, so markdown h4s keep prose styles", () => {
@@ -126,7 +140,7 @@ describe("PrDescription", () => {
         <PrDescription project="pavilio" pr={PR} body="Hi" />
       </Host>,
     );
-    expect(within(aside()).getByRole("heading", { name: "Description" })).toHaveClass("rv-desc-title");
+    expect(within(view()).getByRole("heading", { name: "Description" })).toHaveClass("rv-desc-title");
   });
 
   it("a comment-only body (an untouched PR template) is no description", () => {
@@ -135,7 +149,7 @@ describe("PrDescription", () => {
         <PrDescription project="pavilio" pr={PR} body={"<!-- Describe your change -->\n<!-- Link the issue -->"} />
       </Host>,
     );
-    expect(aside()).toHaveTextContent("No description provided.");
+    expect(view()).toHaveTextContent("No description provided.");
     expect(play()).toBeDisabled();
   });
 });

@@ -100,6 +100,14 @@ describe("FileTree", () => {
     expect(screen.getByRole("button", { name: /a\.ts/ })).not.toHaveAttribute("aria-current");
   });
 
+  it("opens the revealed file's folders without selecting it", () => {
+    render(<FileTree files={FILES} reveal="src/lib/deep.ts" onSelect={() => {}} />);
+    expect(folder("src")).toHaveAttribute("aria-expanded", "true");
+    expect(folder("lib")).toHaveAttribute("aria-expanded", "true");
+    expect(folder("docs")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /deep\.ts/ })).not.toHaveAttribute("aria-current");
+  });
+
   it("keeps a folder the user collapsed closed while the selection is unchanged", () => {
     const { rerender } = render(<FileTree files={FILES} selected="src/lib/deep.ts" onSelect={() => {}} />);
     fireEvent.click(folder("lib"));
@@ -107,6 +115,40 @@ describe("FileTree", () => {
 
     rerender(<FileTree files={FILES} selected="src/lib/deep.ts" onSelect={() => {}} />);
     expect(folder("lib")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("shows a comment badge on files with comments", () => {
+    render(<FileTree files={[{ path: "README.md", status: "M", add: 72, del: 1, comments: 3 }]} onSelect={() => {}} />);
+    const row = screen.getByRole("button", { name: /README/ });
+    const badge = row.querySelector(".ft-cm");
+    expect(badge).toHaveTextContent("💬3");
+    expect(badge).toHaveAttribute("title", "3 comments");
+    expect(badge?.nextElementSibling).toHaveClass("ft-cnt");
+    // Read as words, like the folder dot: the emoji is hidden from screen readers.
+    expect(row).toHaveAccessibleName(expect.stringContaining("3 comments"));
+    expect(row).not.toHaveAccessibleName(expect.stringContaining("💬"));
+  });
+
+  it("a single comment reads as \"1 comment\"", () => {
+    render(<FileTree files={[{ path: "a.ts", status: "M", add: 1, del: 0, comments: 1 }]} onSelect={() => {}} />);
+    const row = screen.getByRole("button", { name: /a\.ts/ });
+    expect(row.querySelector(".ft-cm")).toHaveAttribute("title", "1 comment");
+    expect(row).toHaveAccessibleName(expect.stringContaining("1 comment"));
+    expect(row).not.toHaveAccessibleName(expect.stringContaining("1 comments"));
+  });
+
+  it("shows no comment badge without comments", () => {
+    render(
+      <FileTree
+        files={[
+          { path: "a.ts", status: "M", add: 1, del: 0, comments: 0 },
+          { path: "b.ts", status: "M", add: 1, del: 0 },
+        ]}
+        onSelect={() => {}}
+      />,
+    );
+    expect(document.querySelector(".ft-cm")).toBeNull();
+    expect(screen.getByRole("button", { name: /a\.ts/ })).not.toHaveTextContent("💬");
   });
 
   it("changedOnly hides unchanged files", () => {

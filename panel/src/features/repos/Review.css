@@ -1,4 +1,4 @@
-/* Review view: PR switcher, compact PR header, tree | viewer | PR description. */
+/* Review view: PR switcher, compact PR header, file list (Description first) | viewer. */
 .rv-sw {
   position: relative;
   display: flex;
@@ -81,11 +81,10 @@
 
 .rv-body {
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr) minmax(300px, 30%);
+  grid-template-columns: 270px minmax(0, 1fr);
   height: calc(100vh - 160px);
   min-height: 360px;
 }
-.rv-body.rv-nodesc { grid-template-columns: 250px minmax(0, 1fr); }
 .rv-body.rv-stack { grid-template-columns: minmax(0, 1fr); height: auto; }
 .rv-side {
   display: flex;
@@ -114,28 +113,58 @@
 .rv-msg { padding: 12px; font-size: 12.5px; color: var(--text-tertiary); }
 .rv-msg button { color: var(--accent); }
 
-.rv-desc {
+/* The Description entry: pinned above the file tree, whatever the tree lists. */
+.rv-descentry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 6px 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.rv-descentry:hover { background: var(--bg-hover); }
+.rv-descentry:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.rv-descentry[aria-current="true"] { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
+.rv-descentry-ico { width: 14px; flex: none; text-align: center; color: var(--accent); }
+.rv-descentry-num { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.rv-sep { flex: none; height: 1px; margin: 6px 12px 0; border: 0; background: var(--border-subtle); }
+.rv-side > .ft { flex: 1; min-height: 0; }
+
+/* The description, and a rendered Markdown file: a card with a title bar, like a file. */
+.rv-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
   /* Left: room for the 22px play-from-here button and its 4px gap. */
-  padding: 12px 14px 12px 26px;
-  overflow: auto;
-  border-left: 1px solid var(--border-subtle);
+  padding: 0 14px 12px 26px;
   font-size: 13px;
   line-height: 1.55;
 }
-.rv-desc-title { margin: 0 auto 0 0; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-.rv-desc > .flex { gap: 6px; }
+.rv-card > .flex {
+  gap: 6px;
+  margin: 0 -14px 0 -26px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rv-desc-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.rv-desc-num { margin-right: auto; font-size: 11px; color: var(--text-muted); }
 .rv-desc-empty { color: var(--text-muted); }
 
-
 /* Fallback before the body is measured. */
-@media (max-width: 1100px) {
-  .rv-desc { display: none; }
-  .rv-body { grid-template-columns: 250px minmax(0, 1fr); }
-}
 @media (max-width: 860px) {
   .rv-body { grid-template-columns: minmax(0, 1fr); height: auto; }
 }
+
+/* A rendered Markdown file sits in the file viewer's frame: no second border; its Play row ends right. */
+.rv-mdfile { border: 0; border-radius: 0; }
+.rv-mdfile > .flex > .flex { justify-content: flex-end; }

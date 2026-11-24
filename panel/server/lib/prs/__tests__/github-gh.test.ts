@@ -218,6 +218,122 @@ describe("GitHubGhProvider", () => {
     expect(view.args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "github.com/o/r"]);
   });
 
+  describe("reviewComments", () => {
+    const raw = (over: Record<string, unknown> = {}) => ({
+      id: 1,
+      path: "src/a.ts",
+      line: 12,
+      side: "RIGHT",
+      user: { login: "alice" },
+      body: "nit",
+      created_at: "2026-11-20T10:00:00Z",
+      html_url: "https://github.com/o/r/pull/40#discussion_r1",
+      commit_id: "headsha",
+      ...over,
+    });
+    const lines = (...cs: object[]) => cs.map((c) => JSON.stringify(c)).join("\n") + (cs.length ? "\n" : "");
+    const commentsRunner = (stdout: string, url = "git@github.com:o/r.git") => {
+      const origin = originIs(url);
+      return fakeRunner((cmd, args) => origin(cmd, args) ?? (cmd === "gh" ? ok(stdout) : new Error(`unexpected ${cmd}`)));
+    };
+
+    it("reviewComments maps gh api comments to ReviewComment", async () => {
+      const { run, calls } = commentsRunner(
+        lines(raw(), raw({ id: 2, in_reply_to_id: 1, side: "LEFT", line: 7, user: { login: "bob" }, body: "agreed" })),
+      );
+      const comments = await createGitHubGhProvider({ run }).reviewComments(REPO, 40);
+
+      const gh = calls.find((c) => c.cmd === "gh")!;
+      expect(gh.cwd).toBe(REPO);
+      // Project only consumed fields: whole objects repeat `diff_hunk` and can overflow maxBuffer.
+      expect(gh.args).toEqual([
+        "api",
+        "--hostname",
+        "github.com",
+        "--paginate",
+        "repos/o/r/pulls/40/comments",
+        "--jq",
+        ".[] | {id, in_reply_to_id, path, line, side, user: {login: .user.login}, body, created_at, html_url, commit_id}",
+      ]);
+      expect(comments).toEqual([
+        {
+          id: 1,
+          replyTo: null,
+          path: "src/a.ts",
+          line: 12,
+          side: "new",
+          author: "alice",
+          body: "nit",
+          createdAt: "2026-11-20T10:00:00Z",
+          url: "https://github.com/o/r/pull/40#discussion_r1",
+          commitId: "headsha",
+        },
+        expect.objectContaining({ id: 2, replyTo: 1, line: 7, side: "old", author: "bob", body: "agreed" }),
+      ]);
+    });
+
+    it("reviewComments drops outdated comments", async () => {
+      const { run } = commentsRunner(lines(raw({ id: 1, line: null }), raw({ id: 2 })));
+      const comments = await createGitHubGhProvider({ run }).reviewComments(REPO, 40);
+      expect(comments.map((c) => c.id)).toEqual([2]);
+    });
+
+    it("reviewComments concatenates paginated output", async () => {
+      // --jq '.[]' emits one object per line on every page, so pages simply append.
+      const page1 = lines(raw({ id: 1 }), raw({ id: 2 }));
+      const page2 = lines(raw({ id: 3 }));
+      const { run } = commentsRunner(page1 + page2);
+      const comments = await createGitHubGhProvider({ run }).reviewComments(REPO, 40);
+      expect(comments.map((c) => c.id)).toEqual([1, 2, 3]);
+    });
+
+    it("reviewComments returns [] for a PR without comments", async () => {
+      const { run } = commentsRunner("");
+      expect(await createGitHubGhProvider({ run }).reviewComments(REPO, 40)).toEqual([]);
+    });
+
+    it("reviewComments rejects a line that is not JSON", async () => {
+      const { run } = commentsRunner(lines(raw()) + "{not json\n");
+      const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect((err as PrUnavailableError).reason).toBe("failed");
+    });
+
+    it("reviewComments rejects a line that is JSON but not an object", async () => {
+      for (const bad of ["null", "42", '"x"', "[]"]) {
+        const { run } = commentsRunner(lines(raw()) + bad + "\n");
+        const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
+        expect(err).toBeInstanceOf(PrUnavailableError);
+        expect((err as PrUnavailableError).reason).toBe("failed");
+      }
+    });
+
+    it("openPr rejects an unsafe or invalid PR number before running anything", async () => {
+      for (const n of [0, -1, 1.5, Number.NaN, 1e20]) {
+        const { run, calls } = commentsRunner("");
+        const err = await createGitHubGhProvider({ run }).openPr(REPO, n).catch((e) => e);
+        expect(err).toBeInstanceOf(PrUnavailableError);
+        expect((err as PrUnavailableError).reason).toBe("failed");
+        expect(calls).toHaveLength(0);
+      }
+    });
+
+    it("reviewComments rejects an invalid PR number and a non-GitHub remote", async () => {
+      for (const n of [0, -1, 1.5, Number.NaN, 1e20]) {
+        const { run, calls } = commentsRunner("");
+        const err = await createGitHubGhProvider({ run }).reviewComments(REPO, n).catch((e) => e);
+        expect(err).toBeInstanceOf(PrUnavailableError);
+        expect((err as PrUnavailableError).reason).toBe("failed");
+        expect(calls.some((c) => c.cmd === "gh")).toBe(false);
+      }
+      const { run, calls } = commentsRunner("", "git@gitlab.com:o/r.git");
+      const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect((err as PrUnavailableError).reason).toBe("not-github");
+      expect(calls.some((c) => c.cmd === "gh")).toBe(false);
+    });
+  });
+
   describe("openPr in a shallow clone", () => {
     const shallowRunner = (mergeBaseAfterDeepens: number) => {
       const origin = originIs("git@github.com:o/r.git");

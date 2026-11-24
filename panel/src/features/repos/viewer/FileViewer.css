@@ -138,6 +138,8 @@
 
 /* Split cells */
 .fv-split td.fv-cd:nth-child(2) { border-right: 1px solid var(--border-subtle); }
+/* With a comment lane the left code cell is the third. */
+.fv-split td.fv-cm:first-child ~ td.fv-cd:nth-child(3) { border-right: 1px solid var(--border-subtle); }
 td.fv-s-del { background: var(--fv-del-bg); }
 td.fv-no.fv-s-del { background: var(--fv-del-no); }
 td.fv-s-add { background: var(--fv-add-bg); }
@@ -218,3 +220,124 @@ td.fv-s-empty {
   font-size: 12px;
 }
 .fv-more:hover { background: var(--bg-hover); }
+
+/* Threads whose lines the diff shows no row for: listed above the table. */
+.fv-unplaced {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 3px 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Comment lane: a review thread's marker beside the line numbers. */
+.fv-table td.fv-cm {
+  padding: 2px 0 0;
+  text-align: center;
+  user-select: none;
+}
+.fv-cmbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  border-radius: 3px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.fv-cmbtn:hover, .fv-cmbtn.open { background: var(--accent-dim); }
+.fv-cmbtn:focus-visible { outline: 2px solid var(--accent); background: var(--accent-dim); }
+.fv-cmbtn svg { width: 14px; height: 14px; }
+.fv-cmk {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--bg-base);
+  font: 600 9px/1 ui-sans-serif, system-ui, sans-serif;
+}
+
+/* The thread popover: portalled to <body>, so the table's overflow can't clip it. */
+.fv-cmpop {
+  position: fixed;
+  z-index: 50;
+  width: min(420px, 72vw);
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+}
+.fv-cmpop header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-default);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fv-cmpop header b, .fv-cmwho b { color: var(--text-primary); }
+.fv-cmplay {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fv-cmplay:hover:not([data-speech]) { background: var(--bg-hover); color: var(--text-primary); }
+/* A comment's run wears the speech row's colours (`.speech-bar-primary[data-speech]` in
+   index.css): green while it plays or is held, red while it waits on synthesis. */
+.fv-cmplay[data-speech]:hover { filter: brightness(1.15); }
+.fv-cmmsg { padding: 8px 12px 10px; }
+.fv-cmmsg + .fv-cmmsg { border-top: 1px solid var(--border-subtle); }
+/* One root conversation: its comments, then its own reply link. */
+.fv-cmconv + .fv-cmconv { border-top: 1px solid var(--border-default); }
+.fv-cmreply {
+  padding: 0 12px 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.fv-cmreply a { color: var(--accent); text-decoration: none; }
+.fv-cmreply a:hover { text-decoration: underline; }
+.fv-cmwho {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fv-cmav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font: 600 10px ui-sans-serif, system-ui, sans-serif;
+  color: #1a1a1d;
+}
+.fv-cmbody { max-width: 60ch; }
+.fv-cmpop footer {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-default);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}

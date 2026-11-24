@@ -8,6 +8,8 @@ export interface TreeFile {
   status?: TreeStatus;
   add?: number;
   del?: number;
+  /** Review comments on this file; a badge shows when above zero. */
+  comments?: number;
 }
 
 interface DirNode {
@@ -21,6 +23,8 @@ interface DirNode {
 interface Props {
   files: TreeFile[];
   selected?: string;
+  /** Opens this file's folders when nothing is selected, so the list doesn't start fully collapsed. */
+  reveal?: string;
   onSelect: (path: string) => void;
   changedOnly?: boolean;
   "aria-label"?: string;
@@ -69,17 +73,20 @@ function ancestors(path: string): string[] {
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
 }
 
+const commentsLabel = (n: number) => `${n} comment${n === 1 ? "" : "s"}`;
+
 const STATUS_LABEL: Record<string, string> = { M: "modified", A: "added", D: "deleted", R: "renamed", "?": "untracked" };
 
-export default function FileTree({ files, selected, onSelect, changedOnly = false, "aria-label": label = "Files" }: Props) {
+export default function FileTree({ files, selected, reveal, onSelect, changedOnly = false, "aria-label": label = "Files" }: Props) {
   const tree = useMemo(() => buildTree(changedOnly ? files.filter(isChanged) : files), [files, changedOnly]);
-  const [open, setOpen] = useState<Set<string>>(() => new Set(selected ? ancestors(selected) : []));
+  const shown = selected ?? reveal;
+  const [open, setOpen] = useState<Set<string>>(() => new Set(shown ? ancestors(shown) : []));
 
   useEffect(() => {
-    if (!selected) return;
-    const need = ancestors(selected);
+    if (!shown) return;
+    const need = ancestors(shown);
     setOpen((prev) => (need.every((p) => prev.has(p)) ? prev : new Set([...prev, ...need])));
-  }, [selected]);
+  }, [shown]);
 
   const toggle = (path: string) =>
     setOpen((prev) => {
@@ -139,6 +146,12 @@ export default function FileTree({ files, selected, onSelect, changedOnly = fals
         >
           <span className={`ft-st ft-st-${st === "?" ? "U" : (st ?? "none")}`}>{st === "?" ? "U" : st}</span>
           <span className="ft-nm">{name}</span>
+          {(file.comments ?? 0) > 0 && (
+            <span className="ft-cm" title={commentsLabel(file.comments!)}>
+              <span aria-hidden="true">💬{file.comments}</span>
+              <span className="sr-only">{commentsLabel(file.comments!)}</span>
+            </span>
+          )}
           {st && file.add != null && file.del != null && (
             <span className="ft-cnt">
               <span className="ft-add">+{file.add}</span> <span className="ft-del">−{file.del}</span>

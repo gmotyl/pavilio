@@ -16,6 +16,21 @@ export interface PullRequest {
   url: string;
 }
 
+/** An inline review comment on a PR diff line; `side` "old" is the base side, "new" the head side. */
+export interface ReviewComment {
+  id: number;
+  replyTo: number | null;
+  path: string;
+  line: number;
+  side: "old" | "new";
+  author: string;
+  body: string;
+  createdAt: string;
+  url: string;
+  /** Head commit `line` refers to (GitHub `commit_id`); a different SHA than the viewed head means stale line numbers. */
+  commitId: string;
+}
+
 export type Unavailable = "gh-missing" | "gh-unauthenticated" | "not-github" | "failed";
 
 export interface PrProvider {
@@ -23,6 +38,8 @@ export interface PrProvider {
   listOpen(repoPath: string): Promise<PullRequest[]>;
   /** Fetches the PR's head and base into private refs; `body` is the PR description (markdown, "" when none). */
   openPr(repoPath: string, n: number): Promise<{ head: string; base: string; body: string }>;
+  /** Inline review comments still anchored to a diff line; outdated ones are dropped. */
+  reviewComments(repoPath: string, n: number): Promise<ReviewComment[]>;
 }
 
 /** Strip `user:secret@` from any URL in `text`: git and gh echo the origin URL in errors. */

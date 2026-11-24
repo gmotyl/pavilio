@@ -3,7 +3,12 @@ import request from "supertest";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
-import { PrUnavailableError, type PrProvider, type PullRequest } from "../../lib/prs/provider";
+import {
+  PrUnavailableError,
+  type PrProvider,
+  type PullRequest,
+  type ReviewComment,
+} from "../../lib/prs/provider";
 
 const projects = withProjectsDir("prs-route-");
 vi.mock("../../config", () => configMock(() => projects.dir()));
@@ -54,6 +59,7 @@ function setup() {
       throw new PrUnavailableError("not-github");
     }),
     openPr: vi.fn(async () => ({ head: "h", base: "b", body: "" })),
+    reviewComments: vi.fn(async (): Promise<ReviewComment[]> => []),
   } satisfies PrProvider;
   return { gh, gl, missing, provider };
 }
@@ -154,7 +160,7 @@ describe("/api/prs", () => {
 
   it("rejects a PR number that is not a positive integer", async () => {
     const { gh, provider } = setup();
-    for (const number of [0, -1, 1.5, "3"]) {
+    for (const number of [0, -1, 1.5, "3", 99999999999999999999]) {
       const res = await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number });
       expect(res.status).toBe(400);
     }
@@ -186,6 +192,71 @@ describe("/api/prs", () => {
     expect(res.status).toBe(502);
     expect(JSON.stringify(res.body)).not.toContain("s3cret");
     expect(res.body.reason).toBe("failed");
+  });
+
+  it("GET /api/prs/comments returns the provider's comments", async () => {
+    const { gh, provider } = setup();
+    const comments: ReviewComment[] = [
+      {
+        id: 7,
+        replyTo: null,
+        path: "src/a.ts",
+        line: 4,
+        side: "new",
+        author: "rev",
+        body: "nit",
+        createdAt: "2026-11-22T00:00:00Z",
+        url: "https://github.com/o/r/pull/3#discussion_r7",
+        commitId: "headsha",
+      },
+    ];
+    provider.reviewComments.mockResolvedValue(comments);
+    const res = await request(appFor(provider)).get("/api/prs/comments").query({ repo: gh, number: "3" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(comments);
+    expect(provider.reviewComments).toHaveBeenCalledWith(gh, 3);
+  });
+
+  it("GET /api/prs/comments rejects an invalid number", async () => {
+    const { gh, provider } = setup();
+    const app = appFor(provider);
+    for (const number of [undefined, "", "0", "-1", "1.5", "abc", "3x", "99999999999999999999"]) {
+      const query = number === undefined ? { repo: gh } : { repo: gh, number };
+      const res = await request(app).get("/api/prs/comments").query(query);
+      expect(res.status).toBe(400);
+    }
+    expect(provider.reviewComments).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/prs/comments rejects an unlinked repo", async () => {
+    const { missing, provider } = setup();
+    const app = appFor(provider);
+    for (const repo of ["/somewhere/else", missing]) {
+      const res = await request(app).get("/api/prs/comments").query({ repo, number: "3" });
+      const open = await request(app).post("/api/prs/open").send({ repo, number: 3 });
+      expect(res.status).toBe(400);
+      expect(res.status).toBe(open.status);
+      expect(res.body).toEqual(open.body);
+    }
+    expect(provider.reviewComments).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/prs/comments maps provider unavailability like /open", async () => {
+    const { gh, provider } = setup();
+    const app = appFor(provider);
+    for (const err of [
+      new PrUnavailableError("gh-unauthenticated", "not logged in"),
+      new Error("fatal: unable to access 'https://user:s3cret@github.com/o/r.git/': 403"),
+    ]) {
+      provider.reviewComments.mockRejectedValueOnce(err);
+      provider.openPr.mockRejectedValueOnce(err);
+      const res = await request(app).get("/api/prs/comments").query({ repo: gh, number: "3" });
+      const open = await request(app).post("/api/prs/open").send({ repo: gh, number: 3 });
+      expect(res.status).toBe(502);
+      expect(res.status).toBe(open.status);
+      expect(res.body).toEqual(open.body);
+      expect(JSON.stringify(res.body)).not.toContain("s3cret");
+    }
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(

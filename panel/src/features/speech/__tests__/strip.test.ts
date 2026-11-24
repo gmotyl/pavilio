@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SPOKEN_CODE_CHARS, SENTINEL_ONLY_RE, stripToSpeakableText } from "../strip";
+import { closeOpenFence, MAX_SPOKEN_CODE_CHARS, SENTINEL_ONLY_RE, stripToSpeakableText } from "../strip";
 
 type Row = [label: string, markdown: string, spoken: string];
 
@@ -271,6 +271,15 @@ describe("stripToSpeakableText", () => {
     ["a long spaced span is an expression", "Call `const x = await synth(a, b, c, d)` first.", "Call ⟦expr⟧ first."],
     ["an over-long call chain is named, not dropped", 'Call `units.map((u) => u.text).join(" ")` before speaking.', "Call ⟦expr⟧ before speaking."],
     ["a response that is only an expression says nothing", '`units.map((u) => u.text).join(" ")`', ""],
+    // A span closes only on a run of its own length (CommonMark): a stray run
+    // of another length is literal, and must not pair up with a later single
+    // backtick and swallow the prose between them. A real PR review reply.
+    [
+      "a stray triple backtick is literal, not a span opener",
+      "The test runs a comment that starts with a ```suggestion block through the real `stripToSpeakableText` and asserts the trailing prose survives.",
+      "The test runs a comment that starts with a suggestion block through the real stripToSpeakableText and asserts the trailing prose survives.",
+    ],
+    ["a double-backtick span may hold a single backtick", "Wrap it as `` a`b `` first.", "Wrap it as a`b first."],
   ])("inline code: %s", (_label, markdown, spoken) => {
     expect(stripToSpeakableText(markdown)).toBe(spoken);
   });
@@ -344,5 +353,23 @@ describe("stripToSpeakableText", () => {
     expect(stripToSpeakableText("Read [[progress-2026-09-23-repos-resize-answer-pane]](https://example.com)")).toBe(
       "Read [progress-2026-09-23-repos-resize-answer-pane]",
     );
+  });
+});
+
+describe("closeOpenFence", () => {
+  it("closes a fence that never closes, with its own character", () => {
+    expect(closeOpenFence(lines("```suggestion", "x = 1"))).toBe(lines("```suggestion", "x = 1", "```"));
+    expect(closeOpenFence(lines("~~~", "x = 1"))).toBe(lines("~~~", "x = 1", "~~~"));
+    // A fence line with an info string, or of the other character, does not close it.
+    expect(closeOpenFence(lines("```", "~~~", "```ts"))).toBe(lines("```", "~~~", "```ts", "```"));
+  });
+
+  it("leaves closed fences and text without fences as they are", () => {
+    expect(closeOpenFence(lines("```ts", "x = 1", "```", "after"))).toBe(lines("```ts", "x = 1", "```", "after"));
+    expect(closeOpenFence("plain `code` text")).toBe("plain `code` text");
+  });
+
+  it("keeps text after the closed piece speakable", () => {
+    expect(stripToSpeakableText(`${closeOpenFence(lines("```", "x = 1"))}\n\nafter`)).toBe(lines("⟦code⟧", "", "after"));
   });
 });
