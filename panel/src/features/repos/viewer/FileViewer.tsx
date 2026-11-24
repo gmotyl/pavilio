@@ -12,6 +12,7 @@ import {
   newSide,
   pairRows,
   parseDiff,
+  revealRows,
   rowWordMarks,
   splitLines,
   type GutterMark,
@@ -354,24 +355,20 @@ export default function FileViewer({
     () => (content != null ? splitLines(content) : changed && status !== "D" ? newSide(parsed) : null),
     [content, changed, parsed, status],
   );
-  const items = useMemo(() => foldRows(rows), [rows]);
+  const folded = useMemo(() => foldRows(rows), [rows]);
   // Expanded folds belong to one row list; a new diff starts folded again.
   const [expansion, setExpansion] = useState<{ rows: Row[]; ids: Set<number> }>({ rows, ids: new Set() });
-  // A fold holding a commented line starts open: the file badge counts that comment, so its marker must show.
-  const commentedFolds = useMemo(() => {
-    const ids = new Set<number>();
-    if (!comments?.size) return ids;
-    for (const it of items) {
-      if (it.kind !== "fold") continue;
-      // Folds hold context rows only, which carry both sides — the same keys the lane looks up.
-      if (it.rows.some((r) => r.kind === "ctx" && (comments.has(`new:${r.new}`) || comments.has(`old:${r.old}`)))) ids.add(it.id);
-    }
-    return ids;
-  }, [items, comments]);
-  const expanded = useMemo(() => {
-    const user = expansion.rows === rows ? expansion.ids : new Set<number>();
-    return commentedFolds.size ? new Set([...user, ...commentedFolds]) : user;
-  }, [expansion, rows, commentedFolds]);
+  const expanded = useMemo(() => (expansion.rows === rows ? expansion.ids : new Set<number>()), [expansion, rows]);
+  // A commented line in a fold shows with a few lines around it: the file badge counts that comment,
+  // so its marker must show — but not the whole fold, which could push the edits past the row limit.
+  // Folds hold context rows only, which carry both sides — the same keys the lane looks up.
+  const items = useMemo(
+    () =>
+      comments?.size
+        ? revealRows(folded, (r) => r.kind === "ctx" && (comments.has(`new:${r.new}`) || comments.has(`old:${r.old}`)), expanded)
+        : folded,
+    [folded, comments, expanded],
+  );
   const expand = useCallback((id: number) => setExpansion({ rows, ids: new Set([...expanded, id]) }), [rows, expanded]);
   const visible = useMemo(() => expandFolds(items, expanded), [items, expanded]);
 
@@ -380,19 +377,27 @@ export default function FileViewer({
   const shownLayout = narrow ? "unified" : layout;
   // Split pages count paired rows: slicing raw rows first would cut a del/add block and pair it with blanks.
   const pairs = useMemo(() => (shownMode === "diff" && shownLayout === "split" ? pairRows(visible) : null), [shownMode, shownLayout, visible]);
-  // Threads on lines the diff has no row for (no whole file to fill its gaps, or a line past the file).
-  // The file badge counts them, so Diff lists them above the table rather than dropping them.
-  const unplaced = useMemo(() => {
-    if (!comments?.size || shownMode !== "diff") return [];
-    const shown = new Set<string>();
-    // Folds holding a commented line are always open, so `visible` has every row a marker could sit on.
-    for (const it of visible) {
-      if (it.kind === "fold" || it.kind === "gap") continue;
-      if (it.kind !== "del") shown.add(`new:${it.new}`);
-      if (it.kind !== "add") shown.add(`old:${it.old}`);
-    }
-    return [...comments].filter(([k]) => !shown.has(k)).sort(([, a], [, b]) => a.anchor.line - b.anchor.line);
-  }, [comments, shownMode, visible]);
+  // Threads on lines the diff has no row for (no whole file to fill its gaps, or a line past the file),
+  // and threads on rows past the row limit. The file badge counts them, so Diff lists them above
+  // the table rather than dropping them.
+  const { unplaced, beyond } = useMemo(() => {
+    if (!comments?.size || shownMode !== "diff") return { unplaced: [], beyond: [] };
+    // Commented lines in folds are revealed, so `visible` has every row a marker could sit on.
+    const keys = (it: Item): string[] =>
+      it.kind === "fold" || it.kind === "gap" ? [] : [...(it.kind !== "del" ? [`new:${it.new}`] : []), ...(it.kind !== "add" ? [`old:${it.old}`] : [])];
+    const all = new Set(visible.flatMap(keys));
+    // Only rows mounted under the limit carry a marker; split pages count paired rows.
+    const mounted = pairs
+      ? pairs.slice(0, limit).flatMap((p): Item[] => (p.kind === "ctx" ? [p.right] : p.kind === "change" ? [p.del, p.add].filter((r) => !!r) : []))
+      : visible.slice(0, limit);
+    const shown = new Set(mounted.flatMap(keys));
+    const byLine = (list: [string, ReviewThread][]) => list.sort(([, a], [, b]) => a.anchor.line - b.anchor.line);
+    const entries = [...comments];
+    return {
+      unplaced: byLine(entries.filter(([k]) => !all.has(k))),
+      beyond: byLine(entries.filter(([k]) => all.has(k) && !shown.has(k))),
+    };
+  }, [comments, shownMode, visible, pairs, limit]);
   const total = counts ?? countChanges(parsed);
   const lang = detectLang(path);
   const term = highlight ?? "";
@@ -528,6 +533,7 @@ export default function FileViewer({
 
   let body: ReactNode;
   let unplacedNote: ReactNode = null;
+  let beyondNote: ReactNode = null;
   let totalRows = 0;
   if (shownMode === "code") {
     totalRows = codeLines?.length ?? 0;
@@ -565,6 +571,14 @@ export default function FileViewer({
       <p className="fv-unplaced" role="note" data-testid="file-viewer-unplaced">
         On lines not in this diff:
         {unplaced.map(([k, thread]) => (
+          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
+        ))}
+      </p>
+    );
+    beyondNote = beyond.length > 0 && (
+      <p className="fv-unplaced" role="note" data-testid="file-viewer-beyond">
+        On lines further down:
+        {beyond.map(([k, thread]) => (
           <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
         ))}
       </p>
@@ -718,6 +732,7 @@ export default function FileViewer({
       </div>
       <div ref={bodyRef} className="fv-body" data-testid="file-viewer-body" onClick={onBodyClick}>
         {unplacedNote}
+        {beyondNote}
         {body}
         {totalRows > limit && (
           <button type="button" className="fv-more" data-testid="file-viewer-more" onClick={() => setLimit((n) => n + ROW_PAGE)}>

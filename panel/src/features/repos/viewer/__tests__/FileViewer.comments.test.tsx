@@ -212,6 +212,69 @@ describe("FileViewer comment lane", () => {
     expect(body().querySelector('tr[data-old-line="95"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 95");
   });
 
+  it("FileViewer reveals only a few lines either side of a commented line in a fold, the rest stays folded", () => {
+    const long = Array.from({ length: 100 }, (_, i) => `row ${i + 1}`);
+    long[79] = "row 80 edited";
+    const longDiff = ["--- a/src/geo/area.ts", "+++ b/src/geo/area.ts", "@@ -77,7 +77,7 @@", " row 77", " row 78", " row 79", "-row 80", "+row 80 edited", " row 81", " row 82", " row 83"].join("\n");
+    render(viewer({ diff: longDiff, content: long.join("\n"), counts: { add: 1, del: 1 }, comments: new Map([["new:30", thread("new", 30)]]) }));
+    for (const layout of [unified, split]) {
+      layout();
+      expect(body().querySelector('tr[data-line="30"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 30");
+      for (const n of [27, 28, 29, 31, 32, 33]) expect(body().querySelector(`tr[data-line="${n}"]`)).not.toBeNull();
+      for (const n of [1, 26, 34, 76]) expect(body().querySelector(`tr[data-line="${n}"]`)).toBeNull();
+      // Lines 1–26 and 34–76 are still folds, each expandable on its own; 84–100 is the trailing one.
+      const folds = [...body().querySelectorAll(".fv-fold-row button")].map((b) => b.textContent);
+      expect(folds).toEqual(["⋯ Expand 26 unchanged lines", "⋯ Expand 43 unchanged lines", "⋯ Expand 17 unchanged lines"]);
+    }
+    unified();
+    fireEvent.click(screen.getByRole("button", { name: "⋯ Expand 26 unchanged lines" }));
+    expect(body().querySelector('tr[data-line="1"]')).not.toBeNull();
+    expect(body().querySelector('tr[data-line="34"]')).toBeNull();
+  });
+
+  // Thousands of mounted rows: slow when the whole suite shares the machine, hence the timeout.
+  it("FileViewer keeps a far edit within the rendered rows when a comment sits in the leading fold", () => {
+    const n = 6100;
+    const long = Array.from({ length: n }, (_, i) => `row ${i + 1}`);
+    long[6000] = "row 6001 edited";
+    const farDiff = ["--- a/src/geo/area.ts", "+++ b/src/geo/area.ts", "@@ -5998,7 +5998,7 @@", " row 5998", " row 5999", " row 6000", "-row 6001", "+row 6001 edited", " row 6002", " row 6003", " row 6004"].join("\n");
+    const comments = new Map([
+      ["new:10", thread("new", 10)],
+      ["new:6001", thread("new", 6001)],
+    ]);
+    render(viewer({ diff: farDiff, content: long.join("\n"), counts: { add: 1, del: 1 }, comments }));
+    unified();
+    expect(body().querySelector('tr[data-line="10"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 10");
+    expect(body().querySelector('tr[data-line="6001"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 6001");
+    expect(screen.queryByTestId("file-viewer-more")).toBeNull();
+    expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
+    expect(screen.queryByTestId("file-viewer-beyond")).toBeNull();
+  }, 30_000);
+
+  // Thousands of mounted rows: slow when the whole suite shares the machine, hence the timeout.
+  it("FileViewer lists threads on rows past the rendered limit until those rows are shown", () => {
+    // A new file of 6000 lines: every row is an addition, so nothing folds and rows past 5000 wait for "Show more".
+    const lines = Array.from({ length: 6000 }, (_, i) => `row ${i + 1}`);
+    const added = ["--- /dev/null", "+++ b/src/geo/area.ts", "@@ -0,0 +1,6000 @@", ...lines.map((l) => `+${l}`)].join("\n");
+    const comments = new Map([
+      ["new:10", thread("new", 10)],
+      ["new:5500", thread("new", 5500, 2)],
+    ]);
+    render(viewer({ diff: added, content: lines.join("\n"), status: "A", counts: { add: 6000, del: 0 }, comments }));
+    for (const layout of [unified, split]) {
+      layout();
+      expect(body().querySelector('tr[data-line="5500"]')).toBeNull();
+      const note = screen.getByTestId("file-viewer-beyond");
+      expect(note).toHaveTextContent("On lines further down:");
+      expect([...note.querySelectorAll("button.fv-cmbtn")].map((b) => b.getAttribute("aria-label"))).toEqual(["2 comments on line 5500"]);
+      expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
+      expect(body().querySelector('tr[data-line="10"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 10");
+    }
+    fireEvent.click(screen.getByTestId("file-viewer-more"));
+    expect(body().querySelector('tr[data-line="5500"] .fv-cmbtn')).toHaveAccessibleName("2 comments on line 5500");
+    expect(screen.queryByTestId("file-viewer-beyond")).toBeNull();
+  }, 30_000);
+
   it("FileViewer lists threads whose lines the diff leaves out above the table, in unified and split", () => {
     // No whole file and no context lines: line 13 and old line 30 have no row to carry a marker.
     const bare = ["--- a/src/geo/area.ts", "+++ b/src/geo/area.ts", "@@ -15 +15,2 @@", "-const area = w * h;", "+const area = width * height;", "+line 16"].join("\n");
