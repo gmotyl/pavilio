@@ -21,6 +21,8 @@ import {
   type Row,
 } from "./diffModel";
 import { detectLang, escapeHtml } from "./highlight";
+import { MAX_HIGHLIGHT_CHARS } from "./highlightLimit";
+import { ROW_PAGE } from "./rowPage";
 import { CopyIconButton } from "../../shell/CopyIconButton";
 import type { ReviewThread } from "../reviewThreads";
 import CommentMarker from "./CommentMarker";
@@ -57,8 +59,6 @@ export interface FileViewerProps {
 
 const SPLIT_MIN_WIDTH = 720;
 const FLASH_MS = 1300;
-// highlight.js on a huge file stalls the tab; past this it renders plain.
-const MAX_HIGHLIGHT_CHARS = 500_000;
 // ts-nav only resolves these; elsewhere identifier links would lead nowhere.
 const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
 
@@ -319,8 +319,6 @@ function scrollRowIntoHost(root: HTMLElement, row: Element): void {
 // git prints this in place of hunks when either side is binary.
 const BINARY_DIFF_RE = /^Binary files .* differ$/m;
 const MODE_CHANGE_RE = /^old mode (\d+)\nnew mode (\d+)$/m;
-// Rows mounted at once; a file of many short lines passes the byte cap yet would mount a huge table.
-const ROW_PAGE = 5000;
 
 const MARK_TITLE: Record<GutterMark, string> = { added: "Added", changed: "Changed", removed: "Lines removed above" };
 const STATUS_TEXT = { M: "modified", A: "new file", D: "deleted" } as const;

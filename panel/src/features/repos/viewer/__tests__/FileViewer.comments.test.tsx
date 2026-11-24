@@ -9,6 +9,17 @@ vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => spee
 
 import FileViewer from "../FileViewer";
 
+// Paging is the same logic at any page size; a test that pages sets a small one instead of mounting thousands of rows.
+const rowPage = vi.hoisted(() => ({ size: undefined as number | undefined }));
+vi.mock("../rowPage", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../rowPage")>();
+  return {
+    get ROW_PAGE() {
+      return rowPage.size ?? real.ROW_PAGE;
+    },
+  };
+});
+
 class NoResizeObserver {
   observe(): void {}
   unobserve(): void {}
@@ -89,6 +100,7 @@ function expectLanes(table: HTMLTableElement, lanes: number) {
 }
 
 beforeEach(() => {
+  rowPage.size = undefined;
   vi.stubGlobal("ResizeObserver", NoResizeObserver);
   speech.speakDocument.mockReset();
   speech.stopDocument.mockReset();
@@ -236,7 +248,6 @@ describe("FileViewer comment lane", () => {
     expect(body().querySelector('tr[data-line="34"]')).toBeNull();
   });
 
-  // Thousands of mounted rows: slow when the whole suite shares the machine, hence the timeout.
   it("FileViewer keeps a far edit within the rendered rows when a comment sits in the leading fold", () => {
     const n = 6100;
     const long = Array.from({ length: n }, (_, i) => `row ${i + 1}`);
@@ -253,31 +264,31 @@ describe("FileViewer comment lane", () => {
     expect(screen.queryByTestId("file-viewer-more")).toBeNull();
     expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
     expect(screen.queryByTestId("file-viewer-beyond")).toBeNull();
-  }, 30_000);
+  });
 
-  // Thousands of mounted rows: slow when the whole suite shares the machine, hence the timeout.
   it("FileViewer lists threads on rows past the rendered limit until those rows are shown", () => {
-    // A new file of 6000 lines: every row is an addition, so nothing folds and rows past 5000 wait for "Show more".
-    const lines = Array.from({ length: 6000 }, (_, i) => `row ${i + 1}`);
-    const added = ["--- /dev/null", "+++ b/src/geo/area.ts", "@@ -0,0 +1,6000 @@", ...lines.map((l) => `+${l}`)].join("\n");
+    // A new file of 60 lines paged by 50: every row is an addition, so nothing folds and rows past 50 wait for "Show more".
+    rowPage.size = 50;
+    const lines = Array.from({ length: 60 }, (_, i) => `row ${i + 1}`);
+    const added = ["--- /dev/null", "+++ b/src/geo/area.ts", "@@ -0,0 +1,60 @@", ...lines.map((l) => `+${l}`)].join("\n");
     const comments = new Map([
       ["new:10", thread("new", 10)],
-      ["new:5500", thread("new", 5500, 2)],
+      ["new:55", thread("new", 55, 2)],
     ]);
-    render(viewer({ diff: added, content: lines.join("\n"), status: "A", counts: { add: 6000, del: 0 }, comments }));
+    render(viewer({ diff: added, content: lines.join("\n"), status: "A", counts: { add: 60, del: 0 }, comments }));
     for (const layout of [unified, split]) {
       layout();
-      expect(body().querySelector('tr[data-line="5500"]')).toBeNull();
+      expect(body().querySelector('tr[data-line="55"]')).toBeNull();
       const note = screen.getByTestId("file-viewer-beyond");
       expect(note).toHaveTextContent("On lines further down:");
-      expect([...note.querySelectorAll("button.fv-cmbtn")].map((b) => b.getAttribute("aria-label"))).toEqual(["2 comments on line 5500"]);
+      expect([...note.querySelectorAll("button.fv-cmbtn")].map((b) => b.getAttribute("aria-label"))).toEqual(["2 comments on line 55"]);
       expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
       expect(body().querySelector('tr[data-line="10"] .fv-cmbtn')).toHaveAccessibleName("1 comment on line 10");
     }
     fireEvent.click(screen.getByTestId("file-viewer-more"));
-    expect(body().querySelector('tr[data-line="5500"] .fv-cmbtn')).toHaveAccessibleName("2 comments on line 5500");
+    expect(body().querySelector('tr[data-line="55"] .fv-cmbtn')).toHaveAccessibleName("2 comments on line 55");
     expect(screen.queryByTestId("file-viewer-beyond")).toBeNull();
-  }, 30_000);
+  });
 
   it("FileViewer lists threads whose lines the diff leaves out above the table, in unified and split", () => {
     // No whole file and no context lines: line 13 and old line 30 have no row to carry a marker.

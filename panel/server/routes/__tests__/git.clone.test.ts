@@ -349,7 +349,10 @@ describe("POST /api/git/clone", () => {
   });
 
   it("classifies by git's diagnostic, never by words in the remote or path", async () => {
-    const malformed = await cloneOne(join(tmp, "a"), "https://127.0.0.1:9/o/repository not found.git");
+    // An out-of-range port is refused by every libcurl while parsing the URL, before any
+    // connection: git's diagnostic stays generic. (A space alone is not enough — curl 7.68
+    // accepts it and connects, which reads as "remote unreachable".)
+    const malformed = await cloneOne(join(tmp, "a"), "https://127.0.0.1:99999/o/repository not found.git");
     expect(malformed.body).toEqual({ error: "git clone failed — see server log" });
     const missing = await cloneOne(join(tmp, "b"), join(tmp, "Permission denied (publickey)", "missing.git"));
     expect(missing.body).toEqual({ error: "git clone failed: repository not found" });
