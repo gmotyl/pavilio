@@ -198,8 +198,8 @@ function assertFreeKnowledgeTarget(projectsDir: string, group: string | null): v
  * Create the skeleton of project `name` under `projectsDir` and add its registry row. Asks (writes
  * nothing) when the project already has a card or the name is taken under `archived/`. Throws on
  * a name that is not a slug, on a research project without a topic, on an empty or over-long
- * group, on a grouped `knowledge`, and on a knowledge project whose harvest target (the
- * ungrouped one, or its group's) already exists.
+ * group, on a grouped `knowledge`, on an ungrouped knowledge project not named `knowledge`, and
+ * on a knowledge project whose harvest target (the ungrouped one, or its group's) already exists.
  */
 export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const { projectsDir, name } = input;
@@ -217,7 +217,15 @@ export function scaffoldProject(input: ScaffoldInput): ScaffoldResult {
   const projectDir = join(projectsDir, name);
   if (existsSync(join(projectDir, "PROJECT.md"))) return { ok: false, ask: true, reason: "exists" };
   if (existsSync(join(projectsDir, "archived", name))) return { ok: false, ask: true, reason: "archived" };
-  if (input.kind === "knowledge") assertFreeKnowledgeTarget(projectsDir, input.group?.trim() || null);
+  if (input.kind === "knowledge") {
+    const group = input.group?.trim() || null;
+    // The harvest locks, logs and commits the ungrouped wiki by name: any other name would take
+    // the global slot and block both the harvest and a later `knowledge`.
+    if (group === null && name !== KNOWLEDGE_PROJECT) {
+      throw new Error(`an ungrouped knowledge wiki must be named ${KNOWLEDGE_PROJECT} (or pass --group)`);
+    }
+    assertFreeKnowledgeTarget(projectsDir, group);
+  }
 
   const { files, keptDirs } = skeleton(input);
   assertWritable(projectsDir, name, files, keptDirs);

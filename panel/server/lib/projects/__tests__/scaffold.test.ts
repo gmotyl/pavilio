@@ -160,6 +160,14 @@ describe("scaffoldProject", () => {
     expect(existsSync(join(projectsDir, "kb"))).toBe(false);
   });
 
+  it("scaffold refuses an ungrouped knowledge wiki not named knowledge, even in an empty workspace", () => {
+    expect(() => scaffoldProject({ projectsDir, name: "notes", kind: "knowledge", today: "2026-10-22" })).toThrow(
+      /knowledge/,
+    );
+    expect(existsSync(join(projectsDir, "notes"))).toBe(false);
+    expect(scaffoldProject({ projectsDir, name: "knowledge", kind: "knowledge", today: "2026-10-22" }).ok).toBe(true);
+  });
+
   it("scaffold refuses a grouped project named knowledge", () => {
     for (const kind of ["knowledge", "project"] as const) {
       expect(() => scaffoldProject({ projectsDir, name: "knowledge", kind, group: "metro", today: "2026-10-22" })).toThrow(

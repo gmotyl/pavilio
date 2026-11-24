@@ -29,7 +29,8 @@ const USAGE = `usage: scripts/project <command> [args]
                                             writes group: <group> into the card (a
                                             grouped knowledge project is that
                                             group's wiki), one line, 1-64 chars;
-                                            a knowledge project whose target (no
+                                            an ungrouped knowledge project not named
+                                            knowledge, or one whose target (no
                                             group, or its group) exists → error
   spike-repo <name>                         {path, repo: created | existing, registered}
                                             creates or reuses the git repo
