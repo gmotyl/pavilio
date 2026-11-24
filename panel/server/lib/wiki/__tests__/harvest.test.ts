@@ -431,10 +431,17 @@ describe("harvest", () => {
   it("knowledgeTargets ignores an active dir without a card whose name has an archived knowledge card", () => {
     write("projects/knowledge/PROJECT.md", "---\nkind: knowledge\n---\n");
     write("projects/archived/metro-wiki/PROJECT.md", "---\nkind: knowledge\ngroup: metro\n---\n");
-    write("projects/metro-wiki/wiki/open-questions.md", "# Open questions\n\n## Knowledge candidates\n- 2026-10-20 — line\n");
+    write(
+      "projects/metro-wiki/wiki/open-questions.md",
+      "# Open questions\n\n## Knowledge candidates\n- 2026-10-20 — line\n\n## Group candidates\n- 2026-10-20 — group line\n",
+    );
     write(".projects.local.md", "| Project | Type |\n| --- | --- |\n| metro-wiki | private |\n");
     expect(knowledgeTargets(root)).toEqual({ global: "knowledge", groups: {} });
-    expect(listCandidates(root).items.map((i) => i.project)).toEqual(["metro-wiki"]);
+    const items = listCandidates(root).items;
+    expect(items.map((i) => [i.project, i.scope, i.group])).toEqual([
+      ["metro-wiki", "generic", null],
+      ["metro-wiki", "group", null],
+    ]);
   });
 
   it("knowledgeTargets keeps a __proto__ group as an own key", () => {

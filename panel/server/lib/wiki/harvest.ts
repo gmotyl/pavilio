@@ -205,7 +205,7 @@ function projectCandidates(workspaceRoot: string, project: string): { lines: str
   for (const [heading, scope] of sections) {
     const range = sectionRange(lines, heading);
     if (!range) continue;
-    const group = scope === "group" ? projectGroup(join(workspaceRoot, "projects"), project) : null;
+    const group = scope === "group" ? activeCard(join(workspaceRoot, "projects"), project).group : null;
     const seen = new Map<string, number>();
     for (let i = range[0]; i < range[1]; i++) {
       if (!isItem(lines[i])) continue;
