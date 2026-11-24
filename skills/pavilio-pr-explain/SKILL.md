@@ -246,7 +246,8 @@ Rules:
   - code this change does not touch (from the repo or a dependency) is quoted the same way, all
     context lines, with `(unchanged)` or `(dependency: <package>)` after the path;
   - the panel numbers the block's lines from each `@@ … L<n> @@` header's start line (context and
-    `+` lines, or context and `-` lines under `(before)`), so that start line must be exact;
+    `+` lines, or context and `-` lines under `(before)`), so that start line must be exact; a line
+    with no ` `/`+`/`-` prefix (e.g. `\ No newline at end of file`) is not numbered;
   - keep a block short: the 3–15 lines the notes are about, not whole hunks.
 - **Numbered line notes** follow each block as an ordered list, restarting at 1 per block. Each note
   starts with the line it is about (`**L57**`, or `**base L40**` for a removed line) and says *why*,

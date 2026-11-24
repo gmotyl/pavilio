@@ -135,8 +135,12 @@ export function taskRunLine(launcher: TerminalLauncher, objective: string): stri
   return composeRunLine(launcher.command, state.promptFlag, state.runLoop, objective);
 }
 
-/** What a change id an Archive run accepts looks like: one slug, nothing else. */
-const CHANGE_ID = /^[A-Za-z0-9._-]+$/;
+/**
+ * What a change id an Archive run accepts looks like: one slug, nothing else.
+ * It must hold a letter or digit, so `.`, `..` and other all-dot names (the
+ * directory itself, its parent) are refused.
+ */
+const CHANGE_ID = /^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]+$/;
 
 /**
  * The objective an Archive run types: the user has approved the manual checks

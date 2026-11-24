@@ -358,7 +358,7 @@ code, pre, .font-mono {
 .diff-line::before {
   content: attr(data-line);
   display: inline-block;
-  min-width: 3ch;
+  min-width: 4ch;
   margin-right: 1.5ch;
   text-align: right;
   color: var(--text-tertiary);

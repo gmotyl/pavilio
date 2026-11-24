@@ -241,6 +241,14 @@ describe("archiveRunLine", () => {
     expect(archiveRunLine(launcher, "web-push-when-closed")).not.toBeNull();
     expect(archiveRunLine(launcher, "v1.2_fix")).not.toBeNull();
   });
+
+  it("archiveRunLine refuses a change id made only of dots", () => {
+    const launcher = { name: "mine", command: "cli", runLoop: "/goal {prompt}", promptFlag: "" };
+    // `.` and `..` name the directory itself or its parent, never a change.
+    for (const bad of [".", "..", "..."]) expect(archiveRunLine(launcher, bad)).toBeNull();
+    expect(archiveRunLine(launcher, "2026-11-24-pr-explain-story")).not.toBeNull();
+    expect(archiveRunLine(launcher, ".hidden")).not.toBeNull();
+  });
 });
 
 describe("explainRunLine", () => {
@@ -281,6 +289,13 @@ describe("explainRunLine", () => {
 
   it("explainRunLine refuses non-slug project or repo", () => {
     for (const bad of ["a b", "it's", 'a"b', "$HOME", "org/repo", "", "a\nb"]) {
+      expect(explainRunLine(launcher, bad, "pavilio", 1)).toBeNull();
+      expect(explainRunLine(launcher, "pavilio", bad, 1)).toBeNull();
+    }
+  });
+
+  it("explainRunLine refuses a project or repo made only of dots", () => {
+    for (const bad of [".", "..", "..."]) {
       expect(explainRunLine(launcher, bad, "pavilio", 1)).toBeNull();
       expect(explainRunLine(launcher, "pavilio", bad, 1)).toBeNull();
     }

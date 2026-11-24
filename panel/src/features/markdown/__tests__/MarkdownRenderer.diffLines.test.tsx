@@ -56,6 +56,16 @@ describe("MarkdownRenderer story diff line numbers", () => {
     expect(gutter(container)!.map(([n]) => n)).toEqual(["", "40", "", "", "41", "42", "43", "", "44", "45"]);
   });
 
+  it("numbers a bare empty line between context lines as context", () => {
+    const { container } = renderMd(fence("diff", ["@@ a.ts L20–22 @@", " a", "", " b"]));
+    expect(gutter(container)).toEqual([
+      ["", "@@ a.ts L20–22 @@"],
+      ["20", " a"],
+      ["21", ""],
+      ["22", " b"],
+    ]);
+  });
+
   it("restarts numbering at a gap header inside the block", () => {
     const { container } = renderMd(
       fence("diff", ["@@ a.ts L10–11 @@", " a", "+b", "@@ a.ts L80 @@", " c", "-d", "+e"]),
