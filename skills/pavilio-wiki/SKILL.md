@@ -387,8 +387,8 @@ wiki, group findings never to `knowledge`.
    goes on, whatever the group routing did. Manual and `-yolo` runs always go on to steps 8–10,
    even with nothing picked: skipped and dropped ids are cleared, the log written and committed.
 5. **Group wiki** — per group with a promoted cluster: `groups[<group>]` from step 1 is its
-   wiki; none → `scripts/project new <groupWikiName> --kind knowledge --group <group>` first
-   (`groupWikiName` = the group slugged — lowercase, non-alphanumeric runs → `-`, trimmed — plus
+   wiki; none → `scripts/project new <groupWikiName> --kind knowledge "--group=<group>"` first
+   — the quoted `=` form, so a group starting with `--` is read as its value (`groupWikiName` = the group slugged — lowercase, non-alphanumeric runs → `-`, trimmed — plus
    `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`; a group that slugs to nothing → `group-wiki`).
    Exit 2 (`exists` / `archived`: the name is taken) → retry with `-2`, `-3`, … appended
    (`motyl-oss-wiki-2`), at most 5 names (an archived namesake stays archived: the panel refuses

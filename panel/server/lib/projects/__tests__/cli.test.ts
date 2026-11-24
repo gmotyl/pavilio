@@ -122,6 +122,13 @@ describe("scripts/project", () => {
     expect(card).toContain("Group knowledge for metro");
   });
 
+  it("cli takes a group that starts with -- as --group=<group>", async () => {
+    expect((await cli(["new", "dash-wiki", "--kind", "knowledge", "--group", "--x"])).code).toBe(1);
+    const ok = await cli(["new", "dash-wiki", "--kind", "knowledge", "--group=--x"]);
+    expect(ok.code).toBe(0);
+    expect(readFileSync(join(root, "projects/dash-wiki/PROJECT.md"), "utf8")).toMatch(/^group: "?--x"?$/m);
+  });
+
   it("cli new exits 2 with reason", async () => {
     mkdirSync(join(root, "projects/acme"), { recursive: true });
     writeFileSync(join(root, "projects/acme/PROJECT.md"), "# Acme\n");
