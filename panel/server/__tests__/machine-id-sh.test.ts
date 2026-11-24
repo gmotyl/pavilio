@@ -33,6 +33,10 @@ function repoCopyWithLocalConfig(localConfig: string): string {
   for (const f of ["panel.config.ts", "tsconfig.json", "package.json"]) {
     cpSync(join(panelSrc, f), join(panelDst, f));
   }
+  // pnpm workspace: panel/node_modules holds links into the root store, and
+  // its `.bin/tsx` shim reaches the store by a path relative to itself
+  // (`../../../node_modules/.pnpm/…`), so the copy needs the root link too.
+  symlinkSync(join(REPO_ROOT, "node_modules"), join(root, "node_modules"), "dir");
   symlinkSync(join(panelSrc, "node_modules"), join(panelDst, "node_modules"), "dir");
   writeFileSync(join(panelDst, "panel.config.local.ts"), localConfig);
   return root;
