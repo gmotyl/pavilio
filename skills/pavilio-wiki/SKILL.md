@@ -427,8 +427,8 @@ wiki, group findings never to `knowledge`.
 9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
    run that reaches this step — `harvest-status` reads the harvest age there — listing picked,
    skipped and dropped generic items with their origin project (with `--min`, the threshold and
-   the number of clusters kept instead of the skipped list), the group counts (promoted / kept per
-   group) and the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
+   the number of clusters kept instead of the skipped list), the group counts (promoted / kept /
+   dropped per group: a group chunk's `single-project` drops are cleared too) and the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
    entry listing what it received.
 10. **Commit** — one commit for the whole harvest: `git add projects/knowledge`, every written
     group wiki's `projects/<group wiki>` (new ones included), and every origin project's
@@ -438,7 +438,7 @@ wiki, group findings never to `knowledge`.
     Then `lock release` on `knowledge` and on every group wiki locked in step 5.
 
 Report: generic clusters picked / skipped (or kept, with `--min`) / dropped; group clusters
-promoted / kept / expired per group, group wikis created; pages created/updated per target,
+promoted / kept / expired and items dropped per group, group wikis created; pages created/updated per target,
 back-links added, failures — each failed writer's subject, its items left as candidates (steps
 7–8), each group whose lock was not held or whose wiki could not be created.
 
