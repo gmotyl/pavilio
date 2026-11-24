@@ -1,6 +1,6 @@
-import type { FileEntry } from "../explorer/useFileIndex";
+import { refreshFileIndex, type FileEntry } from "../explorer/useFileIndex";
 import { useFileDragSource, useFileDropTarget } from "../explorer/useFileDrag";
-import FileRow from "./FileRow";
+import FileRow, { type FileRowDelete } from "./FileRow";
 import { filterAndSortFiles, type SortKey, type SortDir } from "./fileListControls";
 
 interface Props {
@@ -22,6 +22,7 @@ function SectionFileRow({
   dateLabel,
   monoLabel,
   kind,
+  deleteControl,
   selected,
   onSelect,
 }: {
@@ -30,6 +31,7 @@ function SectionFileRow({
   dateLabel?: string;
   monoLabel?: boolean;
   kind?: string;
+  deleteControl?: FileRowDelete;
   selected: boolean;
   onSelect: (relativePath: string) => void;
 }) {
@@ -41,6 +43,7 @@ function SectionFileRow({
       dateLabel={dateLabel}
       monoLabel={monoLabel}
       kind={kind}
+      deleteControl={deleteControl}
       selected={selected}
       title={file.relativePath}
       dragProps={drag}
@@ -97,7 +100,45 @@ export interface SectionRow {
   file: FileEntry;
   label: string;
   monoLabel?: boolean;
-  kind?: "review" | "run";
+  kind?: "review" | "run" | "story";
+}
+
+/**
+ * The path, relative to `qa/`, that `DELETE /api/projects/:p/qa/*` removes for
+ * this row: the story/review file, or a run row's whole `runs/<run>` folder.
+ * Null when the row is not one of those shapes (e.g. a legacy run outside runs/).
+ */
+function qaDeletePath(row: SectionRow): string | null {
+  const parts = row.file.relativePath.split("/");
+  const n = parts.length;
+  if (row.kind === "run") {
+    return parts[n - 3] === "runs" ? `runs/${parts[n - 2]}` : null;
+  }
+  if (row.kind === "story") return `stories/${parts[n - 1]}`;
+  if (row.kind === "review") return `reviews/${parts[n - 1]}`;
+  return null;
+}
+
+/** Deletes one QA artifact and asks the file index to re-fetch. */
+function qaDeleteControl(projectName: string, row: SectionRow): FileRowDelete | undefined {
+  const path = qaDeletePath(row);
+  if (!path) return undefined;
+  return {
+    name: path,
+    confirmLabel: row.kind === "run" ? "Delete run?" : "Delete?",
+    run: async () => {
+      const url = `/api/projects/${encodeURIComponent(projectName)}/qa/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`;
+      const res = await fetch(url, { method: "DELETE" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Delete failed (${res.status})`);
+      }
+      refreshFileIndex();
+    },
+  };
 }
 
 /**
@@ -132,7 +173,22 @@ export function sectionRows(section: string, files: FileEntry[]): SectionRow[] {
           .replace(/^\d{4}-\d{2}-\d{2}_CODE_REVIEW_/, "");
         return { file: f, label, monoLabel: true, kind: "review" };
       });
-    return [...reviewRows, ...runRows].sort(
+    // `stories/` also holds the `.gitignore` the skill writes; only .md rows.
+    const storyRows: SectionRow[] = files
+      .filter((f) => {
+        const parts = f.relativePath.split("/");
+        const base = parts[parts.length - 1];
+        return (
+          parts[parts.length - 2] === "stories" &&
+          base.endsWith(".md") &&
+          !base.startsWith(".")
+        );
+      })
+      .map((f) => {
+        const base = f.relativePath.split("/").pop() ?? f.relativePath;
+        return { file: f, label: base.replace(/\.md$/, ""), monoLabel: true, kind: "story" };
+      });
+    return [...storyRows, ...reviewRows, ...runRows].sort(
       (a, b) => b.file.modified - a.file.modified,
     );
   }
@@ -168,15 +224,16 @@ export function SectionFilesList({
 
   const rowList = (
     <div className="space-y-0.5">
-      {rows.map(({ file, label, monoLabel, kind }) => (
+      {rows.map((row) => (
         <SectionFileRow
-          key={file.relativePath}
-          file={file}
-          label={label}
-          monoLabel={monoLabel}
-          kind={kind}
-          dateLabel={shortDate(file.modified, withYear)}
-          selected={selectedPath === file.relativePath}
+          key={row.file.relativePath}
+          file={row.file}
+          label={row.label}
+          monoLabel={row.monoLabel}
+          kind={row.kind}
+          deleteControl={section === "qa" ? qaDeleteControl(projectName, row) : undefined}
+          dateLabel={shortDate(row.file.modified, withYear)}
+          selected={selectedPath === row.file.relativePath}
           onSelect={onSelect}
         />
       ))}

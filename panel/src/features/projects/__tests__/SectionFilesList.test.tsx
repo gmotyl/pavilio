@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import SectionFilesList, { sectionRows, visibleSectionRows } from "../SectionFilesList";
 
 const files = [
@@ -110,7 +110,7 @@ describe("SectionFilesList qa branch", () => {
       />,
     );
 
-    const rows = screen.getAllByTestId(/^section-files-file-.*(?<!-kind)$/);
+    const rows = screen.getAllByTestId(/^section-files-file-.*(?<!-kind|-delete)$/);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "section-files-file-p/qa/runs/2026-07-21-beta/run.md",
@@ -228,7 +228,7 @@ describe("SectionFilesList qa reviews", () => {
         onSelect={() => {}}
       />,
     );
-    const rows = screen.getAllByTestId(/^section-files-file-.*(?<!-kind)$/);
+    const rows = screen.getAllByTestId(/^section-files-file-.*(?<!-kind|-delete)$/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "section-files-file-p/qa/reviews/2026-08-19_CODE_REVIEW_feat-x_1e2ca0f.md",
       "section-files-file-p/qa/runs/2026-07-21-beta/run.md",
@@ -308,7 +308,7 @@ describe("sectionRows drives both the count and the rows", () => {
         onSelect={() => {}}
       />,
     );
-    expect(screen.getAllByTestId(/^section-files-file-.*(?<!-kind)$/)).toHaveLength(count);
+    expect(screen.getAllByTestId(/^section-files-file-.*(?<!-kind|-delete)$/)).toHaveLength(count);
   });
 
   it("passes non-qa sections through unfiltered", () => {
@@ -358,4 +358,155 @@ it("visibleSectionRows filters notes by substring", () => {
     sortDir: "desc",
   });
   expect(out.map((r) => r.label)).toEqual(["alpha.md"]);
+});
+
+describe("SectionFilesList qa stories and delete", () => {
+  const storyFiles = [
+    {
+      relativePath: "p/qa/stories/pavilio-pr-237.md",
+      modified: Date.parse("2026-11-24T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/stories/.gitignore",
+      modified: Date.parse("2026-11-24T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/runs/2026-11-20-review-view/run.md",
+      modified: Date.parse("2026-11-20T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/reviews/2026-11-22_CODE_REVIEW_feat-y_abc1234.md",
+      modified: Date.parse("2026-11-22T00:00:00.000Z"),
+    },
+    {
+      relativePath: "p/qa/REVIEW_RULES.md",
+      modified: Date.parse("2026-11-25T00:00:00.000Z"),
+    },
+  ] as never[];
+
+  const storyId = "section-files-file-p/qa/stories/pavilio-pr-237.md";
+  const runId = "section-files-file-p/qa/runs/2026-11-20-review-view/run.md";
+
+  /** Mounts the qa list and drops the deleted row when the index refresh fires. */
+  const mountQa = (onSelect = vi.fn()) => {
+    const view = render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", storyFiles)}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={onSelect}
+      />,
+    );
+    return { ...view, onSelect };
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("QA list shows stories with a story marker", () => {
+    mountQa();
+    const row = screen.getByTestId(storyId);
+    expect(row.querySelector("span.font-mono")?.textContent).toBe("pavilio-pr-237");
+    expect(screen.getByTestId(`${storyId}-kind`).textContent).toBe("story");
+    const rows = screen.getAllByTestId(/^section-files-file-[^]*\.md$|run\.md$/);
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+      storyId,
+      "section-files-file-p/qa/reviews/2026-11-22_CODE_REVIEW_feat-y_abc1234.md",
+      runId,
+    ]);
+  });
+
+  it("QA list skips REVIEW_RULES.md and stories/.gitignore", () => {
+    const out = sectionRows("qa", storyFiles);
+    expect(out.map((r) => r.file.relativePath)).not.toContain("p/qa/REVIEW_RULES.md");
+    expect(out.map((r) => r.file.relativePath)).not.toContain("p/qa/stories/.gitignore");
+    expect(out).toHaveLength(3);
+  });
+
+  it("first click arms Delete?, second within 4s deletes a story", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const refreshed = vi.fn();
+    window.addEventListener("pavilio:file-index-refresh", refreshed);
+    const { onSelect, rerender } = mountQa();
+    const del = screen.getByTestId(`${storyId}-delete`);
+    fireEvent.click(del);
+    expect(del.textContent).toBe("Delete?");
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(del);
+    await waitFor(() => expect(refreshed).toHaveBeenCalled());
+    window.removeEventListener("pavilio:file-index-refresh", refreshed);
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/p/qa/stories/pavilio-pr-237.md", {
+      method: "DELETE",
+    });
+    // Clicking the trash never opens the row.
+    expect(onSelect).not.toHaveBeenCalled();
+    // The refreshed index no longer holds the file, so the row is gone.
+    rerender(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows(
+          "qa",
+          (storyFiles as { relativePath: string }[]).filter(
+            (f) => f.relativePath !== "p/qa/stories/pavilio-pr-237.md",
+          ) as never[],
+        )}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={onSelect}
+      />,
+    );
+    expect(screen.queryByTestId(storyId)).toBeNull();
+  });
+
+  it("run row arms Delete run? and deletes the run folder", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    mountQa();
+    const del = screen.getByRole("button", { name: "Delete runs/2026-11-20-review-view" });
+    fireEvent.click(del);
+    expect(del.textContent).toBe("Delete run?");
+    fireEvent.click(del);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/projects/p/qa/runs/2026-11-20-review-view", {
+        method: "DELETE",
+      }),
+    );
+  });
+
+  it("failed delete keeps the row and shows the error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ error: "Could not delete" }, { status: 500 }),
+      ),
+    );
+    mountQa();
+    const del = screen.getByTestId(`${storyId}-delete`);
+    fireEvent.click(del);
+    fireEvent.click(del);
+    expect(await screen.findByText("Could not delete")).toBeTruthy();
+    expect(screen.getByTestId(storyId)).toBeTruthy();
+    expect(del.textContent).toBe("");
+  });
+
+  it("no delete control outside the QA tab", () => {
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="notes"
+        rows={sectionRows("notes", files)}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("section-files-file-p/notes/a.md-delete")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull();
+  });
 });
