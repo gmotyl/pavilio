@@ -83,14 +83,22 @@ router.post("/:name", (req, res) => {
 });
 
 /**
- * Why archived `name` may not come back: it is an ungrouped knowledge wiki not named `knowledge`,
- * or a knowledge wiki whose harvest target (the ungrouped one, or its group's) is held by an active wiki — e.g. the `-2` the harvest made while
- * it was archived. Two would make `scripts/wiki targets` ambiguous and block every harvest.
+ * Why archived `name` may not come back, mirroring scaffold's rules: it is `knowledge` with a
+ * group (any kind), an ungrouped knowledge wiki not named `knowledge`, or a knowledge wiki whose
+ * harvest target (the ungrouped one, or its group's) is held by an active wiki — e.g. the `-2`
+ * the harvest made while it was archived. Two would make `scripts/wiki targets` ambiguous and
+ * block every harvest.
  */
 function takenKnowledgeTarget(projectsDir: string, name: string): string | null {
   const archivedDir = archivedRoot(projectsDir);
-  if (projectKind(archivedDir, name) !== "knowledge") return null;
   const group = projectGroup(archivedDir, name);
+  if (name === KNOWLEDGE_PROJECT && group !== null) {
+    return (
+      `Cannot restore ${name}: ${KNOWLEDGE_PROJECT} is the workspace-wide knowledge wiki and takes ` +
+      `no group — remove group: ${group} from its PROJECT.md first`
+    );
+  }
+  if (projectKind(archivedDir, name) !== "knowledge") return null;
   // Same rule as scaffold: the harvest locks, logs and commits the ungrouped wiki by name, so any
   // other name would take the global slot and block both the harvest and a later `knowledge`.
   if (group === null && name !== KNOWLEDGE_PROJECT) {

@@ -88,6 +88,22 @@ describe("archive routes", () => {
     expect(existsSync(join(projects.dir(), "kb"))).toBe(false);
   });
 
+  it("409s restoring an archived knowledge card that has a group, of any kind", async () => {
+    const app = makeApp(archiveRouter, "/api/archive");
+    for (const kind of ["knowledge", "project"]) {
+      mkdirSync(join(projects.dir(), "archived", "knowledge"), { recursive: true });
+      writeFileSync(
+        join(projects.dir(), "archived", "knowledge", "PROJECT.md"),
+        `---\nkind: ${kind}\ngroup: metro\n---\n# knowledge\n`,
+      );
+      const res = await request(app).post("/api/archive/knowledge/restore");
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/takes no group/);
+      expect(existsSync(join(projects.dir(), "archived", "knowledge", "PROJECT.md"))).toBe(true);
+      expect(existsSync(join(projects.dir(), "knowledge"))).toBe(false);
+    }
+  });
+
   it("restores the archived ungrouped knowledge wiki when the slot is free", async () => {
     mkdirSync(join(projects.dir(), "archived", "knowledge"), { recursive: true });
     writeFileSync(
