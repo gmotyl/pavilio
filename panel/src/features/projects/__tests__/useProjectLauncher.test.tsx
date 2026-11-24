@@ -61,6 +61,16 @@ describe("useProjectLauncher", () => {
     expect(result.current.overridden).toBe(false);
   });
 
+  it("a project pick whose launcher is gone falls back to the workspace pick", () => {
+    writePreference(preferences.projectRunLauncher, "gone", "pavilio");
+    writePreference(preferences.plansRunLauncher, "opencode");
+
+    const { result } = renderHook(() => useProjectLauncher("pavilio"));
+
+    expect(result.current.launcher?.name).toBe("opencode");
+    expect(result.current.overridden).toBe(false);
+  });
+
   it("falls back to the first ready launcher when nothing resolves", () => {
     // The project pick names a launcher that is gone, the workspace one names a
     // launcher that is not offered (no run loop): neither resolves.
