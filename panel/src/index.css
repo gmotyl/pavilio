@@ -352,6 +352,20 @@ code, pre, .font-mono {
   position: relative;
 }
 
+/* Line-number gutter of a PR-explain story's diff block (`storyDiff.ts`). The
+   number is generated content from `data-line`, never text, so a selection or
+   copy of the code cannot pick it up; a removed line gets an empty cell. */
+.diff-line::before {
+  content: attr(data-line);
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 1.5ch;
+  text-align: right;
+  color: var(--text-tertiary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .code-block > button {
   position: absolute;
   top: 0.5rem;
