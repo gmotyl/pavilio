@@ -78,6 +78,28 @@ describe("archive routes", () => {
     expect((await request(app).post("/api/archive/other-wiki/restore")).status).toBe(200);
   });
 
+  it("409s restoring an ungrouped knowledge wiki not named knowledge, even with the slot free", async () => {
+    mkdirSync(join(projects.dir(), "archived", "kb"), { recursive: true });
+    writeFileSync(join(projects.dir(), "archived", "kb", "PROJECT.md"), "---\nkind: knowledge\n---\n# kb\n");
+    const res = await request(makeApp(archiveRouter, "/api/archive")).post("/api/archive/kb/restore");
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/must be named knowledge/);
+    expect(existsSync(join(projects.dir(), "archived", "kb", "PROJECT.md"))).toBe(true);
+    expect(existsSync(join(projects.dir(), "kb"))).toBe(false);
+  });
+
+  it("restores the archived ungrouped knowledge wiki when the slot is free", async () => {
+    mkdirSync(join(projects.dir(), "archived", "knowledge"), { recursive: true });
+    writeFileSync(
+      join(projects.dir(), "archived", "knowledge", "PROJECT.md"),
+      "---\nkind: knowledge\n---\n# knowledge\n",
+    );
+    const res = await request(makeApp(archiveRouter, "/api/archive")).post("/api/archive/knowledge/restore");
+    expect(res.status).toBe(200);
+    expect(existsSync(join(projects.dir(), "knowledge", "PROJECT.md"))).toBe(true);
+    expect(existsSync(join(projects.dir(), "archived", "knowledge"))).toBe(false);
+  });
+
   it("lists archived projects with archivedAt", async () => {
     seedProject("archived/beta");
     seedProject("archived/gamma");

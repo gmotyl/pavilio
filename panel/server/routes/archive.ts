@@ -13,7 +13,7 @@ import { markArchivedInRegistry, markRestoredInRegistry } from "../lib/registry.
 import { projectDescription } from "../lib/projects/description.js";
 import { projectKind } from "../lib/projects/kind.js";
 import { projectGroup } from "../lib/projects/group.js";
-import { knowledgeTargetsIn } from "../lib/wiki/harvest.js";
+import { KNOWLEDGE_PROJECT, knowledgeTargetsIn } from "../lib/wiki/harvest.js";
 import { archivedAt, archivedRoot } from "../lib/discovery.js";
 
 const router = Router();
@@ -83,14 +83,22 @@ router.post("/:name", (req, res) => {
 });
 
 /**
- * Why archived `name` may not come back: it is a knowledge wiki and its harvest target (the
- * ungrouped one, or its group's) is held by an active wiki — e.g. the `-2` the harvest made while
+ * Why archived `name` may not come back: it is an ungrouped knowledge wiki not named `knowledge`,
+ * or a knowledge wiki whose harvest target (the ungrouped one, or its group's) is held by an active wiki — e.g. the `-2` the harvest made while
  * it was archived. Two would make `scripts/wiki targets` ambiguous and block every harvest.
  */
 function takenKnowledgeTarget(projectsDir: string, name: string): string | null {
   const archivedDir = archivedRoot(projectsDir);
   if (projectKind(archivedDir, name) !== "knowledge") return null;
   const group = projectGroup(archivedDir, name);
+  // Same rule as scaffold: the harvest locks, logs and commits the ungrouped wiki by name, so any
+  // other name would take the global slot and block both the harvest and a later `knowledge`.
+  if (group === null && name !== KNOWLEDGE_PROJECT) {
+    return (
+      `Cannot restore knowledge wiki ${name}: an ungrouped knowledge wiki must be named ` +
+      `${KNOWLEDGE_PROJECT} — rename it to ${KNOWLEDGE_PROJECT} or give it a group in its PROJECT.md first`
+    );
+  }
   let holder: string | null;
   try {
     const targets = knowledgeTargetsIn(projectsDir);
