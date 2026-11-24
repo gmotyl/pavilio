@@ -248,7 +248,9 @@ describe("explainRunLine", () => {
 
   it("explainRunLine composes the skill prompt without the run loop", () => {
     const line = explainRunLine(launcher, "pavilio", "pavilio", 239);
-    expect(line).toBe("claude '/pavilio-pr-explain pavilio pavilio#239'");
+    expect(line).toBe(
+      "claude 'Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project pavilio and PR pavilio#239.'",
+    );
     expect(line).not.toContain("/goal");
     expect(
       explainRunLine(
@@ -257,7 +259,24 @@ describe("explainRunLine", () => {
         "web.app_v2",
         7,
       ),
-    ).toBe("tool --prompt '/pavilio-pr-explain pavilio web.app_v2#7'");
+    ).toBe(
+      "tool --prompt 'Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project pavilio and PR web.app_v2#7.'",
+    );
+  });
+
+  it("explainRunLine names the SKILL.md path instead of a CLI slash command", () => {
+    // Claude Code only knows `/pavilio-pr-explain` where a command wrapper was
+    // installed; a plain-language prompt naming the file works for every CLI.
+    const line = explainRunLine(launcher, "woozle", "woo-dev-be", 375) ?? "";
+    expect(line).toContain("skills/pavilio-pr-explain/SKILL.md");
+    expect(line).not.toMatch(/(^|[\s'])\/pavilio-pr-explain/);
+    expect(line.startsWith("claude '/")).toBe(false);
+  });
+
+  it("explainRunLine carries the project, the repo and the PR number", () => {
+    const line = explainRunLine(launcher, "woozle", "woo-dev-be", 375) ?? "";
+    expect(line).toContain("project woozle");
+    expect(line).toContain("PR woo-dev-be#375");
   });
 
   it("explainRunLine refuses non-slug project or repo", () => {

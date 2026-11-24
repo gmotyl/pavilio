@@ -18,8 +18,11 @@ call or read any other plugin's story tooling.
 
 ## When to use
 
-- `/pavilio-pr-explain <project> <ref>`, typed or started by the **Explain** / **↻** button on a PR
-  row in the Repos tab's PRs list
+- `/pavilio-pr-explain <project> <ref>`, typed
+- started by the **Explain** / **↻** button on a PR row in the Repos tab's PRs list, which types a
+  plain-language prompt (no slash command, so it works in every CLI): `Read and follow the
+  instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project <project> and PR
+  <repo>#<n>.`
 - "explain this PR / branch / these changes", onboarding someone to a change, reviewing one
 
 ## When NOT to use
@@ -57,7 +60,14 @@ call or read any other plugin's story tooling.
 
 ## 1. Resolve project, repo and ref
 
-`/pavilio-pr-explain <project> <ref>`:
+The project and the ref arrive in either form — both mean the same:
+
+- `/pavilio-pr-explain <project> <ref>` (slash command with arguments);
+- `… for project <project> and PR <ref>.` — the line the panel's Explain / ↻ button types after
+  naming this file (`<ref>` is `<repo>#<n>` there). Take `<project>` and `<ref>` from it as given;
+  a trailing `.` ends the sentence and is not part of the ref.
+
+Then:
 
 - **Workspace root** = the notes workspace (the one holding `projects/` and `skills/`), not the code
   repo being explained. Project folder: the `.projects.local.md` Notes Path when present, else

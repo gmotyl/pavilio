@@ -200,7 +200,7 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
         line={line}
         tabbable={tabbable}
         launchTitle={
-          blockedReason ?? `Start ${launcher?.name ?? ""} running /pavilio-pr-explain ${project} ${p.repo}#${p.number}`
+          blockedReason ?? `Start ${launcher?.name ?? ""} running pavilio-pr-explain for ${project} ${p.repo}#${p.number}`
         }
         onLaunch={onLaunch}
         onStory={onStory}

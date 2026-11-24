@@ -177,12 +177,24 @@ export function explainable(project: string, repo: string, number: number): bool
 }
 
 /**
- * The line an Explain run types for `launcher`: `/pavilio-pr-explain
- * <project> <repo>#<number>` as the start prompt on its own, NOT wrapped in
- * the run loop — like {@link archiveRunLine}, one interactive session. Null
- * when the launcher's run loop is not ready, when `project` or `repo` is not a
- * slug ({@link CHANGE_ID}: they land in a prompt the agent reads), or when
- * `number` is not a positive integer.
+ * The objective an Explain run types. `{project}`, `{repo}` and `{number}` are
+ * filled in; the skill is named by its file, RELATIVE to the cell's cwd (the
+ * workspace root, D16 — see `expandCommand`), never as `/pavilio-pr-explain`:
+ * a slash command exists only where a CLI has a wrapper for it installed
+ * (Claude Code's `.claude/commands/`, opencode's `.opencode/commands/`), and a
+ * workspace without one turns the run into "Unknown command". Plain language
+ * works for every launcher.
+ */
+const EXPLAIN_OBJECTIVE =
+  "Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project {project} and PR {repo}#{number}.";
+
+/**
+ * The line an Explain run types for `launcher`: {@link EXPLAIN_OBJECTIVE} —
+ * the skill file plus project, repo and PR number — as the start prompt on
+ * its own, NOT wrapped in the run loop; like {@link archiveRunLine}, one
+ * interactive session. Null when the launcher's run loop is not ready, when
+ * `project` or `repo` is not a slug ({@link CHANGE_ID}: they land in a prompt
+ * the agent reads), or when `number` is not a positive integer.
  */
 export function explainRunLine(
   launcher: TerminalLauncher,
@@ -193,6 +205,7 @@ export function explainRunLine(
   if (!explainable(project, repo, number)) return null;
   const state = resolveRunLoop(launcher);
   if (state.kind !== "ready") return null;
-  const prompt = `/pavilio-pr-explain ${project} ${repo}#${number}`;
+  const vars: Record<string, string> = { project, repo, number: String(number) };
+  const prompt = EXPLAIN_OBJECTIVE.replace(/\{(project|repo|number)\}/g, (_, name: string) => vars[name]);
   return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(prompt)}'`;
 }

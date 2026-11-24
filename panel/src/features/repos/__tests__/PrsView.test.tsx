@@ -322,7 +322,8 @@ describe("PrsView", () => {
       await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
       expect(vi.mocked(startTaskRun).mock.calls[0][0]).toEqual({
         project: "pavilio",
-        runLine: "claude '/pavilio-pr-explain pavilio pavilio#7'",
+        runLine:
+          "claude 'Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project pavilio and PR pavilio#7.'",
       });
       expect(where()).toBe("?view=prs");
       expect(screen.queryByTestId("prs-launch-error")).toBeNull();
