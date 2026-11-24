@@ -40,6 +40,8 @@ beforeEach(() => {
       prs: [pr({ number: 1, reviewers: [ME] }), pr({ number: 2, reviewers: ["bob", ME] }), pr({ number: 3, author: ME })],
       unavailable: [],
     },
+    // The PRs view reads the file index for its rows' stories.
+    "/api/files/index": [],
   });
 });
 

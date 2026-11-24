@@ -99,16 +99,27 @@ interface StoryActionsProps {
   line: string | null;
   /** Title for a launch: what it starts, or why it cannot. */
   launchTitle: string;
+  /** Follows the row's roving tabindex, so the list stays a single tab stop. */
+  tabbable: boolean;
   onLaunch: (line: string) => void;
   onStory: (path: string) => void;
 }
 
 /** Explain with no story yet; Story (opens it in the QA tab) and ↻ (rebuilds it) once one exists. */
-function StoryActions({ pr, story, line, launchTitle, onLaunch, onStory }: StoryActionsProps) {
+function StoryActions({ pr, story, line, launchTitle, tabbable, onLaunch, onStory }: StoryActionsProps) {
   const launch = () => line && onLaunch(line);
+  const tabIndex = tabbable ? 0 : -1;
   if (!story) {
     return (
-      <button type="button" className="pr-act" disabled={!line} title={launchTitle} onClick={launch}>
+      <button
+        type="button"
+        className="pr-act"
+        data-testid={`pr-explain-${prKey(pr)}`}
+        tabIndex={tabIndex}
+        disabled={!line}
+        title={launchTitle}
+        onClick={launch}
+      >
         <SparkIcon />
         Explain
       </button>
@@ -116,13 +127,22 @@ function StoryActions({ pr, story, line, launchTitle, onLaunch, onStory }: Story
   }
   return (
     <>
-      <button type="button" className="pr-act pr-act-story" title={`Open qa/stories/${pr.repo}-pr-${pr.number}.md`} onClick={() => onStory(story)}>
+      <button
+        type="button"
+        className="pr-act pr-act-story"
+        data-testid={`pr-story-${prKey(pr)}`}
+        tabIndex={tabIndex}
+        title={`Open qa/stories/${pr.repo}-pr-${pr.number}.md`}
+        onClick={() => onStory(story)}
+      >
         <BookIcon />
         Story
       </button>
       <button
         type="button"
         className="pr-act-icon"
+        data-testid={`pr-rebuild-${prKey(pr)}`}
+        tabIndex={tabIndex}
         aria-label={`Rebuild story for #${pr.number}`}
         disabled={!line}
         title={line ? "Rebuild story" : launchTitle}
@@ -160,7 +180,7 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
     (path: string) => navigate(`/project/${encodeURIComponent(project)}/qa?file=${encodeURIComponent(path)}`),
     [navigate, project],
   );
-  const actionsFor = (p: PullRequest): ReactNode => {
+  const actionsFor = (p: PullRequest, tabbable: boolean): ReactNode => {
     // A PR whose repo is not a slug never reaches a prompt: no controls at all.
     if (!explainable(project, p.repo, p.number)) return null;
     const { launcher } = projectLauncher;
@@ -171,6 +191,7 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
         pr={p}
         story={stories.has(path) ? path : null}
         line={line}
+        tabbable={tabbable}
         launchTitle={
           blockedReason ?? `Start ${launcher?.name ?? ""} running /pavilio-pr-explain ${project} ${p.repo}#${p.number}`
         }
@@ -199,19 +220,22 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
   else if (prs.prs.length > 0)
     body = (
       <ul className="pr-list" role="listbox" aria-label="Open pull requests" onKeyDown={moveListFocus}>
-        {prs.prs.map((p) => (
-          <PrRow
-            key={prKey(p)}
-            pr={p}
-            me={prs.me}
-            selected={prKey(p) === current}
-            tabbable={prKey(p) === active}
-            onFocus={() => setFocused(prKey(p))}
-            // file/line belong to whatever was open before; the new PR starts at its first change.
-            onOpen={(open) => setParams({ view: "review", pr: prKey(open), file: null, line: null })}
-            actions={actionsFor(p)}
-          />
-        ))}
+        {prs.prs.map((p) => {
+          const tabbable = prKey(p) === active;
+          return (
+            <PrRow
+              key={prKey(p)}
+              pr={p}
+              me={prs.me}
+              selected={prKey(p) === current}
+              tabbable={tabbable}
+              onFocus={() => setFocused(prKey(p))}
+              // file/line belong to whatever was open before; the new PR starts at its first change.
+              onOpen={(open) => setParams({ view: "review", pr: prKey(open), file: null, line: null })}
+              actions={actionsFor(p, tabbable)}
+            />
+          );
+        })}
       </ul>
     );
   else if (prs.all.length === 0) body = <p className="prs-empty">No open pull requests.</p>;

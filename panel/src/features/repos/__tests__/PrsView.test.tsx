@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../../../test-utils";
 import { preferences, type TerminalLauncher } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
-import { BLOCKED_TEXT } from "../../projects/useProjectLauncher";
+import { BLOCKED_TEXT, NO_LAUNCHER_TEXT } from "../../projects/useProjectLauncher";
 import { explainRunLine } from "../../projects/runPrompt";
 import { startTaskRun } from "../../projects/startTaskRun";
 import ReposTab from "../ReposTab";
@@ -33,6 +33,8 @@ vi.mock("../../terminal/useTerminalSessions", async (importOriginal) => ({
 const CLAUDE: TerminalLauncher = { name: "claude", command: "claude", runLoop: "/goal {prompt}" };
 // Not a shipped name, so its stored whole line is read as one: never ready.
 const WHOLE_LINE: TerminalLauncher = { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' };
+// A blank run loop is not offered for runs at all.
+const NO_RUN_LOOP: TerminalLauncher = { name: "shell", command: "bash", runLoop: "" };
 
 const REPOS = [{ name: "pavilio", path: "/root/git/prv/pavilio", present: true }];
 
@@ -49,11 +51,11 @@ function renderPrs(
   body: PrsResponse = { me: ME, prs: PRS, unavailable: [] },
   project = "pavilio",
   search = "?view=prs",
-  files: string[] = [],
+  files: (string | { relativePath: string; archived: boolean })[] = [],
 ) {
   stubFetch({
     "/api/prs": body,
-    "/api/files/index": files.map((relativePath) => ({ relativePath, modified: 1 })),
+    "/api/files/index": files.map((f) => ({ modified: 1, ...(typeof f === "string" ? { relativePath: f } : f) })),
   });
   return render(
     <MemoryRouter initialEntries={[`/project/${project}/repos${search}`]}>
@@ -364,6 +366,52 @@ describe("PrsView", () => {
       expect(within(rows()[0]).getByRole("button", { name: "Story" })).toBeEnabled();
       fireEvent.click(explain);
       expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+    });
+
+    it("Explain names the missing launcher when none has a run loop", async () => {
+      writePreference(preferences.terminalLaunchers, [NO_RUN_LOOP]);
+      renderPrs(one());
+      const explain = await within(await row()).findByRole("button", { name: "Explain" });
+      expect(explain).toBeDisabled();
+      expect(explain).toHaveAttribute("title", NO_LAUNCHER_TEXT);
+    });
+
+    it("an archived story file does not count as the row's story", async () => {
+      renderPrs(one(), "pavilio", "?view=prs", [{ relativePath: STORY, archived: true }]);
+      const r = await row();
+      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/index"));
+      expect(await within(r).findByRole("button", { name: "Explain" })).toBeEnabled();
+      expect(within(r).queryByRole("button", { name: "Story" })).toBeNull();
+    });
+
+    it("row actions follow the roving tabindex", async () => {
+      renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] }, "pavilio", "?view=prs", [STORY]);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      await within(rows()[0]).findByRole("button", { name: "Story" });
+      const tabIndexes = () => rows().map((r) => within(r).getAllByRole("button").map((b) => b.tabIndex));
+      // Row 7: Story and rebuild; row 8: Explain.
+      expect(tabIndexes()).toEqual([[0, 0], [-1]]);
+
+      rows()[0].focus();
+      fireEvent.keyDown(rows()[0], { key: "ArrowDown" });
+      expect(rows()[1]).toHaveFocus();
+      expect(tabIndexes()).toEqual([[-1, -1], [0]]);
+    });
+
+    it("arrow keys from a row's action button move to the next row", async () => {
+      renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 }), pr({ number: 9 })], unavailable: [] });
+      await waitFor(() => expect(rows()).toHaveLength(3));
+      const explain = await within(rows()[1]).findByRole("button", { name: "Explain" });
+      act(() => explain.focus());
+      // Focus inside a row makes that row the list's tab stop.
+      expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+
+      fireEvent.keyDown(explain, { key: "ArrowDown" });
+      expect(rows()[2]).toHaveFocus();
+      act(() => within(rows()[2]).getByRole("button", { name: "Explain" }).focus());
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowUp" });
+      expect(rows()[1]).toHaveFocus();
+      expect(where()).toBe("?view=prs");
     });
 
     it("a failed launch shows an error under the list", async () => {

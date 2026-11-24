@@ -90,6 +90,8 @@ export function codeFetch(routes: Record<string, FetchHandler> = {}) {
     const u = new URL(url, "http://x");
     const repo = u.searchParams.get("repo") ?? "";
     if (u.pathname === "/api/prs") return jsonResponse({ me: "me", prs: [], unavailable: [] });
+    // The PRs view reads the file index for its rows' stories.
+    if (u.pathname === "/api/files/index") return jsonResponse([]);
     if (u.pathname === "/api/git/resolve") return jsonResponse({ sha: u.searchParams.get("ref") === "HEAD" ? HEAD_SHA : BASE_SHA });
     if (u.pathname === "/api/git/tree") return jsonResponse({ files: TREES[repo] ?? [] });
     if (u.pathname === "/api/git/worktrees") return jsonResponse(WORKTREES[repo] ?? []);

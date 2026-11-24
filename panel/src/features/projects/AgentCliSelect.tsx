@@ -40,6 +40,7 @@ export function AgentCliSelect({ project }: { project: string }) {
               // Index keys: names may repeat.
               key={index}
               type="button"
+              data-testid={`project-agent-cli-${index}`}
               aria-pressed={on}
               onClick={() => setLauncher(entry.name)}
               className="text-xs px-3 py-1"

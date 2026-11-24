@@ -517,6 +517,9 @@ describe("SectionFilesList qa stories and delete", () => {
       { relativePath: "p/qa/stories/sub/s.md", modified: 1 },
       { relativePath: "p/qa/x/stories/t.md", modified: 1 },
       { relativePath: "p/qa/reviews/ok.md", modified: 4 },
+      // An archived project's qa files sit under `archived/`, outside `<project>/qa/`.
+      { relativePath: "archived/p/qa/stories/old.md", modified: 1, archived: true },
+      { relativePath: "archived/p/qa/runs/r0/run.md", modified: 1, archived: true },
     ] as never[];
     const rows = sectionRows("qa", nested);
     expect(rows.map((r) => r.file.relativePath)).not.toContain("p/qa/stories/sub/s.md");
@@ -534,6 +537,10 @@ describe("SectionFilesList qa stories and delete", () => {
     expect(screen.queryByTestId("section-files-file-p/qa/x/reviews/a.md-delete")).toBeNull();
     expect(screen.queryByTestId("section-files-file-p/qa/x/runs/r1/run.md-delete")).toBeNull();
     expect(screen.getByTestId("section-files-file-p/qa/reviews/ok.md-delete")).toBeTruthy();
+    for (const archived of ["archived/p/qa/stories/old.md", "archived/p/qa/runs/r0/run.md"]) {
+      expect(screen.getByTestId(`section-files-file-${archived}`)).toBeTruthy();
+      expect(screen.queryByTestId(`section-files-file-${archived}-delete`)).toBeNull();
+    }
   });
 
   it("deleting the open row clears the selection", async () => {
