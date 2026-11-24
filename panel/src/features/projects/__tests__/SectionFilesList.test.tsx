@@ -509,4 +509,88 @@ describe("SectionFilesList qa stories and delete", () => {
     expect(screen.queryByTestId("section-files-file-p/notes/a.md-delete")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull();
   });
+
+  it("nested qa paths get no delete control and nested stories are not listed", () => {
+    const nested = [
+      { relativePath: "p/qa/x/reviews/a.md", modified: 3 },
+      { relativePath: "p/qa/x/runs/r1/run.md", modified: 2 },
+      { relativePath: "p/qa/stories/sub/s.md", modified: 1 },
+      { relativePath: "p/qa/x/stories/t.md", modified: 1 },
+      { relativePath: "p/qa/reviews/ok.md", modified: 4 },
+    ] as never[];
+    const rows = sectionRows("qa", nested);
+    expect(rows.map((r) => r.file.relativePath)).not.toContain("p/qa/stories/sub/s.md");
+    expect(rows.map((r) => r.file.relativePath)).not.toContain("p/qa/x/stories/t.md");
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={rows}
+        filterActive={false}
+        selectedPath={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("section-files-file-p/qa/x/reviews/a.md-delete")).toBeNull();
+    expect(screen.queryByTestId("section-files-file-p/qa/x/runs/r1/run.md-delete")).toBeNull();
+    expect(screen.getByTestId("section-files-file-p/qa/reviews/ok.md-delete")).toBeTruthy();
+  });
+
+  it("deleting the open row clears the selection", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const onSelect = vi.fn();
+    const view = render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", storyFiles)}
+        filterActive={false}
+        selectedPath="p/qa/stories/pavilio-pr-237.md"
+        onSelect={onSelect}
+      />,
+    );
+    const del = screen.getByTestId(`${storyId}-delete`);
+    fireEvent.click(del);
+    fireEvent.click(del);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(null));
+    view.unmount();
+
+    // Deleting a row that is not open leaves the selection alone.
+    onSelect.mockClear();
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", storyFiles)}
+        filterActive={false}
+        selectedPath={runId}
+        onSelect={onSelect}
+      />,
+    );
+    const other = screen.getByTestId(`${storyId}-delete`);
+    fireEvent.click(other);
+    fireEvent.click(other);
+    await waitFor(() => expect(other.textContent).toBe(""));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("deleting a run clears a selection inside that run", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const onSelect = vi.fn();
+    render(
+      <SectionFilesList
+        projectName="p"
+        section="qa"
+        rows={sectionRows("qa", storyFiles)}
+        filterActive={false}
+        selectedPath="p/qa/runs/2026-11-20-review-view/notes.md"
+        onSelect={onSelect}
+      />,
+    );
+    const del = screen.getByTestId(`${runId}-delete`);
+    fireEvent.click(del);
+    fireEvent.click(del);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(null));
+  });
 });

@@ -9,6 +9,8 @@ import { configMock, makeApp, withProjectsDir } from "../../test-kit";
 const projects = withProjectsDir("pavilio-qa-test-");
 
 vi.mock("../../config", () => configMock(() => projects.dir()));
+const { rebuildIndex } = vi.hoisted(() => ({ rebuildIndex: vi.fn() }));
+vi.mock("../../lib/file-index", () => ({ getFileIndex: () => [], rebuildIndex }));
 
 // Every process-spawning entry point, wrapped so a delete that shells out
 // (e.g. `git rm`) is caught. Both specifiers resolve to the same module.
@@ -84,6 +86,7 @@ async function rawDel(path: string, project = "p"): Promise<number> {
 describe("DELETE /api/projects/:project/qa/*path", () => {
   beforeEach(() => {
     spawned.calls = [];
+    rebuildIndex.mockReset();
     seed();
   });
 
@@ -201,5 +204,26 @@ describe("DELETE /api/projects/:project/qa/*path", () => {
     expect((await del("reviews/2026-11-20-review.md")).status).toBe(204);
     expect((await del("runs/2026-11-20-x")).status).toBe(204);
     expect(spawned.calls).toEqual([]);
+  });
+
+  it("rebuilds the file index after a delete, not after a refusal", async () => {
+    expect((await del("stories/nope.md")).status).toBe(404);
+    expect((await del("REVIEW_RULES.md")).status).toBe(400);
+    expect(rebuildIndex).not.toHaveBeenCalled();
+    expect((await del("stories/pavilio-pr-237.md")).status).toBe(204);
+    expect(rebuildIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failing index rebuild still answers 204", async () => {
+    rebuildIndex.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect((await del("runs/2026-11-20-x")).status).toBe(204);
+      expect(existsSync(join(qaDir(), "runs", "2026-11-20-x"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

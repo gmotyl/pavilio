@@ -9,7 +9,8 @@ interface Props {
   rows: SectionRow[];
   filterActive: boolean;
   selectedPath: string | null;
-  onSelect: (relativePath: string) => void;
+  /** Null clears the selection (the open QA file was deleted). */
+  onSelect: (relativePath: string | null) => void;
 }
 
 /**
@@ -106,22 +107,34 @@ export interface SectionRow {
 /**
  * The path, relative to `qa/`, that `DELETE /api/projects/:p/qa/*` removes for
  * this row: the story/review file, or a run row's whole `runs/<run>` folder.
- * Null when the row is not one of those shapes (e.g. a legacy run outside runs/).
+ * The row must sit exactly at `<project>/qa/{stories,reviews}/<file>` or
+ * `<project>/qa/runs/<run>/run.md` — a nested `qa/x/reviews/a.md` would
+ * otherwise send `reviews/a.md` and remove a different file. Null otherwise.
  */
-function qaDeletePath(row: SectionRow): string | null {
-  const parts = row.file.relativePath.split("/");
-  const n = parts.length;
+function qaDeletePath(projectName: string, row: SectionRow): string | null {
+  const prefix = `${projectName}/qa/`;
+  if (!row.file.relativePath.startsWith(prefix)) return null;
+  const parts = row.file.relativePath.slice(prefix.length).split("/");
   if (row.kind === "run") {
-    return parts[n - 3] === "runs" ? `runs/${parts[n - 2]}` : null;
+    return parts.length === 3 && parts[0] === "runs" && parts[2] === "run.md"
+      ? `runs/${parts[1]}`
+      : null;
   }
-  if (row.kind === "story") return `stories/${parts[n - 1]}`;
-  if (row.kind === "review") return `reviews/${parts[n - 1]}`;
-  return null;
+  const dir = row.kind === "story" ? "stories" : row.kind === "review" ? "reviews" : null;
+  return dir && parts.length === 2 && parts[0] === dir ? `${dir}/${parts[1]}` : null;
 }
 
-/** Deletes one QA artifact and asks the file index to re-fetch. */
-function qaDeleteControl(projectName: string, row: SectionRow): FileRowDelete | undefined {
-  const path = qaDeletePath(row);
+/**
+ * Deletes one QA artifact and asks the file index to re-fetch. `onDeleted`
+ * gets the removed path (relative to the projects dir) so an open file inside
+ * it can be closed.
+ */
+function qaDeleteControl(
+  projectName: string,
+  row: SectionRow,
+  onDeleted: (removed: string) => void,
+): FileRowDelete | undefined {
+  const path = qaDeletePath(projectName, row);
   if (!path) return undefined;
   return {
     name: path,
@@ -137,6 +150,7 @@ function qaDeleteControl(projectName: string, row: SectionRow): FileRowDelete | 
         throw new Error(body?.error ?? `Delete failed (${res.status})`);
       }
       refreshFileIndex();
+      onDeleted(`${projectName}/qa/${path}`);
     },
   };
 }
@@ -178,8 +192,10 @@ export function sectionRows(section: string, files: FileEntry[]): SectionRow[] {
       .filter((f) => {
         const parts = f.relativePath.split("/");
         const base = parts[parts.length - 1];
+        // Direct children of qa/stories/ only — the delete route takes no other.
         return (
           parts[parts.length - 2] === "stories" &&
+          parts[parts.length - 3] === "qa" &&
           base.endsWith(".md") &&
           !base.startsWith(".")
         );
@@ -221,6 +237,10 @@ export function SectionFilesList({
   onSelect,
 }: Props) {
   const withYear = section !== "qa";
+  // A deleted row that is open (or, for a run, holds the open file) closes it.
+  const onDeleted = (removed: string) => {
+    if (selectedPath === removed || selectedPath?.startsWith(`${removed}/`)) onSelect(null);
+  };
 
   const rowList = (
     <div className="space-y-0.5">
@@ -231,7 +251,9 @@ export function SectionFilesList({
           label={row.label}
           monoLabel={row.monoLabel}
           kind={row.kind}
-          deleteControl={section === "qa" ? qaDeleteControl(projectName, row) : undefined}
+          deleteControl={
+            section === "qa" ? qaDeleteControl(projectName, row, onDeleted) : undefined
+          }
           dateLabel={shortDate(row.file.modified, withYear)}
           selected={selectedPath === row.file.relativePath}
           onSelect={onSelect}

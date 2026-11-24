@@ -74,8 +74,11 @@ describe("FileRow delete control", () => {
     try {
       const { run, onSelect } = mountWithDelete();
       const del = screen.getByTestId("row-delete");
+      expect(del.style.color).toBe("var(--text-tertiary)");
       fireEvent.click(del);
       expect(del.textContent).toBe("Delete?");
+      // Armed reads red.
+      expect(del.style.color).toBe("var(--red)");
       expect(del.getAttribute("aria-label")).toBe("Confirm delete stories/pavilio-pr-237.md");
       expect(del.className).toContain("opacity-100");
       act(() => {
@@ -88,6 +91,26 @@ describe("FileRow delete control", () => {
       expect(del.textContent).toBe("");
       expect(run).not.toHaveBeenCalled();
       expect(onSelect).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("armed delete stays armed until 4s and the second click deletes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { run } = mountWithDelete();
+      const del = screen.getByTestId("row-delete");
+      fireEvent.click(del);
+      act(() => {
+        vi.advanceTimersByTime(3_999);
+      });
+      expect(del.textContent).toBe("Delete?");
+      expect(del.style.color).toBe("var(--red)");
+      await act(async () => {
+        fireEvent.click(del);
+      });
+      expect(run).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

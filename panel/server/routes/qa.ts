@@ -2,6 +2,7 @@ import { Router } from "express";
 import { lstat, realpath, rm, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { getConfig } from "../config.js";
+import { rebuildIndex } from "../lib/file-index.js";
 import { requireProject } from "./mockups.js";
 
 /**
@@ -71,6 +72,13 @@ router.delete("/:project/qa/*path", requireProject, async (req, res) => {
   } catch (err) {
     console.error("[qa] delete failed:", err);
     return res.status(500).json({ error: "Could not delete" });
+  }
+  // The client re-fetches the cached index right after this answers.
+  try {
+    rebuildIndex();
+  } catch (err) {
+    // delete already succeeded; watcher will rebuild shortly
+    console.warn("[qa] rebuildIndex failed:", err);
   }
   res.status(204).end();
 });
