@@ -5,6 +5,17 @@ import { preferences } from "../../../../preferences/declarations";
 import { readPreference } from "../../../../preferences/store";
 import FileViewer from "../FileViewer";
 
+// Paging is the same logic at any page size; a test that pages sets a small one instead of mounting thousands of rows.
+const rowPage = vi.hoisted(() => ({ size: undefined as number | undefined }));
+vi.mock("../rowPage", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../rowPage")>();
+  return {
+    get ROW_PAGE() {
+      return rowPage.size ?? real.ROW_PAGE;
+    },
+  };
+});
+
 /** A ResizeObserver the test drives: `resize(width)` reports a new content width to every observer. */
 class DrivenResizeObserver {
   static all: DrivenResizeObserver[] = [];
@@ -52,6 +63,7 @@ const changed = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
 );
 
 beforeEach(() => {
+  rowPage.size = undefined;
   DrivenResizeObserver.all = [];
   vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
   stubFetch({}, { ok: true });
@@ -397,14 +409,15 @@ describe("FileViewer", () => {
   });
 
   it("mounts long files in pages and grows to reach a jump target", () => {
-    const content = Array.from({ length: 12_000 }, (_, i) => `l${i + 1}`).join("\n");
+    rowPage.size = 50;
+    const content = Array.from({ length: 120 }, (_, i) => `l${i + 1}`).join("\n");
     const { rerender } = render(<FileViewer path="big.txt" content={content} defaultMode="code" />);
     const rows = () => screen.getByTestId("file-viewer-body").querySelectorAll("tr[data-line]").length;
-    expect(rows()).toBe(5000);
+    expect(rows()).toBe(50);
     fireEvent.click(screen.getByTestId("file-viewer-more"));
-    expect(rows()).toBe(10_000);
-    rerender(<FileViewer path="big.txt" content={content} defaultMode="code" scrollToLine={11_500} scrollKey={1} />);
-    expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="11500"]')).not.toBeNull();
+    expect(rows()).toBe(100);
+    rerender(<FileViewer path="big.txt" content={content} defaultMode="code" scrollToLine={115} scrollKey={1} />);
+    expect(screen.getByTestId("file-viewer-body").querySelector('tr[data-line="115"]')).not.toBeNull();
     expect(screen.queryByTestId("file-viewer-more")).toBeNull();
   });
 

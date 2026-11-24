@@ -21,6 +21,7 @@ import {
   type Row,
 } from "./diffModel";
 import { detectLang, escapeHtml } from "./highlight";
+import { ROW_PAGE } from "./rowPage";
 import { CopyIconButton } from "../../shell/CopyIconButton";
 import type { ReviewThread } from "../reviewThreads";
 import CommentMarker from "./CommentMarker";
@@ -319,8 +320,6 @@ function scrollRowIntoHost(root: HTMLElement, row: Element): void {
 // git prints this in place of hunks when either side is binary.
 const BINARY_DIFF_RE = /^Binary files .* differ$/m;
 const MODE_CHANGE_RE = /^old mode (\d+)\nnew mode (\d+)$/m;
-// Rows mounted at once; a file of many short lines passes the byte cap yet would mount a huge table.
-const ROW_PAGE = 5000;
 
 const MARK_TITLE: Record<GutterMark, string> = { added: "Added", changed: "Changed", removed: "Lines removed above" };
 const STATUS_TEXT = { M: "modified", A: "new file", D: "deleted" } as const;
