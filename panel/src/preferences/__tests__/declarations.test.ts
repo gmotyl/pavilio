@@ -27,6 +27,7 @@ const PORTABLE = [
   "plans.taskPrompt",
   "plans.taskPrompt.override",
   "project.color",
+  "project.runLauncher",
   "project.mark",
   "projects.favorites",
   "repos.prFilter",
@@ -155,6 +156,8 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ],
   // `null` is "no override": the read falls through to `plans.taskPrompt`.
   ["plans.taskPrompt.override", null, "project"],
+  // `null` is "no pick": the project follows `plans.runBanner.launcher`.
+  ["project.runLauncher", null, "project"],
   ["projects.favorites", [], "global"],
   ["repos.view", "code", "project"],
   ["repos.prFilter", { preset: "review", author: null }, "project"],

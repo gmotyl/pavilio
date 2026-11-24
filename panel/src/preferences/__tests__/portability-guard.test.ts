@@ -111,6 +111,7 @@ const FIXTURES: Record<string, Fixture> = {
   "plans.taskPrompt.override": { value: "Only the UI tasks of {change}.", scopeArg: "pavilio" },
   "plans.runBanner.expanded": { value: false },
   "plans.runBanner.launcher": { value: "codex" },
+  "project.runLauncher": { value: "opencode", scopeArg: "pavilio" },
 
   // ── Terminal ─────────────────────────────────────────────────────────────
   "terminal.drawer.open": { value: true },
@@ -271,8 +272,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(66);
-    expect(portable.length).toBe(52);
+    expect(ALL_PREFERENCES.length).toBe(67);
+    expect(portable.length).toBe(53);
     expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

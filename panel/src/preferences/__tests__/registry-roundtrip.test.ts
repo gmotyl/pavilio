@@ -74,6 +74,8 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   "plans.taskPrompt.override": [null, "Only {change}.", "true", "240", "null", "{}"],
   // `optionalStr` again: a launcher name, or `null` for "nothing picked yet".
   "plans.runBanner.launcher": [null, "codex", "true", "240", "null", "{}"],
+  // `optionalStr`: a project's own launcher name, or `null` for "no pick".
+  "project.runLauncher": [null, "opencode", "true", "240", "null", "{}"],
 
   // ── oneOf ───────────────────────────────────────────────────────────────
   "repos.view": ["review", "code", "prs"],
@@ -155,7 +157,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 66;
+const DECLARATION_COUNT = 67;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
