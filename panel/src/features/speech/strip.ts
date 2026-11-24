@@ -631,6 +631,24 @@ function listItemToSentence(line: string): string {
   return SENTENCE_TERMINATOR_RE.test(content) ? `\n${content}` : `\n${content}.`;
 }
 
+/**
+ * `markdown` with a closing fence appended when a fenced block in it never
+ * closes, by the same rule {@link stripToSpeakableText} reads fences with.
+ * For a text that is one piece of a larger one (a review comment in a thread
+ * read aloud): there an unclosed fence would run on and swallow the pieces
+ * after it, where alone it only reaches its own end.
+ */
+export function closeOpenFence(markdown: string): string {
+  let open: string | null = null;
+  for (const line of markdown.replace(/\r\n?/g, "\n").split("\n")) {
+    const fence = FENCE_RE.exec(line);
+    if (!fence) continue;
+    if (open === null) open = fence[1][0];
+    else if (fence[1][0] === open && fence[2].trim() === "") open = null;
+  }
+  return open === null ? markdown : `${markdown}\n${open.repeat(3)}`;
+}
+
 export function stripToSpeakableText(markdown: string): string {
   const lines = removeBlocks(markdown.replace(/\r\n?/g, "\n").split("\n"));
 

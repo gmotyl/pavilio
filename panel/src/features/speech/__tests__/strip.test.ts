@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SPOKEN_CODE_CHARS, SENTINEL_ONLY_RE, stripToSpeakableText } from "../strip";
+import { closeOpenFence, MAX_SPOKEN_CODE_CHARS, SENTINEL_ONLY_RE, stripToSpeakableText } from "../strip";
 
 type Row = [label: string, markdown: string, spoken: string];
 
@@ -344,5 +344,23 @@ describe("stripToSpeakableText", () => {
     expect(stripToSpeakableText("Read [[progress-2026-09-23-repos-resize-answer-pane]](https://example.com)")).toBe(
       "Read [progress-2026-09-23-repos-resize-answer-pane]",
     );
+  });
+});
+
+describe("closeOpenFence", () => {
+  it("closes a fence that never closes, with its own character", () => {
+    expect(closeOpenFence(lines("```suggestion", "x = 1"))).toBe(lines("```suggestion", "x = 1", "```"));
+    expect(closeOpenFence(lines("~~~", "x = 1"))).toBe(lines("~~~", "x = 1", "~~~"));
+    // A fence line with an info string, or of the other character, does not close it.
+    expect(closeOpenFence(lines("```", "~~~", "```ts"))).toBe(lines("```", "~~~", "```ts", "```"));
+  });
+
+  it("leaves closed fences and text without fences as they are", () => {
+    expect(closeOpenFence(lines("```ts", "x = 1", "```", "after"))).toBe(lines("```ts", "x = 1", "```", "after"));
+    expect(closeOpenFence("plain `code` text")).toBe("plain `code` text");
+  });
+
+  it("keeps text after the closed piece speakable", () => {
+    expect(stripToSpeakableText(`${closeOpenFence(lines("```", "x = 1"))}\n\nafter`)).toBe(lines("⟦code⟧", "", "after"));
   });
 });

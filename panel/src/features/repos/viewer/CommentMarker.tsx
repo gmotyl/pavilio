@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, use
 import { createPortal } from "react-dom";
 import MarkdownRenderer from "../../markdown/MarkdownRenderer";
 import { usePageSpeech } from "../../speech/SpeechHostProvider";
+import { closeOpenFence } from "../../speech/strip";
 import { prDescriptionSource } from "../PrDescription";
 import { hue, updatedAgo } from "../PrRow";
 import type { ReviewComment } from "../../../../server/lib/prs/provider";
@@ -223,7 +224,8 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
 
   // The author on a paragraph of their own: a body opening with a fence (```suggestion) must start
   // its line, or the speech filter's line-anchored fence match misses it and swallows what follows.
-  const spoken = (i: number) => `${comments[i].author}:\n\n${bodies[i]}`;
+  // A fence left open is closed per comment, so in Play all it can't swallow the replies after it.
+  const spoken = (i: number) => `${comments[i].author}:\n\n${closeOpenFence(bodies[i])}`;
   const speak = (key: string, text: string) => {
     if (scope) scope(key, speech.stopDocument);
     else started.current.add(key);

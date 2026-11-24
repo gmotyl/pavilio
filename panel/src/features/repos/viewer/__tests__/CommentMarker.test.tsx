@@ -203,6 +203,18 @@ describe("CommentMarker", () => {
     expect(stripToSpeakableText(speech.speakDocument.mock.calls[1][0].text)).toContain("Please rename this flag.");
   });
 
+  it("CommentMarker Play all keeps the replies after a comment whose code fence never closes", () => {
+    const OPEN = comment({ body: "```suggestion\nconst prod = true;" });
+    render(<CommentMarker thread={thread([OPEN, REPLY])} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Play thread" }));
+    const spoken = stripToSpeakableText(speech.speakDocument.mock.calls[0][0].text);
+    expect(spoken).toContain("kwojcik:");
+    expect(spoken).not.toContain("const prod");
+    expect(spoken).toContain("gmotyl:");
+    expect(spoken).toContain("It does.");
+  });
+
   it("CommentMarker stops the speech it started when it unmounts", () => {
     const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
     fireEvent.focus(marker());
