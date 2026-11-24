@@ -64,14 +64,46 @@ describe("useProjectLauncher", () => {
   it("falls back to the first ready launcher when nothing resolves", () => {
     // The project pick names a launcher that is gone, the workspace one names a
     // launcher that is not offered (no run loop): neither resolves.
+    // `aider` is offered but its run loop is a whole command line (not ready)
+    // and sits AHEAD of the first ready one, so "first offered" would pick it.
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "aider", command: "aider", runLoop: "aider --message {prompt}" },
+      ...LAUNCHERS.slice(1),
+    ]);
     writePreference(preferences.projectRunLauncher, "gone", "pavilio");
     writePreference(preferences.plansRunLauncher, "shell");
 
     const { result } = renderHook(() => useProjectLauncher("pavilio"));
 
+    expect(result.current.offered[0]?.name).toBe("aider");
     expect(result.current.launcher?.name).toBe("claude");
     expect(result.current.state?.kind).toBe("ready");
     expect(result.current.overridden).toBe(false);
+  });
+
+  it("falls back to the first offered launcher when none is ready", () => {
+    writePreference(preferences.terminalLaunchers, [
+      LAUNCHERS[0],
+      { name: "aider", command: "aider", runLoop: "aider --message {prompt}" },
+      { name: "goose", command: "goose", runLoop: "goose run {prompt}" },
+    ]);
+
+    const { result } = renderHook(() => useProjectLauncher("pavilio"));
+
+    expect(result.current.launcher?.name).toBe("aider");
+    expect(result.current.state?.kind).toBe("wholeLine");
+    expect(result.current.overridden).toBe(false);
+  });
+
+  it("resolves to null when no launcher is offered", () => {
+    writePreference(preferences.terminalLaunchers, [LAUNCHERS[0]]);
+
+    const { result } = renderHook(() => useProjectLauncher("pavilio"));
+
+    expect(result.current.launcher).toBeNull();
+    expect(result.current.state).toBeNull();
+    expect(result.current.offered).toEqual([]);
   });
 
   it("keeps the pick across a reordered launcher list", () => {

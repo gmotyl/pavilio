@@ -3,7 +3,11 @@ import { usePreference } from "../../preferences/usePreference";
 import { resolveRunLoop, type RunLoopState } from "../agents/launcherRunLoop";
 
 export interface ProjectLauncher {
-  /** The resolved launcher, or null when no launcher is offered at all. */
+  /**
+   * The resolved launcher, or null when no launcher is offered at all. With
+   * launchers offered but none ready and no pick resolving, the first offered
+   * one, so its `state` (e.g. `wholeLine`) can drive the blocked note.
+   */
   launcher: TerminalLauncher | null;
   /** `resolveRunLoop(launcher)`, or null with no launcher. */
   state: RunLoopState | null;
@@ -19,7 +23,8 @@ export interface ProjectLauncher {
  * The agent CLI a project runs with. By NAME, so a reordered or shortened
  * launcher list keeps the same CLI: the project's pick (`projectRunLauncher`)
  * when it names an offered launcher, else the workspace pick
- * (`plansRunLauncher`), else the first launcher whose run loop is ready.
+ * (`plansRunLauncher`), else the first launcher whose run loop is ready, else
+ * (none ready) the first offered one, so the UI can show why it is blocked.
  */
 export function useProjectLauncher(project: string): ProjectLauncher {
   const [launchers] = usePreference(preferences.terminalLaunchers);
@@ -34,7 +39,11 @@ export function useProjectLauncher(project: string): ProjectLauncher {
     name === null ? undefined : entries.find((entry) => entry.launcher.name === name);
 
   const own = byName(projectPick);
-  const chosen = own ?? byName(workspacePick) ?? entries.find((e) => e.state.kind === "ready");
+  const chosen =
+    own ??
+    byName(workspacePick) ??
+    entries.find((e) => e.state.kind === "ready") ??
+    entries[0];
 
   return {
     launcher: chosen?.launcher ?? null,
