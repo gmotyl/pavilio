@@ -7,7 +7,7 @@ import { projectGroup } from "../projects/group";
 import { projectKind } from "../projects/kind";
 import { slugifyProjectTitle } from "../projects/slug";
 import { readActiveProjects, readArchivedProjects } from "../registry";
-import { parseWikiLink } from "./wikilinks";
+import { extractWikiLinks, parseWikiLink } from "./wikilinks";
 
 /**
  * The deterministic half of the knowledge harvest: list and clear the `## Knowledge candidates`
@@ -318,10 +318,10 @@ export function addBacklink(
   // A link already present stays a no-op even when its project is no longer a target (archived,
   // renamed, ambiguous): ingest re-appends existing lines and must not lose them.
   if (range) {
+    // As the renderer reads it: a link inside inline code or a fence is an example, not a link.
     const section = lines.slice(range[0], range[1]).join("\n");
-    for (const m of section.matchAll(/\[\[([^\]]*)\]\]/g)) {
-      const link = parseWikiLink(m[1]);
-      if (link?.project === wanted.project && link.target === wanted.page) return { added: false };
+    for (const link of extractWikiLinks(section)) {
+      if (link.project === wanted.project && link.target === wanted.page) return { added: false };
     }
   }
   if (!options.keep) {

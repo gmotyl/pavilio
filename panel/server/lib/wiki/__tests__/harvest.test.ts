@@ -162,6 +162,16 @@ describe("harvest", () => {
     expect(listCandidates(root).items[0].id).toBe(same[0].id);
   });
 
+  it("backlink is not suppressed by the same link inside inline code", () => {
+    write("projects/alpha/PROJECT.md", "# p\n");
+    knowledgeWikis();
+    write("projects/alpha/wiki/sources/a.md", "body\n\n## Knowledge\n- e.g. `[[knowledge:wiki/concepts/x]]`\n");
+    expect(addBacklink(root, "alpha", "wiki/sources/a.md", "wiki/concepts/x")).toEqual({ added: true });
+    expect(read("projects/alpha/wiki/sources/a.md")).toBe(
+      "body\n\n## Knowledge\n- e.g. `[[knowledge:wiki/concepts/x]]`\n- [[knowledge:wiki/concepts/x]]\n",
+    );
+  });
+
   it("backlink is idempotent", () => {
     write("projects/alpha/PROJECT.md", "# p\n");
     knowledgeWikis();
