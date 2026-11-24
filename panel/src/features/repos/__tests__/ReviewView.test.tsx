@@ -457,14 +457,78 @@ describe("ReviewView", () => {
     await waitFor(() => expect(viewer).toHaveTextContent("const area = width * height;"));
     expect(within(viewer).queryByRole("button", { name: /comments? on line/ })).toBeNull();
 
-    const counts = () => [calls(fetch, "/api/prs/open").length, calls(fetch, "/api/git/changed").length, calls(fetch, "/api/git/diff-ref").length];
-    const was = counts();
+    expect(calls(fetch, "/api/prs/open")).toHaveLength(1);
     fail = false;
     fireEvent.click(within(note).getByRole("button", { name: "Retry" }));
-    await within(screen.getByTestId("file-viewer")).findByRole("button", { name: "2 comments on line 15" });
+    await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "2 comments on line 15" });
     expect(screen.queryByTestId("review-comments-note")).toBeNull();
     expect(calls(fetch, "/api/prs/comments")).toHaveLength(2);
-    expect(counts()).toEqual(was);
+    // The branch is opened again with them: comments are only ever overlaid on a diff fetched alongside.
+    expect(calls(fetch, "/api/prs/open")).toHaveLength(2);
+  });
+
+  it("comments Retry after the PR was retargeted shows the new base's diff, never the old one with the new markers", async () => {
+    const B1 = "b".repeat(40);
+    const B2 = "c".repeat(40);
+    let fail = true;
+    let base = B1;
+    // A deleted-side thread: its line numbers belong to the base the comments were made against.
+    const left = [comment({ id: 7, line: 29, side: "old" })];
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const fetch = renderReview({
+      search: FILE_A,
+      open: () => jsonResponse({ head: HEAD, base, body: "PR body text" }),
+      comments: () => (fail ? jsonResponse({ error: "boom" }, { status: 502 }) : jsonResponse(left)),
+      diffRef: async (url: string) => {
+        if (url.includes(`base=${B2}`)) await held;
+        return text(DIFF);
+      },
+    });
+    const note = await screen.findByTestId("review-comments-note");
+    await waitFor(() => expect(screen.getByTestId("file-viewer")).toHaveTextContent("const area = width * height;"));
+
+    // Retargeted: same head, another base.
+    base = B2;
+    fail = false;
+    fireEvent.click(within(note).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(calls(fetch, "/api/git/diff-ref").some(([u]) => String(u).includes(`base=${B2}`))).toBe(true));
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+    expect(screen.getByText("Loading src/a.ts…")).toBeInTheDocument();
+
+    await act(async () => release());
+    await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "1 comment on line 29" });
+  });
+
+  it("Re-open to the same head on a new base refetches the shown file before showing markers", async () => {
+    const B1 = "b".repeat(40);
+    const B2 = "c".repeat(40);
+    const OLDER = "o".repeat(40);
+    let base = B1;
+    let commentsHead = OLDER;
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const fetch = renderReview({
+      search: FILE_A,
+      open: () => jsonResponse({ head: HEAD, base, body: "PR body text" }),
+      comments: () => jsonResponse(COMMENTS.map((c) => ({ ...c, commitId: commentsHead }))),
+      diffRef: async (url: string) => {
+        if (url.includes(`base=${B2}`)) await held;
+        return text(DIFF);
+      },
+    });
+    const note = await screen.findByTestId("review-stale-note");
+    await waitFor(() => expect(screen.getByTestId("file-viewer")).toHaveTextContent("const area = width * height;"));
+
+    base = B2;
+    commentsHead = HEAD;
+    fireEvent.click(within(note).getByRole("button", { name: "Re-open" }));
+    await waitFor(() => expect(calls(fetch, "/api/git/diff-ref").some(([u]) => String(u).includes(`base=${B2}`))).toBe(true));
+    expect(screen.queryByTestId("file-viewer")).toBeNull();
+    expect(screen.getByText("Loading src/a.ts…")).toBeInTheDocument();
+
+    await act(async () => release());
+    await within(await waitFor(() => screen.getByTestId("file-viewer"))).findByRole("button", { name: "2 comments on line 15" });
   });
 
   it("comments made at the viewed head get markers and no stale note", async () => {

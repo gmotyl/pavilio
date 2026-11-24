@@ -41,8 +41,11 @@ type Fetched = { path: string } & (
   | { binary: true; tooLarge?: false }
   | { tooLarge: true; size?: number; binary?: false }
 );
-/** A file as loaded at one head: after a re-open to a newer head it is stale, never shown with that head's markers. */
-type Loaded = Fetched & { head: string };
+/**
+ * A file as loaded at one head and base: after a re-open to a newer head or a retargeted base it is
+ * stale, never shown with that revision's markers (a base change moves the old side's line numbers).
+ */
+type Loaded = Fetched & { head: string; base: string };
 
 class HttpError extends Error {
   constructor(
@@ -173,7 +176,9 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   const whole = listed && listed.head === head ? listed.files : null;
 
   // Comments load apart from `open`: after a push they can carry line numbers for a newer
-  // head than the diff shown. Only those made at the viewed head are overlaid.
+  // head than the diff shown. Only those made at the viewed head are overlaid. A retargeted
+  // base keeps `commitId` but moves old-side lines, so comments are never fetched without the
+  // branch: every comments request (mount, Retry, Re-open) re-runs `open` with it.
   const { threads, stale } = useMemo(() => {
     if (!Array.isArray(comments) || !head) return { threads: null, stale: false };
     const atHead = comments.filter((c) => c.commitId === head);
@@ -225,7 +230,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
     if (!ready || !selected) return;
     let cancelled = false;
     const path = selected;
-    const at = ready.head;
+    const at = { head: ready.head, base: ready.base };
     (async (): Promise<Fetched> => {
       const diff = change
         ? await (await request(`/api/git/diff-ref?repo=${q(pr.repoPath)}&base=${q(ready.base)}&head=${q(ready.head)}&path=${q(path)}`)).text()
@@ -246,8 +251,8 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
         throw e;
       }
     })()
-      .then((l) => !cancelled && setLoaded({ ...l, head: at }))
-      .catch((e: unknown) => !cancelled && setLoaded({ path, head: at, error: message(e) }));
+      .then((l) => !cancelled && setLoaded({ ...l, ...at }))
+      .catch((e: unknown) => !cancelled && setLoaded({ path, ...at, error: message(e) }));
     return () => {
       cancelled = true;
     };
@@ -265,7 +270,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   };
 
   const stack = width !== null && width < STACK_MAX_WIDTH;
-  const current = loaded && loaded.path === selected && loaded.head === head ? loaded : null;
+  const current = loaded && loaded.path === selected && loaded.head === head && loaded.base === ready?.base ? loaded : null;
   const scrollHere = scroll && scroll.file === selected ? scroll : null;
 
   let tree: ReactNode;
@@ -401,7 +406,15 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
           {comments && !Array.isArray(comments) && (
             <p className="rv-msg" role="status" data-testid="review-comments-note">
               Couldn't load review comments ({comments.error}).{" "}
-              <button type="button" data-testid="review-comments-retry" onClick={() => setCommentsAttempt((n) => n + 1)}>
+              <button
+                type="button"
+                data-testid="review-comments-retry"
+                onClick={() => {
+                  // The branch again too: the PR may have been retargeted since it was opened.
+                  setAttempt((n) => n + 1);
+                  setCommentsAttempt((n) => n + 1);
+                }}
+              >
                 Retry
               </button>
             </p>
