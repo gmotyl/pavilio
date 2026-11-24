@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { ChecksState } from "../../../server/lib/prs/provider";
+import type { ChecksState, ReviewComment } from "../../../server/lib/prs/provider";
 import FileTree, { type TreeFile } from "./FileTree";
-import PrDescription from "./PrDescription";
+import PrDescription, { prSpeechKey } from "./PrDescription";
 import PrSwitcher from "./PrSwitcher";
+import ReviewMarkdownFile, { fileBlobUrl, fileRawUrl, isMarkdownPath } from "./ReviewMarkdownFile";
 import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
+import { commentCount, groupThreads, type ReviewThread } from "./reviewThreads";
 import type { PullRequest } from "./usePrs";
 import { useWidth } from "./useWidth";
 import { tooLargeMessage, tooLargeSize } from "./tooLarge";
 import FileViewer from "./viewer/FileViewer";
 import "./Review.css";
 
-const DESC_MIN_WIDTH = 1100;
 const STACK_MAX_WIDTH = 860;
 
 interface ChangedFile {
@@ -30,11 +31,22 @@ type Opened =
 /** The PR description: null while `open` is in flight, failed when it errored before answering. */
 type Description = string | null | { failed: true };
 
-type Loaded = { path: string } & (
+/** Review comments: null while loading; a failure keeps the review usable without markers. */
+type Comments = ReviewComment[] | { error: string } | null;
+
+// One empty map: the comment lane stays put while comments load or after they fail.
+const NO_THREADS: Map<string, ReviewThread> = new Map();
+
+type Fetched = { path: string } & (
   | { diff?: string; content?: string; binary?: false; tooLarge?: false; error?: string; codeNote?: string }
   | { binary: true; tooLarge?: false }
   | { tooLarge: true; size?: number; binary?: false }
 );
+/**
+ * A file as loaded at one head and base: after a re-open to a newer head or a retargeted base it is
+ * stale, never shown with that revision's markers (a base change moves the old side's line numbers).
+ */
+type Loaded = Fetched & { head: string; base: string };
 
 class HttpError extends Error {
   constructor(
@@ -100,13 +112,17 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
   const [opened, setOpened] = useState<Opened>({ status: "loading" });
   const [description, setDescription] = useState<Description>(null);
   const [changedOnly, setChangedOnly] = useState(true);
-  const [whole, setWhole] = useState<TreeFile[] | { error: string } | null>(null);
+  // Listed at one head: a re-open to a newer head lists the repo again.
+  const [listed, setListed] = useState<{ head: string; files: TreeFile[] | { error: string } } | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  // Bound to its file: a line is meaningless on another one. A link without
-  // `file` (null) targets whichever file opens first.
-  const [scroll, setScroll] = useState<{ line: number; side?: "old" | "new"; key: number; file: string | null } | null>(() => {
+  const [comments, setComments] = useState<Comments>(null);
+  const [commentsAttempt, setCommentsAttempt] = useState(0);
+  // Bound to its file: a line is meaningless on another one. A link's line
+  // without a file (old links opened the first file) is ignored.
+  const [scroll, setScroll] = useState<{ line: number; side?: "old" | "new"; key: number; file: string } | null>(() => {
     const line = Number(params.get("line"));
-    return line > 0 ? { line, key: 0, file: params.get("file") } : null;
+    const file = params.get("file");
+    return line > 0 && file ? { line, key: 0, file } : null;
   });
   const [bodyRef, width] = useWidth<HTMLDivElement>();
 
@@ -143,17 +159,43 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
     };
   }, [pr.repoPath, pr.number, attempt]);
 
+  // Independent of the branch fetch: comments come from GitHub, not the clone.
+  useEffect(() => {
+    let cancelled = false;
+    setComments(null);
+    request(`/api/prs/comments?repo=${q(pr.repoPath)}&number=${pr.number}`)
+      .then(async (res) => (await res.json()) as ReviewComment[])
+      .then((list) => !cancelled && setComments(list))
+      .catch((e: unknown) => !cancelled && setComments({ error: message(e) }));
+    return () => {
+      cancelled = true;
+    };
+  }, [pr.repoPath, pr.number, commentsAttempt]);
+
   const ready = opened.status === "ready" ? opened : null;
+  const head = ready?.head;
+  const whole = listed && listed.head === head ? listed.files : null;
+
+  // Comments load apart from `open`: after a push they can carry line numbers for a newer
+  // head than the diff shown. Only those made at the viewed head are overlaid. A retargeted
+  // base keeps `commitId` but moves old-side lines, so comments are never fetched without the
+  // branch: every comments request (mount, Retry, Re-open) re-runs `open` with it.
+  const { threads, stale } = useMemo(() => {
+    if (!Array.isArray(comments) || !head) return { threads: null, stale: false };
+    const atHead = comments.filter((c) => c.commitId === head);
+    return { threads: groupThreads(atHead), stale: atHead.length < comments.length };
+  }, [comments, head]);
 
   useEffect(() => {
     if (changedOnly || !ready || whole) return;
     let cancelled = false;
+    const at = ready.head;
     // The SHA `open` resolved, not the PR ref: another tab re-opening the PR
     // moves the ref, and the review must stay on one revision.
     request(`/api/git/tree?repo=${q(pr.repoPath)}&ref=${q(ready.head)}`)
       .then(async (res) => ((await res.json()) as { files: TreeFile[] }).files)
-      .then((files) => !cancelled && setWhole(files))
-      .catch((e: unknown) => !cancelled && setWhole({ error: message(e) }));
+      .then((files) => !cancelled && setListed({ head: at, files }))
+      .catch((e: unknown) => !cancelled && setListed({ head: at, files: { error: message(e) } }));
     return () => {
       cancelled = true;
     };
@@ -173,14 +215,24 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
     return [...merged, ...changed.filter((f) => !seen.has(f.path))];
   }, [ready, changedOnly, whole, changedByPath]);
 
-  const selected = params.get("file") ?? ready?.changed[0]?.path ?? null;
+  const counted = useMemo<TreeFile[]>(() => {
+    if (!threads) return files;
+    return files.map((f) => {
+      const n = commentCount(threads.get(f.path));
+      return n > 0 ? { ...f, comments: n } : f;
+    });
+  }, [files, threads]);
+
+  // No file: the Description entry.
+  const selected = params.get("file") || null;
   const change = selected ? changedByPath.get(selected) : undefined;
 
   useEffect(() => {
     if (!ready || !selected) return;
     let cancelled = false;
     const path = selected;
-    (async (): Promise<Loaded> => {
+    const at = { head: ready.head, base: ready.base };
+    (async (): Promise<Fetched> => {
       const diff = change
         ? await (await request(`/api/git/diff-ref?repo=${q(pr.repoPath)}&base=${q(ready.base)}&head=${q(ready.head)}&path=${q(path)}`)).text()
         : undefined;
@@ -200,22 +252,27 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
         throw e;
       }
     })()
-      .then((l) => !cancelled && setLoaded(l))
-      .catch((e: unknown) => !cancelled && setLoaded({ path, error: message(e) }));
+      .then((l) => !cancelled && setLoaded({ ...l, ...at }))
+      .catch((e: unknown) => !cancelled && setLoaded({ path, ...at, error: message(e) }));
     return () => {
       cancelled = true;
     };
   }, [ready, selected, change, pr.repoPath]);
 
-  const select = (path: string) => {
+  // Description opens at the top, not at the scroll offset of the diff left behind.
+  const mainRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (selected === null && mainRef.current) mainRef.current.scrollTop = 0;
+  }, [selected]);
+
+  const select = (path: string | null) => {
     setScroll(null);
     setParams({ file: path, line: null });
   };
 
-  const showDesc = width === null || width >= DESC_MIN_WIDTH;
   const stack = width !== null && width < STACK_MAX_WIDTH;
-  const current = loaded && loaded.path === selected ? loaded : null;
-  const scrollHere = scroll && (scroll.file === null || scroll.file === selected) ? scroll : null;
+  const current = loaded && loaded.path === selected && loaded.head === head && loaded.base === ready?.base ? loaded : null;
+  const scrollHere = scroll && scroll.file === selected ? scroll : null;
 
   let tree: ReactNode;
   if (opened.status === "error" && opened.stage === "history")
@@ -243,18 +300,23 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
         {!changedOnly && whole && !Array.isArray(whole) && (
           <p className="rv-msg" role="status">
             Couldn't list the repo at the PR head ({whole.error}).{" "}
-            <button type="button" data-testid="review-tree-retry" onClick={() => setWhole(null)}>
+            <button type="button" data-testid="review-tree-retry" onClick={() => setListed(null)}>
               Retry
             </button>
           </p>
         )}
-        <FileTree files={files} selected={selected ?? undefined} onSelect={select} changedOnly={changedOnly} aria-label="Pull request files" />
+        {changedOnly && ready.changed.length === 0 ? (
+          <p className="rv-msg">This pull request changes no files.</p>
+        ) : (
+          <FileTree files={counted} selected={selected ?? undefined} reveal={ready.changed[0]?.path} onSelect={select} changedOnly={changedOnly} aria-label="Pull request files" />
+        )}
       </>
     );
 
   let viewer: ReactNode;
-  if (!ready) viewer = null;
-  else if (!selected) viewer = <p className="fv-empty">This pull request changes no files.</p>;
+  if (!selected)
+    viewer = <PrDescription project={project} pr={pr} body={typeof description === "object" && description !== null ? undefined : description} />;
+  else if (!ready) viewer = null;
   else if (!current) viewer = <p className="fv-empty">Loading {selected}…</p>;
   else if (current.binary) viewer = <p className="fv-empty">{selected} is a binary file and can't be shown.</p>;
   else if (current.tooLarge) viewer = <p className="fv-empty">{tooLargeMessage(current.size)}</p>;
@@ -278,6 +340,22 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
           scrollToLine={scrollHere?.line}
           scrollSide={scrollHere?.side}
           scrollKey={scrollHere?.key}
+          comments={threads?.get(current.path) ?? NO_THREADS}
+          commentSpeechKey={prSpeechKey(project, pr)}
+          me={me}
+          rendered={
+            // A deleted file has nothing at head to render.
+            isMarkdownPath(current.path) && change?.status !== "D" ? (
+              <ReviewMarkdownFile
+                speechKey={`${prSpeechKey(project, pr)}/f/${current.path}`}
+                content={current.content}
+                // A codeNote is already shown above the viewer.
+                note={current.codeNote ? undefined : "File content is not loaded."}
+                linkBase={fileBlobUrl(pr.url, current.head, current.path)}
+                imageBase={fileRawUrl(pr.url, current.head, current.path)}
+              />
+            ) : undefined
+          }
         />
       </>
     );
@@ -287,7 +365,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
       <PrHeader pr={pr} me={me} />
       <div
         ref={bodyRef}
-        className={`rv-body${showDesc ? "" : " rv-nodesc"}${stack ? " rv-stack" : ""}`}
+        className={`rv-body${stack ? " rv-stack" : ""}`}
         data-testid="review-body"
       >
         <div className="rv-side" data-testid="review-tree">
@@ -299,20 +377,70 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
               <input type="checkbox" checked={changedOnly} onChange={(e) => {
                   setChangedOnly(e.target.checked);
                   // A failed listing is retried on the next untick rather than sticking.
-                  if (whole && !Array.isArray(whole)) setWhole(null);
+                  if (whole && !Array.isArray(whole)) setListed(null);
                 }} /> Changed files only
             </label>
           </div>
+          {/* A sibling of the tree: neither the branch fetch nor "Changed files only" moves it. */}
+          <button
+            type="button"
+            className="rv-descentry"
+            data-testid="review-desc-entry"
+            aria-current={selected === null ? "true" : undefined}
+            onClick={() => select(null)}
+          >
+            <span className="rv-descentry-ico" aria-hidden="true">
+              ☰
+            </span>
+            Description
+            <span className="rv-descentry-num" aria-hidden="true">
+              PR #{pr.number}
+            </span>
+          </button>
+          <hr className="rv-sep" />
           {tree}
         </div>
-        <div className="rv-main">{viewer}</div>
-        {showDesc && <PrDescription project={project} pr={pr} body={typeof description === "object" && description !== null ? undefined : description} />}
+        <div className="rv-main" ref={mainRef}>
+          {stale && (
+            <p className="rv-msg" role="status" data-testid="review-stale-note">
+              This PR changed since it was opened — markers may be missing.{" "}
+              <button
+                type="button"
+                data-testid="review-stale-reopen"
+                onClick={() => {
+                  // Both again: the diff moves to the new head, and comments older than it catch up.
+                  setAttempt((n) => n + 1);
+                  setCommentsAttempt((n) => n + 1);
+                }}
+              >
+                Re-open
+              </button>
+            </p>
+          )}
+          {comments && !Array.isArray(comments) && (
+            <p className="rv-msg" role="status" data-testid="review-comments-note">
+              Couldn't load review comments ({comments.error}).{" "}
+              <button
+                type="button"
+                data-testid="review-comments-retry"
+                onClick={() => {
+                  // The branch again too: the PR may have been retargeted since it was opened.
+                  setAttempt((n) => n + 1);
+                  setCommentsAttempt((n) => n + 1);
+                }}
+              >
+                Retry
+              </button>
+            </p>
+          )}
+          {viewer}
+        </div>
       </div>
     </>
   );
 }
 
-/** Read-only PR review: switcher in the context slot, header, changed-files tree, viewer and PR description. */
+/** Read-only PR review: switcher in the context slot, header, file list led by the PR description, viewer. */
 export default function ReviewView({ project, prs, filter, setFilter, params, setParams, contextSlot }: ReposViewProps) {
   const key = params.get("pr");
   const pr = key ? prs.all.find((p) => prKey(p) === key) : undefined;

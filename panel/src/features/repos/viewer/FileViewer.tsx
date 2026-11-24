@@ -12,6 +12,7 @@ import {
   newSide,
   pairRows,
   parseDiff,
+  revealRows,
   rowWordMarks,
   splitLines,
   type GutterMark,
@@ -20,7 +21,12 @@ import {
   type Row,
 } from "./diffModel";
 import { detectLang, escapeHtml } from "./highlight";
+import { MAX_HIGHLIGHT_CHARS } from "./highlightLimit";
+import { ROW_PAGE } from "./rowPage";
 import { CopyIconButton } from "../../shell/CopyIconButton";
+import type { ReviewThread } from "../reviewThreads";
+import CommentMarker from "./CommentMarker";
+import { CommentSpeechScope, type TrackCommentSpeech } from "./commentSpeech";
 import "./FileViewer.css";
 
 export interface FileViewerProps {
@@ -38,12 +44,21 @@ export interface FileViewerProps {
   scrollSide?: "old" | "new";
   /** Changes on every request so asking for the same line again re-scrolls and re-flashes. */
   scrollKey?: number | string;
+  /** Review threads keyed `"new:N"` / `"old:N"`. When given, every table gets a comment lane; absent, the markup is unchanged. */
+  comments?: Map<string, ReviewThread>;
+  /** The base speech key for the threads (`prSpeechKey`). */
+  commentSpeechKey?: string;
+  /** The signed-in login: their comments read as "you". */
+  me?: string | null;
+  /**
+   * A Markdown file's rendered view. When given, Code mode offers Rendered (the default, this node)
+   * and Source (the line table); absent, Code mode is the table alone.
+   */
+  rendered?: ReactNode;
 }
 
 const SPLIT_MIN_WIDTH = 720;
 const FLASH_MS = 1300;
-// highlight.js on a huge file stalls the tab; past this it renders plain.
-const MAX_HIGHLIGHT_CHARS = 500_000;
 // ts-nav only resolves these; elsewhere identifier links would lead nowhere.
 const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
 
@@ -304,8 +319,6 @@ function scrollRowIntoHost(root: HTMLElement, row: Element): void {
 // git prints this in place of hunks when either side is binary.
 const BINARY_DIFF_RE = /^Binary files .* differ$/m;
 const MODE_CHANGE_RE = /^old mode (\d+)\nnew mode (\d+)$/m;
-// Rows mounted at once; a file of many short lines passes the byte cap yet would mount a huge table.
-const ROW_PAGE = 5000;
 
 const MARK_TITLE: Record<GutterMark, string> = { added: "Added", changed: "Changed", removed: "Lines removed above" };
 const STATUS_TEXT = { M: "modified", A: "new file", D: "deleted" } as const;
@@ -323,6 +336,10 @@ export default function FileViewer({
   scrollToLine,
   scrollSide = "new",
   scrollKey,
+  comments,
+  commentSpeechKey,
+  me,
+  rendered,
 }: FileViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -333,6 +350,19 @@ export default function FileViewer({
   const [flash, setFlash] = useState<{ line: number; side: "old" | "new"; seq: number } | null>(null);
   const [pending, setPending] = useState<{ line: number; side: "old" | "new" } | undefined>(undefined);
   const [limit, setLimit] = useState(ROW_PAGE);
+  const [source, setSource] = useState(false);
+
+  // Comment speech started in this file stops when the viewer leaves it (unmount, another file or
+  // PR), not when a marker remounts for another layout or mode.
+  const commentSpeech = useRef(new Map<string, (key: string) => void>());
+  const trackCommentSpeech = useCallback<TrackCommentSpeech>((key, stop) => void commentSpeech.current.set(key, stop), []);
+  useEffect(() => {
+    const started = commentSpeech.current;
+    return () => {
+      for (const [key, stop] of started) stop(key);
+      started.clear();
+    };
+  }, [path, commentSpeechKey]);
 
   const parsed = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);
   const changed = isChanged(parsed);
@@ -343,18 +373,57 @@ export default function FileViewer({
     () => (content != null ? splitLines(content) : changed && status !== "D" ? newSide(parsed) : null),
     [content, changed, parsed, status],
   );
-  const items = useMemo(() => foldRows(rows), [rows]);
+  const folded = useMemo(() => foldRows(rows), [rows]);
   // Expanded folds belong to one row list; a new diff starts folded again.
   const [expansion, setExpansion] = useState<{ rows: Row[]; ids: Set<number> }>({ rows, ids: new Set() });
   const expanded = useMemo(() => (expansion.rows === rows ? expansion.ids : new Set<number>()), [expansion, rows]);
+  // A commented line in a fold shows with a few lines around it: the file badge counts that comment,
+  // so its marker must show — but not the whole fold, which could push the edits past the row limit.
+  // Folds hold context rows only, which carry both sides — the same keys the lane looks up.
+  const items = useMemo(
+    () =>
+      comments?.size
+        ? revealRows(folded, (r) => r.kind === "ctx" && (comments.has(`new:${r.new}`) || comments.has(`old:${r.old}`)), expanded)
+        : folded,
+    [folded, comments, expanded],
+  );
   const expand = useCallback((id: number) => setExpansion({ rows, ids: new Set([...expanded, id]) }), [rows, expanded]);
   const visible = useMemo(() => expandFolds(items, expanded), [items, expanded]);
 
   const narrow = width !== null && width < SPLIT_MIN_WIDTH;
   const shownMode = changed ? mode : "code";
   const shownLayout = narrow ? "unified" : layout;
+  const markdown = shownMode === "code" && rendered !== undefined;
+  const showRendered = markdown && !source;
+  // The comments Source would show: Code mode has markers for new-side lines only.
+  const sourceComments = useMemo(() => {
+    let n = 0;
+    for (const [k, t] of comments ?? []) if (k.startsWith("new:")) n += t.comments.length;
+    return n;
+  }, [comments]);
   // Split pages count paired rows: slicing raw rows first would cut a del/add block and pair it with blanks.
   const pairs = useMemo(() => (shownMode === "diff" && shownLayout === "split" ? pairRows(visible) : null), [shownMode, shownLayout, visible]);
+  // Threads on lines the diff has no row for (no whole file to fill its gaps, or a line past the file),
+  // and threads on rows past the row limit. The file badge counts them, so Diff lists them above
+  // the table rather than dropping them.
+  const { unplaced, beyond } = useMemo(() => {
+    if (!comments?.size || shownMode !== "diff") return { unplaced: [], beyond: [] };
+    // Commented lines in folds are revealed, so `visible` has every row a marker could sit on.
+    const keys = (it: Item): string[] =>
+      it.kind === "fold" || it.kind === "gap" ? [] : [...(it.kind !== "del" ? [`new:${it.new}`] : []), ...(it.kind !== "add" ? [`old:${it.old}`] : [])];
+    const all = new Set(visible.flatMap(keys));
+    // Only rows mounted under the limit carry a marker; split pages count paired rows.
+    const mounted = pairs
+      ? pairs.slice(0, limit).flatMap((p): Item[] => (p.kind === "ctx" ? [p.right] : p.kind === "change" ? [p.del, p.add].filter((r) => !!r) : []))
+      : visible.slice(0, limit);
+    const shown = new Set(mounted.flatMap(keys));
+    const byLine = (list: [string, ReviewThread][]) => list.sort(([, a], [, b]) => a.anchor.line - b.anchor.line);
+    const entries = [...comments];
+    return {
+      unplaced: byLine(entries.filter(([k]) => !all.has(k))),
+      beyond: byLine(entries.filter(([k]) => all.has(k) && !shown.has(k))),
+    };
+  }, [comments, shownMode, visible, pairs, limit]);
   const total = counts ?? countChanges(parsed);
   const lang = detectLang(path);
   const term = highlight ?? "";
@@ -388,11 +457,11 @@ export default function FileViewer({
   }, [shownMode, rows, lang, term]);
 
   const codeHtml = useMemo(() => {
-    if (shownMode !== "code" || !codeLines) return null;
+    if (shownMode !== "code" || showRendered || !codeLines) return null;
     // Highlighted whole (multi-line tokens), decorated only as far as is mounted.
     const { html, tokens } = highlightLines(codeLines, lang);
     return html.slice(0, limit).map((h, i) => lineHtml(h, codeLines[i], { term, symbols, specs: tokens }));
-  }, [shownMode, codeLines, lang, term, symbols, limit]);
+  }, [shownMode, showRendered, codeLines, lang, term, symbols, limit]);
 
   const marks = useMemo(() => (changed ? gutterMarks(rows) : new Map<number, GutterMark>()), [changed, rows]);
 
@@ -409,6 +478,8 @@ export default function FileViewer({
       if (changed) return setMode("diff");
       return setPending(undefined);
     }
+    // A line lives in the source table, not in the rendering.
+    if (showRendered) return setSource(true);
     const el = bodyRef.current?.querySelector(`tr[${old ? "data-old-line" : "data-line"}="${line}"]`);
     if (el) {
       if (rootRef.current) scrollRowIntoHost(rootRef.current, el);
@@ -433,7 +504,7 @@ export default function FileViewer({
       if (codeLines && !old) return setMode("code");
     }
     setPending(undefined);
-  }, [pending, shownMode, changed, items, codeLines, expanded, expand, visible, pairs, limit]);
+  }, [pending, shownMode, showRendered, changed, items, codeLines, expanded, expand, visible, pairs, limit]);
 
   useEffect(() => {
     if (flash == null) return;
@@ -456,9 +527,24 @@ export default function FileViewer({
     return flash && at !== undefined && at === flash.line ? ` fv-flash${flash.seq % 2 ? "" : " fv-flash-alt"}` : "";
   };
 
+  // The comment lane: one 22px column per side, only when the viewer has threads to show.
+  const laneCol = comments ? <col className="fv-cm-col" style={{ width: 22 }} /> : null;
+  /** The lane cell for a row: every one of `keys` with a thread gets a marker, stacked (a unified context row can carry both sides). */
+  const lane = (...keys: string[]) => {
+    if (!comments) return null;
+    return (
+      <td className="fv-cm">
+        {keys.map((k) => {
+          const thread = comments.get(k);
+          return thread && <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />;
+        })}
+      </td>
+    );
+  };
+  const diffCols = 4 + (comments ? (shownLayout === "split" ? 2 : 1) : 0);
   const foldRow = (it: Extract<Item, { kind: "fold" }>) => (
     <tr key={`f${it.id}`} className="fv-fold-row">
-      <td colSpan={4}>
+      <td colSpan={diffCols}>
         <button type="button" data-testid={`file-viewer-fold-${it.id}`} className="fv-fold" onClick={() => expand(it.id)}>
           ⋯ Expand {it.rows.length} unchanged lines
         </button>
@@ -467,19 +553,24 @@ export default function FileViewer({
   );
   const gapRow = (r: Extract<Row, { kind: "gap" }>, key: string) => (
     <tr key={key} className="fv-gap-row">
-      <td colSpan={4}>⋯ {r.count} unchanged lines</td>
+      <td colSpan={diffCols}>⋯ {r.count} unchanged lines</td>
     </tr>
   );
   const cell = (r: Row | undefined, side: "del" | "add") =>
     r && r.kind !== "gap" ? <td className={`fv-cd fv-s-${side}`} dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} /> : <td className="fv-cd fv-s-empty" />;
 
   let body: ReactNode;
+  let unplacedNote: ReactNode = null;
+  let beyondNote: ReactNode = null;
   let totalRows = 0;
-  if (shownMode === "code") {
+  if (showRendered) {
+    body = rendered;
+  } else if (shownMode === "code") {
     totalRows = codeLines?.length ?? 0;
     body = codeHtml ? (
       <table className="fv-table fv-code">
         <colgroup>
+          {laneCol}
           <col style={{ width: 6 }} />
           <col style={{ width: 46 }} />
           <col />
@@ -490,6 +581,7 @@ export default function FileViewer({
             const m = marks.get(n);
             return (
               <tr key={n} data-line={n} data-mark={m} className={`${m ? `fv-m-${m}` : ""}${flashCls(n)}`}>
+                {lane(`new:${n}`)}
                 <td className="fv-gm" title={m ? MARK_TITLE[m] : undefined} />
                 <td className="fv-no">{n}</td>
                 <td className="fv-cd" dangerouslySetInnerHTML={{ __html: html }} />
@@ -505,10 +597,27 @@ export default function FileViewer({
     );
   } else {
     totalRows = pairs ? pairs.length : visible.length;
+    unplacedNote = unplaced.length > 0 && (
+      <p className="fv-unplaced" role="note" data-testid="file-viewer-unplaced">
+        On lines not in this diff:
+        {unplaced.map(([k, thread]) => (
+          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
+        ))}
+      </p>
+    );
+    beyondNote = beyond.length > 0 && (
+      <p className="fv-unplaced" role="note" data-testid="file-viewer-beyond">
+        On lines further down:
+        {beyond.map(([k, thread]) => (
+          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
+        ))}
+      </p>
+    );
     if (!pairs) {
       body = (
         <table className="fv-table fv-unified">
           <colgroup>
+            {laneCol}
             <col style={{ width: 46 }} />
             <col style={{ width: 46 }} />
             <col style={{ width: 18 }} />
@@ -522,6 +631,7 @@ export default function FileViewer({
               const o = it.kind === "add" ? undefined : it.old;
               return (
                 <tr key={i} data-line={n} data-old-line={o} className={`fv-r-${it.kind}${flashCls(n, o)}`}>
+                  {lane(...(n !== undefined ? [`new:${n}`] : []), ...(o !== undefined ? [`old:${o}`] : []))}
                   <td className="fv-no">{it.kind === "add" ? "" : it.old}</td>
                   <td className="fv-no">{n ?? ""}</td>
                   <td className="fv-sg">{it.kind === "del" ? "−" : it.kind === "add" ? "+" : ""}</td>
@@ -536,8 +646,10 @@ export default function FileViewer({
       body = (
         <table className="fv-table fv-split">
           <colgroup>
+            {laneCol}
             <col style={{ width: 42 }} />
             <col />
+            {laneCol}
             <col style={{ width: 42 }} />
             <col />
           </colgroup>
@@ -549,8 +661,10 @@ export default function FileViewer({
                 const r = p.right as Extract<Row, { kind: "ctx" }>;
                 return (
                   <tr key={i} data-line={r.new} data-old-line={r.old} className={`fv-r-ctx${flashCls(r.new, r.old)}`}>
+                    {lane(`old:${r.old}`)}
                     <td className="fv-no">{r.old}</td>
                     <td className="fv-cd" dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} />
+                    {lane(`new:${r.new}`)}
                     <td className="fv-no">{r.new}</td>
                     <td className="fv-cd" dangerouslySetInnerHTML={{ __html: diffHtml?.get(r) ?? "" }} />
                   </tr>
@@ -560,8 +674,10 @@ export default function FileViewer({
               const a = p.add?.kind === "add" ? p.add : undefined;
               return (
                 <tr key={i} data-line={a?.new} data-old-line={d?.old} className={`fv-r-change${flashCls(a?.new, d?.old)}`}>
+                  {lane(...(d ? [`old:${d.old}`] : []))}
                   <td className={`fv-no ${d ? "fv-s-del" : "fv-s-empty"}`}>{d?.old ?? ""}</td>
                   {cell(d, "del")}
+                  {lane(...(a ? [`new:${a.new}`] : []))}
                   <td className={`fv-no ${a ? "fv-s-add" : "fv-s-empty"}`}>{a?.new ?? ""}</td>
                   {cell(a, "add")}
                 </tr>
@@ -622,7 +738,8 @@ export default function FileViewer({
             </button>
           </div>
         ) : (
-          changed && (
+          changed &&
+          !showRendered && (
             <span className="fv-legend" data-testid="file-viewer-legend">
               <span>
                 <i className="fv-legend-added" />
@@ -639,13 +756,35 @@ export default function FileViewer({
             </span>
           )
         )}
+        {markdown && (
+          <div className="fv-seg" role="group" aria-label="Markdown view">
+            <button type="button" data-testid="review-md-toggle-rendered" aria-pressed={!source} onClick={() => setSource(false)}>
+              Rendered
+            </button>
+            <button
+              type="button"
+              data-testid="review-md-toggle-source"
+              aria-pressed={source}
+              aria-label={sourceComments > 0 ? `Source, ${sourceComments} ${sourceComments === 1 ? "comment" : "comments"}` : undefined}
+              onClick={() => setSource(true)}
+            >
+              Source
+              {/* Rendered shows no markers: the count says where they are. */}
+              {sourceComments > 0 && <span className="fv-segcm" aria-hidden="true"> 💬{sourceComments}</span>}
+            </button>
+          </div>
+        )}
         <span className="fv-copy">
           {/* Only the loaded whole file; a diff's hunks alone are not the file. */}
           <CopyIconButton value={binary ? "" : (content ?? "")} label="Copy file content" data-testid="file-viewer-copy-content" />
         </span>
       </div>
       <div ref={bodyRef} className="fv-body" data-testid="file-viewer-body" onClick={onBodyClick}>
-        {body}
+        <CommentSpeechScope.Provider value={trackCommentSpeech}>
+          {unplacedNote}
+          {beyondNote}
+          {body}
+        </CommentSpeechScope.Provider>
         {totalRows > limit && (
           <button type="button" className="fv-more" data-testid="file-viewer-more" onClick={() => setLimit((n) => n + ROW_PAGE)}>
             Show {Math.min(ROW_PAGE, totalRows - limit).toLocaleString()} more of {(totalRows - limit).toLocaleString()} remaining lines

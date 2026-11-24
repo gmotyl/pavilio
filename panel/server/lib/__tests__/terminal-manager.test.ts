@@ -27,10 +27,14 @@ import { buildRunAsSpawnCommand } from "../terminal-run-as"
 // variable would read it before it's initialized. `hasGitBindMount` defaults
 // true so every test not specifically about the fallback keeps exercising
 // the normal translated-path behavior regardless of what the machine running
-// the suite actually has under `/home/greg-ip`.
+// the suite actually has under `/home/pavilio-runas-target`.
+//
+// The account is fictional on purpose: createSession routes through su only
+// when the target differs from `userInfo().username`, so a real login name
+// here would turn every run-as test into a direct spawn on that machine.
 const mockOsUsers = vi.hoisted(() => ({
   users: [
-    { username: "greg-ip", homeDir: "/home/greg-ip", shell: "/bin/bash", uid: 1001, gid: 1002 },
+    { username: "pavilio-runas-target", homeDir: "/home/pavilio-runas-target", shell: "/bin/bash", uid: 64001, gid: 64002 },
   ],
   hasGitBindMount: true,
 }))
@@ -353,13 +357,13 @@ describe("identity file lifecycle", () => {
 })
 
 describe("createSession with runAsUser", () => {
-  const RUN_AS_USER = "greg-ip"
+  const RUN_AS_USER = "pavilio-runas-target"
   const DEFAULT_TARGET_USER = {
     username: RUN_AS_USER,
-    homeDir: "/home/greg-ip",
+    homeDir: "/home/pavilio-runas-target",
     shell: "/bin/bash",
-    uid: 1001,
-    gid: 1002,
+    uid: 64001,
+    gid: 64002,
   }
 
   afterEach(() => {
@@ -410,7 +414,7 @@ describe("createSession with runAsUser", () => {
         runAsUser: RUN_AS_USER,
       })
 
-      const translatedCwd = "/home/greg-ip/git/prv/pavilio"
+      const translatedCwd = "/home/pavilio-runas-target/git/prv/pavilio"
       const expected = buildRunAsSpawnCommand({
         user: DEFAULT_TARGET_USER,
         cwd: translatedCwd,
@@ -436,9 +440,9 @@ describe("createSession with runAsUser", () => {
     {
       label: "falls back to the target's home + a visible notice when it has no ~/git link",
       cwd: `${homedir()}/git/prv/pavilio`,
-      spawnCwd: "/home/greg-ip",
+      spawnCwd: "/home/pavilio-runas-target",
       notice:
-        "pavilio: greg-ip has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)",
+        "pavilio: pavilio-runas-target has no ~/git link yet, opening $HOME instead of the project directory (expected until that account is set up with the shared tree)",
     },
     {
       label: "does not fall back when translateCwd never fired (no known owner-git prefix)",
@@ -488,7 +492,7 @@ describe("createSession with runAsUser", () => {
 
       expect(lastSpawnCall!.file).toBe("su")
       // args[4] is the -c command string: `su --pty - <user> -c <command>`.
-      expect(lastSpawnCall!.args.slice(0, 4)).toEqual(["--pty", "-", "greg-ip", "-c"])
+      expect(lastSpawnCall!.args.slice(0, 4)).toEqual(["--pty", "-", "pavilio-runas-target", "-c"])
       const command = lastSpawnCall!.args[4] as string
       expect(command).toContain("PAVILIO_PANEL_URL='http://127.0.0.1:3012'")
       // A `su -c` command line is world-readable in `ps aux`, so the URL may
@@ -608,7 +612,7 @@ describe("createSession with runAsUser", () => {
     delete process.env.PANEL_AUTH_STATE_DIR
     const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
     mockOsUsers.users = [
-      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 1001, gid: 1002 },
+      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 64001, gid: 64002 },
     ]
     try {
       const meta = createSession({
@@ -639,7 +643,7 @@ describe("createSession with runAsUser", () => {
     delete process.env.PANEL_AUTH_STATE_DIR
     const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
     mockOsUsers.users = [
-      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 1001, gid: 1002 },
+      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 64001, gid: 64002 },
     ]
     try {
       const meta = createSession({
@@ -668,7 +672,7 @@ describe("createSession with runAsUser", () => {
     delete process.env.PANEL_AUTH_STATE_DIR
     const otherHome = mkdtempSync(join(tmpdir(), "panel-terminal-manager-runas-home-"))
     mockOsUsers.users = [
-      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 1001, gid: 1002 },
+      { username: RUN_AS_USER, homeDir: otherHome, shell: "/bin/bash", uid: 64001, gid: 64002 },
     ]
     try {
       const meta = createSession({
@@ -709,9 +713,9 @@ describe("getSessionOwner", () => {
       cols: 80,
       rows: 24,
       project: "alokai",
-      runAsUser: "greg-ip",
+      runAsUser: "pavilio-runas-target",
     })
-    expect(getSessionOwner(runAs.id)).toEqual({ uid: 1001, gid: 1002 })
+    expect(getSessionOwner(runAs.id)).toEqual({ uid: 64001, gid: 64002 })
 
     // An unknown runAsUser falls back to the direct-spawn path, so its owner
     // is the panel process's identity, same as a session with no runAsUser.

@@ -76,6 +76,14 @@
 .ft-st-D {
   color: var(--red);
 }
+.ft-cm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--accent);
+}
 .ft-cnt {
   flex: none;
   font: 11px "JetBrains Mono", ui-monospace, monospace;

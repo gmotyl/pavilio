@@ -42,7 +42,7 @@ function commentRanges(body: string): Array<[number, number]> {
 }
 
 /**
- * The PR body as the column renders AND speaks it — one text, so the toolbar,
+ * The PR body as the viewer renders AND speaks it — one text, so the toolbar,
  * the speech host and play-from-here always agree on its units:
  * - HTML comments go (PR templates hide their prompts in them). They are found
  *   by the markdown parser, so an escaped `\<!--` or a comment shown in code
@@ -51,10 +51,30 @@ function commentRanges(body: string): Array<[number, number]> {
  *   a blank first line keeps page speech from stripping the text after it.
  */
 export function prDescriptionSource(body: string): string {
-  let text = body;
-  // Back to front, so earlier offsets stay valid.
-  for (const [start, end] of commentRanges(body).reverse()) text = text.slice(0, start) + text.slice(end);
+  const text = withoutHtmlComments(body);
   return /^\uFEFF?---/.test(text) ? `\n${text}` : text;
+}
+
+/** `markdown` without its HTML comments, as the markdown parser finds them (escapes and code excluded). */
+export function withoutHtmlComments(markdown: string): string {
+  let text = markdown;
+  // Back to front, so earlier offsets stay valid.
+  for (const [start, end] of commentRanges(markdown).reverse()) text = text.slice(0, start) + text.slice(end);
+  return text;
+}
+
+/**
+ * Third-party markdown rendered and readable from any block: `source` is
+ * both what renders and what `docKey`'s toolbar speaks, so the ▶ on a block
+ * starts at that block's unit. Links resolve against `linkBase`, images
+ * against `imageBase` when given.
+ */
+export function SpokenMarkdown({ docKey, source, linkBase, imageBase }: { docKey: string; source: string; linkBase: string; imageBase?: string }) {
+  return (
+    <PagePlayFromHere docKey={docKey} text={source}>
+      <MarkdownRenderer content={source} untrusted={{ linkBase, imageBase }} />
+    </PagePlayFromHere>
+  );
 }
 
 interface Props {
@@ -64,16 +84,17 @@ interface Props {
   body: string | null | undefined;
 }
 
-/** The review's right column: the PR description, rendered and readable aloud like a notes page. */
+/** The review viewer's Description entry: the PR description, rendered and readable aloud like a notes page. */
 export default function PrDescription({ project, pr, body }: Props) {
   const source = typeof body === "string" ? prDescriptionSource(body) : body;
   const speech = { key: prSpeechKey(project, pr), text: source ?? "" };
   return (
-    <aside className="rv-desc" aria-label="Pull request description">
+    <section className="rv-card rv-descview" aria-label="Pull request description">
       <SpeakingToolbar speech={speech} testIdPrefix="pr-description">
         {(play) => (
           <>
             <h4 className="rv-desc-title">Description</h4>
+            <span className="rv-desc-num">PR #{pr.number}</span>
             {play}
           </>
         )}
@@ -85,10 +106,8 @@ export default function PrDescription({ project, pr, body }: Props) {
       ) : source.trim() === "" ? (
         <p className="rv-desc-empty">No description provided.</p>
       ) : (
-        <PagePlayFromHere docKey={speech.key} text={speech.text}>
-          <MarkdownRenderer content={source} untrusted={{ linkBase: pr.url }} />
-        </PagePlayFromHere>
+        <SpokenMarkdown docKey={speech.key} source={source} linkBase={pr.url} />
       )}
-    </aside>
+    </section>
   );
 }

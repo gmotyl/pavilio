@@ -150,6 +150,53 @@ export function foldRows(rows: Row[], min = 6, context = 3): Item[] {
   return out;
 }
 
+/**
+ * Opens `context` rows either side of each folded row `keep` picks (a commented line), leaving the
+ * rest of its fold folded in pieces. Folds in `expanded` are left whole (they open anyway). A piece's
+ * id is `-(index of its first row in the row list + 1)`: negative, so it never meets a `foldRows` id,
+ * and the same whichever rows are kept, so a piece the user opened stays open when `keep` changes.
+ */
+export function revealRows(items: Item[], keep: (r: Row) => boolean, expanded: ReadonlySet<number>, context = 3): Item[] {
+  const out: Item[] = [];
+  let at = 0;
+  for (const it of items) {
+    if (it.kind !== "fold") {
+      out.push(it);
+      at++;
+      continue;
+    }
+    const start = at;
+    at += it.rows.length;
+    if (expanded.has(it.id)) {
+      out.push(it);
+      continue;
+    }
+    const shown = new Set<number>();
+    it.rows.forEach((r, i) => {
+      if (!keep(r)) return;
+      for (let j = Math.max(0, i - context); j <= Math.min(it.rows.length - 1, i + context); j++) shown.add(j);
+    });
+    if (shown.size === 0) {
+      out.push(it);
+      continue;
+    }
+    let piece: number | null = null;
+    const flush = (end: number) => {
+      if (piece === null) return;
+      out.push({ kind: "fold", id: -(start + piece + 1), rows: it.rows.slice(piece, end) });
+      piece = null;
+    };
+    it.rows.forEach((r, i) => {
+      if (shown.has(i)) {
+        flush(i);
+        out.push(r);
+      } else if (piece === null) piece = i;
+    });
+    flush(it.rows.length);
+  }
+  return out;
+}
+
 export function expandFolds(items: Item[], expanded: ReadonlySet<number>): Item[] {
   return items.flatMap((it) => (it.kind === "fold" && expanded.has(it.id) ? it.rows : [it]));
 }

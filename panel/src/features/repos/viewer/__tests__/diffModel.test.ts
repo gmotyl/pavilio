@@ -8,6 +8,7 @@ import {
   newSide,
   pairRows,
   parseDiff,
+  revealRows,
   wordMarks,
   type Row,
 } from "../diffModel";
@@ -73,6 +74,21 @@ describe("diffModel", () => {
     // Runs of six or fewer never fold.
     expect(foldRows(rows.slice(4)).some((r) => r.kind === "fold")).toBe(false);
     expect(expandFolds(items, new Set([0]))).toEqual(rows);
+  });
+
+  it("reveals a window around kept rows in a fold, with ids that do not depend on what is kept", () => {
+    const ctx = (n: number): Row => ({ kind: "ctx", old: n, new: n, text: `l${n}` });
+    const rows: Row[] = [...Array.from({ length: 20 }, (_, i) => ctx(i + 1)), { kind: "add", new: 21, text: "x" }];
+    const items = foldRows(rows);
+    // Lines 1–17 fold; keep line 9: lines 6–12 open, 1–5 and 13–17 stay folded.
+    const out = revealRows(items, (r) => r.kind === "ctx" && r.new === 9, new Set());
+    expect(out.slice(0, 9)).toEqual([{ kind: "fold", id: -1, rows: rows.slice(0, 5) }, ...rows.slice(5, 12), { kind: "fold", id: -13, rows: rows.slice(12, 17) }]);
+    expect(expandFolds(out, new Set([-1, -13]))).toEqual(rows);
+    // A piece starting at the same row keeps its id with another kept row.
+    expect(revealRows(items, (r) => r.kind === "ctx" && r.new === 10, new Set())[0]).toEqual({ kind: "fold", id: -1, rows: rows.slice(0, 6) });
+    // An expanded fold, or one with nothing kept, is left as it is.
+    expect(revealRows(items, (r) => r.kind === "ctx" && r.new === 9, new Set([0]))).toEqual(items);
+    expect(revealRows(items, () => false, new Set())).toEqual(items);
   });
 
   it("marks only the changed tokens", () => {

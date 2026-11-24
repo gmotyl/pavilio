@@ -176,6 +176,17 @@ describe("ref-based git reads", () => {
     expect(res.text).toContain("+TWO");
   });
 
+  it("keeps three context lines whatever the user's diff.context says", async () => {
+    // Review comments anchor to unchanged lines GitHub shows; a diff.context of 0 would drop them.
+    sh("config diff.context 0");
+    const ref = (await get("diff-ref", { base: "main", head: PR_REF, path: "a.txt" })).text;
+    expect(ref).toContain("\n one\n");
+    expect(ref).toContain("\n three\n");
+    expect(ref).toBe(sh(`diff -U3 main...${PR_REF} -- a.txt`));
+    const commit = (await get("diff", { sha: sh(`rev-parse ${PR_REF}`).trim(), file: "a.txt" })).body.diff;
+    expect(commit).toContain("\n one\n");
+  });
+
   it("reports a rename with counts on the destination path", async () => {
     sh("checkout -q -b r");
     sh("mv a.txt moved.txt");
