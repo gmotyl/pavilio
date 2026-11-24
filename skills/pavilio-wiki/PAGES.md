@@ -203,7 +203,7 @@ The knowledge harvest appends to `knowledge/wiki/log.md` on every run that write
 - kept: 12 clusters below 3                          # --min only, instead of skipped
 - dropped: "Client X renews in Q3" ← alokai          # prefilter: not generic
 - group metro: 2 promoted → metro-wiki (created), 5 kept, 1 dropped
-- group infopoly: 1 promoted → infopoly-wiki, 3 kept
+- group infopoly: 1 promoted → infopoly-wiki, 3 kept, 0 dropped
 - expired: "Metro VAT check needs country prefix" ← metro-bank (2026-07-01)
 - pages: entities/edge-tts (created), concepts/sse-backpressure (updated)
 - backlinks: 5
@@ -211,8 +211,10 @@ The knowledge harvest appends to `knowledge/wiki/log.md` on every run that write
 
 `group <g>:` — one line per group with group candidates: clusters promoted (≥2 member projects)
 and the target wiki, `(created)` when this harvest scaffolded it, clusters kept, and items
-dropped (`single-project`, cleared); `lock not held` when that group was skipped. `expired:` — each group candidate cleared because its cluster
-stayed below 2 projects with every item dated more than 90 days back, with origin project and date.
+dropped (`single-project`, cleared); `lock not held` when that group was skipped. `expired:` —
+each group candidate cleared because its cluster stayed below 2 projects with every item dated
+more than 90 days back, or because it has no `source` inside a promoted cluster and its date is
+more than 90 days back, with origin project and date.
 
 Each group wiki the harvest wrote gets its own entry in its `wiki/log.md`:
 
