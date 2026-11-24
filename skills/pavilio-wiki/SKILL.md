@@ -423,12 +423,15 @@ wiki, group findings never to `knowledge`.
    not be created (step 5) — its prefilter-dropped ids included — and ids missing from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
    <file.json>` (clears from either section); `removed` must equal the number of ids in that
    file. Kept and failed-writer items stay as candidates for the next harvest. A group chunk's
-   `single-project` drop is cleared now, like any drop — no 90-day wait.
+   `single-project` drop is cleared now, like any drop — no 90-day wait — when that group's lock
+   was held; a group whose lock was not held keeps every candidate, its drops included.
 9. **Log** — append the harvest entry to `knowledge/wiki/log.md` (`PAGES.md § log.md`) on every
    run that reaches this step — `harvest-status` reads the harvest age there — listing picked,
    skipped and dropped generic items with their origin project (with `--min`, the threshold and
    the number of clusters kept instead of the skipped list), the group counts (promoted / kept /
-   dropped per group: a group chunk's `single-project` drops are cleared too) and the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
+   dropped per group whose lock was held: its `single-project` drops are cleared too; a group
+   whose lock was not held is listed as `lock not held`, with no counts and nothing cleared) and
+   the expired items. Each written group wiki's `wiki/log.md` gets its own harvest
    entry listing what it received.
 10. **Commit** — one commit for the whole harvest: `git add projects/knowledge`, every written
     group wiki's `projects/<group wiki>` (new ones included), and every origin project's
