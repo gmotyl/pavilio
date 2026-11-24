@@ -25,6 +25,10 @@ vi.mock("../PrDescription", async (importOriginal) => {
 });
 // Comment markers speak through the panel's one host; only the call matters here.
 const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn() }));
+// A Markdown file's unfolded speech bar: the run itself is the host's (PrDescription.test).
+vi.mock("../../speech/DocumentSpeechBar", () => ({
+  DocumentSpeechBar: ({ docKey }: { docKey: string }) => <div data-testid="doc-speech-bar" data-key={docKey} />,
+}));
 vi.mock("../../speech/SpeechHostProvider", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/SpeechHostProvider")>()),
   usePageSpeech: () => speech,
@@ -812,5 +816,140 @@ describe("ReviewView", () => {
     // right edge 860 → 592 (600 minus the 8px gutter)
     expect(pop.style.left).toBe("-268px");
     vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockRestore();
+  });
+});
+
+// A changed Markdown file, and the repo's README (unchanged, reached through the whole-repo tree).
+const GUIDE = "docs/guide.md";
+const GUIDE_CONTENT = ["# Guide", "", "Read me first.<!-- a hidden note -->", "", "See [setup](setup.md)."].join("\n");
+const GUIDE_DIFF = [
+  "diff --git a/docs/guide.md b/docs/guide.md",
+  "--- a/docs/guide.md",
+  "+++ b/docs/guide.md",
+  "@@ -1,5 +1,5 @@",
+  " # Guide",
+  " ",
+  "-Read me.",
+  "+Read me first.<!-- a hidden note -->",
+  " ",
+  " See [setup](setup.md).",
+].join("\n");
+const MD_CHANGED = [...CHANGED, { path: GUIDE, status: "M", add: 1, del: 1 }];
+const README_CONTENT = "# Pavilio\n\nThe panel.";
+const mdFile = (url: string) => text(url.includes("guide.md") ? GUIDE_CONTENT : url.includes("README.md") ? README_CONTENT : CONTENT);
+const mdDiff = (url: string) => text(url.includes("guide.md") ? GUIDE_DIFF : url.includes("gone.ts") ? GONE_DIFF : DIFF);
+const GUIDE_URL = `?view=review&pr=pavilio%231&file=${encodeURIComponent(GUIDE)}`;
+const renderMd = (setup: Setup = {}) => renderReview({ search: GUIDE_URL, changed: () => jsonResponse(MD_CHANGED), file: mdFile, diffRef: mdDiff, ...setup });
+const fileKey = (path: string) => `${prSpeechKey("pavilio", PRS[0])}/f/${path}`;
+const toCode = async () => {
+  const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+  await waitFor(() => expect(viewer).toHaveTextContent("Read me first."));
+  fireEvent.click(within(viewer).getByRole("button", { name: "Code" }));
+  return viewer;
+};
+
+describe("ReviewView — a Markdown file in Code mode", () => {
+  it("is rendered by default, Rendered pressed", async () => {
+    renderMd();
+    const viewer = await toCode();
+    const rendered = within(viewer).getByTestId("review-md-rendered");
+    expect(within(rendered).getByRole("heading", { name: "Guide" })).toBeInTheDocument();
+    // Raw HTML (comments included) never renders.
+    expect(rendered).not.toHaveTextContent("a hidden note");
+    expect(within(viewer).getByTestId("review-md-toggle-rendered")).toHaveAttribute("aria-pressed", "true");
+    expect(within(viewer).getByTestId("review-md-toggle-source")).toHaveAttribute("aria-pressed", "false");
+    expect(viewer.querySelector("table")).toBeNull();
+  });
+
+  it("Play reads the file under the PR's key, as it renders", async () => {
+    renderMd();
+    const viewer = await toCode();
+    fireEvent.click(within(viewer).getByTestId("review-md-play"));
+    expect(speech.speakDocument).toHaveBeenCalledWith({
+      key: fileKey(GUIDE),
+      text: ["# Guide", "", "Read me first.", "", "See [setup](setup.md)."].join("\n"),
+    });
+  });
+
+  it("resolves relative links against the file at the PR head on GitHub", async () => {
+    renderMd();
+    const viewer = await toCode();
+    expect(within(viewer).getByRole("link", { name: "setup" })).toHaveAttribute(
+      "href",
+      `https://github.com/gmotyl/pavilio/blob/${HEAD}/docs/setup.md`,
+    );
+  });
+
+  it("Source shows the line table with its comment markers", async () => {
+    renderMd({ comments: () => jsonResponse([comment({ id: 9, path: GUIDE, line: 3 })]) });
+    const viewer = await toCode();
+    fireEvent.click(within(viewer).getByTestId("review-md-toggle-source"));
+    expect(within(viewer).queryByTestId("review-md-rendered")).toBeNull();
+    expect(within(viewer).getByTestId("review-md-toggle-source")).toHaveAttribute("aria-pressed", "true");
+    expect(viewer.querySelector('tr[data-line="1"]')).toHaveTextContent("# Guide");
+    expect(await within(viewer).findByRole("button", { name: "1 comment on line 3" })).toBeInTheDocument();
+  });
+
+  it("Diff mode is unchanged", async () => {
+    renderMd();
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    await waitFor(() => expect(viewer).toHaveTextContent("Read me first."));
+    expect(within(viewer).getByRole("button", { name: "Diff" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(viewer).queryByTestId("review-md-rendered")).toBeNull();
+    expect(within(viewer).queryByTestId("review-md-toggle-rendered")).toBeNull();
+    expect(viewer.querySelector('tr[data-line="3"]')).toBeInTheDocument();
+  });
+
+  it("a link to a line opens Source at that line", async () => {
+    renderMd({ search: "?view=review&pr=pavilio%231&file=README.md&line=3" });
+    await waitFor(() => expect(screen.getByTestId("review-md-toggle-source")).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.queryByTestId("review-md-rendered")).toBeNull();
+    expect(document.querySelector('tr[data-line="3"]')).toHaveTextContent("The panel.");
+  });
+
+  it("an unchanged Markdown file opens rendered", async () => {
+    renderMd({ search: "?view=review&pr=pavilio%231&file=README.md" });
+    const rendered = await screen.findByTestId("review-md-rendered");
+    expect(within(rendered).getByRole("heading", { name: "Pavilio" })).toBeInTheDocument();
+  });
+
+  it("a non-Markdown file in Code mode keeps the table and no toggle", async () => {
+    renderMd({ search: FILE_A });
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    fireEvent.click(within(viewer).getByRole("button", { name: "Code" }));
+    await waitFor(() => expect(viewer.querySelector('tr[data-line="40"]')).toBeInTheDocument());
+    expect(within(viewer).queryByTestId("review-md-rendered")).toBeNull();
+    expect(within(viewer).queryByTestId("review-md-toggle-source")).toBeNull();
+  });
+
+  it("a Markdown file too large to read whole shows the note instead of rendering", async () => {
+    renderMd({
+      file: (url: string) => (url.includes("guide.md") ? jsonResponse({ error: "file too large", tooLarge: true, size: 9e6 }, { status: 413 }) : mdFile(url)),
+    });
+    const viewer = await toCode();
+    const rendered = within(viewer).getByTestId("review-md-rendered");
+    expect(rendered).toHaveTextContent("too large to load");
+    expect(within(rendered).queryByRole("heading")).toBeNull();
+  });
+
+  it("leaving the file stops its speech", async () => {
+    renderMd();
+    const viewer = await toCode();
+    fireEvent.click(within(viewer).getByTestId("review-md-play"));
+    speech.stopDocument.mockClear();
+    if (!screen.queryByTestId("ft-file-src/a.ts")) fireEvent.click(screen.getByTestId("ft-dir-src"));
+    fireEvent.click(screen.getByTestId("ft-file-src/a.ts"));
+    await waitFor(() => expect(speech.stopDocument).toHaveBeenCalledWith(fileKey(GUIDE)));
+  });
+
+  it("another file opens Rendered again", async () => {
+    renderMd({ search: "?view=review&pr=pavilio%231&file=README.md" });
+    await screen.findByTestId("review-md-rendered");
+    fireEvent.click(screen.getByTestId("review-md-toggle-source"));
+    expect(screen.queryByTestId("review-md-rendered")).toBeNull();
+    if (!screen.queryByTestId(`ft-file-${GUIDE}`)) fireEvent.click(screen.getByTestId("ft-dir-docs"));
+    fireEvent.click(screen.getByTestId(`ft-file-${GUIDE}`));
+    await toCode();
+    expect(screen.getByTestId("review-md-toggle-rendered")).toHaveAttribute("aria-pressed", "true");
   });
 });

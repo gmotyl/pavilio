@@ -4,6 +4,7 @@ import type { ChecksState, ReviewComment } from "../../../server/lib/prs/provide
 import FileTree, { type TreeFile } from "./FileTree";
 import PrDescription, { prSpeechKey } from "./PrDescription";
 import PrSwitcher from "./PrSwitcher";
+import ReviewMarkdownFile, { fileBlobUrl, isMarkdownPath } from "./ReviewMarkdownFile";
 import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
 import { commentCount, groupThreads, type ReviewThread } from "./reviewThreads";
@@ -342,6 +343,17 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
           comments={threads?.get(current.path) ?? NO_THREADS}
           commentSpeechKey={prSpeechKey(project, pr)}
           me={me}
+          rendered={
+            // A deleted file has nothing at head to render.
+            isMarkdownPath(current.path) && change?.status !== "D" ? (
+              <ReviewMarkdownFile
+                speechKey={`${prSpeechKey(project, pr)}/f/${current.path}`}
+                content={current.content}
+                note={current.codeNote ?? "File content is not loaded."}
+                linkBase={fileBlobUrl(pr.url, current.head, current.path)}
+              />
+            ) : undefined
+          }
         />
       </>
     );

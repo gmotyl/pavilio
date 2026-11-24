@@ -48,6 +48,11 @@ export interface FileViewerProps {
   commentSpeechKey?: string;
   /** The signed-in login: their comments read as "you". */
   me?: string | null;
+  /**
+   * A Markdown file's rendered view. When given, Code mode offers Rendered (the default, this node)
+   * and Source (the line table); absent, Code mode is the table alone.
+   */
+  rendered?: ReactNode;
 }
 
 const SPLIT_MIN_WIDTH = 720;
@@ -336,6 +341,7 @@ export default function FileViewer({
   comments,
   commentSpeechKey,
   me,
+  rendered,
 }: FileViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -346,6 +352,7 @@ export default function FileViewer({
   const [flash, setFlash] = useState<{ line: number; side: "old" | "new"; seq: number } | null>(null);
   const [pending, setPending] = useState<{ line: number; side: "old" | "new" } | undefined>(undefined);
   const [limit, setLimit] = useState(ROW_PAGE);
+  const [source, setSource] = useState(false);
 
   // Comment speech started in this file stops when the viewer leaves it (unmount, another file or
   // PR), not when a marker remounts for another layout or mode.
@@ -388,6 +395,8 @@ export default function FileViewer({
   const narrow = width !== null && width < SPLIT_MIN_WIDTH;
   const shownMode = changed ? mode : "code";
   const shownLayout = narrow ? "unified" : layout;
+  const markdown = shownMode === "code" && rendered !== undefined;
+  const showRendered = markdown && !source;
   // Split pages count paired rows: slicing raw rows first would cut a del/add block and pair it with blanks.
   const pairs = useMemo(() => (shownMode === "diff" && shownLayout === "split" ? pairRows(visible) : null), [shownMode, shownLayout, visible]);
   // Threads on lines the diff has no row for (no whole file to fill its gaps, or a line past the file),
@@ -444,11 +453,11 @@ export default function FileViewer({
   }, [shownMode, rows, lang, term]);
 
   const codeHtml = useMemo(() => {
-    if (shownMode !== "code" || !codeLines) return null;
+    if (shownMode !== "code" || showRendered || !codeLines) return null;
     // Highlighted whole (multi-line tokens), decorated only as far as is mounted.
     const { html, tokens } = highlightLines(codeLines, lang);
     return html.slice(0, limit).map((h, i) => lineHtml(h, codeLines[i], { term, symbols, specs: tokens }));
-  }, [shownMode, codeLines, lang, term, symbols, limit]);
+  }, [shownMode, showRendered, codeLines, lang, term, symbols, limit]);
 
   const marks = useMemo(() => (changed ? gutterMarks(rows) : new Map<number, GutterMark>()), [changed, rows]);
 
@@ -465,6 +474,8 @@ export default function FileViewer({
       if (changed) return setMode("diff");
       return setPending(undefined);
     }
+    // A line lives in the source table, not in the rendering.
+    if (showRendered) return setSource(true);
     const el = bodyRef.current?.querySelector(`tr[${old ? "data-old-line" : "data-line"}="${line}"]`);
     if (el) {
       if (rootRef.current) scrollRowIntoHost(rootRef.current, el);
@@ -489,7 +500,7 @@ export default function FileViewer({
       if (codeLines && !old) return setMode("code");
     }
     setPending(undefined);
-  }, [pending, shownMode, changed, items, codeLines, expanded, expand, visible, pairs, limit]);
+  }, [pending, shownMode, showRendered, changed, items, codeLines, expanded, expand, visible, pairs, limit]);
 
   useEffect(() => {
     if (flash == null) return;
@@ -548,7 +559,9 @@ export default function FileViewer({
   let unplacedNote: ReactNode = null;
   let beyondNote: ReactNode = null;
   let totalRows = 0;
-  if (shownMode === "code") {
+  if (showRendered) {
+    body = rendered;
+  } else if (shownMode === "code") {
     totalRows = codeLines?.length ?? 0;
     body = codeHtml ? (
       <table className="fv-table fv-code">
@@ -721,7 +734,8 @@ export default function FileViewer({
             </button>
           </div>
         ) : (
-          changed && (
+          changed &&
+          !showRendered && (
             <span className="fv-legend" data-testid="file-viewer-legend">
               <span>
                 <i className="fv-legend-added" />
@@ -737,6 +751,16 @@ export default function FileViewer({
               </span>
             </span>
           )
+        )}
+        {markdown && (
+          <div className="fv-seg" role="group" aria-label="Markdown view">
+            <button type="button" data-testid="review-md-toggle-rendered" aria-pressed={!source} onClick={() => setSource(false)}>
+              Rendered
+            </button>
+            <button type="button" data-testid="review-md-toggle-source" aria-pressed={source} onClick={() => setSource(true)}>
+              Source
+            </button>
+          </div>
         )}
         <span className="fv-copy">
           {/* Only the loaded whole file; a diff's hunks alone are not the file. */}

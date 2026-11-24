@@ -164,3 +164,20 @@
 @media (max-width: 860px) {
   .rv-body { grid-template-columns: minmax(0, 1fr); height: auto; }
 }
+
+/* A Markdown file rendered in Code mode: the description's card body, under its own Play row. */
+.rv-mdfile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Left: room for the 22px play-from-here button and its 4px gap. */
+  padding: 0 14px 12px 26px;
+  font-size: 13px;
+}
+.rv-mdfile > .flex {
+  gap: 6px;
+  margin: 0 -14px 0 -26px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rv-mdfile > .flex > .flex { justify-content: flex-end; }
