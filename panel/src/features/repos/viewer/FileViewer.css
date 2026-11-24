@@ -291,6 +291,9 @@ td.fv-s-empty {
 }
 .fv-cmpop header b, .fv-cmwho b { color: var(--text-primary); }
 .fv-cmplay {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
   padding: 1px 6px;
   border: 1px solid var(--border-default);
@@ -298,7 +301,10 @@ td.fv-s-empty {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.fv-cmplay:hover { background: var(--bg-hover); color: var(--text-primary); }
+.fv-cmplay:hover:not([data-speech]) { background: var(--bg-hover); color: var(--text-primary); }
+/* A comment's run wears the speech row's colours (`.speech-bar-primary[data-speech]` in
+   index.css): green while it plays or is held, red while it waits on synthesis. */
+.fv-cmplay[data-speech]:hover { filter: brightness(1.15); }
 .fv-cmmsg { padding: 8px 12px 10px; }
 .fv-cmmsg + .fv-cmmsg { border-top: 1px solid var(--border-subtle); }
 /* One root conversation: its comments, then its own reply link. */

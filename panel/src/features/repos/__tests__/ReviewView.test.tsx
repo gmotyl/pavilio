@@ -28,6 +28,7 @@ const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn()
 vi.mock("../../speech/SpeechHostProvider", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../speech/SpeechHostProvider")>()),
   usePageSpeech: () => speech,
+  usePanelSpeech: () => ({ stateFor: () => "empty", onPause: () => {}, onResume: () => {} }),
 }));
 
 const REPO_PATH = "/root/git/prv/pavilio";

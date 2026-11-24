@@ -4,7 +4,8 @@ import type { ReviewComment } from "../../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../../reviewThreads";
 
 const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn() }));
-vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech }));
+const host = vi.hoisted(() => ({ stateFor: () => "empty", onPause: vi.fn(), onResume: vi.fn() }));
+vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech, usePanelSpeech: () => host }));
 
 import FileViewer from "../FileViewer";
 

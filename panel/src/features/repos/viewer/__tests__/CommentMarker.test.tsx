@@ -4,8 +4,17 @@ import type { ReviewComment } from "../../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../../reviewThreads";
 
 const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn() }));
+/** The host's read side and transport, as the speech row reads them: a state per key. */
+const host = vi.hoisted(() => ({
+  states: new Map<string, string>(),
+  stateFor(key: string) {
+    return this.states.get(key) ?? "empty";
+  },
+  onPause: vi.fn(),
+  onResume: vi.fn(),
+}));
 
-vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech }));
+vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech, usePanelSpeech: () => host }));
 vi.mock("../../../markdown/MarkdownRenderer", () => ({
   default: ({ content, untrusted }: { content: string; untrusted?: { linkBase: string } }) => (
     <div data-testid="md" data-link-base={untrusted?.linkBase}>
@@ -77,6 +86,9 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   speech.speakDocument.mockReset();
   speech.stopDocument.mockReset();
+  host.states.clear();
+  host.onPause.mockReset();
+  host.onResume.mockReset();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -107,12 +119,12 @@ describe("CommentMarker", () => {
     expect(marker().parentElement?.contains(pop)).toBe(false);
     expect(pop.parentElement).toBe(document.body);
     expect(pop.querySelector("header")).toHaveTextContent("Line 14 · 2 comments");
-    expect(within(pop).getByRole("button", { name: "Play thread" })).toHaveTextContent("▷ Play all");
+    expect(within(pop).getByRole("button", { name: "Play thread" })).toHaveTextContent("Play all");
     const msgs = pop.querySelectorAll(".fv-cmmsg");
     expect(msgs).toHaveLength(2);
     expect(msgs[0]).toHaveTextContent("KW");
     expect(msgs[0]).toHaveTextContent("kwojcik · 2 h ago");
-    expect(within(msgs[0] as HTMLElement).getByRole("button", { name: "Play comment" })).toHaveTextContent("▷");
+    expect(within(msgs[0] as HTMLElement).getByRole("button", { name: "Play comment" })).toHaveAttribute("data-icon", "play");
     // `me` reads as "you".
     expect(msgs[1]).toHaveTextContent("you · 1 h ago");
     expect(msgs[1]).not.toHaveTextContent("gmotyl");
@@ -307,11 +319,90 @@ describe("CommentMarker", () => {
     fireEvent.focus(marker());
     const pop = dialog();
     const play = within(pop).getByRole("button", { name: "Play thread" });
-    expect(play).toHaveTextContent("▷ Play");
+    expect(play).toHaveTextContent(/^Play$/);
     expect(play).not.toHaveTextContent("Play all");
     expect(within(pop).queryByRole("button", { name: "Play comment" })).toBeNull();
     fireEvent.click(play);
     expect(speech.speakDocument).toHaveBeenCalledWith({ key: `${KEY}/t/990`, text: `kwojcik:\n\n${ROOT.body}` });
+  });
+
+  // Each Play reads its own key's run off the host, as the page's speech row does.
+  it.each([
+    ["empty", "Play comment", "play", undefined],
+    ["ready", "Play comment", "play", undefined],
+    ["heard", "Play comment", "play", undefined],
+    ["preparing", "Play comment — waiting for the voice", "play", "preparing"],
+    ["stalled", "Pause comment — waiting for the voice", "pause", "stalled"],
+    ["speaking", "Pause comment", "pause", "speaking"],
+    ["paused", "Resume comment", "resume", "paused"],
+  ])("CommentMarker comment Play while its key is %s reads %s", (state, label, icon, lit) => {
+    host.states.set(`${KEY}/c/991`, state);
+    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    const button = screen.getByTestId("comment-play-991");
+    expect(button).toHaveAccessibleName(label);
+    expect(button).toHaveAttribute("data-icon", icon);
+    expect(button).toHaveClass("speech-bar-primary");
+    if (lit) expect(button).toHaveAttribute("data-speech", lit);
+    else expect(button).not.toHaveAttribute("data-speech");
+    // Only its own key: the other comment and the thread stay idle.
+    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Play comment");
+    expect(screen.getByTestId("comment-play-thread")).toHaveAccessibleName("Play thread");
+  });
+
+  it("CommentMarker shows the red pause while the run waits on synthesis, then the pause once audio plays", () => {
+    const key = `${KEY}/t/990`;
+    const { rerender } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(screen.getByTestId("comment-play-thread"));
+    expect(speech.speakDocument).toHaveBeenCalledTimes(1);
+    // The host's run starts before unit 0 is in hand: `stalled`, the speech row's red.
+    host.states.set(key, "stalled");
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    const play = screen.getByTestId("comment-play-thread");
+    expect(play).toHaveAttribute("data-speech", "stalled");
+    expect(play).toHaveAttribute("data-icon", "pause");
+    expect(play).toHaveTextContent("Pause");
+    host.states.set(key, "speaking");
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    expect(play).toHaveAttribute("data-speech", "speaking");
+    expect(play).toHaveAccessibleName("Pause thread");
+    host.states.set(key, "heard");
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    expect(play).not.toHaveAttribute("data-speech");
+    expect(play).toHaveAccessibleName("Play thread");
+    expect(play).toHaveTextContent("Play all");
+  });
+
+  it("CommentMarker Pause pauses its key's run and Resume resumes it, starting nothing new", () => {
+    host.states.set(`${KEY}/c/990`, "speaking");
+    host.states.set(`${KEY}/t/990`, "paused");
+    const { rerender } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    fireEvent.focus(marker());
+    fireEvent.click(screen.getByTestId("comment-play-990"));
+    expect(host.onPause).toHaveBeenCalledWith(`${KEY}/c/990`);
+    fireEvent.click(screen.getByTestId("comment-play-thread"));
+    expect(host.onResume).toHaveBeenCalledWith(`${KEY}/t/990`);
+    expect(speech.speakDocument).not.toHaveBeenCalled();
+    // Waiting on synthesis is a run in hand too: its press pauses.
+    host.states.set(`${KEY}/c/991`, "stalled");
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    fireEvent.click(screen.getByTestId("comment-play-991"));
+    expect(host.onPause).toHaveBeenLastCalledWith(`${KEY}/c/991`);
+  });
+
+  it("CommentMarker closing the popover keeps its comment playing and reopening shows the run", () => {
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
+    fireEvent.click(screen.getByTestId("comment-play-990"));
+    host.states.set(`${KEY}/c/990`, "speaking");
+    fireEvent.pointerLeave(marker(), { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(speech.stopDocument).not.toHaveBeenCalled();
+    fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
+    expect(screen.getByTestId("comment-play-990")).toHaveAccessibleName("Pause comment");
+    unmount();
   });
 
   it("CommentMarker without a speech key renders no Play buttons", () => {

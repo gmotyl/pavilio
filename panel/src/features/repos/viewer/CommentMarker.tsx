@@ -1,7 +1,9 @@
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { Pause, Play } from "lucide-react";
 import { createPortal } from "react-dom";
 import MarkdownRenderer from "../../markdown/MarkdownRenderer";
-import { usePageSpeech } from "../../speech/SpeechHostProvider";
+import { usePageSpeech, usePanelSpeech } from "../../speech/SpeechHostProvider";
+import type { CellSpeechState } from "../../speech/types";
 import { closeOpenFence } from "../../speech/strip";
 import { prDescriptionSource } from "../PrDescription";
 import { hue, updatedAgo } from "../PrRow";
@@ -86,6 +88,22 @@ function conversations(comments: readonly ReviewComment[]): { root: ReviewCommen
 const initials = (login: string): string => login.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
 const plural = (n: number) => `${n} comment${n === 1 ? "" : "s"}`;
 
+/**
+ * What a comment's Play control shows and does for its key's state, read from the host by key as
+ * the page's speech row reads it (`SpeechTransport`): a run in hand offers its pause, red while it
+ * waits on synthesis; a held run its resume; anything else Play.
+ */
+type PlayIntent = "play" | "pause" | "resume";
+function playIntent(state: CellSpeechState): PlayIntent {
+  if (state === "speaking" || state === "stalled") return "pause";
+  if (state === "paused") return "resume";
+  return "play";
+}
+/** The states the control wears the transport's colours for (`.speech-bar-primary[data-speech]`); idle stays neutral. */
+const LIT: ReadonlySet<CellSpeechState> = new Set(["preparing", "stalled", "speaking", "paused"]);
+const WAITING: ReadonlySet<CellSpeechState> = new Set(["preparing", "stalled"]);
+const VERB: Record<PlayIntent, string> = { play: "Play", pause: "Pause", resume: "Resume" };
+
 const ChatIcon = () => (
   <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
     <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H7l-3 2.6V11h-.5A1.5 1.5 0 0 1 2 9.5z" />
@@ -98,6 +116,7 @@ const ChatIcon = () => (
  */
 export default function CommentMarker({ thread, speechKey, me }: Props) {
   const speech = usePageSpeech();
+  const host = usePanelSpeech();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<Position | null>(null);
   const popId = useId();
@@ -231,13 +250,31 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
     else started.current.add(key);
     speech.speakDocument({ key, text });
   };
-  const playOne = (i: number) => speechKey && speak(`${speechKey}/c/${comments[i].id}`, spoken(i));
-  const playAll = () =>
-    speechKey &&
-    speak(
-      `${speechKey}/t/${comments[0].id}`,
-      groups.flatMap((g) => g.items.map(spoken)).join("\n\n"),
-    );
+  const commentKey = (i: number) => `${speechKey}/c/${comments[i].id}`;
+  const threadKey = `${speechKey}/t/${comments[0].id}`;
+  const playOne = (i: number) => speechKey && speak(commentKey(i), spoken(i));
+  const playAll = () => speechKey && speak(threadKey, groups.flatMap((g) => g.items.map(spoken)).join("\n\n"));
+
+  /** The control's look and press for `key`: Play starts it, a run in hand pauses, a held one resumes. */
+  const control = (key: string, what: "comment" | "thread", play: () => void) => {
+    const state = host.stateFor(key);
+    const intent = playIntent(state);
+    const waiting = WAITING.has(state);
+    return {
+      intent,
+      label: `${VERB[intent]} ${what}${waiting ? " — waiting for the voice" : ""}`,
+      icon: intent === "pause" ? <Pause size={11} aria-hidden="true" /> : <Play size={11} aria-hidden="true" />,
+      props: {
+        "data-speech": LIT.has(state) ? state : undefined,
+        "data-icon": intent,
+        onClick: () => {
+          if (intent === "pause") host.onPause(key);
+          else if (intent === "resume") host.onResume(key);
+          else play();
+        },
+      },
+    };
+  };
 
   const style: CSSProperties = { top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" };
 
@@ -303,11 +340,16 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
           >
             <header>
               <b>Line {line}</b> · {plural(n)}
-              {speechKey && (
-                <button type="button" data-testid="comment-play-thread" className="fv-cmplay fv-cmplay-all" aria-label="Play thread" onClick={playAll}>
-                  {n >= 2 ? "▷ Play all" : "▷ Play"}
-                </button>
-              )}
+              {speechKey &&
+                (() => {
+                  const c = control(threadKey, "thread", playAll);
+                  return (
+                    <button type="button" data-testid="comment-play-thread" className="fv-cmplay fv-cmplay-all speech-bar-primary" aria-label={c.label} title={c.label} {...c.props}>
+                      {c.icon}
+                      {c.intent === "play" ? (n >= 2 ? "Play all" : "Play") : VERB[c.intent]}
+                    </button>
+                  );
+                })()}
             </header>
             {groups.map(({ root, items }) => {
               const href = safeHref(root.url);
@@ -322,11 +364,16 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
                             {initials(c.author)}
                           </span>
                           <b>{me && c.author === me ? "you" : c.author}</b> · {updatedAgo(c.createdAt)}
-                          {speechKey && n >= 2 && (
-                            <button type="button" data-testid={`comment-play-${c.id}`} className="fv-cmplay" aria-label="Play comment" onClick={() => playOne(i)}>
-                              ▷
-                            </button>
-                          )}
+                          {speechKey &&
+                            n >= 2 &&
+                            (() => {
+                              const p = control(commentKey(i), "comment", () => playOne(i));
+                              return (
+                                <button type="button" data-testid={`comment-play-${c.id}`} className="fv-cmplay speech-bar-primary" aria-label={p.label} title={p.label} {...p.props}>
+                                  {p.icon}
+                                </button>
+                              );
+                            })()}
                         </div>
                         <div className="fv-cmbody">
                           <MarkdownRenderer content={bodies[i]} untrusted={{ linkBase: c.url }} />
