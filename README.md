@@ -92,7 +92,7 @@ on the machine — see [docs/agents.md](./docs/agents.md).
 | `/pavilio-note-batch` | Batch-process unprocessed meetings from every connected notetaker |
 | `/pavilio-openspec-migrate` | Move a project's flat plans and specs into the OpenSpec layout |
 | `/pavilio-openspec-storage` | Shared reference: how Pavilio stores OpenSpec changes and specs |
-| `/pavilio-pr-explain` | Explain a PR, branch or commit range as a diagram-rich memo |
+| `/pavilio-pr-explain` | Explain a PR, branch or commit range as a chaptered story in the QA tab, ending in a diagram overview |
 | `/pavilio-qa-agent` | Acceptance-criteria-driven browser QA with evidence for every check |
 | `/pavilio-question` | Answer questions about people, decisions and timelines from project notes |
 | `/pavilio-resume` | Execute a prebaked handoff file (explicit invocation only) |

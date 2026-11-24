@@ -18,7 +18,7 @@ Create a markdown memo that explains a topic with embedded mermaid diagrams. **F
 ## When NOT to use
 
 - Quick thought capture with no inherent structure → use [[pavilio-memo]]
-- Explaining a specific PR / branch / commit-range (built from a diff) → use [[pavilio-pr-explain]]
+- Explaining a specific PR / branch / commit-range (built from a diff) → use [[pavilio-pr-explain]], which writes a chaptered story to `qa/stories/`, not a memo
 - Project-wide architecture overview that should live forever → that's PROJECT.md or an ADR, not a dated memo
 
 ## Process
