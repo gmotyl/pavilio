@@ -61,6 +61,23 @@ describe("archive routes", () => {
     expect(res.status).toBe(409);
   });
 
+  it("409s restoring a knowledge wiki whose harvest target is taken", async () => {
+    const card = (rel: string, fm: string) => {
+      mkdirSync(join(projects.dir(), rel), { recursive: true });
+      writeFileSync(join(projects.dir(), rel, "PROJECT.md"), `---\n${fm}---\n# ${rel}\n`);
+    };
+    card("archived/metro-wiki", "kind: knowledge\ngroup: metro\n");
+    card("metro-wiki-2", "kind: knowledge\ngroup: metro\n");
+    card("archived/other-wiki", "kind: knowledge\ngroup: other\n");
+    const app = makeApp(archiveRouter, "/api/archive");
+    const res = await request(app).post("/api/archive/metro-wiki/restore");
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/metro-wiki-2/);
+    expect(existsSync(join(projects.dir(), "archived", "metro-wiki", "PROJECT.md"))).toBe(true);
+    expect(existsSync(join(projects.dir(), "metro-wiki"))).toBe(false);
+    expect((await request(app).post("/api/archive/other-wiki/restore")).status).toBe(200);
+  });
+
   it("lists archived projects with archivedAt", async () => {
     seedProject("archived/beta");
     seedProject("archived/gamma");

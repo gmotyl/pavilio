@@ -391,8 +391,9 @@ wiki, group findings never to `knowledge`.
    (`groupWikiName` = the group slugged — lowercase, non-alphanumeric runs → `-`, trimmed — plus
    `-wiki`: group `Motyl OSS` → `motyl-oss-wiki`; a group that slugs to nothing → `group-wiki`).
    Exit 2 (`exists` / `archived`: the name is taken) → retry with `-2`, `-3`, … appended
-   (`motyl-oss-wiki-2`), at most 5 names; exit 1, or every name taken → treat that group as a lock
-   not held (below). Then `scripts/wiki lock take <group wiki>
+   (`motyl-oss-wiki-2`), at most 5 names (an archived namesake stays archived: the panel refuses
+   to restore a knowledge wiki while its group has another); exit 1, or every name taken → treat
+   that group as a lock not held (below). Then `scripts/wiki lock take <group wiki>
    --session <id>`; `held: false` → that group's clusters stay as candidates (no page, no
    back-link, not cleared — dropped ids of its chunks included), the other targets proceed, and
    the report names the group. A renamed

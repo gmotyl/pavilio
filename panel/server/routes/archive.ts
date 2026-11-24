@@ -12,6 +12,8 @@ import { rebuildIndex } from "../lib/file-index.js";
 import { markArchivedInRegistry, markRestoredInRegistry } from "../lib/registry.js";
 import { projectDescription } from "../lib/projects/description.js";
 import { projectKind } from "../lib/projects/kind.js";
+import { projectGroup } from "../lib/projects/group.js";
+import { knowledgeTargetsIn } from "../lib/wiki/harvest.js";
 import { archivedAt, archivedRoot } from "../lib/discovery.js";
 
 const router = Router();
@@ -80,6 +82,28 @@ router.post("/:name", (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Why archived `name` may not come back: it is a knowledge wiki and its harvest target (the
+ * ungrouped one, or its group's) is held by an active wiki — e.g. the `-2` the harvest made while
+ * it was archived. Two would make `scripts/wiki targets` ambiguous and block every harvest.
+ */
+function takenKnowledgeTarget(projectsDir: string, name: string): string | null {
+  const archivedDir = archivedRoot(projectsDir);
+  if (projectKind(archivedDir, name) !== "knowledge") return null;
+  const group = projectGroup(archivedDir, name);
+  let holder: string | null;
+  try {
+    const targets = knowledgeTargetsIn(projectsDir);
+    holder = group === null ? targets.global : (targets.groups[group] ?? null);
+  } catch (err) {
+    return `Cannot restore knowledge wiki ${name}: ${(err as Error).message}`;
+  }
+  if (holder === null) return null;
+  return group === null
+    ? `Cannot restore knowledge wiki ${name}: the ungrouped knowledge wiki is ${holder}`
+    : `Cannot restore knowledge wiki ${name}: group ${group} already has ${holder}`;
+}
+
 router.post("/:name/restore", (req, res) => {
   const { name } = req.params;
   if (!isSafeName(name)) return res.status(400).json({ error: "Invalid project name" });
@@ -88,6 +112,8 @@ router.post("/:name/restore", (req, res) => {
   const dest = join(projectsDir, name);
   if (!existsSync(src)) return res.status(404).json({ error: `Not archived: ${name}` });
   if (existsSync(dest)) return res.status(409).json({ error: `Active project exists: ${name}` });
+  const taken = takenKnowledgeTarget(projectsDir, name);
+  if (taken) return res.status(409).json({ error: taken });
   try {
     renameSync(src, dest);
   } catch (err) {
