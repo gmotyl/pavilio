@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewComment } from "../../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../../reviewThreads";
 
-vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => ({ speakDocument: vi.fn() }) }));
+const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn() }));
+vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech }));
 
 import FileViewer from "../FileViewer";
 
@@ -88,6 +89,8 @@ function expectLanes(table: HTMLTableElement, lanes: number) {
 
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", NoResizeObserver);
+  speech.speakDocument.mockReset();
+  speech.stopDocument.mockReset();
 });
 
 describe("FileViewer comment lane", () => {
@@ -303,5 +306,40 @@ describe("FileViewer comment lane", () => {
     expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
     split();
     expect(screen.queryByTestId("file-viewer-unplaced")).toBeNull();
+  });
+
+  const playThread16 = () => {
+    fireEvent.focus(body().querySelector<HTMLButtonElement>('tr[data-line="16"] .fv-cmbtn')!);
+    fireEvent.click(screen.getByRole("button", { name: "Play thread" }));
+    expect(speech.speakDocument).toHaveBeenCalledWith(expect.objectContaining({ key: "pavilio//pr/gmotyl/pavilio/7/t/160" }));
+  };
+
+  it("FileViewer keeps a comment playing when the diff layout changes and its marker remounts", () => {
+    render(viewer({ comments: COMMENTS }));
+    split();
+    playThread16();
+    unified();
+    expect(body().querySelector('tr[data-line="16"] .fv-cmbtn')).not.toBeNull();
+    expect(speech.stopDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    expect(speech.stopDocument).not.toHaveBeenCalled();
+  });
+
+  it("FileViewer stops the comment speech it started when it unmounts", () => {
+    const { unmount } = render(viewer({ comments: COMMENTS }));
+    unified();
+    playThread16();
+    unmount();
+    expect(speech.stopDocument).toHaveBeenCalledWith("pavilio//pr/gmotyl/pavilio/7/t/160");
+    expect(speech.stopDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("FileViewer stops the comment speech it started when it shows another file", () => {
+    const { rerender } = render(viewer({ comments: COMMENTS }));
+    unified();
+    playThread16();
+    rerender(viewer({ comments: COMMENTS, path: "src/geo/other.ts" }));
+    expect(speech.stopDocument).toHaveBeenCalledWith("pavilio//pr/gmotyl/pavilio/7/t/160");
+    expect(speech.stopDocument).toHaveBeenCalledTimes(1);
   });
 });

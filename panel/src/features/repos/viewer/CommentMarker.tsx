@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import MarkdownRenderer from "../../markdown/MarkdownRenderer";
 import { usePageSpeech } from "../../speech/SpeechHostProvider";
@@ -6,6 +6,7 @@ import { prDescriptionSource } from "../PrDescription";
 import { hue, updatedAgo } from "../PrRow";
 import type { ReviewComment } from "../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../reviewThreads";
+import { CommentSpeechScope } from "./commentSpeech";
 
 /** Grace period after the pointer leaves both the marker and the popover (as in WikiLinkHoverCard). */
 const CLOSE_DELAY_MS = 150;
@@ -134,6 +135,9 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
 
   // Speech this marker started stops with it: leaving the file or PR must not leave a comment
   // playing, nor a stale key for the global Play shortcut to resume (as `SpeakingToolbar` does).
+  // Inside a file viewer the viewer owns that instead, so a layout switch remounting the marker
+  // keeps the comment playing.
+  const scope = useContext(CommentSpeechScope);
   const started = useRef(new Set<string>());
   useEffect(() => {
     const keys = started.current;
@@ -221,7 +225,8 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
   // its line, or the speech filter's line-anchored fence match misses it and swallows what follows.
   const spoken = (i: number) => `${comments[i].author}:\n\n${bodies[i]}`;
   const speak = (key: string, text: string) => {
-    started.current.add(key);
+    if (scope) scope(key, speech.stopDocument);
+    else started.current.add(key);
     speech.speakDocument({ key, text });
   };
   const playOne = (i: number) => speechKey && speak(`${speechKey}/c/${comments[i].id}`, spoken(i));

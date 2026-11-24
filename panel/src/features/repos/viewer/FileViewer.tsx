@@ -24,6 +24,7 @@ import { detectLang, escapeHtml } from "./highlight";
 import { CopyIconButton } from "../../shell/CopyIconButton";
 import type { ReviewThread } from "../reviewThreads";
 import CommentMarker from "./CommentMarker";
+import { CommentSpeechScope, type TrackCommentSpeech } from "./commentSpeech";
 import "./FileViewer.css";
 
 export interface FileViewerProps {
@@ -345,6 +346,18 @@ export default function FileViewer({
   const [flash, setFlash] = useState<{ line: number; side: "old" | "new"; seq: number } | null>(null);
   const [pending, setPending] = useState<{ line: number; side: "old" | "new" } | undefined>(undefined);
   const [limit, setLimit] = useState(ROW_PAGE);
+
+  // Comment speech started in this file stops when the viewer leaves it (unmount, another file or
+  // PR), not when a marker remounts for another layout or mode.
+  const commentSpeech = useRef(new Map<string, (key: string) => void>());
+  const trackCommentSpeech = useCallback<TrackCommentSpeech>((key, stop) => void commentSpeech.current.set(key, stop), []);
+  useEffect(() => {
+    const started = commentSpeech.current;
+    return () => {
+      for (const [key, stop] of started) stop(key);
+      started.clear();
+    };
+  }, [path, commentSpeechKey]);
 
   const parsed = useMemo(() => (diff ? parseDiff(diff) : []), [diff]);
   const changed = isChanged(parsed);
@@ -731,9 +744,11 @@ export default function FileViewer({
         </span>
       </div>
       <div ref={bodyRef} className="fv-body" data-testid="file-viewer-body" onClick={onBodyClick}>
-        {unplacedNote}
-        {beyondNote}
-        {body}
+        <CommentSpeechScope.Provider value={trackCommentSpeech}>
+          {unplacedNote}
+          {beyondNote}
+          {body}
+        </CommentSpeechScope.Provider>
         {totalRows > limit && (
           <button type="button" className="fv-more" data-testid="file-viewer-more" onClick={() => setLimit((n) => n + ROW_PAGE)}>
             Show {Math.min(ROW_PAGE, totalRows - limit).toLocaleString()} more of {(totalRows - limit).toLocaleString()} remaining lines
