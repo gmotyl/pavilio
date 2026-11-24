@@ -7,7 +7,7 @@ import { useProjectLauncher } from "./useProjectLauncher";
  * workspace fallback — and the "overrides default" tag shows only while the
  * project's own pick is set. A click stores the pick for this project only.
  */
-export default function AgentCliSelect({ project }: { project: string }) {
+export function AgentCliSelect({ project }: { project: string }) {
   const { launcher, offered, overridden, setLauncher } = useProjectLauncher(project);
   const labelId = `project-agent-cli-${project}`;
 

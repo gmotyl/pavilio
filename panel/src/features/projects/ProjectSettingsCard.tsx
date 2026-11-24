@@ -2,7 +2,7 @@ import { Settings } from "lucide-react";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { ProjectVoiceSelect } from "../speech/ProjectVoiceSelect";
-import AgentCliSelect from "./AgentCliSelect";
+import { AgentCliSelect } from "./AgentCliSelect";
 import AppearanceEditor from "./AppearanceEditor";
 
 /**
