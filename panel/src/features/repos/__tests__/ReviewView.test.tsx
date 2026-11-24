@@ -821,7 +821,7 @@ describe("ReviewView", () => {
 
 // A changed Markdown file, and the repo's README (unchanged, reached through the whole-repo tree).
 const GUIDE = "docs/guide.md";
-const GUIDE_CONTENT = ["# Guide", "", "Read me first.<!-- a hidden note -->", "", "See [setup](setup.md)."].join("\n");
+const GUIDE_CONTENT = ["# Guide", "", "Read me first.<!-- a hidden note -->", "", "See [setup](setup.md).", "", "![logo](img/logo.png)"].join("\n");
 const GUIDE_DIFF = [
   "diff --git a/docs/guide.md b/docs/guide.md",
   "--- a/docs/guide.md",
@@ -867,7 +867,7 @@ describe("ReviewView — a Markdown file in Code mode", () => {
     fireEvent.click(within(viewer).getByTestId("review-md-play"));
     expect(speech.speakDocument).toHaveBeenCalledWith({
       key: fileKey(GUIDE),
-      text: ["# Guide", "", "Read me first.", "", "See [setup](setup.md)."].join("\n"),
+      text: ["# Guide", "", "Read me first.", "", "See [setup](setup.md).", "", "![logo](img/logo.png)"].join("\n"),
     });
   });
 
@@ -878,6 +878,30 @@ describe("ReviewView — a Markdown file in Code mode", () => {
       "href",
       `https://github.com/gmotyl/pavilio/blob/${HEAD}/docs/setup.md`,
     );
+    // Images load from the raw file, not GitHub's HTML page for it.
+    expect(within(viewer).getByRole("img", { name: "logo" })).toHaveAttribute("src", `https://github.com/gmotyl/pavilio/raw/${HEAD}/docs/img/logo.png`);
+  });
+
+  it("Source carries the count of the comments it shows", async () => {
+    renderMd({ comments: () => jsonResponse([comment({ id: 9, path: GUIDE, line: 3 }), comment({ id: 10, replyTo: 9, path: GUIDE, line: 3 })]) });
+    const viewer = await toCode();
+    const source = await waitFor(() => {
+      const el = within(viewer).getByTestId("review-md-toggle-source");
+      expect(el).toHaveAccessibleName("Source, 2 comments");
+      return el;
+    });
+    expect(source).toHaveTextContent("Source 💬2");
+  });
+
+  it("Source carries no count without comments", async () => {
+    renderMd();
+    const viewer = await toCode();
+    expect(within(viewer).getByTestId("review-md-toggle-source")).toHaveAccessibleName("Source");
+  });
+
+  it("a file of frontmatter and comments only has nothing to render", async () => {
+    renderMd({ search: "?view=review&pr=pavilio%231&file=README.md", file: (url: string) => (url.includes("README.md") ? text("---\na: 1\n---\n<!-- x -->\n") : mdFile(url)) });
+    expect(await screen.findByTestId("review-md-rendered")).toHaveTextContent("Nothing to render.");
   });
 
   it("Source shows the line table with its comment markers", async () => {
@@ -928,8 +952,9 @@ describe("ReviewView — a Markdown file in Code mode", () => {
     });
     const viewer = await toCode();
     const rendered = within(viewer).getByTestId("review-md-rendered");
-    expect(rendered).toHaveTextContent("too large to load");
     expect(within(rendered).queryByRole("heading")).toBeNull();
+    // Said once, above the viewer, not again inside the card.
+    expect(screen.getAllByText(/too large to load/)).toHaveLength(1);
   });
 
   it("leaving the file stops its speech", async () => {

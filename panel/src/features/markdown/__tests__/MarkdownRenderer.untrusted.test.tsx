@@ -78,6 +78,21 @@ describe("MarkdownRenderer untrusted mode (third-party markdown, e.g. a PR body)
     );
   });
 
+  it("resolves images against imageBase when given, links still against linkBase", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <MarkdownRenderer
+          content={"[guide](guide.md) ![logo](img/logo.png) ![x](javascript:alert(1))"}
+          untrusted={{ linkBase: "https://github.com/o/r/blob/abc/docs/a.md", imageBase: "https://github.com/o/r/raw/abc/docs/a.md" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "guide" })).toHaveAttribute("href", "https://github.com/o/r/blob/abc/docs/guide.md");
+    const imgs = container.querySelectorAll("img");
+    expect(imgs[0]).toHaveAttribute("src", "https://github.com/o/r/raw/abc/docs/img/logo.png");
+    expect(imgs[1].getAttribute("src") ?? "").toBe("");
+  });
+
   it("keeps absolute links and drops script URLs", () => {
     renderUntrusted("[ext](https://example.com/a)\n\n[bad](javascript:alert(1))");
     expect(screen.getByRole("link", { name: "ext" })).toHaveAttribute("href", "https://example.com/a");

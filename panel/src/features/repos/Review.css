@@ -138,8 +138,8 @@
 .rv-sep { flex: none; height: 1px; margin: 6px 12px 0; border: 0; background: var(--border-subtle); }
 .rv-side > .ft { flex: 1; min-height: 0; }
 
-/* The description in the viewer: a card with a title bar, like a file. */
-.rv-descview {
+/* The description, and a rendered Markdown file: a card with a title bar, like a file. */
+.rv-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -150,7 +150,7 @@
   font-size: 13px;
   line-height: 1.55;
 }
-.rv-descview > .flex {
+.rv-card > .flex {
   gap: 6px;
   margin: 0 -14px 0 -26px;
   padding: 6px 14px;
@@ -165,19 +165,6 @@
   .rv-body { grid-template-columns: minmax(0, 1fr); height: auto; }
 }
 
-/* A Markdown file rendered in Code mode: the description's card body, under its own Play row. */
-.rv-mdfile {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  /* Left: room for the 22px play-from-here button and its 4px gap. */
-  padding: 0 14px 12px 26px;
-  font-size: 13px;
-}
-.rv-mdfile > .flex {
-  gap: 6px;
-  margin: 0 -14px 0 -26px;
-  padding: 6px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
+/* A rendered Markdown file sits in the file viewer's frame: no second border; its Play row ends right. */
+.rv-mdfile { border: 0; border-radius: 0; }
 .rv-mdfile > .flex > .flex { justify-content: flex-end; }

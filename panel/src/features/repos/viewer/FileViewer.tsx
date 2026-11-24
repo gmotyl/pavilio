@@ -397,6 +397,12 @@ export default function FileViewer({
   const shownLayout = narrow ? "unified" : layout;
   const markdown = shownMode === "code" && rendered !== undefined;
   const showRendered = markdown && !source;
+  // The comments Source would show: Code mode has markers for new-side lines only.
+  const sourceComments = useMemo(() => {
+    let n = 0;
+    for (const [k, t] of comments ?? []) if (k.startsWith("new:")) n += t.comments.length;
+    return n;
+  }, [comments]);
   // Split pages count paired rows: slicing raw rows first would cut a del/add block and pair it with blanks.
   const pairs = useMemo(() => (shownMode === "diff" && shownLayout === "split" ? pairRows(visible) : null), [shownMode, shownLayout, visible]);
   // Threads on lines the diff has no row for (no whole file to fill its gaps, or a line past the file),
@@ -757,8 +763,16 @@ export default function FileViewer({
             <button type="button" data-testid="review-md-toggle-rendered" aria-pressed={!source} onClick={() => setSource(false)}>
               Rendered
             </button>
-            <button type="button" data-testid="review-md-toggle-source" aria-pressed={source} onClick={() => setSource(true)}>
+            <button
+              type="button"
+              data-testid="review-md-toggle-source"
+              aria-pressed={source}
+              aria-label={sourceComments > 0 ? `Source, ${sourceComments} ${sourceComments === 1 ? "comment" : "comments"}` : undefined}
+              onClick={() => setSource(true)}
+            >
               Source
+              {/* Rendered shows no markers: the count says where they are. */}
+              {sourceComments > 0 && <span className="fv-segcm" aria-hidden="true"> 💬{sourceComments}</span>}
             </button>
           </div>
         )}

@@ -24,8 +24,17 @@ export function markdownFileSource(content: string): string {
  * relative URL resolves against — those links drop, absolute ones still work.
  */
 export function fileBlobUrl(prUrl: string, head: string, path: string): string {
+  return fileUrl(prUrl, "blob", head, path);
+}
+
+/** The file's raw bytes at the head: what its relative images resolve against (a blob page is HTML). */
+export function fileRawUrl(prUrl: string, head: string, path: string): string {
+  return fileUrl(prUrl, "raw", head, path);
+}
+
+function fileUrl(prUrl: string, kind: "blob" | "raw", head: string, path: string): string {
   const repo = /^(https?:\/\/[^?#]+)\/pull\/\d+\/?$/.exec(prUrl)?.[1];
-  return repo ? `${repo}/blob/${encodeURIComponent(head)}/${path.split("/").map(encodeURIComponent).join("/")}` : "about:blank";
+  return repo ? `${repo}/${kind}/${encodeURIComponent(head)}/${path.split("/").map(encodeURIComponent).join("/")}` : "about:blank";
 }
 
 interface Props {
@@ -33,26 +42,28 @@ interface Props {
   speechKey: string;
   /** The whole file at head; undefined when it couldn't be loaded whole. */
   content: string | undefined;
-  /** Shown instead of the rendering when `content` is missing. */
-  note: string;
+  /** Shown instead of the rendering when `content` is missing; none when the review already says why above the viewer. */
+  note?: string;
   linkBase: string;
+  imageBase?: string;
 }
 
 /** A review's Markdown file in Code mode: rendered, with Play and play-from-here like the PR description. */
-export default function ReviewMarkdownFile({ speechKey, content, note, linkBase }: Props) {
+export default function ReviewMarkdownFile({ speechKey, content, note, linkBase, imageBase }: Props) {
   const source = content === undefined ? "" : markdownFileSource(content);
   const speech = useMemo(() => ({ key: speechKey, text: source }), [speechKey, source]);
   return (
-    <section className="rv-mdfile" data-testid="review-md-rendered" aria-label="Rendered file">
+    <section className="rv-card rv-mdfile" data-testid="review-md-rendered" aria-label="Rendered file">
       <SpeakingToolbar speech={speech} testIdPrefix="review-md">
         {(play) => play}
       </SpeakingToolbar>
       {content === undefined ? (
-        <p className="rv-desc-empty">{note}</p>
+        note && <p className="rv-desc-empty">{note}</p>
       ) : source.trim() === "" ? (
-        <p className="rv-desc-empty">This file is empty.</p>
+        // Empty, or frontmatter and comments only.
+        <p className="rv-desc-empty">Nothing to render.</p>
       ) : (
-        <SpokenMarkdown docKey={speechKey} source={source} linkBase={linkBase} />
+        <SpokenMarkdown docKey={speechKey} source={source} linkBase={linkBase} imageBase={imageBase} />
       )}
     </section>
   );

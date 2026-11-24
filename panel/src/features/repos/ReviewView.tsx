@@ -4,7 +4,7 @@ import type { ChecksState, ReviewComment } from "../../../server/lib/prs/provide
 import FileTree, { type TreeFile } from "./FileTree";
 import PrDescription, { prSpeechKey } from "./PrDescription";
 import PrSwitcher from "./PrSwitcher";
-import ReviewMarkdownFile, { fileBlobUrl, isMarkdownPath } from "./ReviewMarkdownFile";
+import ReviewMarkdownFile, { fileBlobUrl, fileRawUrl, isMarkdownPath } from "./ReviewMarkdownFile";
 import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
 import { commentCount, groupThreads, type ReviewThread } from "./reviewThreads";
@@ -349,8 +349,10 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
               <ReviewMarkdownFile
                 speechKey={`${prSpeechKey(project, pr)}/f/${current.path}`}
                 content={current.content}
-                note={current.codeNote ?? "File content is not loaded."}
+                // A codeNote is already shown above the viewer.
+                note={current.codeNote ? undefined : "File content is not loaded."}
                 linkBase={fileBlobUrl(pr.url, current.head, current.path)}
+                imageBase={fileRawUrl(pr.url, current.head, current.path)}
               />
             ) : undefined
           }

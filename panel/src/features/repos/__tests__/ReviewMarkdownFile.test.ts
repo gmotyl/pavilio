@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileBlobUrl, isMarkdownPath, markdownFileSource } from "../ReviewMarkdownFile";
+import { fileBlobUrl, fileRawUrl, isMarkdownPath, markdownFileSource } from "../ReviewMarkdownFile";
 
 describe("isMarkdownPath", () => {
   it("takes .md and .markdown in any case, not MDX or other text", () => {
@@ -28,5 +28,16 @@ describe("fileBlobUrl", () => {
     expect(base).toBe("about:blank");
     expect(() => new URL("setup.md", base)).toThrow();
     expect(new URL("https://x.dev/", base).href).toBe("https://x.dev/");
+  });
+});
+
+describe("fileRawUrl", () => {
+  it("points at the file's raw bytes at the head, so relative images load", () => {
+    expect(fileRawUrl("https://github.com/o/r/pull/7", "abc", "docs/a b.md")).toBe("https://github.com/o/r/raw/abc/docs/a%20b.md");
+    expect(new URL("img/x.png", fileRawUrl("https://github.com/o/r/pull/7", "abc", "docs/a.md")).href).toBe("https://github.com/o/r/raw/abc/docs/img/x.png");
+  });
+
+  it("falls back to a base no relative URL resolves against", () => {
+    expect(fileRawUrl("https://example.com/x", "abc", "a.md")).toBe("about:blank");
   });
 });

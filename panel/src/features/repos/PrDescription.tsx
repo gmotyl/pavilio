@@ -66,12 +66,13 @@ export function withoutHtmlComments(markdown: string): string {
 /**
  * Third-party markdown rendered and readable from any block: `source` is
  * both what renders and what `docKey`'s toolbar speaks, so the ▶ on a block
- * starts at that block's unit. Links resolve against `linkBase`.
+ * starts at that block's unit. Links resolve against `linkBase`, images
+ * against `imageBase` when given.
  */
-export function SpokenMarkdown({ docKey, source, linkBase }: { docKey: string; source: string; linkBase: string }) {
+export function SpokenMarkdown({ docKey, source, linkBase, imageBase }: { docKey: string; source: string; linkBase: string; imageBase?: string }) {
   return (
     <PagePlayFromHere docKey={docKey} text={source}>
-      <MarkdownRenderer content={source} untrusted={{ linkBase }} />
+      <MarkdownRenderer content={source} untrusted={{ linkBase, imageBase }} />
     </PagePlayFromHere>
   );
 }
@@ -88,7 +89,7 @@ export default function PrDescription({ project, pr, body }: Props) {
   const source = typeof body === "string" ? prDescriptionSource(body) : body;
   const speech = { key: prSpeechKey(project, pr), text: source ?? "" };
   return (
-    <section className="rv-descview" aria-label="Pull request description">
+    <section className="rv-card rv-descview" aria-label="Pull request description">
       <SpeakingToolbar speech={speech} testIdPrefix="pr-description">
         {(play) => (
           <>
