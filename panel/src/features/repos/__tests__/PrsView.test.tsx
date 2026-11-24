@@ -377,11 +377,15 @@ describe("PrsView", () => {
     });
 
     it("an archived story file does not count as the row's story", async () => {
-      renderPrs(one(), "pavilio", "?view=prs", [{ relativePath: STORY, archived: true }]);
-      const r = await row();
-      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/index"));
-      expect(await within(r).findByRole("button", { name: "Explain" })).toBeEnabled();
-      expect(within(r).queryByRole("button", { name: "Story" })).toBeNull();
+      renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] }, "pavilio", "?view=prs", [
+        { relativePath: STORY, archived: true },
+        "pavilio/qa/stories/pavilio-pr-8.md",
+      ]);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      // Row 8's live story showing proves the index has loaded, not just been asked for.
+      await within(rows()[1]).findByRole("button", { name: "Story" });
+      expect(within(rows()[0]).getByRole("button", { name: "Explain" })).toBeEnabled();
+      expect(within(rows()[0]).queryByRole("button", { name: "Story" })).toBeNull();
     });
 
     it("row actions follow the roving tabindex", async () => {
@@ -412,6 +416,28 @@ describe("PrsView", () => {
       fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowUp" });
       expect(rows()[1]).toHaveFocus();
       expect(where()).toBe("?view=prs");
+    });
+
+    it("a pending launch disables every launch button until it settles", async () => {
+      let finish = (_id: string) => {};
+      vi.mocked(startTaskRun).mockImplementationOnce(() => new Promise<string>((done) => (finish = done)));
+      renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] }, "pavilio", "?view=prs", [STORY]);
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      const rebuild = await within(rows()[0]).findByRole("button", { name: "Rebuild story for #7" });
+      const explain = within(rows()[1]).getByRole("button", { name: "Explain" });
+
+      fireEvent.click(explain);
+      fireEvent.click(explain);
+      fireEvent.click(rebuild);
+      expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1);
+      expect(explain).toBeDisabled();
+      expect(rebuild).toBeDisabled();
+      // Opening a story launches nothing, so it stays usable.
+      expect(within(rows()[0]).getByRole("button", { name: "Story" })).toBeEnabled();
+
+      await act(async () => finish("new-1"));
+      expect(explain).toBeEnabled();
+      expect(rebuild).toBeEnabled();
     });
 
     it("a failed launch shows an error under the list", async () => {

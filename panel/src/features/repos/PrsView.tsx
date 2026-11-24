@@ -95,7 +95,7 @@ const RebuildIcon = () => (
 interface StoryActionsProps {
   pr: PullRequest;
   story: string | null;
-  /** The launch line, or null when the launcher is not ready. */
+  /** The launch line, or null when the launcher is not ready or a launch is pending. */
   line: string | null;
   /** Title for a launch: what it starts, or why it cannot. */
   launchTitle: string;
@@ -169,10 +169,16 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
   const launchRun = useLaunchRun(project);
   const navigate = useNavigate();
   const [launchError, setLaunchError] = useState<string | null>(null);
+  // One launch at a time: while one is pending every Explain/↻ is disabled, so
+  // repeated clicks cannot start a second terminal and story run.
+  const [launching, setLaunching] = useState(false);
   const onLaunch = useCallback(
     (line: string) => {
       setLaunchError(null);
-      launchRun(line).catch((err: unknown) => setLaunchError(err instanceof Error ? err.message : String(err)));
+      setLaunching(true);
+      launchRun(line)
+        .catch((err: unknown) => setLaunchError(err instanceof Error ? err.message : String(err)))
+        .finally(() => setLaunching(false));
     },
     [launchRun],
   );
@@ -184,7 +190,8 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
     // A PR whose repo is not a slug never reaches a prompt: no controls at all.
     if (!explainable(project, p.repo, p.number)) return null;
     const { launcher } = projectLauncher;
-    const line = blockedReason === null && launcher ? explainRunLine(launcher, project, p.repo, p.number) : null;
+    const line =
+      blockedReason === null && launcher && !launching ? explainRunLine(launcher, project, p.repo, p.number) : null;
     const path = storyPath(project, p);
     return (
       <StoryActions
