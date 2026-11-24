@@ -165,3 +165,25 @@ export function archiveRunLine(launcher: TerminalLauncher, change: string): stri
   const objective = ARCHIVE_OBJECTIVE.replace("{change}", () => change);
   return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(objective)}'`;
 }
+
+/**
+ * The line an Explain run types for `launcher`: `/pavilio-pr-explain
+ * <project> <repo>#<number>` as the start prompt on its own, NOT wrapped in
+ * the run loop — like {@link archiveRunLine}, one interactive session. Null
+ * when the launcher's run loop is not ready, when `project` or `repo` is not a
+ * slug ({@link CHANGE_ID}: they land in a prompt the agent reads), or when
+ * `number` is not a positive integer.
+ */
+export function explainRunLine(
+  launcher: TerminalLauncher,
+  project: string,
+  repo: string,
+  number: number,
+): string | null {
+  if (!CHANGE_ID.test(project) || !CHANGE_ID.test(repo)) return null;
+  if (!Number.isInteger(number) || number <= 0) return null;
+  const state = resolveRunLoop(launcher);
+  if (state.kind !== "ready") return null;
+  const prompt = `/pavilio-pr-explain ${project} ${repo}#${number}`;
+  return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(prompt)}'`;
+}

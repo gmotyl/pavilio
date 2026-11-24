@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ARCHIVE_OBJECTIVE,
   archiveRunLine,
+  explainRunLine,
   composeRunLine,
   resolveObjective,
   runLineParts,
@@ -239,5 +240,48 @@ describe("archiveRunLine", () => {
     expect(archiveRunLine(launcher, "a\nb")).toBeNull();
     expect(archiveRunLine(launcher, "web-push-when-closed")).not.toBeNull();
     expect(archiveRunLine(launcher, "v1.2_fix")).not.toBeNull();
+  });
+});
+
+describe("explainRunLine", () => {
+  const launcher = { name: "mine", command: "claude", runLoop: "/goal {prompt}", promptFlag: "" };
+
+  it("explainRunLine composes the skill prompt without the run loop", () => {
+    const line = explainRunLine(launcher, "pavilio", "pavilio", 239);
+    expect(line).toBe("claude '/pavilio-pr-explain pavilio pavilio#239'");
+    expect(line).not.toContain("/goal");
+    expect(
+      explainRunLine(
+        { name: "mine", command: "tool", runLoop: "/goal {prompt}", promptFlag: "--prompt" },
+        "pavilio",
+        "web.app_v2",
+        7,
+      ),
+    ).toBe("tool --prompt '/pavilio-pr-explain pavilio web.app_v2#7'");
+  });
+
+  it("explainRunLine refuses non-slug project or repo", () => {
+    for (const bad of ["a b", "it's", 'a"b', "$HOME", "org/repo", "", "a\nb"]) {
+      expect(explainRunLine(launcher, bad, "pavilio", 1)).toBeNull();
+      expect(explainRunLine(launcher, "pavilio", bad, 1)).toBeNull();
+    }
+  });
+
+  it("explainRunLine refuses a bad PR number", () => {
+    for (const bad of [0, -3, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(explainRunLine(launcher, "pavilio", "pavilio", bad)).toBeNull();
+    }
+  });
+
+  it("explainRunLine is null for a launcher that is not ready", () => {
+    expect(
+      explainRunLine(
+        { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+        "pavilio",
+        "pavilio",
+        239,
+      ),
+    ).toBeNull();
+    expect(explainRunLine({ name: "mine", command: "tool" }, "pavilio", "pavilio", 239)).toBeNull();
   });
 });
