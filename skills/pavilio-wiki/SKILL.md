@@ -355,7 +355,9 @@ wiki, group findings never to `knowledge`.
 4. **Route** — the orchestrator computes per cluster:
    - *Group* (any mode, no question, never shown for picking): count = distinct origin
      **projects** of its items with a `source` (an item without one gives the page writer nothing
-     to cite, so it does not count). ≥2 → **promoted** to that group's wiki. Below 2 → **kept**
+     to cite, so it does not count). ≥2 → **promoted** to that group's wiki; its items without a
+     `source` reach no page writer, so they stay **kept** (not cleared), each **expired** once its
+     `date` is more than 90 days before today. Below 2 → **kept**
      (not written, not cleared), unless every item in it has a `date` more than 90 days before
      today → **expired** (cleared in step 8, logged in step 9). An undated item never expires,
      so its cluster is kept. `--min` and `-yolo` thresholds do not apply.
@@ -416,7 +418,8 @@ wiki, group findings never to `knowledge`.
    cleared and before the commit (as in § Ingest): release every lock and report `error` and
    `page`; every candidate is still in place for the next harvest. Then write every id the harvest saw — picked, skipped, dropped, promoted and expired —
    except the items of a failed page writer, of clusters kept (`--min` below n, group below 2 and
-   not expired, `group: null` not expired), of a group whose lock was not held or whose wiki could
+   not expired, `group: null` not expired, a promoted cluster's items without a `source` and not
+   expired), of a group whose lock was not held or whose wiki could
    not be created (step 5) — its prefilter-dropped ids included — and ids missing from a receipt, to a JSON array file and run `scripts/wiki clear-candidates --ids
    <file.json>` (clears from either section); `removed` must equal the number of ids in that
    file. Kept and failed-writer items stay as candidates for the next harvest. A group chunk's
