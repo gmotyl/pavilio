@@ -351,7 +351,8 @@ describe("MockupFrame fullscreen enter is idempotent and moves focus", () => {
     fireEvent.keyDown(window, { key: "Escape" });
 
     await waitFor(() => expect(layer()).toBeNull());
-    expect(document.activeElement).toBe(toggle());
+    // Focus moves in an effect, which can land after the DOM already shows the layer gone.
+    await waitFor(() => expect(document.activeElement).toBe(toggle()));
   });
 });
 
@@ -380,7 +381,8 @@ describe("MockupFrame fullscreen exit after a navigation inside the frame", () =
     expect(window.location.pathname).toBe("/mock");
     expect(pushState).toHaveBeenCalledTimes(1);
     expect(frame()).toBe(before);
-    expect(document.activeElement).toBe(toggle());
+    // Focus moves in an effect, which can land after the DOM already shows the layer gone.
+    await waitFor(() => expect(document.activeElement).toBe(toggle()));
   });
 
   it("escape still leaves fullscreen when the pop only stepped the frame", async () => {
@@ -404,9 +406,13 @@ describe("MockupFrame fullscreen exit after a navigation inside the frame", () =
     await waitFor(() => expect(layer()).toBeNull());
     expect(go).toHaveBeenCalledTimes(1);
 
-    // The lock is released: fullscreen enters and leaves again.
-    enter();
-    expect(layer()).not.toBeNull();
+    // The lock is released: fullscreen enters and leaves again. The release is an
+    // effect of the location change, which can land after the DOM already shows
+    // the layer gone; an Enter before it is ignored, so try until one takes.
+    await waitFor(() => {
+      enter();
+      expect(layer()).not.toBeNull();
+    });
     expect(pushState).toHaveBeenCalledTimes(2);
     fireEvent.click(exitButton()!);
     await waitFor(() => expect(layer()).toBeNull());
@@ -488,7 +494,8 @@ describe("MockupFrame fullscreen marker under a routed navigation", () => {
     back();
     await waitFor(() => expect(layer()).not.toBeNull());
     expect(window.location.pathname).toBe("/mock");
-    expect(document.activeElement).toBe(exitButton());
+    // Focus moves in an effect, which can land after the DOM already shows the layer.
+    await waitFor(() => expect(document.activeElement).toBe(exitButton()));
     // It stays: StrictMode's replayed cleanup does not pop it again.
     await new Promise((r) => setTimeout(r, 20));
     expect(layer()).not.toBeNull();
