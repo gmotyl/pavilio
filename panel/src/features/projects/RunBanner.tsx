@@ -12,7 +12,7 @@ import {
 } from "./ObjectiveField";
 import { resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
-import { useProjectLauncher } from "./useProjectLauncher";
+import { BLOCKED_TEXT, NO_LAUNCHER_TEXT, useProjectLauncher } from "./useProjectLauncher";
 
 /**
  * The banner above a change's `tasks.md`. Once every box is checked it is the
@@ -87,9 +87,6 @@ export interface RunBannerProps {
    */
   onArchive?: (run: { launcher: TerminalLauncher }) => void | Promise<unknown>;
 }
-
-/** Why a whole-line launcher cannot run, in the banner and on its disabled Run. */
-const BLOCKED_TEXT = "This launcher's run loop is a whole command line";
 
 /**
  * The project's Overview, where its Agent CLI is chosen. `explicit` skips the
@@ -170,7 +167,7 @@ function useRunLauncher(project: string) {
  */
 function CliLabel({ project, launcher }: { project: string; launcher: TerminalLauncher | null }) {
   if (!launcher) {
-    return <span className="run-banner-none">No launcher has a run loop — add one in Settings</span>;
+    return <span className="run-banner-none">{NO_LAUNCHER_TEXT}</span>;
   }
   return (
     <Link

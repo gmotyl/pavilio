@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import type { ChecksState } from "../../../server/lib/prs/provider";
 import type { PullRequest } from "./usePrs";
 import "./Prs.css";
@@ -11,7 +11,15 @@ interface Props {
   tabbable?: boolean;
   onFocus?: () => void;
   onOpen: (pr: PullRequest) => void;
+  /** Buttons drawn at the right; their clicks and keys never reach the row, so they don't open it. */
+  actions?: ReactNode;
 }
+
+const keepClick = (e: MouseEvent) => e.stopPropagation();
+/** Enter/Space press the button only; Arrow/Home/End still bubble to the list's roving focus. */
+const keepActivation = (e: KeyboardEvent) => {
+  if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+};
 
 /** `pr=` value in the URL; the Review view resolves the repo name back to its path. */
 export const prKey = (pr: Pick<PullRequest, "repo" | "number">) => `${pr.repo}#${pr.number}`;
@@ -22,7 +30,8 @@ const NAV_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
 export function moveListFocus(e: KeyboardEvent<HTMLElement>) {
   if (!NAV_KEYS.includes(e.key)) return;
   const options = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
-  const at = options.indexOf(document.activeElement as HTMLElement);
+  // From a row's own button too: the option holding focus, not just a focused option.
+  const at = options.indexOf(document.activeElement?.closest<HTMLElement>('[role="option"]') as HTMLElement);
   const last = options.length - 1;
   const to =
     e.key === "Home" ? 0 : e.key === "End" ? last : e.key === "ArrowDown" ? Math.min(at + 1, last) : Math.max(at - 1, 0);
@@ -64,7 +73,7 @@ function badge(pr: PullRequest, me: string | null): [string, string] | null {
   return null;
 }
 
-export default function PrRow({ pr, me, selected = false, tabbable = true, onFocus, onOpen }: Props) {
+export default function PrRow({ pr, me, selected = false, tabbable = true, onFocus, onOpen, actions }: Props) {
   const chk = CHECKS[pr.checks];
   const b = badge(pr, me);
   return (
@@ -99,6 +108,12 @@ export default function PrRow({ pr, me, selected = false, tabbable = true, onFoc
         {chk && (
           <span className={`pr-chk pr-chk-${pr.checks}`} title={chk[1]} aria-label={chk[1]}>
             {chk[0]}
+          </span>
+        )}
+        {actions && (
+          // Not a control: it only fences the row's open-on-click/Enter off its buttons.
+          <span className="pr-actions" onClick={keepClick} onKeyDown={keepActivation}>
+            {actions}
           </span>
         )}
       </span>

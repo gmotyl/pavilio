@@ -167,6 +167,16 @@ export function archiveRunLine(launcher: TerminalLauncher, change: string): stri
 }
 
 /**
+ * Whether an Explain run can name this PR at all, whatever the launcher:
+ * `project` and `repo` are slugs ({@link CHANGE_ID}) and `number` a positive
+ * integer. {@link explainRunLine} is null otherwise; a caller uses this to
+ * tell an unnamable PR from a launcher that is not ready.
+ */
+export function explainable(project: string, repo: string, number: number): boolean {
+  return CHANGE_ID.test(project) && CHANGE_ID.test(repo) && Number.isInteger(number) && number > 0;
+}
+
+/**
  * The line an Explain run types for `launcher`: `/pavilio-pr-explain
  * <project> <repo>#<number>` as the start prompt on its own, NOT wrapped in
  * the run loop — like {@link archiveRunLine}, one interactive session. Null
@@ -180,8 +190,7 @@ export function explainRunLine(
   repo: string,
   number: number,
 ): string | null {
-  if (!CHANGE_ID.test(project) || !CHANGE_ID.test(repo)) return null;
-  if (!Number.isInteger(number) || number <= 0) return null;
+  if (!explainable(project, repo, number)) return null;
   const state = resolveRunLoop(launcher);
   if (state.kind !== "ready") return null;
   const prompt = `/pavilio-pr-explain ${project} ${repo}#${number}`;

@@ -2,6 +2,18 @@ import { preferences, type TerminalLauncher } from "../../preferences/declaratio
 import { usePreference } from "../../preferences/usePreference";
 import { resolveRunLoop, type RunLoopState } from "../agents/launcherRunLoop";
 
+/** Why a whole-line launcher cannot run: the run banner's blocked note and every disabled launch's title. */
+export const BLOCKED_TEXT = "This launcher's run loop is a whole command line";
+
+/** Why nothing can run when no launcher has a run loop at all. */
+export const NO_LAUNCHER_TEXT = "No launcher has a run loop — add one in Settings";
+
+/** Why `pick` cannot start a run, or null when its launcher is ready. */
+export function launcherBlockedReason(pick: Pick<ProjectLauncher, "launcher" | "state">): string | null {
+  if (pick.state?.kind === "ready") return null;
+  return pick.launcher ? BLOCKED_TEXT : NO_LAUNCHER_TEXT;
+}
+
 export interface ProjectLauncher {
   /**
    * The resolved launcher, or null when no launcher is offered at all. With
