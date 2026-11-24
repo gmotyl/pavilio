@@ -11,6 +11,13 @@
 /** A story header: path (with any `(before)`/`(unchanged)` marker), then `L<start>` or `L<start>–<end>`. */
 const STORY_HEADER = /^@@ (\S.*?) L(\d+)(?:[–-]\d+)? @@$/;
 
+/**
+ * `(before)` as a marker the skill writes after the path: preceded by
+ * whitespace and followed only by further `(…)` markers — never a `(before)`
+ * inside the path itself, such as a directory named so.
+ */
+const BEFORE_MARKER = /\s\(before\)(?:\s+\([^()]*\))*$/;
+
 type DiffLineKind = "header" | "context" | "added" | "removed" | "other";
 
 export interface StoryDiffLine {
@@ -40,7 +47,7 @@ export function numberStoryDiff(text: string): StoryDiffLine[] | null {
     if (kind === "header") {
       const [, path, start] = STORY_HEADER.exec(line)!;
       next = Number(start);
-      before = /\(before\)/.test(path);
+      before = BEFORE_MARKER.test(path);
       return { text: line, kind, number: null };
     }
     const counted = kind === "context" || (kind === (before ? "removed" : "added"));

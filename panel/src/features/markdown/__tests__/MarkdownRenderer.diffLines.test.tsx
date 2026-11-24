@@ -78,6 +78,18 @@ describe("MarkdownRenderer story diff line numbers", () => {
     expect(gutter(container)!.map(([n]) => n)).toEqual(["", "5", "6", "", "7"]);
   });
 
+  it("a (before) directory in the path is not the marker: the block numbers head lines", () => {
+    const { container } = renderMd(fence("diff", ["@@ src/(before)/file.ts L5–7 @@", " a", "-b", "+B", " c"]));
+    expect(gutter(container)!.map(([n]) => n)).toEqual(["", "5", "", "6", "7"]);
+  });
+
+  it("(before) followed by another marker still numbers base lines", () => {
+    const { container } = renderMd(
+      fence("diff", ["@@ src/(before)/file.ts (before) (unchanged) L5–7 @@", " a", "-b", "+B", " c"]),
+    );
+    expect(gutter(container)!.map(([n]) => n)).toEqual(["", "5", "6", "", "7"]);
+  });
+
   it("an (unchanged) block is numbered like any other", () => {
     const { container } = renderMd(fence("diff", ["@@ lib/x.ts (unchanged) L3–4 @@", " a", " b"]));
     expect(gutter(container)!.map(([n]) => n)).toEqual(["", "3", "4"]);
