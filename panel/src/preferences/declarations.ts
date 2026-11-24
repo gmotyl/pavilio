@@ -743,6 +743,19 @@ export const preferences = {
     codec: optionalStr,
     portable: true,
   }),
+  /**
+   * A project's own agent CLI, by launcher NAME, for the same reason as
+   * `plansRunLauncher`. `null` (stored blank) is "no pick": the project
+   * follows `plansRunLauncher`, then the first launcher with a ready run loop.
+   * A pick that names a launcher no longer offered falls through the same way.
+   */
+  projectRunLauncher: definePreference<string | null>({
+    key: "project.runLauncher", // was: nothing — new with the per-project agent CLI
+    scope: "project",
+    default: null,
+    codec: optionalStr,
+    portable: true,
+  }),
 
   // ── Git ──────────────────────────────────────────────────────────────────
   gitViewMode: definePreference<GitViewMode>({

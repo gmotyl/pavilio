@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ARCHIVE_OBJECTIVE,
   archiveRunLine,
+  explainRunLine,
   composeRunLine,
   resolveObjective,
   runLineParts,
@@ -239,5 +240,82 @@ describe("archiveRunLine", () => {
     expect(archiveRunLine(launcher, "a\nb")).toBeNull();
     expect(archiveRunLine(launcher, "web-push-when-closed")).not.toBeNull();
     expect(archiveRunLine(launcher, "v1.2_fix")).not.toBeNull();
+  });
+
+  it("archiveRunLine refuses a change id made only of dots", () => {
+    const launcher = { name: "mine", command: "cli", runLoop: "/goal {prompt}", promptFlag: "" };
+    // `.` and `..` name the directory itself or its parent, never a change.
+    for (const bad of [".", "..", "..."]) expect(archiveRunLine(launcher, bad)).toBeNull();
+    expect(archiveRunLine(launcher, "2026-11-24-pr-explain-story")).not.toBeNull();
+    expect(archiveRunLine(launcher, ".hidden")).not.toBeNull();
+  });
+});
+
+describe("explainRunLine", () => {
+  const launcher = { name: "mine", command: "claude", runLoop: "/goal {prompt}", promptFlag: "" };
+
+  it("explainRunLine composes the skill prompt without the run loop", () => {
+    const line = explainRunLine(launcher, "pavilio", "pavilio", 239);
+    expect(line).toBe(
+      "claude 'Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project pavilio and PR pavilio#239.'",
+    );
+    expect(line).not.toContain("/goal");
+    expect(
+      explainRunLine(
+        { name: "mine", command: "tool", runLoop: "/goal {prompt}", promptFlag: "--prompt" },
+        "pavilio",
+        "web.app_v2",
+        7,
+      ),
+    ).toBe(
+      "tool --prompt 'Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project pavilio and PR web.app_v2#7.'",
+    );
+  });
+
+  it("explainRunLine names the SKILL.md path instead of a CLI slash command", () => {
+    // Claude Code only knows `/pavilio-pr-explain` where a command wrapper was
+    // installed; a plain-language prompt naming the file works for every CLI.
+    const line = explainRunLine(launcher, "woozle", "woo-dev-be", 375) ?? "";
+    expect(line).toContain("skills/pavilio-pr-explain/SKILL.md");
+    expect(line).not.toMatch(/(^|[\s'])\/pavilio-pr-explain/);
+    expect(line.startsWith("claude '/")).toBe(false);
+  });
+
+  it("explainRunLine carries the project, the repo and the PR number", () => {
+    const line = explainRunLine(launcher, "woozle", "woo-dev-be", 375) ?? "";
+    expect(line).toContain("project woozle");
+    expect(line).toContain("PR woo-dev-be#375");
+  });
+
+  it("explainRunLine refuses non-slug project or repo", () => {
+    for (const bad of ["a b", "it's", 'a"b', "$HOME", "org/repo", "", "a\nb"]) {
+      expect(explainRunLine(launcher, bad, "pavilio", 1)).toBeNull();
+      expect(explainRunLine(launcher, "pavilio", bad, 1)).toBeNull();
+    }
+  });
+
+  it("explainRunLine refuses a project or repo made only of dots", () => {
+    for (const bad of [".", "..", "..."]) {
+      expect(explainRunLine(launcher, bad, "pavilio", 1)).toBeNull();
+      expect(explainRunLine(launcher, "pavilio", bad, 1)).toBeNull();
+    }
+  });
+
+  it("explainRunLine refuses a bad PR number", () => {
+    for (const bad of [0, -3, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(explainRunLine(launcher, "pavilio", "pavilio", bad)).toBeNull();
+    }
+  });
+
+  it("explainRunLine is null for a launcher that is not ready", () => {
+    expect(
+      explainRunLine(
+        { name: "mine", command: "claude", runLoop: 'claude "/goal {prompt}"' },
+        "pavilio",
+        "pavilio",
+        239,
+      ),
+    ).toBeNull();
+    expect(explainRunLine({ name: "mine", command: "tool" }, "pavilio", "pavilio", 239)).toBeNull();
   });
 });

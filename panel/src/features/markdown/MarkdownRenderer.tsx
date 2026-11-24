@@ -7,6 +7,7 @@ import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
 import WikiLinkHoverCard from "./WikiLinkHoverCard";
+import { HLJS_CLASS, numberStoryDiff } from "./storyDiff";
 import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
 import remarkWikiLinks, {
   owningProject,
@@ -319,6 +320,26 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
                 <MermaidDiagram chart={chart} />
               </Suspense>
             </span>
+          );
+        }
+        // A PR-explain story's diff block gets a line-number gutter. The
+        // numbers live in `data-line` and are drawn by CSS (`.diff-line::before`),
+        // so selecting and copying the code never picks them up; the copy
+        // button reads the original children in the `pre` override.
+        const storyLines = isBlock === true && /language-diff/.test(className || "") ? numberStoryDiff(extractText(children)) : null;
+        if (storyLines) {
+          return (
+            <code className={className} {...props}>
+              {storyLines.map((line, i) => {
+                const hljs = HLJS_CLASS[line.kind];
+                return (
+                  <span key={i} className="diff-line" data-line={line.number ?? ""}>
+                    {hljs ? <span className={hljs}>{line.text}</span> : line.text}
+                    {"\n"}
+                  </span>
+                );
+              })}
+            </code>
           );
         }
         const code = <code className={className} {...props}>{children}</code>;

@@ -135,8 +135,12 @@ export function taskRunLine(launcher: TerminalLauncher, objective: string): stri
   return composeRunLine(launcher.command, state.promptFlag, state.runLoop, objective);
 }
 
-/** What a change id an Archive run accepts looks like: one slug, nothing else. */
-const CHANGE_ID = /^[A-Za-z0-9._-]+$/;
+/**
+ * What a change id an Archive run accepts looks like: one slug, nothing else.
+ * It must hold a letter or digit, so `.`, `..` and other all-dot names (the
+ * directory itself, its parent) are refused.
+ */
+const CHANGE_ID = /^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]+$/;
 
 /**
  * The objective an Archive run types: the user has approved the manual checks
@@ -164,4 +168,48 @@ export function archiveRunLine(launcher: TerminalLauncher, change: string): stri
   if (state.kind !== "ready") return null;
   const objective = ARCHIVE_OBJECTIVE.replace("{change}", () => change);
   return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(objective)}'`;
+}
+
+/**
+ * Whether an Explain run can name this PR at all, whatever the launcher:
+ * `project` and `repo` are slugs ({@link CHANGE_ID}) and `number` a positive
+ * integer. {@link explainRunLine} is null otherwise; a caller uses this to
+ * tell an unnamable PR from a launcher that is not ready.
+ */
+export function explainable(project: string, repo: string, number: number): boolean {
+  return CHANGE_ID.test(project) && CHANGE_ID.test(repo) && Number.isInteger(number) && number > 0;
+}
+
+/**
+ * The objective an Explain run types. `{project}`, `{repo}` and `{number}` are
+ * filled in; the skill is named by its file, RELATIVE to the cell's cwd (the
+ * workspace root, D16 — see `expandCommand`), never as `/pavilio-pr-explain`:
+ * a slash command exists only where a CLI has a wrapper for it installed
+ * (Claude Code's `.claude/commands/`, opencode's `.opencode/commands/`), and a
+ * workspace without one turns the run into "Unknown command". Plain language
+ * works for every launcher.
+ */
+const EXPLAIN_OBJECTIVE =
+  "Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project {project} and PR {repo}#{number}.";
+
+/**
+ * The line an Explain run types for `launcher`: {@link EXPLAIN_OBJECTIVE} —
+ * the skill file plus project, repo and PR number — as the start prompt on
+ * its own, NOT wrapped in the run loop; like {@link archiveRunLine}, one
+ * interactive session. Null when the launcher's run loop is not ready, when
+ * `project` or `repo` is not a slug ({@link CHANGE_ID}: they land in a prompt
+ * the agent reads), or when `number` is not a positive integer.
+ */
+export function explainRunLine(
+  launcher: TerminalLauncher,
+  project: string,
+  repo: string,
+  number: number,
+): string | null {
+  if (!explainable(project, repo, number)) return null;
+  const state = resolveRunLoop(launcher);
+  if (state.kind !== "ready") return null;
+  const vars: Record<string, string> = { project, repo, number: String(number) };
+  const prompt = EXPLAIN_OBJECTIVE.replace(/\{(project|repo|number)\}/g, (_, name: string) => vars[name]);
+  return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(prompt)}'`;
 }

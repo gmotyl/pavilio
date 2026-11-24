@@ -27,6 +27,7 @@ import mobileAccessRouter from "./routes/mobile-access.js";
 import projectsRouter from "./routes/projects.js";
 import mockupsRouter from "./routes/mockups.js";
 import markRouter from "./routes/mark.js";
+import qaRouter from "./routes/qa.js";
 import { rebuildIndex } from "./lib/file-index.js";
 import filesRouter from "./routes/files.js";
 import gitRouter from "./routes/git.js";
@@ -267,6 +268,7 @@ export async function startPanel(
 
   app.use("/api/projects", mockupsRouter);
   app.use("/api/projects", markRouter);
+  app.use("/api/projects", qaRouter);
   app.use("/api/projects", projectsRouter);
   app.use("/api/files", filesRouter);
   app.use("/api/skills", skillsRouter);

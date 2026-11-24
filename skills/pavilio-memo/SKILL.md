@@ -9,7 +9,7 @@ Capture a thought or note with light adjustments to make it clear and understand
 
 ## Shared memo contract
 
-This skill owns project resolution, memo storage, naming, edit preservation, and panel links. Read and apply this section when using `pavilio-memo-*` or [[pavilio-pr-explain]]. Those skills supply their own content workflow; do not run the quick-capture cleanup again or flatten diagrams, research, or interview results into a short note. Keep these shared rules here rather than copying them into each derivative.
+This skill owns project resolution, memo storage, naming, edit preservation, and panel links. Read and apply this section when using `pavilio-memo-*`. Those skills supply their own content workflow; do not run the quick-capture cleanup again or flatten diagrams, research, or interview results into a short note. Keep these shared rules here rather than copying them into each derivative.
 
 ### Resolve the destination
 

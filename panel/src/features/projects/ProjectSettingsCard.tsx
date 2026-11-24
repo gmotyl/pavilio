@@ -2,16 +2,17 @@ import { Settings } from "lucide-react";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { ProjectVoiceSelect } from "../speech/ProjectVoiceSelect";
+import { AgentCliSelect } from "./AgentCliSelect";
 import AppearanceEditor from "./AppearanceEditor";
 
 /**
  * The project's own settings, on its Overview tab: the voice its terminals'
- * answers are read in, how far the answer panel's bottom edge fades, and the
+ * answers are read in, the agent CLI its runs start, how far the answer panel's bottom edge fades, and the
  * mark and colour that identify it.
  *
  * Each row's control brings its own label and help where it has them — the
  * voice select renders "Speech voice", its help line and the "overrides
- * default" tag itself, so the card adds none of those.
+ * default" tag itself, as does the Agent CLI row, so the card adds none of those.
  */
 export default function ProjectSettingsCard({ project }: { project: string }) {
   const titleId = `project-settings-${project}`;
@@ -32,6 +33,9 @@ export default function ProjectSettingsCard({ project }: { project: string }) {
       </div>
       <div className="px-3.5 py-3">
         <ProjectVoiceSelect project={project} />
+      </div>
+      <div className="px-3.5 py-3" style={{ borderTop: "1px solid var(--border-subtle)" }}>
+        <AgentCliSelect project={project} />
       </div>
       <div className="px-3.5 py-3" style={{ borderTop: "1px solid var(--border-subtle)" }}>
         <AnswerOpacitySlider project={project} />

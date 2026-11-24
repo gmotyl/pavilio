@@ -352,6 +352,20 @@ code, pre, .font-mono {
   position: relative;
 }
 
+/* Line-number gutter of a PR-explain story's diff block (`storyDiff.ts`). The
+   number is generated content from `data-line`, never text, so a selection or
+   copy of the code cannot pick it up; a removed line gets an empty cell. */
+.diff-line::before {
+  content: attr(data-line);
+  display: inline-block;
+  min-width: 4ch;
+  margin-right: 1.5ch;
+  text-align: right;
+  color: var(--text-tertiary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .code-block > button {
   position: absolute;
   top: 0.5rem;
@@ -2045,34 +2059,24 @@ input[type="checkbox"] {
   background: var(--bg-hover);
 }
 
-/* The CLI switch: a segmented control one size down, mono because each option
-   is the name of a binary. */
-.run-banner-cli {
-  display: inline-flex;
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.run-banner-cli button {
-  padding: 2px 7px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 10.5px;
+/* `via <cli>`: the project's Agent CLI, named and linked to the Overview
+   where it is changed. Read as a label; the dotted rule says it is a link. */
+.run-banner-via {
+  font-size: 11.5px;
   color: var(--text-secondary);
-  transition: color var(--transition-fast), background var(--transition-fast);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-tertiary);
+  white-space: nowrap;
+  transition: color var(--transition-fast);
 }
 
-.run-banner-cli button + button {
-  border-left: 1px solid var(--border-default);
+.run-banner-via b {
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
-.run-banner-cli button:hover {
-  background: var(--bg-hover);
-}
-
-.run-banner-cli button[data-on] {
-  background: var(--accent-dim);
-  color: var(--accent);
+.run-banner-via:hover {
+  color: var(--text-primary);
 }
 
 .run-banner-none {

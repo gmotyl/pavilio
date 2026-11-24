@@ -186,6 +186,27 @@ describe("PlansTab run banner", () => {
     expect(await screen.findByText("terminal view")).toBeTruthy();
   });
 
+  it("Run starts the project's Agent CLI, named by a via link to the Overview", async () => {
+    writePreference(preferences.terminalLaunchers, [
+      ...LAUNCHERS,
+      { name: "codex", command: "codex --no-daemon", runLoop: "/goal {prompt}" },
+    ]);
+    writePreference(preferences.projectRunLauncher, "codex", "alokai");
+    open(ACTIVE_TASKS);
+    await screen.findByText("Step two pending");
+
+    expect(screen.queryByRole("group", { name: "CLI" })).toBeNull();
+    expect(screen.getByRole("link", { name: "via codex" })).toHaveAttribute(
+      "href",
+      "/project/alokai",
+    );
+    const run = screen.getByRole("button", { name: "Run" });
+    await waitFor(() => expect(run).not.toBeDisabled());
+    fireEvent.click(run);
+    await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(startTaskRun).mock.calls[0][0].runLine).toMatch(/^codex --no-daemon '\/goal /);
+  });
+
   it("the run line names the plan by its workspace-relative path", async () => {
     open(ACTIVE_TASKS);
     await screen.findByText("Step two pending");
