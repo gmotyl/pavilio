@@ -435,7 +435,9 @@ describe("FileViewer", () => {
   });
 
   it("split view pages paired rows, so a replaced block never shows false blanks", () => {
-    const n = 3000;
+    // 2n raw rows overflow a page, n paired rows fit it: paging raw rows would cut the block mid-way.
+    rowPage.size = 50;
+    const n = 40;
     const diff = [
       "--- a/big.txt",
       "+++ b/big.txt",
