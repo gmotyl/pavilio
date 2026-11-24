@@ -61,7 +61,8 @@ call or read any other plugin's story tooling.
 
 - **Workspace root** = the notes workspace (the one holding `projects/` and `skills/`), not the code
   repo being explained. Project folder: the `.projects.local.md` Notes Path when present, else
-  `<workspace>/projects/<project>/`.
+  `<workspace>/projects/<project>/`. The QA-tab link (§8) works only for a story under
+  `<workspace>/projects/`; for a Notes Path elsewhere, report the saved path instead of a link.
 - **Ref forms:**
   - `<repo>#<n>`: PR `<n>` in the repo named `<repo>`;
   - a GitHub PR URL: the PR it names; the repo is the `repos.json` entry whose `origin` is that
@@ -92,6 +93,18 @@ Run `git -C <path> fetch origin --quiet` first.
   `gh pr list --head <branch> --state open` once: an open PR for that branch → treat it as that PR.
 - **Empty range** (`git log --oneline <merge-base>..<head>` prints nothing) → write no file; report
   that there is nothing to tell.
+- **Fetch refused** (e.g. a read-only, root-owned clone): go on without fetching, in this order.
+  1. `refs/pavilio/pr/<n>` (written by the panel's PR review on open, with
+     `refs/pavilio/pr-base/<n>` = the base branch tip at that time):
+     `git -C <path> rev-parse --verify refs/pavilio/pr/<n>^{commit}` is `head`, and
+     `git merge-base refs/pavilio/pr-base/<n> <head>` the merge-base when that ref exists (else
+     `origin/<baseRefName>`). These refs are only as fresh as the panel's last open of the PR.
+  2. Else `gh api repos/<owner>/<repo>/pulls/<n> --jq .head.sha`, accepted only when
+     `git -C <path> cat-file -e <sha>^{commit}` succeeds.
+  3. Else write no file; report that the head commit is not in the local clone, and stop. Never
+     guess a head.
+
+  Say which source pinned `head` (fetch, `refs/pavilio`, or `gh api`) in the report.
 
 ## 3. Read the change and its reasons
 
@@ -287,7 +300,7 @@ skill exists, skip this step silently.
 ## 8. Report
 
 A few lines, no questions:
-- what the story covers (its chapter headings) and the head/base it was built from;
+- what the story covers (its chapter headings) and the head/base it was built from, and which source pinned the head (§2);
 - the defaults taken (this PR only, uncommitted changes ignored, an existing story overwritten);
 - where the reasoning is missing, or where you think the change is wrong.
 
