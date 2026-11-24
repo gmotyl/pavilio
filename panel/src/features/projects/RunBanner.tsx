@@ -4,7 +4,6 @@ import { Archive, CheckCircle2, ChevronDown, ChevronRight, Play } from "lucide-r
 
 import { preferences, type TerminalLauncher } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { resolveRunLoop, type RunLoopState } from "../agents/launcherRunLoop";
 import {
   ObjectiveField,
   ObjectiveOverrideMarker,
@@ -13,6 +12,7 @@ import {
 } from "./ObjectiveField";
 import { resolveObjective, runLineParts, takesPrompt } from "./runPrompt";
 import type { TaskListStatus } from "./taskList";
+import { useProjectLauncher } from "./useProjectLauncher";
 
 /**
  * The banner above a change's `tasks.md`. Once every box is checked it is the
@@ -21,6 +21,10 @@ import type { TaskListStatus } from "./taskList";
  *
  * While boxes are unchecked it is the run banner: how much is left, which CLI a run would start, and the objective it would
  * start with — shown RESOLVED, so what is read is what is sent.
+ *
+ * The CLI is the project's Agent CLI ({@link useProjectLauncher}), chosen on
+ * the project's Overview. The banner only names it — `via <cli>`, a link to
+ * that Overview — and never offers a switch or writes a pick.
  *
  * The objective is a saved field ({@link ObjectiveField}): an edit becomes
  * this project's objective when the box loses focus, and a Run while it still
@@ -31,31 +35,29 @@ import type { TaskListStatus } from "./taskList";
  * editable: `command [flag] '` and the rest of its RESOLVED run loop
  * (`resolveRunLoop`), so a list saved before the run loop existed, or one
  * holding PR #131's whole-line defaults, draws what it will send. It belongs
- * to the launcher entry, not to the template, and it redraws when the CLI
- * switch moves. A run loop with no `{prompt}` sends no objective, so the field
- * is disabled and says so rather than being dropped silently.
+ * to the launcher entry, not to the template, and it redraws when the
+ * project's Agent CLI changes. A run loop with no `{prompt}` sends no
+ * objective, so the field is disabled and says so rather than being dropped
+ * silently.
  *
- * The switch offers every launcher with a run loop — ready ones, and ones
- * whose run loop is a whole command line (it starts with the command's own
- * word). The latter is offered only so choosing it says what is wrong: the
- * warning takes the wrapper's place, and Run and ⌘↵ do nothing, since the
- * line would spawn the CLI inside its own argument.
- *
- * The switch remembers the last CLI picked, by name, for every change
- * (`plansRunLauncher`), so a run is not a question asked every time.
+ * A project's Agent CLI may be one whose run loop is a whole command line (it
+ * starts with the command's own word). Then the warning takes the wrapper's
+ * place, pointing at the Overview, and Run, Archive and ⌘↵ do nothing, since
+ * the line would spawn the CLI inside its own argument.
  *
  * Collapse is one remembered toggle for every change (`plansBannerExpanded`),
- * and the collapsed row keeps the count, the switch and Run, so a plan that is
- * only being read costs a single row and can still be started from it.
+ * and the collapsed row keeps the count, the `via <cli>` label and Run, so a
+ * plan that is only being read costs a single row and can still be started
+ * from it.
  *
  * Right of Run sits Archive ({@link ArchiveButton}), on the collapsed row too;
- * on the done banner it is the only action, next to the CLI switch. With
+ * on the done banner it is the only action, next to the `via <cli>` label. With
  * unchecked tasks the first click only arms it, and a second within
  * {@link ARCHIVE_CONFIRM_MS} archives.
  *
- * This component does not spawn anything. `onRun` receives the chosen
+ * This component does not spawn anything. `onRun` receives the project's
  * launcher and the objective, composes the line and owns the session;
- * `onArchive` receives the chosen launcher the same way.
+ * `onArchive` receives the project's launcher the same way.
  */
 export interface RunBannerProps {
   status: TaskListStatus;
@@ -73,13 +75,13 @@ export interface RunBannerProps {
    */
   path: string | null;
   /**
-   * Called with the chosen launcher — always one whose run loop resolves
+   * Called with the project's launcher — always one whose run loop resolves
    * ready — and the objective to send. A returned promise disables Run and
    * Archive until it settles, so one click cannot start two sessions.
    */
   onRun: (run: { launcher: TerminalLauncher; objective: string }) => void | Promise<unknown>;
   /**
-   * Called with the chosen launcher — always a ready one — to archive the
+   * Called with the project's launcher — always a ready one — to archive the
    * change. A returned promise disables Archive and Run until it settles.
    * Without it no Archive control is drawn (e.g. an already archived change).
    */
@@ -90,16 +92,25 @@ export interface RunBannerProps {
 const BLOCKED_TEXT = "This launcher's run loop is a whole command line";
 
 /**
- * {@link BLOCKED_TEXT} drawn where it is read, with where to fix it. The
- * disabled Run and Archive point at it through `aria-describedby`, since a
- * disabled button's `title` is neither hovered nor focused.
+ * The project's Overview, where its Agent CLI is chosen. `explicit` skips the
+ * resume-where-you-left-off redirect, so the link lands on the Overview.
  */
-function BlockedNote({ id }: { id: string }) {
+function overviewLink(project: string) {
+  return { to: `/project/${encodeURIComponent(project)}`, state: { explicit: true } };
+}
+
+/**
+ * {@link BLOCKED_TEXT} drawn where it is read, with where to fix it: the
+ * project's Overview, where another Agent CLI can be picked. The disabled Run
+ * and Archive point at it through `aria-describedby`, since a disabled
+ * button's `title` is neither hovered nor focused.
+ */
+function BlockedNote({ id, project }: { id: string; project: string }) {
   return (
     <div className="run-banner-blocked" data-testid="run-banner-blocked" id={id}>
-      {BLOCKED_TEXT} — fix it in{" "}
-      <Link to="/settings" className="run-banner-blocked-link">
-        Settings
+      {BLOCKED_TEXT} — pick another Agent CLI in the{" "}
+      <Link {...overviewLink(project)} className="run-banner-blocked-link">
+        Overview
       </Link>
     </div>
   );
@@ -110,36 +121,6 @@ const ARCHIVE_CONFIRM_MS = 4_000;
 
 /** Past this many tasks one segment per task is thinner than the gap between them. */
 const MAX_SEGMENTS = 48;
-
-type Offered = { launcher: TerminalLauncher; state: Exclude<RunLoopState, { kind: "none" }> };
-
-/**
- * The launchers the CLI switch offers, each with its resolved run loop: ready
- * ones and whole-line ones, never those not offered for runs.
- */
-function offered(launchers: TerminalLauncher[]): Offered[] {
-  return launchers.flatMap((launcher) => {
-    const state = resolveRunLoop(launcher);
-    return state.kind === "none" ? [] : [{ launcher, state }];
-  });
-}
-
-/**
- * Which runnable launcher is checked. By NAME, so a reordered or shortened
- * list keeps the pick on the same CLI: this banner's own pick first (its
- * position when that still holds the same name), else the remembered name,
- * else — nothing picked, or the pick gone or no longer runnable — the first.
- */
-function resolvePick(
-  options: { name: string }[],
-  picked: { index: number; name: string } | null,
-  remembered: string | null,
-): number {
-  if (picked && options[picked.index]?.name === picked.name) return picked.index;
-  const name = picked?.name ?? remembered;
-  const at = name === null ? -1 : options.findIndex((entry) => entry.name === name);
-  return at < 0 ? 0 : at;
-}
 
 export function RunBanner(props: RunBannerProps) {
   // Decided before any hook: the done banner reads no fold preference, so the
@@ -171,60 +152,35 @@ function TaskProgress({ total, done }: { total: number; done: number }) {
 }
 
 /**
- * The CLI switch's state: the launchers offered, the one checked and how its
- * run loop resolves. Shared by the run banner and the done banner, so both
- * remember the same pick (`plansRunLauncher`).
+ * The project's Agent CLI as the banners use it: the launcher, its run loop
+ * when ready, and whether it is blocked (a whole command line). Read only —
+ * the pick is made on the Overview. A non-null launcher is not a runnable
+ * one: only `ready` lets Run and Archive start.
  */
-function useRunLauncher() {
-  const [launchers] = usePreference(preferences.terminalLaunchers);
-  const entries = offered(launchers);
-  const options = entries.map((entry) => entry.launcher);
-  const [remembered, setRemembered] = usePreference(preferences.plansRunLauncher);
-  // This banner's own pick carries its position too, so of two launchers that
-  // share a name the one clicked stays checked; the preference keeps the name.
-  const [picked, setPicked] = useState<{ index: number; name: string } | null>(null);
-  const pickedIndex = resolvePick(options, picked, remembered);
-  const launcher = options[pickedIndex];
-  const state = entries[pickedIndex]?.state;
+function useRunLauncher(project: string) {
+  const { launcher, state } = useProjectLauncher(project);
   const ready = state?.kind === "ready" ? state : null;
   const blocked = state?.kind === "wholeLine";
-  const pick = (index: number) => {
-    // The pressed one again changes nothing, so it writes nothing: with no CLI
-    // remembered yet it would otherwise store the default nobody chose.
-    if (index === pickedIndex) return;
-    const name = options[index].name;
-    setPicked({ index, name });
-    setRemembered(name);
-  };
-  return { options, pickedIndex, pick, launcher, ready, blocked };
+  return { launcher, ready, blocked };
 }
 
-type RunLauncher = ReturnType<typeof useRunLauncher>;
-
-function CliSwitch({ options, pickedIndex, pick }: RunLauncher) {
-  if (options.length === 0) {
+/**
+ * `via <cli>`: the project's Agent CLI, named and linked to the Overview
+ * where it is changed. With no launcher offered at all, where to add one.
+ */
+function CliLabel({ project, launcher }: { project: string; launcher: TerminalLauncher | null }) {
+  if (!launcher) {
     return <span className="run-banner-none">No launcher has a run loop — add one in Settings</span>;
   }
-  // Toggle buttons, as the panel's other one-of-n switches are (MockupFrame's
-  // widths, the colour presets): each is a Tab stop and Enter/Space picks it,
-  // and the pick reaches assistive tech through `aria-pressed` rather than
-  // colour alone.
   return (
-    <div className="run-banner-cli" role="group" aria-label="CLI">
-      {options.map((entry, index) => (
-        <button
-          // Index keys: names may repeat.
-          key={index}
-          type="button"
-          data-testid={`run-banner-cli-${index}`}
-          aria-pressed={index === pickedIndex}
-          data-on={index === pickedIndex || undefined}
-          onClick={() => pick(index)}
-        >
-          {entry.name}
-        </button>
-      ))}
-    </div>
+    <Link
+      {...overviewLink(project)}
+      className="run-banner-via"
+      data-testid="run-banner-via"
+      title="Change in Overview → Project settings"
+    >
+      via <b>{launcher.name}</b>
+    </Link>
   );
 }
 
@@ -267,7 +223,7 @@ function ArchiveButton({
   describedBy,
   onArchive,
 }: {
-  launcher: TerminalLauncher | undefined;
+  launcher: TerminalLauncher | null;
   ready: boolean;
   blocked: boolean;
   unchecked: number;
@@ -293,7 +249,7 @@ function ArchiveButton({
     setArmed(null);
   }, [path]);
 
-  const canArchive = ready && launcher !== undefined && !gate.busy;
+  const canArchive = ready && launcher !== null && !gate.busy;
 
   const click = () => {
     if (!canArchive || !launcher) return;
@@ -324,16 +280,16 @@ function ArchiveButton({
 
 /**
  * A finished change: the check and the count, and the bar full. It offers no
- * objective, Run or chevron — there is nothing left to run — only the CLI
- * switch and Archive; having no collapse, it is the same whether the run
+ * objective, Run or chevron — there is nothing left to run — only the
+ * `via <cli>` label and Archive; having no collapse, it is the same whether the run
  * banner was last left open or not.
  */
-function DoneBanner({ status, path, onArchive }: RunBannerProps) {
-  const cli = useRunLauncher();
+function DoneBanner({ status, project, path, onArchive }: RunBannerProps) {
+  const cli = useRunLauncher(project);
   const gate = useLaunchGate();
   const blockedNote = useId();
   // The done banner has no prompt row, so a blocked launcher's reason gets a
-  // row of its own under the switch rather than only Archive's title.
+  // row of its own under the label rather than only Archive's title.
   const showBlocked = Boolean(onArchive) && cli.blocked;
   const total = status.total;
   return (
@@ -351,7 +307,7 @@ function DoneBanner({ status, path, onArchive }: RunBannerProps) {
         {onArchive && (
           <>
             <span className="run-banner-grow" />
-            <CliSwitch {...cli} />
+            <CliLabel project={project} launcher={cli.launcher} />
             <ArchiveButton
               launcher={cli.launcher}
               ready={Boolean(cli.ready)}
@@ -365,7 +321,7 @@ function DoneBanner({ status, path, onArchive }: RunBannerProps) {
           </>
         )}
       </div>
-      {showBlocked && <BlockedNote id={blockedNote} />}
+      {showBlocked && <BlockedNote id={blockedNote} project={project} />}
       <TaskProgress total={total} done={total} />
     </section>
   );
@@ -379,8 +335,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
   // Mounted only while expanded; collapsed, the stored objective is sent.
   const field = useRef<ObjectiveFieldHandle>(null);
 
-  const cli = useRunLauncher();
-  const { launcher, ready, blocked } = cli;
+  const { launcher, ready, blocked } = useRunLauncher(project);
 
   const gate = useLaunchGate();
   const noPromptNote = useId();
@@ -422,7 +377,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
 
   const controls = (
     <>
-      <CliSwitch {...cli} />
+      <CliLabel project={project} launcher={launcher} />
       <button
         type="button"
         className="run-banner-run"
@@ -459,14 +414,15 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
         {controls}
         {/* No prompt row when collapsed, so a blocked launcher's reason wraps
             onto a line of its own, still the target of Run and Archive. */}
-        {blocked && <BlockedNote id={blockedNote} />}
+        {blocked && <BlockedNote id={blockedNote} project={project} />}
       </section>
     );
   }
 
-  const wrapper = ready
-    ? runLineParts(launcher.command, ready.promptFlag, ready.runLoop)
-    : { before: "", after: "" };
+  const wrapper =
+    ready && launcher
+      ? runLineParts(launcher.command, ready.promptFlag, ready.runLoop)
+      : { before: "", after: "" };
 
   return (
     <section className="run-banner" aria-label="Run this change">
@@ -479,7 +435,7 @@ function ActiveRunBanner({ status, project, path, onRun, onArchive }: RunBannerP
       <div className="run-banner-prompt" data-testid="run-banner-prompt">
         {/* A whole-line run loop draws no line: it would not be the one sent,
             since none is. What is wrong, and where to fix it, stands instead. */}
-        {blocked && <BlockedNote id={blockedNote} />}
+        {blocked && <BlockedNote id={blockedNote} project={project} />}
         {/* The launcher's, not the template's: drawn, never editable, and
             hidden from assistive tech, which reads the field by its name. */}
         {!blocked && (

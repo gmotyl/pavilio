@@ -214,6 +214,8 @@ describe("ObjectiveField", () => {
     writeOverride(preferences.taskPromptOverride, "b's own {project}", "b");
     const { rerender } = render(
       <RunBanner status={STATUS} project="a" path={PATH} onRun={vi.fn()} />,
+      // The `via <cli>` label is a router link.
+      { wrapper: MemoryRouter },
     );
 
     await user.click(objective());
@@ -238,6 +240,8 @@ describe("ObjectiveField", () => {
     writeOverride(preferences.taskPromptOverride, "b's own", "b");
     const { rerender } = render(
       <RunBanner status={STATUS} project="a" path={PATH} onRun={vi.fn()} />,
+      // The `via <cli>` label is a router link.
+      { wrapper: MemoryRouter },
     );
 
     await user.click(objective());
@@ -254,6 +258,8 @@ describe("ObjectiveField", () => {
     const user = userEvent.setup();
     const { unmount } = render(
       <RunBanner status={STATUS} project="pavilio" path={PATH} onRun={vi.fn()} />,
+      // The `via <cli>` label is a router link.
+      { wrapper: MemoryRouter },
     );
 
     await user.click(objective());
