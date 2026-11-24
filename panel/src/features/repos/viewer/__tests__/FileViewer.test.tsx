@@ -16,6 +16,17 @@ vi.mock("../rowPage", async (importOriginal) => {
   };
 });
 
+// Likewise the highlight cap: a test that crosses it sets a small one instead of building half a megabyte.
+const highlightLimit = vi.hoisted(() => ({ chars: undefined as number | undefined }));
+vi.mock("../highlightLimit", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../highlightLimit")>();
+  return {
+    get MAX_HIGHLIGHT_CHARS() {
+      return highlightLimit.chars ?? real.MAX_HIGHLIGHT_CHARS;
+    },
+  };
+});
+
 /** A ResizeObserver the test drives: `resize(width)` reports a new content width to every observer. */
 class DrivenResizeObserver {
   static all: DrivenResizeObserver[] = [];
@@ -64,6 +75,7 @@ const changed = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
 
 beforeEach(() => {
   rowPage.size = undefined;
+  highlightLimit.chars = undefined;
   DrivenResizeObserver.all = [];
   vi.stubGlobal("ResizeObserver", DrivenResizeObserver);
   stubFetch({}, { ok: true });
@@ -286,9 +298,10 @@ describe("FileViewer", () => {
   });
 
   it("a file too big to highlight links no specifiers, since comments are unknown", () => {
-    const pad = Array.from({ length: 5200 }, () => `const v = ${"1".repeat(90)};`);
+    highlightLimit.chars = 2000;
+    const pad = Array.from({ length: 20 }, () => `const v = ${"1".repeat(90)};`);
     const content = ["// see import x from './in-comment'", "import y from './real';", ...pad].join("\n");
-    expect(content.length).toBeGreaterThan(500_000);
+    expect(content.length).toBeGreaterThan(2000);
     const { container } = render(<FileViewer path="src/big.ts" content={content} defaultMode="code" onIdentifierClick={vi.fn()} />);
     expect(container.querySelector('tr[data-line="2"]')).not.toBeNull();
     expect(container.querySelectorAll(".fv-spec")).toHaveLength(0);

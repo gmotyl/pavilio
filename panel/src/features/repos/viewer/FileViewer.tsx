@@ -21,6 +21,7 @@ import {
   type Row,
 } from "./diffModel";
 import { detectLang, escapeHtml } from "./highlight";
+import { MAX_HIGHLIGHT_CHARS } from "./highlightLimit";
 import { ROW_PAGE } from "./rowPage";
 import { CopyIconButton } from "../../shell/CopyIconButton";
 import type { ReviewThread } from "../reviewThreads";
@@ -58,8 +59,6 @@ export interface FileViewerProps {
 
 const SPLIT_MIN_WIDTH = 720;
 const FLASH_MS = 1300;
-// highlight.js on a huge file stalls the tab; past this it renders plain.
-const MAX_HIGHLIGHT_CHARS = 500_000;
 // ts-nav only resolves these; elsewhere identifier links would lead nowhere.
 const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
 
