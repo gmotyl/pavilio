@@ -51,10 +51,29 @@ function commentRanges(body: string): Array<[number, number]> {
  *   a blank first line keeps page speech from stripping the text after it.
  */
 export function prDescriptionSource(body: string): string {
-  let text = body;
-  // Back to front, so earlier offsets stay valid.
-  for (const [start, end] of commentRanges(body).reverse()) text = text.slice(0, start) + text.slice(end);
+  const text = withoutHtmlComments(body);
   return /^\uFEFF?---/.test(text) ? `\n${text}` : text;
+}
+
+/** `markdown` without its HTML comments, as the markdown parser finds them (escapes and code excluded). */
+export function withoutHtmlComments(markdown: string): string {
+  let text = markdown;
+  // Back to front, so earlier offsets stay valid.
+  for (const [start, end] of commentRanges(markdown).reverse()) text = text.slice(0, start) + text.slice(end);
+  return text;
+}
+
+/**
+ * Third-party markdown rendered and readable from any block: `source` is
+ * both what renders and what `docKey`'s toolbar speaks, so the ▶ on a block
+ * starts at that block's unit. Links resolve against `linkBase`.
+ */
+export function SpokenMarkdown({ docKey, source, linkBase }: { docKey: string; source: string; linkBase: string }) {
+  return (
+    <PagePlayFromHere docKey={docKey} text={source}>
+      <MarkdownRenderer content={source} untrusted={{ linkBase }} />
+    </PagePlayFromHere>
+  );
 }
 
 interface Props {
@@ -86,9 +105,7 @@ export default function PrDescription({ project, pr, body }: Props) {
       ) : source.trim() === "" ? (
         <p className="rv-desc-empty">No description provided.</p>
       ) : (
-        <PagePlayFromHere docKey={speech.key} text={speech.text}>
-          <MarkdownRenderer content={source} untrusted={{ linkBase: pr.url }} />
-        </PagePlayFromHere>
+        <SpokenMarkdown docKey={speech.key} source={source} linkBase={pr.url} />
       )}
     </section>
   );
