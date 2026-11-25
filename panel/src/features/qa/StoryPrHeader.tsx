@@ -105,16 +105,15 @@ export default function StoryPrHeader({ story }: { story: StoryPr }) {
   if (pr) {
     return (
       <div className="story-pr" data-testid="story-pr-header">
-        <ul className="pr-list" role="listbox" aria-label="Story pull request">
-          <PrRow
-            pr={pr}
-            me={knownLogin()}
-            state={pr.state}
-            onOpen={() => navigate(reviewRoute(story))}
-            actions={<Actions review={review} url={pr.url} loading={loading} onRefresh={refresh} />}
-            extraBadges={badges(story, pr)}
-          />
-        </ul>
+        <PrRow
+          pr={pr}
+          me={knownLogin()}
+          state={pr.state}
+          standalone
+          onOpen={() => navigate(reviewRoute(story))}
+          actions={<Actions review={review} url={pr.url} loading={loading} onRefresh={refresh} />}
+          extraBadges={badges(story, pr)}
+        />
       </div>
     );
   }
@@ -135,13 +134,10 @@ export default function StoryPrHeader({ story }: { story: StoryPr }) {
           <span className="pr-repo">{story.repo}</span>
           <span>#{story.number}</span>
           <LangTag lang={story.lang} />
-          {problem && !loading ? (
-            <span className="story-pr-problem" role="status">
-              {PROBLEM[problem]}
-            </span>
-          ) : (
-            loading && <span role="status">Loading PR status…</span>
-          )}
+          {/* One live region for the row's life: only its text changes, so the change is announced. */}
+          <span className="story-pr-problem" role="status">
+            {loading ? "Loading PR status…" : problem ? PROBLEM[problem] : ""}
+          </span>
         </span>
       </div>
     </div>

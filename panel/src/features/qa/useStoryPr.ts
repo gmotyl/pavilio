@@ -91,10 +91,12 @@ export function useStoryPr(project: string, repo: string, number: number): Story
 
   useEffect(() => {
     let cancelled = false;
+    // A switch, a ↻ or an unmount leaves this request behind: stop it rather than let it run on.
+    const ctrl = new AbortController();
     setLoading(true);
     const qs = new URLSearchParams({ project, repo, number: String(number) });
     if (fresh > 0) qs.set("fresh", "1");
-    fetch(`/api/prs/one?${qs}`)
+    fetch(`/api/prs/one?${qs}`, { signal: ctrl.signal })
       .then(async (res) =>
         res.ok ? { pr: (await res.json()) as StoryPrData, problem: null } : { pr: null, problem: await problemOf(res) },
       )
@@ -106,6 +108,7 @@ export function useStoryPr(project: string, repo: string, number: number): Story
       });
     return () => {
       cancelled = true;
+      ctrl.abort();
     };
   }, [key, project, repo, number, fresh]);
 

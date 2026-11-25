@@ -40,6 +40,10 @@ export function filterPrs(prs: PullRequest[], me: string, filter: PrFilter): { p
  */
 let lastLogin: string | null = null;
 export const knownLogin = (): string | null => lastLogin;
+/** Tests only: forget the borrowed login so suites don't depend on run order. */
+export function __resetKnownLoginForTests(): void {
+  lastLogin = null;
+}
 
 /** A view entry refetches only past this age; the server caches lists for a minute anyway. */
 const FRESH_MS = 15_000;

@@ -17,6 +17,12 @@ interface Props {
   state?: PrState;
   /** Badges drawn after the review badge, e.g. the story header's Merged / Story behind / language tag. */
   extraBadges?: ReactNode;
+  /**
+   * A lone row outside a listbox (the story header): a plain `div` with no option
+   * role, selection or tab stop, so its links and buttons are not nested in an
+   * interactive role. A click still opens it; the keyboard uses its own Review link.
+   */
+  standalone?: boolean;
 }
 
 const keepClick = (e: MouseEvent) => e.stopPropagation();
@@ -91,26 +97,31 @@ export const PrIcon = () => (
 
 const IC_STATE: Partial<Record<PrState, string>> = { merged: " pr-ic-merged", closed: " pr-ic-closed" };
 
-export default function PrRow({ pr, me, selected = false, tabbable = true, onFocus, onOpen, actions, state, extraBadges }: Props) {
+/** A finished PR's review state is history: only its Merged / Closed badge speaks for it. */
+const FINISHED: readonly PrState[] = ["merged", "closed"];
+
+export default function PrRow({
+  pr,
+  me,
+  selected = false,
+  tabbable = true,
+  onFocus,
+  onOpen,
+  actions,
+  state,
+  extraBadges,
+  standalone = false,
+}: Props) {
   const chk = CHECKS[pr.checks];
-  const b = badge(pr, me);
-  return (
-    <li
-      className="pr-row"
-      role="option"
-      tabIndex={tabbable ? 0 : -1}
-      aria-selected={selected}
-      onFocus={onFocus}
-      data-testid={`pr-row-${prKey(pr)}`}
-      data-number={pr.number}
-      onClick={() => onOpen(pr)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onOpen(pr);
-        }
-      }}
-    >
+  const b = state && FINISHED.includes(state) ? null : badge(pr, me);
+  const shared = {
+    className: "pr-row",
+    "data-testid": `pr-row-${prKey(pr)}`,
+    "data-number": pr.number,
+    onClick: () => onOpen(pr),
+  };
+  const body = (
+    <>
       <span className={`pr-ic${(state && IC_STATE[state]) || (pr.isDraft ? " pr-ic-draft" : "")}`}>
         <PrIcon />
       </span>
@@ -139,6 +150,24 @@ export default function PrRow({ pr, me, selected = false, tabbable = true, onFoc
         {b && <span className={`pr-badge${b[1] ? ` ${b[1]}` : ""}`}>{b[0]}</span>}
         {extraBadges}
       </span>
+    </>
+  );
+  if (standalone) return <div {...shared}>{body}</div>;
+  return (
+    <li
+      {...shared}
+      role="option"
+      tabIndex={tabbable ? 0 : -1}
+      aria-selected={selected}
+      onFocus={onFocus}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onOpen(pr);
+        }
+      }}
+    >
+      {body}
     </li>
   );
 }

@@ -32,4 +32,25 @@ describe("PrRow", () => {
     expect(document.querySelector(".pr-ic")?.className).toBe("pr-ic");
     expect(document.querySelectorAll(".pr-meta > *")).toHaveLength(6);
   });
+
+  it("a merged or closed PR shows no review badge; an open one keeps it", () => {
+    const merged = row({ state: "merged" });
+    expect(screen.queryByText("Approved")).toBeNull();
+    merged.unmount();
+    const closed = row({ state: "closed" });
+    expect(screen.queryByText("Approved")).toBeNull();
+    closed.unmount();
+    row({ state: "open" });
+    expect(screen.getByText("Approved")).toBeTruthy();
+  });
+
+  it("standalone drops the option semantics: no option role, no aria-selected, not in the tab order", () => {
+    render(<PrRow pr={pr({ number: 7 })} me={null} onOpen={vi.fn()} standalone />);
+    const el = screen.getByTestId("pr-row-pavilio#7");
+    expect(el.tagName).toBe("DIV");
+    expect(el.getAttribute("role")).toBeNull();
+    expect(el.hasAttribute("aria-selected")).toBe(false);
+    expect(el.hasAttribute("tabindex")).toBe(false);
+    expect(screen.queryByRole("option")).toBeNull();
+  });
 });

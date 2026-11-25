@@ -6,9 +6,10 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--bg-elevated);
-  overflow: hidden;
+  /* Nothing is clipped here: clipping would cut the focus ring of the row's Review / GitHub / ↻ controls.
+     The row rounds its own hover background to the card's corners instead. */
 }
-.story-pr .pr-row { border-bottom: 0; }
+.story-pr .pr-row { border-bottom: 0; border-radius: 7px; }
 .story-pr .pr-tt { overflow-wrap: anywhere; }
 .story-pr a.pr-act { text-decoration: none; }
 .story-pr-reduced { cursor: default; }

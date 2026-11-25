@@ -2,12 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse, stubFetch } from "../../../test-utils";
 import { ME, pr } from "../../repos/__tests__/prFixtures";
-import { usePrs } from "../../repos/usePrs";
+import { __resetKnownLoginForTests, usePrs } from "../../repos/usePrs";
 import StoryPrHeader from "../StoryPrHeader";
-import type { StoryPr } from "../useStoryPr";
+import { useStoryPr, type StoryPr } from "../useStoryPr";
 
 const HEAD = "18fcc84a1b2c3d4e5f60718293a4b5c6d7e8f901";
 const NEWER = "99aa00bb11cc22dd33ee44ff5566778899aabbcc";
@@ -56,6 +56,11 @@ function renderHeader(story: StoryPr = STORY) {
 const header = () => screen.getByTestId("story-pr-header");
 const oneCalls = (fetch: ReturnType<typeof stubFetch>) =>
   fetch.mock.calls.map(([u]) => String(u)).filter((u) => u.startsWith("/api/prs/one"));
+
+// knownLogin() is module state: a test that loads a PRs list must not leak its login into the next.
+beforeEach(() => {
+  __resetKnownLoginForTests();
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -137,6 +142,8 @@ describe("StoryPrHeader", () => {
     expect(merged.className).toContain("pr-badge-merged");
     expect(header().querySelector(".pr-ic")?.className).toContain("pr-ic-merged");
     expect(within(header()).queryByText("Closed")).toBeNull();
+    // Only Merged speaks for a finished PR: no stale review badge beside it.
+    expect(within(header()).queryByText("Review required")).toBeNull();
     unmount();
 
     stubFetch({ "/api/prs/one": { ...OPEN, state: "closed" } });
@@ -145,6 +152,7 @@ describe("StoryPrHeader", () => {
     expect(closed.className).toContain("pr-badge");
     expect(header().querySelector(".pr-ic")?.className).toContain("pr-ic-closed");
     expect(within(header()).queryByText("Merged")).toBeNull();
+    expect(within(header()).queryByText("Review required")).toBeNull();
   });
 
   it("Story behind shows when head differs", async () => {
@@ -161,6 +169,13 @@ describe("StoryPrHeader", () => {
     await screen.findByText("fix(security): require an allowed Origin");
     expect(screen.queryByText("Story behind")).toBeNull();
     second.unmount();
+
+    // A short head: that the PR head starts with is the same commit: no badge.
+    stubFetch({ "/api/prs/one": OPEN });
+    const short = renderHeader({ ...STORY, head: HEAD.slice(0, 7) });
+    await screen.findByText("fix(security): require an allowed Origin");
+    expect(screen.queryByText("Story behind")).toBeNull();
+    short.unmount();
 
     // No head: in the frontmatter: no badge either.
     stubFetch({ "/api/prs/one": { ...OPEN, headSha: NEWER } });
@@ -223,6 +238,30 @@ describe("StoryPrHeader", () => {
     expect(within(header()).queryByRole("link", { name: /GitHub/ })).toBeNull();
   });
 
+  it("the header row is not a one-option listbox", async () => {
+    stubFetch({ "/api/prs/one": OPEN });
+    renderHeader();
+    await screen.findByText("fix(security): require an allowed Origin");
+    expect(within(header()).queryByRole("listbox")).toBeNull();
+    expect(within(header()).queryByRole("option")).toBeNull();
+  });
+
+  it("the reduced row keeps one live region and only changes its text", async () => {
+    let fail: (r: Response) => void = () => {};
+    stubFetch({ "/api/prs/one": () => new Promise<Response>((res) => (fail = res)) });
+    renderHeader();
+    const status = within(header()).getByRole("status");
+    expect(status.textContent).toBe("Loading PR status…");
+    fail(jsonResponse({ unavailable: "gh-missing" }, { status: 502 }));
+    await waitFor(() => expect(status.textContent).toBe("gh is not installed"));
+    expect(within(header()).getAllByRole("status")).toEqual([status]);
+  });
+
+  it("the focus ring of the header's controls is not clipped by the card", () => {
+    const css = readFileSync(join(__dirname, "..", "StoryPrHeader.css"), "utf8").replace(/\s+/g, " ");
+    expect(css).not.toMatch(/\.story-pr \{[^}]*overflow: hidden/);
+  });
+
   it("header actions wrap at 390px", async () => {
     stubFetch({ "/api/prs/one": OPEN });
     renderHeader();
@@ -239,5 +278,21 @@ describe("StoryPrHeader", () => {
     expect(narrow?.[2]).toMatch(/\.pr-actions \{[^}]*flex-wrap: wrap/);
     // The title wraps instead of pushing the row wider than the pane.
     expect(css).toMatch(/\.story-pr \.pr-tt \{[^}]*overflow-wrap: anywhere/);
+  });
+});
+
+describe("useStoryPr", () => {
+  it("aborts the request a switch or an unmount leaves behind", () => {
+    const fetch = stubFetch({ "/api/prs/one": () => new Promise<Response>(() => {}) });
+    const hook = renderHook(({ n }) => useStoryPr("woozle", "woo-dev-be", n), { initialProps: { n: 375 } });
+    const signalOf = (i: number) => (fetch.mock.calls[i][1] as RequestInit | undefined)?.signal;
+    const first = signalOf(0);
+    expect(first?.aborted).toBe(false);
+    hook.rerender({ n: 376 });
+    expect(first?.aborted).toBe(true);
+    const second = signalOf(1);
+    expect(second?.aborted).toBe(false);
+    hook.unmount();
+    expect(second?.aborted).toBe(true);
   });
 });
