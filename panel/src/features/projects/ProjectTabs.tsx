@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import { ChevronDown, Search, Terminal } from "lucide-react";
 import { REPOS_LABEL, type ProjectTab } from "./useProjectTabs";
 
-/** The text a tab shows; `capitalize` would turn `qa` into "Qa". */
-const tabText = (label: string) => (label === "qa" ? "QA" : label);
+/** Labels whose shown text is not the label itself; `capitalize` would turn `qa` into "Qa". */
+const TAB_TEXT: Record<string, string> = { qa: "QA" };
+
+/** The text a tab shows. */
+const tabText = (label: string) => TAB_TEXT[label] ?? label;
 
 interface MenuProps {
   tabs: ProjectTab[];
