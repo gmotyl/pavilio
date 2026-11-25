@@ -46,9 +46,15 @@ beforeEach(() => {
 });
 
 describe("ReposTab", () => {
+  it("repos tab breadcrumb reads Code", () => {
+    renderTab();
+    expect(screen.getByTestId("repos-crumb")).toHaveTextContent("pavilio / Code");
+    expect(screen.getByTestId("repos-crumb")).not.toHaveTextContent("Repos");
+  });
+
   it("renders the three pills and the project crumb", () => {
     renderTab();
-    expect(screen.getByTestId("repos-crumb")).toHaveTextContent("pavilio / Repos");
+    expect(screen.getByTestId("repos-crumb")).toHaveTextContent(/^pavilio \/ /);
     const pills = within(screen.getByRole("group", { name: "Repos view" })).getAllByRole("button");
     expect(pills.map((b) => b.textContent?.replace(/\d+$/, ""))).toEqual(["Code", "PRs", "Review"]);
   });
