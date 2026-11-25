@@ -101,6 +101,7 @@ export function StoryLanguageMenu({ lang, onPick, disabled = false, tabIndex, te
             {OPTIONS.map((o, i) => (
               <button
                 key={o.lang}
+                data-testid={`story-lang-${o.lang}`}
                 ref={(el) => {
                   items.current[i] = el;
                 }}

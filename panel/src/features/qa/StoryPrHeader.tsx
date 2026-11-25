@@ -55,6 +55,7 @@ function Actions({ review, url, loading, onRefresh }: ActionsProps) {
       <button
         type="button"
         className={`pr-act-icon${loading ? " story-pr-spin" : ""}`}
+        data-testid="story-pr-refresh"
         aria-label="Refresh PR status"
         title="Refresh PR status"
         disabled={loading}
