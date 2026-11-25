@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { jsonResponse, stubFetch } from "../../../test-utils";
 import type { PrFilter } from "../../../preferences/declarations";
-import { usePrs } from "../usePrs";
+import { __resetKnownLoginForTests, knownLogin, usePrs } from "../usePrs";
 import { ME, PRS } from "./prFixtures";
 
 const numbers = (prs: { number: number }[]) => prs.map((p) => p.number);
@@ -88,6 +88,20 @@ describe("usePrs", () => {
       await act(async () => a.resolve(jsonResponse({ me: ME, prs: PRS, unavailable: [] })));
       expect(result.current.me).toBe("bob");
       expect(numbers(result.current.all)).toEqual([6]);
+    });
+
+    it("a stale response resolving last does not update the known login", async () => {
+      __resetKnownLoginForTests();
+      const a = deferred();
+      stubFetch({ "project=a": () => a.promise, "project=b": { me: "bob", prs: [PRS[5]], unavailable: [] } });
+      const { result, rerender } = renderHook(({ project }: { project: string }) => usePrs(project, ALL), {
+        initialProps: { project: "a" },
+      });
+      rerender({ project: "b" });
+      await waitFor(() => expect(result.current.me).toBe("bob"));
+      expect(knownLogin()).toBe("bob");
+      await act(async () => a.resolve(jsonResponse({ me: ME, prs: PRS, unavailable: [] })));
+      expect(knownLogin()).toBe("bob");
     });
 
     it("reload refetches the current project", async () => {

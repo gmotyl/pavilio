@@ -89,8 +89,10 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
         return (await res.json()) as PrsResponse;
       })
       .then((body) => {
+        if (cancelled) return;
+        // Only a current response may update the borrowed login.
         if (body.me) lastLogin = body.me;
-        if (!cancelled) setLoaded({ project, body });
+        setLoaded({ project, body });
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
