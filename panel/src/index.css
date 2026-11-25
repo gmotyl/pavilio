@@ -366,6 +366,23 @@ code, pre, .font-mono {
   -webkit-user-select: none;
 }
 
+/* A story diff block in a known language (`MarkdownRenderer`'s `colourStoryDiff`): each row is a line
+   with a sign cell and syntax-coloured code; added and removed rows are tinted like the Review view's. */
+.story-line {
+  display: block;
+}
+.story-line-added {
+  background: var(--green-dim);
+}
+.story-line-removed {
+  background: var(--red-dim);
+}
+.story-line-sign {
+  display: inline-block;
+  width: 2ch;
+  color: var(--text-muted);
+}
+
 .code-block > button {
   position: absolute;
   top: 0.5rem;

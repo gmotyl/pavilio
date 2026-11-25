@@ -7,7 +7,8 @@ import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
 import WikiLinkHoverCard from "./WikiLinkHoverCard";
-import { HLJS_CLASS, numberStoryDiff } from "./storyDiff";
+import { highlightLines } from "./highlight";
+import { HLJS_CLASS, numberStoryDiff, storyDiffLanguage, type StoryDiffLine } from "./storyDiff";
 import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
 import remarkWikiLinks, {
   owningProject,
@@ -109,6 +110,24 @@ function rawFileUrl(resolved: string): string {
     return `/api/files/raw/${parts.slice(2).join("/")}?${params.toString()}${fragment}`;
   }
   return `/api/files/raw/${resolved}`;
+}
+
+/** Kinds whose first character is a diff prefix, so the rest is code. */
+const CODE_KINDS = new Set<StoryDiffLine["kind"]>(["context", "added", "removed"]);
+
+/**
+ * Highlighted HTML per story line (null for a header or other non-code line), or null when the block
+ * keeps the whole-line diff colouring: an unknown language, or a block too large to highlight. The code
+ * lines, without their prefix, are highlighted as one text so multi-line tokens stay right.
+ */
+function colourStoryDiff(lines: StoryDiffLine[]): Array<string | null> | null {
+  const lang = storyDiffLanguage(lines);
+  if (!lang) return null;
+  const code = lines.filter((line) => CODE_KINDS.has(line.kind));
+  const { html, tokens } = highlightLines(code.map((line) => line.text.slice(1)), lang);
+  if (!tokens) return null;
+  let next = 0;
+  return lines.map((line) => (CODE_KINDS.has(line.kind) ? html[next++] : null));
 }
 
 /** Extract plain text from React children (handles nested spans from rehype-highlight leftovers) */
@@ -327,6 +346,33 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
         // so selecting and copying the code never picks them up; the copy
         // button reads the original children in the `pre` override.
         const storyLines = isBlock === true && /language-diff/.test(className || "") ? numberStoryDiff(extractText(children)) : null;
+        const coloured = storyLines && colourStoryDiff(storyLines);
+        if (storyLines && coloured) {
+          return (
+            <code className={className} {...props}>
+              {storyLines.map((line, i) => {
+                const code = coloured[i];
+                if (code === null) {
+                  return (
+                    <span key={i} className="diff-line" data-line={line.number ?? ""}>
+                      {line.text}
+                      {"\n"}
+                    </span>
+                  );
+                }
+                const tint = line.kind === "added" ? " story-line-added" : line.kind === "removed" ? " story-line-removed" : "";
+                return (
+                  <span key={i} className={`diff-line story-line${tint}`} data-line={line.number ?? ""} data-base={line.base ?? ""}>
+                    {/* The sign is the line's own prefix, as text, so selecting the block still copies the diff. */}
+                    <span className="story-line-sign">{line.text.slice(0, 1)}</span>
+                    <span className="story-line-code" dangerouslySetInnerHTML={{ __html: code }} />
+                    {"\n"}
+                  </span>
+                );
+              })}
+            </code>
+          );
+        }
         if (storyLines) {
           return (
             <code className={className} {...props}>
