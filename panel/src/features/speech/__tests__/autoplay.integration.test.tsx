@@ -22,7 +22,7 @@
  * instead of quietly arming nothing.
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { drain, emitUtterance, useWebSocketMock, ws } from "./speech.harness";
 
@@ -393,7 +393,11 @@ vi.mock("../../terminal/useAllTerminalSessions", async (importOriginal) => ({
  * cell and to arrive at it. Empty unless a test fills it, so the alerts stay
  * out of every test that is not about them.
  */
-const sessionList = vi.hoisted(() => ({ current: [] as Array<Record<string, unknown>> }));
+const sessionList = vi.hoisted(() => ({
+  current: [] as Array<Record<string, unknown>>,
+  /** Reads the real store instead: for the tests that publish through it. */
+  real: false,
+}));
 /**
  * Lists the surface's cells in the session store, so the terminal's language
  * port can place them: a cell the list does not hold has no language yet, and
@@ -403,10 +407,13 @@ const sessionList = vi.hoisted(() => ({ current: [] as Array<Record<string, unkn
 const placeCells = (): void => {
   sessionList.current = SESSIONS as unknown as Array<Record<string, unknown>>;
 };
-vi.mock("../../terminal/sessionStore", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../terminal/sessionStore")>()),
-  getSessions: () => sessionList.current,
-}));
+vi.mock("../../terminal/sessionStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../terminal/sessionStore")>();
+  return {
+    ...actual,
+    getSessions: () => (sessionList.real ? actual.getSessions() : sessionList.current),
+  };
+});
 vi.mock("../../terminal/useTerminalMaximized", () => ({
   useTerminalMaximized: () => [false, () => {}, () => {}],
 }));
@@ -429,10 +436,16 @@ import {
 } from "../../alerts/store";
 import { SPEAKING_ALERT_ID } from "../speakingAlert";
 import { prepare } from "../prepare";
-import { getStoredEngine, setEngineVoice, setStoredSpeechMode } from "../voices";
+import {
+  getStoredEngine,
+  setEngineVoice,
+  setProjectEngineVoice,
+  setStoredSpeechMode,
+} from "../voices";
+import { __resetSessionStoreForTests, refreshSessions } from "../../terminal/sessionStore";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
-import { installMatchMedia } from "../../../test-utils";
+import { installMatchMedia, jsonResponse } from "../../../test-utils";
 
 /** The newest alert, which is the one a failure under test just raised. */
 function lastAlert() {
@@ -1903,5 +1916,96 @@ describe("the answer alert, end to end", () => {
     // It did land — in its cell — so the silence below is not a missed fetch.
     expect(speakState("cell-b")).toBe("ready");
     expect(answerAlerts()).toEqual([]);
+  });
+});
+
+/**
+ * The session list decides an answer's voice language: a cell it does not list
+ * yet has no project, so its answer is prepared provisionally and neither
+ * warmed nor preloaded. These publish through the REAL session store — its
+ * fetch, its change gate, its subscribers — so the host learns of the cell
+ * being placed exactly as the panel does.
+ */
+describe("warming waits for the session to be placed", () => {
+  /** Ends in a code block, which Polish and English read differently. */
+  const ANSWER = `${shortResponse(2)}\n\n\`\`\`ts\nconst x = 1;\n\`\`\``;
+
+  beforeEach(() => {
+    __resetSessionStoreForTests();
+    sessionList.real = true;
+  });
+
+  afterEach(() => {
+    sessionList.real = false;
+    __resetSessionStoreForTests();
+    clearPreference(preferences.speechVoiceByProject);
+  });
+
+  /** One `/api/terminal/sessions` answer, through the store's own load and publish. */
+  async function publishSessions(list: readonly SessionMeta[]): Promise<void> {
+    const fallback = global.fetch;
+    global.fetch = vi.fn((input: RequestInfo | URL) =>
+      String(input) === "/api/terminal/sessions"
+        ? Promise.resolve(jsonResponse(list))
+        : fallback(input),
+    ) as unknown as typeof fetch;
+    await act(async () => {
+      await refreshSessions();
+      await drain();
+    });
+    global.fetch = fallback;
+  }
+
+  /** One step round the speech mode: armed, which preloads and stays silent. */
+  async function armOnly(sessionId: string): Promise<void> {
+    await openBar(sessionId);
+    await click(testIdFor("bar-autoplay", sessionId));
+    expect(armed(sessionId)).toBe("armed");
+  }
+
+  it("an answer before its session is listed is warmed and preloaded once the list places it, in its project's language", async () => {
+    setProjectEngineVoice("vector", getStoredEngine(), "pl-PL-MarekNeural");
+    const polish = prepare(ANSWER, { language: "pl" }).units.map((unit) => unit.text);
+    // Fixture guard: the language shows in the requested texts.
+    expect(polish).not.toEqual(prepare(ANSWER, { language: "en" }).units.map((unit) => unit.text));
+    expect(polish.length).toBeGreaterThan(1);
+
+    await renderProjectSurface();
+    await armOnly("cell-a");
+    await emitUtterance("cell-a", "a1", ANSWER);
+
+    // The store is still empty: nothing places cell-a, so nothing is synthesized.
+    expect(synth.requests).toEqual([]);
+
+    await publishSessions(SESSIONS);
+
+    expect(synth.requests).toEqual(polish);
+    expect(synth.requestTiers).toEqual(["warm", ...polish.slice(1).map(() => "preload")]);
+  });
+
+  it("a list change that keeps every session's place is no warming opportunity; a session added is", async () => {
+    await publishSessions([SESSIONS[0]]);
+    const units = prepare(shortResponse(4)).units.map((unit) => unit.text);
+    await renderProjectSurface();
+    await armOnly("cell-a");
+
+    // Unit 0 warms; the synthesizer is down for the preloads after it, so the
+    // pass stops at the first one and leaves it for the next opportunity.
+    synth.setHealthyRequests(1);
+    await emitUtterance("cell-a", "a1", shortResponse(4));
+    await act(async () => {
+      await drain();
+    });
+    const before = synth.requests.length;
+    expect(synth.requests.slice(0, 2)).toEqual(units.slice(0, 2));
+    synth.setHealthyRequests(Number.POSITIVE_INFINITY);
+
+    // A rename: the same sessions in the same projects.
+    await publishSessions([{ ...SESSIONS[0], name: "renamed" }]);
+    expect(synth.requests).toHaveLength(before);
+
+    // A session added: a new placement, so the pass runs and retries the preload.
+    await publishSessions([{ ...SESSIONS[0], name: "renamed" }, SESSIONS[1]]);
+    expect(synth.requests.slice(before)).toEqual(units.slice(1));
   });
 });
