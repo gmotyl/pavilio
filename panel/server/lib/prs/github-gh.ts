@@ -4,6 +4,7 @@ import { gitSafeEnv } from "../gitEnv.js";
 import {
   type ChecksState,
   type PrProvider,
+  type PrState,
   PrUnavailableError,
   type PullRequest,
   type ReviewComment,
@@ -27,7 +28,7 @@ const TIMEOUT_MS = 30_000;
 const DEEPEN_ROUNDS = 5;
 const DEEPEN_BY = 200;
 const PR_FIELDS =
-  "number,title,author,isDraft,reviewRequests,reviewDecision,statusCheckRollup,headRefName,baseRefName,updatedAt,url";
+  "number,title,author,isDraft,reviewRequests,reviewDecision,statusCheckRollup,headRefName,headRefOid,baseRefName,updatedAt,url";
 // gh exits 4 when it needs `gh auth login`; older versions only say so on stderr.
 const GH_AUTH_EXIT = 4;
 const AUTH_ERROR = /gh auth login|not logged in|authentication required|HTTP 401|bad credentials/i;
@@ -63,6 +64,7 @@ interface RawPr {
   reviewDecision?: string | null;
   statusCheckRollup?: RawCheck[] | null;
   headRefName: string;
+  headRefOid?: string;
   baseRefName: string;
   updatedAt: string;
   url: string;
@@ -121,6 +123,38 @@ function mapDecision(d: string | null | undefined): PullRequest["reviewDecision"
     default:
       return null;
   }
+}
+
+function mapState(s: string | undefined): PrState {
+  switch (s) {
+    case "MERGED":
+      return "merged";
+    case "CLOSED":
+      return "closed";
+    default:
+      return "open";
+  }
+}
+
+/** One mapper for `gh pr list` and `gh pr view` rows. */
+function mapPr(p: RawPr, repoPath: string): PullRequest {
+  return {
+    repo: basename(repoPath),
+    repoPath,
+    number: p.number,
+    title: p.title,
+    author: p.author?.login ?? "",
+    isDraft: Boolean(p.isDraft),
+    // Team requests have no login; only individual users are reviewers here.
+    reviewers: (p.reviewRequests ?? []).filter((r) => r.__typename === "User" && r.login).map((r) => r.login as string),
+    reviewDecision: mapDecision(p.reviewDecision),
+    checks: rollupChecks(p.statusCheckRollup),
+    head: p.headRefName,
+    headSha: p.headRefOid ?? "",
+    base: p.baseRefName,
+    updatedAt: p.updatedAt,
+    url: p.url,
+  };
 }
 
 /** Host of a git remote URL: https://, ssh://, git:// or scp-style `user@host:path`. */
@@ -238,27 +272,23 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
         throw new PrUnavailableError("failed", "gh pr list returned invalid JSON");
       }
       if (!Array.isArray(raw)) throw new PrUnavailableError("failed", "gh pr list returned non-array JSON");
-      const repo = basename(repoPath);
-      return raw.map(
-        (p): PullRequest => ({
-          repo,
-          repoPath,
-          number: p.number,
-          title: p.title,
-          author: p.author?.login ?? "",
-          isDraft: Boolean(p.isDraft),
-          // Team requests have no login; only individual users are reviewers here.
-          reviewers: (p.reviewRequests ?? [])
-            .filter((r) => r.__typename === "User" && r.login)
-            .map((r) => r.login as string),
-          reviewDecision: mapDecision(p.reviewDecision),
-          checks: rollupChecks(p.statusCheckRollup),
-          head: p.headRefName,
-          base: p.baseRefName,
-          updatedAt: p.updatedAt,
-          url: p.url,
-        }),
-      );
+      return raw.map((p) => mapPr(p, repoPath));
+    },
+
+    async getPr(repoPath, n) {
+      if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
+      const slug = await assertGitHub(repoPath);
+      const out = await gh(["pr", "view", String(n), "--repo", slug, "--json", `${PR_FIELDS},state`], repoPath);
+      let raw: RawPr & { state?: string };
+      try {
+        raw = JSON.parse(out) as RawPr & { state?: string };
+      } catch {
+        throw new PrUnavailableError("failed", "gh pr view returned invalid JSON");
+      }
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new PrUnavailableError("failed", "gh pr view returned a non-object");
+      }
+      return { ...mapPr(raw, repoPath), state: mapState(raw.state) };
     },
 
     async openPr(repoPath, n) {

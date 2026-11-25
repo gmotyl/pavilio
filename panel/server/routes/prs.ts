@@ -6,6 +6,7 @@ import { expandHome } from "../lib/paths.js";
 import { createGitHubGhProvider } from "../lib/prs/github-gh.js";
 import {
   type PrProvider,
+  type PrState,
   PrUnavailableError,
   type PullRequest,
   redactUrlCredentials,
@@ -41,6 +42,18 @@ export function createPrsRouter(
   const cache = new Map<string, { at: number; prs: PullRequest[] }>();
   // Concurrent cold requests share one provider call per repo.
   const inFlight = new Map<string, Promise<PullRequest[]>>();
+
+  // Per-PR cache for /one, keyed `repoPath#n`; successes only, like the list cache.
+  const oneCache = new Map<string, { at: number; pr: PullRequest & { state: PrState } }>();
+
+  async function getPr(repoPath: string, n: number, fresh: boolean): Promise<PullRequest & { state: PrState }> {
+    const key = `${repoPath}#${n}`;
+    const hit = oneCache.get(key);
+    if (!fresh && hit && now() - hit.at < CACHE_TTL_MS) return hit.pr;
+    const pr = await provider.getPr(repoPath, n);
+    oneCache.set(key, { at: now(), pr });
+    return pr;
+  }
 
   function listOpen(repoPath: string): Promise<PullRequest[]> {
     const hit = cache.get(repoPath);
@@ -85,6 +98,30 @@ export function createPrsRouter(
     });
     prs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
     res.json({ me, prs, unavailable });
+  });
+
+  router.get("/one", async (req, res) => {
+    const name = typeof req.query.project === "string" ? req.query.project : "";
+    if (!name) return res.status(400).json({ error: "project parameter required" });
+    const repoName = typeof req.query.repo === "string" ? req.query.repo : "";
+    if (!repoName.trim()) return res.status(400).json({ error: "repo required" });
+    const raw = typeof req.query.number === "string" ? req.query.number : "";
+    if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+      return res.status(400).json({ error: "number must be a positive integer" });
+    }
+    const { projectsDir } = getConfig();
+    if (!isLiveProject(projectsDir, name)) return res.status(404).json({ error: "Project not found" });
+    const entry = readRepos(join(projectsDir, name), name).find((r) => r.name === repoName && r.present);
+    if (!entry) return res.status(404).json({ error: "Repo not found" });
+
+    try {
+      const pr = await getPr(repoRoot(entry), Number(raw), req.query.fresh === "1");
+      // Label by the repos.json name, as the list does.
+      res.json({ ...pr, repo: entry.name });
+    } catch (e) {
+      const reason: Unavailable = e instanceof PrUnavailableError ? e.reason : "failed";
+      res.status(502).json({ unavailable: reason });
+    }
   });
 
   router.post("/open", async (req, res) => {

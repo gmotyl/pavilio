@@ -13,6 +13,7 @@ export function pr(over: Partial<PullRequest> & { number: number }): PullRequest
     reviewDecision: null,
     checks: "none",
     head: `feat/${over.number}`,
+    headSha: `sha${over.number}`,
     base: "main",
     updatedAt: "2026-11-22T10:00:00Z",
     url: `https://github.com/gmotyl/pavilio/pull/${over.number}`,

@@ -1,5 +1,7 @@
 export type ChecksState = "pass" | "fail" | "running" | "none";
 
+export type PrState = "open" | "merged" | "closed";
+
 export interface PullRequest {
   repo: string;
   repoPath: string;
@@ -11,6 +13,8 @@ export interface PullRequest {
   reviewDecision: "approved" | "changes" | "required" | null;
   checks: ChecksState;
   head: string;
+  /** Head commit SHA (GitHub `headRefOid`). */
+  headSha: string;
   base: string;
   updatedAt: string;
   url: string;
@@ -36,6 +40,8 @@ export type Unavailable = "gh-missing" | "gh-unauthenticated" | "not-github" | "
 export interface PrProvider {
   whoami(): Promise<string>;
   listOpen(repoPath: string): Promise<PullRequest[]>;
+  /** One PR in any state (open, merged or closed). */
+  getPr(repoPath: string, n: number): Promise<PullRequest & { state: PrState }>;
   /** Fetches the PR's head and base into private refs; `body` is the PR description (markdown, "" when none). */
   openPr(repoPath: string, n: number): Promise<{ head: string; base: string; body: string }>;
   /** Inline review comments still anchored to a diff line; outdated ones are dropped. */

@@ -55,6 +55,7 @@ describe("GitHubGhProvider", () => {
       reviewDecision: "required",
       checks: "running",
       head: "feat/search",
+      headSha: "sha1",
       base: "main",
       updatedAt: "2026-11-21T10:05:00Z",
       url: "https://github.com/o/r/pull/231",
@@ -65,6 +66,63 @@ describe("GitHubGhProvider", () => {
 
     const { run: emptyRun } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-empty.json")));
     expect(await createGitHubGhProvider({ run: emptyRun }).listOpen(REPO)).toEqual([]);
+  });
+
+  it("list entries carry headSha", async () => {
+    const origin = originIs("git@github.com:o/r.git");
+    const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-mixed.json")));
+    const prs = await createGitHubGhProvider({ run }).listOpen(REPO);
+    expect(prs.map((p) => p.headSha)).toEqual(["sha1", "sha2", "sha3", "sha4"]);
+    const ghCall = calls.find((c) => c.cmd === "gh")!;
+    expect(ghCall.args[ghCall.args.indexOf("--json") + 1].split(",")).toContain("headRefOid");
+  });
+
+  describe("getPr", () => {
+    const view = (state: string) =>
+      JSON.stringify({ ...(JSON.parse(fixture("gh-pr-list-mixed.json")) as object[])[0], state });
+
+    it("getPr maps MERGED, CLOSED and OPEN to state", async () => {
+      const origin = originIs("git@github.com:o/r.git");
+      for (const [raw, state] of [
+        ["MERGED", "merged"],
+        ["CLOSED", "closed"],
+        ["OPEN", "open"],
+        ["SOMETHING_NEW", "open"],
+      ]) {
+        const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(view(raw)));
+        const pr = await createGitHubGhProvider({ run }).getPr(REPO, 231);
+        expect(pr.state).toBe(state);
+        expect(pr).toEqual({
+          repo: "acme-web",
+          repoPath: REPO,
+          number: 231,
+          title: "Add search",
+          author: "alice",
+          isDraft: false,
+          reviewers: ["gmotyl"],
+          reviewDecision: "required",
+          checks: "running",
+          head: "feat/search",
+          headSha: "sha1",
+          base: "main",
+          updatedAt: "2026-11-21T10:05:00Z",
+          url: "https://github.com/o/r/pull/231",
+          state,
+        });
+      }
+    });
+
+    it("getPr passes the PR fields plus state to gh pr view", async () => {
+      const origin = originIs("git@github.com:o/r.git");
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(view("OPEN")));
+      await createGitHubGhProvider({ run }).listOpen(REPO).catch(() => undefined);
+      const listFields = calls.find((c) => c.cmd === "gh")!.args.at(-1)!;
+      calls.length = 0;
+      await createGitHubGhProvider({ run }).getPr(REPO, 231);
+      const ghCall = calls.find((c) => c.cmd === "gh")!;
+      expect(ghCall.cwd).toBe(REPO);
+      expect(ghCall.args).toEqual(["pr", "view", "231", "--repo", "github.com/o/r", "--json", `${listFields},state`]);
+    });
   });
 
   it("rolls up status checks into pass/fail/running/none", () => {
