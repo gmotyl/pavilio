@@ -12,7 +12,7 @@ import { useCallback, useSyncExternalStore, type ReactNode } from "react";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { CASCADE } from "../speech/engines";
-import { usePrimeOpenaiVoices } from "../speech/useOpenaiVoices";
+import { useOpenaiVoicesSnapshot, usePrimeOpenaiVoices } from "../speech/useOpenaiVoices";
 import { getCascadeOrder, getStoredEngine } from "../speech/voices";
 import {
   SpeechHostProvider,
@@ -123,14 +123,17 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   usePreference(preferences.speechEngine);
   usePreference(preferences.speechCascadeOrder);
   usePrimeOpenaiVoices(speaksWithOpenai());
-  // A new language port each time a session becomes placed:
-  // `languageForSession` answers `undefined` for a session the list does not
-  // hold yet, and the host takes a new port as the moment to warm what it
-  // skipped for that. Keyed on the placement, not the list, so a rename or a
-  // title change is no warming opportunity.
+  // A new language port each time a session becomes placed, and when the
+  // OmniVoice list first lands: `languageForSession` answers `undefined` for a
+  // session the list does not hold yet, and for a saved openai voice the list
+  // has not named yet, and the host takes a new port as the moment to warm
+  // what it skipped for that. Keyed on the placement, not the list, so a
+  // rename or a title change is no warming opportunity.
   const placement = useSyncExternalStore(subscribeSessionList, placementSignature);
+  const voicesLoaded = useOpenaiVoicesSnapshot().loaded;
+  const portKey = `${placement}|${voicesLoaded ? "voices" : ""}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the point: a new placement, a new port
-  const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [placement]);
+  const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [portKey]);
   return (
     <SpeechHostProvider
       sessionOf={sessionOf}

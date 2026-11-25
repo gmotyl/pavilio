@@ -28,6 +28,7 @@ import { projectOfDocKey } from "./docKey";
 import { CASCADE, cascadeVoiceKey, getCascadeOrder, speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
+import { openaiVoicesLoaded } from "./useOpenaiVoices";
 import { voicesOf } from "./voicesOf";
 
 export { DEFAULT_SPEECH_VOICE, getCascadeOrder };
@@ -198,6 +199,25 @@ export function voiceFor(engine: string, project?: string): string | undefined {
     getStoredVoices()[engine] ??
     catalogDefaultVoice(engine)
   );
+}
+
+/**
+ * Whether `engine`'s voice in `project` is one that is saved but cannot be
+ * looked up yet: a stored OmniVoice id (the project's or the default's) while
+ * the live list has not loaded. Until it does, every openai id is outside the
+ * catalog, so {@link voiceFor} drops it and the voice — and its language — are
+ * not known. Once the list has loaded, an id it still lacks is stale, and is
+ * dropped as any stale id is; a static catalog is always loaded.
+ */
+export function isVoiceAwaitingCatalog(engine: string, project: string | undefined): boolean {
+  if (engine !== "openai" || openaiVoicesLoaded()) return false;
+  const byProject = asRecord<unknown>(readPreference(preferences.speechVoiceByProject));
+  const own = project && Object.hasOwn(byProject, project) ? asRecord<unknown>(byProject[project]) : {};
+  const fallback = asRecord<unknown>(readPreference(preferences.speechVoice));
+  return [own, fallback].some((stored) => {
+    const id = Object.hasOwn(stored, engine) ? stored[engine] : undefined;
+    return typeof id === "string" && id !== "" && !isCatalogVoice(engine, id);
+  });
 }
 
 /**

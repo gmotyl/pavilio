@@ -6,8 +6,11 @@ import { useOpenaiVoicesSnapshot } from "../speech/useOpenaiVoices";
 import { voiceLanguageFor, type VoiceLanguage } from "../speech/voiceLanguage";
 import {
   firstCascadeVoice,
+  getCascadeOrder,
   getStoredEngine,
+  isVoiceAwaitingCatalog,
   projectOfDocVoice,
+  voiceFor,
   voiceForDocKey,
   voiceForProject,
 } from "../speech/voices";
@@ -57,6 +60,14 @@ function projectOfSpeechKey(sessionId: string): string | undefined {
  * does hold whose project has no voice of its own (or which carries no
  * project): that one is placed, and speaks the default voice's language. A
  * page's `doc:` key is always placed, through its path.
+ *
+ * `undefined` too while the voice that decides is a saved OmniVoice id and
+ * the live list that names its locale has not loaded (see
+ * {@link isVoiceAwaitingCatalog}): the answer is prepared provisionally, and
+ * the list landing is a new port (`TerminalSpeechHost`). A voice that is
+ * simply absent — none saved, no enabled member with one — is English as
+ * before, and so is an id the loaded list still lacks: it is stale. A
+ * page's key is exempt: it still always answers.
  */
 export function languageForSession(sessionId: string): VoiceLanguage | undefined {
   if (!isDocSpeechKey(sessionId) && !getSessions().some((session) => session.id === sessionId)) {
@@ -64,10 +75,22 @@ export function languageForSession(sessionId: string): VoiceLanguage | undefined
   }
   const project = projectOfSpeechKey(sessionId);
   const engine = getStoredEngine();
+  // A page keeps its own rule — it always has an answer, and re-prepares on
+  // the next Play once its language moves — so only a cell waits for a catalog.
+  const awaiting = (member: string): boolean =>
+    !isDocSpeechKey(sessionId) && isVoiceAwaitingCatalog(member, project);
   if (engine === CASCADE) {
+    // The member that would decide, if its saved voice could be looked up,
+    // comes before the one `firstCascadeVoice` finds: that one is not first.
+    for (const entry of getCascadeOrder()) {
+      if (!entry.on) continue;
+      if (awaiting(entry.id)) return undefined;
+      if (voiceFor(entry.id, project) !== undefined) break;
+    }
     const first = firstCascadeVoice(project);
     return first ? voiceLanguageFor(first.engine, first.voice) : "en";
   }
+  if (awaiting(engine)) return undefined;
   return voiceLanguageFor(engine, voiceForProject(project));
 }
 

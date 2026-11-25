@@ -118,6 +118,14 @@ export function currentOpenaiVoices(): readonly OmniVoiceInfo[] {
   return state.voices;
 }
 
+/**
+ * Whether a route answer has landed ({@link OpenaiVoices.loaded}), for readers outside React: until
+ * then a saved openai voice cannot be told from a stale one.
+ */
+export function openaiVoicesLoaded(): boolean {
+  return state.loaded;
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
