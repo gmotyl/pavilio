@@ -298,7 +298,7 @@ export interface SpeechUnit {
  * so no unit is ever held back.
  *
  * `language` is the language the response was prepared in — every unit's
- * `lang`. It is the session's language, handed *to* preparation rather than
+ * `lang`. It is the voice language, handed *to* preparation rather than
  * detected from this one response (see `prepare.ts`), so it is reported back
  * to make it visible.
  */

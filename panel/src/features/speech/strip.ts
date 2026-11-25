@@ -17,7 +17,7 @@
  * sentinel behind — `⟦code⟧`, `⟦table⟧`, `⟦html⟧` for whole blocks, `⟦image⟧`
  * and `⟦link⟧` for the addresses inside a line, `⟦expr⟧` for a code span too
  * long for a listener to follow. They are deliberately not words: this stage
- * does not know the session's language, so it names the *kind* and leaves the
+ * does not know the voice language, so it names the *kind* and leaves the
  * wording to `prepare.ts`, which does. The corner
  * brackets are the point — no answer contains them, so the substitution
  * downstream cannot collide with the response's own prose.

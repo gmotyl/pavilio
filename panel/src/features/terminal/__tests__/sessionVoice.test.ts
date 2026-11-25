@@ -127,7 +127,7 @@ describe("session voice", () => {
   });
 });
 
-describe("session language", () => {
+describe("voice language of a session", () => {
   it("single engine: the project's voice decides", async () => {
     await loadLiveVoices();
     setStoredEngine("openai");

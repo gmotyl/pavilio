@@ -273,7 +273,7 @@ describe("useUtteranceChannel", () => {
 
     // The frame was processed — it just was not announced. The language it is
     // checked in is the session's voice language, read from the port; the
-    // Polish inside the fence votes for nothing.
+    // Polish inside the fence decides nothing.
     lastMessage = frame(codeOnly("cell-a", "a1"));
     await act(async () => {
       rerender();
