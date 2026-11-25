@@ -54,7 +54,12 @@ call or read any other plugin's story tooling.
    the code. When the reason for a change is nowhere to be found, the story says so. Never invent.
 5. **Code is quoted only from git**, verbatim: `git show <head>:<path>` (after) or
    `git show <merge-base>:<path>` (before). Never retype from memory, never tidy a quoted line.
-6. **English**, unless the request names another language.
+6. **English**, unless the request names another language; the frontmatter records it as
+   `lang: en`. A request that ends with `Write the story in Polish.` (the line the panel types
+   when the story language is PL) → write the chapter questions, prose, line notes, section
+   headings and the Technical overview (its prose and diagram labels) in Polish, and
+   `lang: pl`. Diff blocks, quoted code, paths, note labels (`**L12**`, `**base L16**`) and
+   frontmatter keys stay unchanged. The §7 anti-slop pass runs in Polish.
 7. **Write only the story file** (and `qa/stories/.gitignore`). Nothing under `projects/<p>/memo/`,
    no commit, no edits to PROJECT.md / STATUS.md / `_index.json`.
 
@@ -176,6 +181,7 @@ title: <the change in plain words>
 pr: <repo>#<n>
 head: <full head sha>
 base: <base ref, e.g. origin/main>
+lang: <en | pl, per rule 6>
 ---
 # <title>
 
@@ -190,18 +196,18 @@ base: <base ref, e.g. origin/main>
 <Prose: what the reader cannot understand without this chapter, then the why, told around the code
 below, for a reader new to the codebase.>
 
-`path/to/file.ts` · L52–60
+`path/to/file.ts` · L52–54
 
 ```diff
-@@ path/to/file.ts L52–60 @@
+@@ path/to/file.ts L52–54 base L50 @@
  unchanged line for context
 +added line the first note explains
 -removed line
  another unchanged line
 ```
 
-1. **L57**: why that line is the way it is.
-2. **L59**: …
+1. **L53**: why that line is the way it is.
+2. **base L51**: why the removed line had to go.
 
 > **Key insight:** … (sparingly)
 
@@ -233,7 +239,9 @@ Rules:
 
 - Chapter headings are exactly `## N. <question>`, numbered from 1, 4–8 of them. After them come
   the three fixed sections in this order: `## Everything else in this change`,
-  `## Where each why came from`, `## Technical overview`. The Technical overview is the **last**
+  `## Where each why came from`, `## Technical overview` (translated for `lang: pl`, per rule 6:
+  e.g. `## Wszystko inne w tej zmianie`, `## Skąd wzięło się każde „dlaczego”`,
+  `## Przegląd techniczny`). The Technical overview is the **last**
   section of the file. Use `###` only inside a section, never another `##`.
 - Every chapter has why-prose and **at least one `diff` block** followed by its numbered notes.
 - **Diff blocks** are quoted from `git show`, never retyped:
@@ -245,13 +253,21 @@ Rules:
     file before the change writes `(before)` after the path and uses base line numbers;
   - code this change does not touch (from the repo or a dependency) is quoted the same way, all
     context lines, with `(unchanged)` or `(dependency: <package>)` after the path;
+  - a block that holds `-` lines and is not `(before)` adds ` base L<c>` after the head range:
+    `@@ <path> L<a>–<b> base L<c> @@`, where `c` is the base line number
+    (`git show <merge-base>:<path> | cat -n`) of the block's first context or `-` line. A gap
+    header in such a block carries its own ` base L<c>` the same way. A block with no `-` lines
+    has no `base` token;
   - the panel numbers the block's lines from each `@@ … L<n> @@` header's start line (context and
-    `+` lines, or context and `-` lines under `(before)`), so that start line must be exact; a line
-    with no ` `/`+`/`-` prefix (e.g. `\ No newline at end of file`) is not numbered;
+    `+` lines, or context and `-` lines under `(before)`), and the hidden base numbers of context
+    and `-` lines from `base L<c>`, so both start lines must be exact; a line with no
+    ` `/`+`/`-` prefix (e.g. `\ No newline at end of file`) is not numbered;
   - keep a block short: the 3–15 lines the notes are about, not whole hunks.
 - **Numbered line notes** follow each block as an ordered list, restarting at 1 per block. Each note
   starts with the line it is about (`**L57**`, or `**base L40**` for a removed line) and says *why*,
-  not *what*.
+  not *what*. A removed line's `base L<n>` is its base line number, counted from the header's
+  `base L<c>` (or from `L<n>` under `(before)`); check it against `git show <merge-base>:<path> |
+  cat -n`.
 - *Everything else* lists every changed file that earned no chapter, with its `(+N / −N)` from
   `git diff --numstat`. Group lockfiles and generated files in one line, the change's own tests in
   one line, and work merged in from another branch or PR (not part of this change's purpose) in
@@ -305,7 +321,7 @@ Omit a type when the change has no such dimension: better 4 sharp diagrams than 
 ## 7. Clean the prose (only when available)
 
 When an `anti-slop` skill is in the skill list (e.g. `anti-slop` or `anti-slop:anti-slop`), run it
-once in file mode on the story, naming the sources read in step 3 as `source:`. It changes prose
+once in file mode on the story, in the story's language (Polish for `lang: pl`), naming the sources read in step 3 as `source:`. It changes prose
 only; frontmatter, headings, `diff` / `mermaid` / code blocks and inline code stay byte for byte,
 and the bold `**L57**` note labels and source labels are the story's format, not slop. When no such
 skill exists, skip this step silently.
