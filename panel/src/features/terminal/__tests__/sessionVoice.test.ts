@@ -163,6 +163,24 @@ describe("session language", () => {
     expect(languageForSession("sess-p")).toBe("pl");
   });
 
+  it("cascade: no enabled member with a voice gives English", async () => {
+    // No live OmniVoice list: openai has no voice, and every other member is off.
+    setStoredEngine("cascade");
+    setCascadeOrder([
+      { id: "openai", on: true },
+      { id: "kokoro", on: false },
+      { id: "elevenlabs", on: false },
+      { id: "cartesia", on: false },
+      { id: "speechify", on: false },
+      { id: "azure", on: false },
+      { id: "edge", on: false },
+    ]);
+    setProjectEngineVoice("p", "edge", MAREK);
+    await seedSessions([session("sess-p", "p")]);
+
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
   it("a page key follows its project's voice", async () => {
     await loadLiveVoices();
     setStoredEngine("openai");

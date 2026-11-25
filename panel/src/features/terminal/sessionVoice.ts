@@ -1,10 +1,16 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { CASCADE } from "../speech/engines";
-import { isDocSpeechKey, projectOfDocKey } from "../speech/docKey";
+import { isDocSpeechKey } from "../speech/docKey";
 import { useOpenaiVoicesSnapshot } from "../speech/useOpenaiVoices";
 import { voiceLanguageFor, type VoiceLanguage } from "../speech/voiceLanguage";
-import { firstCascadeVoice, getStoredEngine, voiceForProject } from "../speech/voices";
+import {
+  firstCascadeVoice,
+  getStoredEngine,
+  projectOfDocVoice,
+  voiceForDocKey,
+  voiceForProject,
+} from "../speech/voices";
 import { projectOfSession } from "./sessionProject";
 
 /**
@@ -19,26 +25,29 @@ import { projectOfSession } from "./sessionProject";
  * `voiceFor` port.
  */
 export function voiceForSession(sessionId: string): string {
-  return voiceForProject(projectOfSpeechKey(sessionId));
+  if (isDocSpeechKey(sessionId)) return voiceForDocKey(sessionId);
+  return voiceForProject(projectOfSession(sessionId) ?? undefined);
 }
 
 /**
- * The project a speech key speaks for: a `doc:` key through its path's
- * project, a session through the tab's placement; `undefined` (the default
- * voice) when neither places it.
+ * The project a speech key speaks for, by the same rules as
+ * {@link voiceForSession}: a `doc:` key through {@link projectOfDocVoice}, a
+ * session through the tab's placement; `undefined` (the default voice) when
+ * neither places it.
  */
 function projectOfSpeechKey(sessionId: string): string | undefined {
-  const project = isDocSpeechKey(sessionId)
-    ? projectOfDocKey(sessionId)
-    : projectOfSession(sessionId);
-  return project ?? undefined;
+  if (isDocSpeechKey(sessionId)) return projectOfDocVoice(sessionId);
+  return projectOfSession(sessionId) ?? undefined;
 }
 
 /**
  * The language a cell's text is prepared in: the language of the voice that
  * speaks it, through the same project as {@link voiceForSession}. Under the
  * cascade that is the first enabled member with a voice for the project — the
- * one that speaks unless it fails. Read-only, like {@link voiceForSession}.
+ * member the cascade tries first. Whether the server can use that member is
+ * not known here: a member it skips (no key, no address) hands the text to a
+ * later one, which reads it prepared in the first member's language, as any
+ * fallback does. Read-only, like {@link voiceForSession}.
  */
 export function languageForSession(sessionId: string): VoiceLanguage {
   const project = projectOfSpeechKey(sessionId);

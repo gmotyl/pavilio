@@ -268,13 +268,23 @@ export function setEnginePronunciation(engine: string, on: boolean | null): void
 }
 
 /**
+ * The project a page's `doc:` key speaks for: the project its path lives in,
+ * `undefined` (the default voice) for a file outside projects. The one rule
+ * {@link voiceForDocKey} and the terminal's `languageForSession` read, so a
+ * page's text is prepared in the language of the voice it is spoken with.
+ */
+export function projectOfDocVoice(key: string): string | undefined {
+  return projectOfDocKey(key) ?? undefined;
+}
+
+/**
  * The voice a page speaks with: the voice of the project its `doc:` key's path
- * lives in, else the default — a file outside projects has no project. The one
- * rule both the host's `voiceFor` port and the document bar read, so the bar
- * peeks the cache in the voice the host synthesized in.
+ * lives in ({@link projectOfDocVoice}), else the default. The one rule both the
+ * host's `voiceFor` port (through `voiceForSession`) and the document bar read,
+ * so the bar peeks the cache in the voice the host synthesized in.
  */
 export function voiceForDocKey(key: string): string {
-  return voiceForProject(projectOfDocKey(key) ?? undefined);
+  return voiceForProject(projectOfDocVoice(key));
 }
 
 /** One click on a cell's speech control: `off → armed → autoplay → off`. */
