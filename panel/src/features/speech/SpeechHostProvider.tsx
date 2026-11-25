@@ -28,6 +28,8 @@ import {
   type ReactNode,
 } from "react";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 import {
   alertOnAnswer,
   drawerShowsProject,
@@ -38,6 +40,7 @@ import {
 import { isDocSpeechKey } from "./docKey";
 import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessionTransport";
+import { useOpenaiVoicesSnapshot } from "./useOpenaiVoices";
 import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
@@ -384,10 +387,23 @@ const ENGLISH = (): VoiceLanguage => "en";
  * The voice language port the host prepares with — the provider's
  * `languageFor` — for a surface that prepares a page itself (the toolbar's
  * `pageHasSpeech`, play-from-here's units), so it prepares the page as the host
- * will. Read at call time, like the host reads it. Without a provider (viewers
- * mounted bare in many suites) every key is English, `prepare`'s default.
+ * will. Without a provider (viewers mounted bare in many suites) every key is
+ * English, `prepare`'s default.
+ *
+ * The caller reads the port during render, so this hook subscribes to
+ * everything the answer depends on — the engine, the default and per-project
+ * voices, the cascade order, and the live OmniVoice list (which lands after a
+ * reload and turns a saved openai voice from "unknown" into a known locale) —
+ * as the terminal's `useVoiceForSession` does. A voice changed in Settings or
+ * on the project card then re-renders a mounted page, which re-prepares its
+ * units in the new language. The values are discarded: subscribing IS the point.
  */
 export function useLanguageFor(): (key: string) => VoiceLanguage {
+  usePreference(preferences.speechEngine);
+  usePreference(preferences.speechVoice);
+  usePreference(preferences.speechVoiceByProject);
+  usePreference(preferences.speechCascadeOrder);
+  useOpenaiVoicesSnapshot();
   return useContext(LanguageForContext) ?? ENGLISH;
 }
 

@@ -35,10 +35,19 @@ import { PagePlayFromHere } from "../PagePlayFromHere";
 import type { CellSpeechState, SpeechUnit } from "../types";
 import { prepare } from "../prepare";
 import { pageSpeechText, preparePage } from "../pageText";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
+import { getStoredEngine, voiceForDocKey } from "../voices";
+import { voiceLanguageFor, type VoiceLanguage } from "../voiceLanguage";
 
 const KEY = "doc:pavilio/wiki/page.md";
 /** What the provider's `languageFor` port answers for every key: the page's voice language. */
 let pageLanguage: "pl" | "en" = "en";
+/**
+ * A port that reads the stored voices instead, as the panel's does; null
+ * (the default) answers {@link pageLanguage}.
+ */
+let storedLanguagePort: ((key: string) => VoiceLanguage) | null = null;
 
 const answerWaiting: AnswerWaitingPort = {
   get: () => ({ waiting: false, pending: false }),
@@ -58,7 +67,7 @@ function Host({ children }: { children: ReactNode }) {
       onArrival={() => {}}
       answerWaiting={answerWaiting}
       voiceFor={() => "a-voice"}
-      languageFor={() => pageLanguage}
+      languageFor={(key) => (storedLanguagePort ? storedLanguagePort(key) : pageLanguage)}
     >
       {children}
     </SpeechHostProvider>
@@ -175,6 +184,7 @@ beforeEach(() => {
 afterEach(() => {
   stub.host = null;
   pageLanguage = "en";
+  storedLanguagePort = null;
 });
 
 describe("PlayFromHere", () => {
@@ -538,6 +548,52 @@ describe("PlayFromHere", () => {
     stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? polishUnits : []) });
     act(() => {
       rerender(<Page text={polish} />);
+    });
+    const heading = block(container, "Następny nagłówek");
+    expect(heading).toHaveAttribute("data-speak-unit", String(headingOf(polishUnits)));
+    fireEvent.mouseOver(heading);
+    fireEvent.click(playOf(container, heading)!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({
+      key: KEY,
+      text: polish,
+      startUnit: headingOf(polishUnits),
+    });
+  });
+
+  it("a mounted page follows a stored project voice change and plays the units of the new language", () => {
+    // The port reads the stored voices, as the panel's does; nothing rerenders
+    // the page by hand — only the preference write can reach it.
+    storedLanguagePort = (key) => voiceLanguageFor(getStoredEngine(), voiceForDocKey(key));
+    const images = Array.from({ length: 46 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+    const polish = [
+      "# Tytuł strony",
+      "",
+      `To jest długi akapit o tym, jak działa nasz system i dlaczego warto go poznać. ${images} Następnie opisujemy, co się dzieje dalej w tej części dokumentu, żeby było jasne. Kolejne zdanie jest tutaj, aby akapit był wystarczająco długi.`,
+      "",
+      "## Następny nagłówek",
+      "",
+      "Krótki akapit po nagłówku.",
+      "",
+    ].join("\n");
+    const englishUnits = prepare(pageSpeechText(polish)).units;
+    const polishUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
+    const headingOf = (units: typeof polishUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
+    expect(headingOf(polishUnits)).not.toBe(headingOf(englishUnits));
+
+    // The default Edge voice is English... (one host throughout: the write
+    // re-renders the page, not the provider, so the host is not swapped)
+    let hostUnits = englishUnits;
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? hostUnits : []) });
+    const { container } = render(<Page text={polish} />);
+    expect(block(container, "Następny nagłówek")).toHaveAttribute(
+      "data-speak-unit",
+      String(headingOf(englishUnits)),
+    );
+
+    // ...then the page's project gets a Polish voice while the page is mounted.
+    hostUnits = polishUnits;
+    act(() => {
+      writePreference(preferences.speechVoiceByProject, { pavilio: { edge: "pl-PL-ZofiaNeural" } });
     });
     const heading = block(container, "Następny nagłówek");
     expect(heading).toHaveAttribute("data-speak-unit", String(headingOf(polishUnits)));
