@@ -1,0 +1,27 @@
+/* The story PR header: the PRs list's row (Prs.css) on top of a story in the QA tab. */
+.story-pr {
+  /* Sized by the pane, not the window: the QA tab's viewer can be narrow beside a wide screen. */
+  container-type: inline-size;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.story-pr .pr-row { border-bottom: 0; }
+.story-pr .pr-tt { overflow-wrap: anywhere; }
+.story-pr a.pr-act { text-decoration: none; }
+.story-pr-reduced { cursor: default; }
+.story-pr-reduced:hover { background: transparent; }
+.story-pr-problem { color: var(--text-secondary); }
+.story-pr-spin svg { animation: story-pr-spin 0.9s linear infinite; }
+@keyframes story-pr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .story-pr-spin svg { animation: none; }
+}
+
+/* A narrow pane (a phone, or a split view): the actions drop under the title and wrap, nothing scrolls sideways. */
+@container (max-width: 560px) {
+  .story-pr .pr-right { grid-column: 2 / 4; justify-self: start; flex-wrap: wrap; }
+  .story-pr .pr-actions { flex-wrap: wrap; }
+}

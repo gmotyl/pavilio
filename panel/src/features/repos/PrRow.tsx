@@ -1,5 +1,5 @@
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import type { ChecksState } from "../../../server/lib/prs/provider";
+import type { ChecksState, PrState } from "../../../server/lib/prs/provider";
 import type { PullRequest } from "./usePrs";
 import "./Prs.css";
 
@@ -13,6 +13,10 @@ interface Props {
   onOpen: (pr: PullRequest) => void;
   /** Buttons drawn at the right; their clicks and keys never reach the row, so they don't open it. */
   actions?: ReactNode;
+  /** A PR fetched in any state (the story header): merged and closed get their own icon colour. */
+  state?: PrState;
+  /** Badges drawn after the review badge, e.g. the story header's Merged / Story behind / language tag. */
+  extraBadges?: ReactNode;
 }
 
 const keepClick = (e: MouseEvent) => e.stopPropagation();
@@ -73,7 +77,21 @@ function badge(pr: PullRequest, me: string | null): [string, string] | null {
   return null;
 }
 
-export default function PrRow({ pr, me, selected = false, tabbable = true, onFocus, onOpen, actions }: Props) {
+/** The pull-request glyph; its colour comes from the `pr-ic` span around it. */
+export const PrIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+    <g fill="none" stroke="currentColor" strokeWidth="1.4">
+      <circle cx="4" cy="3.5" r="1.6" />
+      <circle cx="4" cy="12.5" r="1.6" />
+      <circle cx="12" cy="12.5" r="1.6" />
+      <path d="M4 5.2v5.6M12 10.8V6.5a2 2 0 0 0-2-2H7.5" />
+    </g>
+  </svg>
+);
+
+const IC_STATE: Partial<Record<PrState, string>> = { merged: " pr-ic-merged", closed: " pr-ic-closed" };
+
+export default function PrRow({ pr, me, selected = false, tabbable = true, onFocus, onOpen, actions, state, extraBadges }: Props) {
   const chk = CHECKS[pr.checks];
   const b = badge(pr, me);
   return (
@@ -93,15 +111,8 @@ export default function PrRow({ pr, me, selected = false, tabbable = true, onFoc
         }
       }}
     >
-      <span className={`pr-ic${pr.isDraft ? " pr-ic-draft" : ""}`}>
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          <g fill="none" stroke="currentColor" strokeWidth="1.4">
-            <circle cx="4" cy="3.5" r="1.6" />
-            <circle cx="4" cy="12.5" r="1.6" />
-            <circle cx="12" cy="12.5" r="1.6" />
-            <path d="M4 5.2v5.6M12 10.8V6.5a2 2 0 0 0-2-2H7.5" />
-          </g>
-        </svg>
+      <span className={`pr-ic${(state && IC_STATE[state]) || (pr.isDraft ? " pr-ic-draft" : "")}`}>
+        <PrIcon />
       </span>
       <span className="pr-tt">{pr.title}</span>
       <span className="pr-right">
@@ -126,6 +137,7 @@ export default function PrRow({ pr, me, selected = false, tabbable = true, onFoc
         <span>{pr.author === me ? "you" : pr.author}</span>
         <span title={pr.updatedAt}>updated {updatedAgo(pr.updatedAt)}</span>
         {b && <span className={`pr-badge${b[1] ? ` ${b[1]}` : ""}`}>{b[0]}</span>}
+        {extraBadges}
       </span>
     </li>
   );

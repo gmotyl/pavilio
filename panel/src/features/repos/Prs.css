@@ -66,6 +66,8 @@
   color: var(--green);
 }
 .pr-ic-draft { color: var(--text-muted); }
+.pr-ic-merged { color: var(--purple, #a78bfa); }
+.pr-ic-closed { color: var(--red); }
 .pr-tt {
   min-width: 0;
   font-weight: 600;
@@ -116,6 +118,9 @@
 .pr-badge-req { color: var(--accent); border-color: var(--accent); }
 .pr-badge-ok { color: var(--green); border-color: var(--green); }
 .pr-badge-chg { color: var(--red); border-color: var(--red); }
+.pr-badge-merged { color: var(--purple, #a78bfa); border-color: var(--purple, #a78bfa); }
+.pr-badge-closed { color: var(--red); border-color: var(--red); }
+.pr-badge-behind { color: var(--accent); border-color: var(--accent); border-style: dashed; }
 .pr-chk {
   font-size: 12px;
   font-weight: 700;

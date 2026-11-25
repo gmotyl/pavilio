@@ -6,6 +6,8 @@ import { useWorkspaceRoot } from "./useWorkspaceRoot";
 import { useDocSpeech } from "./docSpeech";
 import { PagePlayFromHere } from "../speech/PagePlayFromHere";
 import { usePeekTriggerProps } from "./peekTrigger";
+import StoryPrHeader from "../qa/StoryPrHeader";
+import { storyPrOf } from "../qa/useStoryPr";
 
 interface Props {
   filePath: string;
@@ -35,6 +37,8 @@ export function FileViewer({
     loading ? null : content,
     isMarkdown(filePath),
   );
+  // A QA story naming its PR opens with the PR's live row; the story renders whatever that fetch does.
+  const storyPr = loading ? null : storyPrOf(filePath, content);
   return (
     <div>
       <div
@@ -68,6 +72,7 @@ export function FileViewer({
         </p>
       ) : (
         <ImageDropZone targetMarkdown={filePath}>
+          {storyPr && <StoryPrHeader key={`${storyPr.project}/${storyPr.repo}#${storyPr.number}`} story={storyPr} />}
           {isMarkdown(filePath) ? (
             <PagePlayFromHere docKey={speech?.key} text={speech?.text ?? ""}>
               <MarkdownRenderer content={content} basePath={filePath} />
