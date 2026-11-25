@@ -69,13 +69,13 @@ const storyPath = (project: string, pr: Pick<PullRequest, "repo" | "number">) =>
  * The project's story files with their index `modified` times, from the same
  * file index the QA tab lists: read on mount and again whenever the index
  * changes on disk, so a finished Explain turns its row's button into Story and
- * a rewritten story ends a rebuild's spinner. Null until the index has loaded
+ * a rewritten story ends a rebuild's spinner. `stories` is null until the index has loaded
  * once: an empty placeholder would read as "no story" and offer Explain for a
- * PR that has one.
+ * PR that has one. `indexError` says the load failed and is being retried.
  */
-function useStoryPaths(project: string): Map<string, number> | null {
-  const { files, loaded } = useFileIndexState();
-  return useMemo(() => {
+function useStoryPaths(project: string): { stories: Map<string, number> | null; indexError: boolean } {
+  const { files, loaded, error } = useFileIndexState();
+  const stories = useMemo(() => {
     if (!loaded) return null;
     const prefix = `${project}/qa/stories/`;
     return new Map(
@@ -84,10 +84,13 @@ function useStoryPaths(project: string): Map<string, number> | null {
         .map((f) => [f.relativePath, f.modified]),
     );
   }, [files, loaded, project]);
+  return { stories, indexError: error };
 }
 
 /** Why Explain / ↻ cannot launch yet: the file index has not said which PRs have a story. */
 const LOADING_STORIES = "Loading stories…";
+/** The same wait after the index failed to load: it is retried on a backoff. */
+const STORIES_RETRYING = "Couldn't load stories — retrying…";
 
 /**
  * How often a live explaining entry is re-checked with no file change: the
@@ -306,7 +309,7 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
   // The tab stays mounted: entering the view is when a remote change should show up.
   useEffect(() => revalidate(), [revalidate]);
 
-  const stories = useStoryPaths(project);
+  const { stories, indexError } = useStoryPaths(project);
   const explaining = useExplaining(project);
   const now = useSettleExplaining(project, prs.all, stories, explaining);
   const [lang, setLang] = usePreference(preferences.storyLanguage);
@@ -356,7 +359,7 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
         pending={launching}
         tabbable={tabbable}
         launchTitle={
-          (stories ? null : LOADING_STORIES) ??
+          (stories ? null : indexError ? STORIES_RETRYING : LOADING_STORIES) ??
           blockedReason ??
           `Start ${launcher?.name ?? ""} running pavilio-pr-explain for ${project} ${p.repo}#${p.number}`
         }

@@ -366,6 +366,38 @@ describe("PrsView", () => {
       expect(within(r).queryByRole("button", { name: "Explain" })).toBeNull();
     });
 
+    it("a failed file index keeps Explain disabled, says it is retrying, and recovers", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let indexUp = false;
+      stubFetch({
+        "/api/prs": { me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] },
+        "/api/files/index": () =>
+          indexUp ? jsonResponse([{ relativePath: STORY, modified: 1 }]) : new Response("boom", { status: 500 }),
+      });
+      render(
+        <MemoryRouter initialEntries={["/project/pavilio/repos?view=prs"]}>
+          <Routes>
+            <Route path="/project/:name/:section" element={<ReposTab project="pavilio" repos={REPOS} />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      const failed = () => screen.queryAllByTitle("Couldn't load stories — retrying…");
+      await waitFor(() => expect(failed()).toHaveLength(2));
+      for (const b of failed()) expect(b).toBeDisabled();
+      expect(screen.queryAllByTitle("Loading stories…")).toHaveLength(0);
+      fireEvent.click(failed()[0]);
+      expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+
+      indexUp = true;
+      await act(async () => void (await vi.advanceTimersByTimeAsync(2_000)));
+      expect(await within(rows()[0]).findByRole("button", { name: "Story" })).toBeEnabled();
+      expect(within(rows()[0]).getByRole("button", { name: "Rebuild story for #7" })).toBeEnabled();
+      expect(within(rows()[0]).queryByRole("button", { name: "Explain" })).toBeNull();
+      expect(within(rows()[1]).getByRole("button", { name: "Explain" })).toBeEnabled();
+      expect(failed()).toHaveLength(0);
+    });
+
     it("Story opens the file in the QA tab", async () => {
       renderPrs(one(), "pavilio", "?view=prs", [STORY]);
       fireEvent.click(await within(await row()).findByRole("button", { name: "Story" }));
