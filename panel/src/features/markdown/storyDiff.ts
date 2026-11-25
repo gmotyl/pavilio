@@ -6,10 +6,23 @@
  * version's, so context and added lines count and removed lines do not — unless
  * the header says `(before)`, which quotes the base version: then context and
  * removed lines count and added ones do not.
+ *
+ * A head-numbered header may add ` base L<c>`, the base line its first
+ * base-side (context or removed) line sits on, so removed lines get a number
+ * too. Under `(before)` the quoted lines are base lines already.
  */
 
-/** A story header: path (with any `(before)`/`(unchanged)` marker), then `L<start>` or `L<start>–<end>`. */
-const STORY_HEADER = /^@@ (\S.*?) L(\d+)(?:[–-]\d+)? @@$/;
+import hljs from "highlight.js";
+import { detectLang } from "./highlight";
+
+/**
+ * A story header: path (with any `(before)`/`(unchanged)` marker), then `L<start>` or `L<start>–<end>`
+ * (en dash or hyphen), then an optional ` base L<start>`.
+ */
+const STORY_HEADER = /^@@ (\S.*?) L(\d+)(?:[–-]\d+)?(?: base L(\d+))? @@$/;
+
+/** The `(…)` markers the skill writes after a header path. */
+const MARKERS = /(?:\s+\([^()]*\))+$/;
 
 /**
  * `(before)` as a marker the skill writes after the path: preceded by
@@ -25,6 +38,11 @@ export interface StoryDiffLine {
   kind: DiffLineKind;
   /** The quoted file's line number; null where the gutter stays empty. */
   number: number | null;
+  /**
+   * The base version's line number: null for `+` lines and when the header has no `base L`;
+   * equals `number` under `(before)`.
+   */
+  base: number | null;
 }
 
 function kindOf(line: string): DiffLineKind {
@@ -41,18 +59,40 @@ export function numberStoryDiff(text: string): StoryDiffLine[] | null {
   const lines = text.replace(/\n$/, "").split("\n");
   if (!STORY_HEADER.test(lines[0] ?? "")) return null;
   let next = 0;
+  let nextBase: number | null = null;
   let before = false;
   return lines.map((line) => {
     const kind = kindOf(line);
     if (kind === "header") {
-      const [, path, start] = STORY_HEADER.exec(line)!;
+      const [, path, start, baseStart] = STORY_HEADER.exec(line)!;
       next = Number(start);
       before = BEFORE_MARKER.test(path);
-      return { text: line, kind, number: null };
+      nextBase = before ? null : baseStart === undefined ? null : Number(baseStart);
+      return { text: line, kind, number: null, base: null };
     }
     const counted = kind === "context" || (kind === (before ? "removed" : "added"));
-    return { text: line, kind, number: counted ? next++ : null };
+    const number = counted ? next++ : null;
+    if (before) return { text: line, kind, number, base: number };
+    if (nextBase === null || (kind !== "context" && kind !== "removed")) {
+      return { text: line, kind, number, base: null };
+    }
+    return { text: line, kind, number, base: nextBase++ };
   });
+}
+
+/**
+ * hljs language name for the block's first header path: the hand map's choice first, else the
+ * extension itself when highlight.js knows it; null when unknown or there is no extension.
+ */
+export function storyDiffLanguage(lines: StoryDiffLine[]): string | null {
+  const header = lines.find((line) => line.kind === "header");
+  const match = header && STORY_HEADER.exec(header.text);
+  if (!match) return null;
+  const path = match[1].replace(MARKERS, "");
+  const name = path.split("/").pop() ?? "";
+  if (!name.includes(".")) return null;
+  const ext = name.split(".").pop()!.toLowerCase();
+  return detectLang(path) ?? (hljs.getLanguage(ext) ? ext : null);
 }
 
 /**

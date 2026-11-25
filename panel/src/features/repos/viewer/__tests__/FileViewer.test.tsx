@@ -18,8 +18,8 @@ vi.mock("../rowPage", async (importOriginal) => {
 
 // Likewise the highlight cap: a test that crosses it sets a small one instead of building half a megabyte.
 const highlightLimit = vi.hoisted(() => ({ chars: undefined as number | undefined }));
-vi.mock("../highlightLimit", async (importOriginal) => {
-  const real = await importOriginal<typeof import("../highlightLimit")>();
+vi.mock("../../../markdown/highlightLimit", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../../markdown/highlightLimit")>();
   return {
     get MAX_HIGHLIGHT_CHARS() {
       return highlightLimit.chars ?? real.MAX_HIGHLIGHT_CHARS;

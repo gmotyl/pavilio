@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import hljs from "highlight.js";
 import { preferences } from "../../../preferences/declarations";
 import { usePreference } from "../../../preferences/usePreference";
 import {
@@ -20,8 +19,7 @@ import {
   type Range,
   type Row,
 } from "./diffModel";
-import { detectLang, escapeHtml } from "./highlight";
-import { MAX_HIGHLIGHT_CHARS } from "./highlightLimit";
+import { detectLang, escapeHtml, highlightLines } from "../../markdown/highlight";
 import { ROW_PAGE } from "./rowPage";
 import { CopyIconButton } from "../../shell/CopyIconButton";
 import type { ReviewThread } from "../reviewThreads";
@@ -61,43 +59,6 @@ const SPLIT_MIN_WIDTH = 720;
 const FLASH_MS = 1300;
 // ts-nav only resolves these; elsewhere identifier links would lead nowhere.
 const NAVIGABLE = /\.(?:tsx?|jsx?|mts|cts)$/i;
-
-/**
- * Highlight `lines` as one text so multi-line tokens (comments, template strings) stay right, then split back per line.
- * `tokens` is false when the text rendered plain, so no token classes exist.
- */
-function highlightLines(lines: string[], lang: string | undefined): { html: string[]; tokens: boolean } {
-  // An empty text still highlights to one (empty) line; keep the counts equal.
-  if (lines.length === 0) return { html: [], tokens: true };
-  const text = lines.join("\n");
-  const plain = () => ({ html: lines.map(escapeHtml), tokens: false });
-  if (!lang || text.length > MAX_HIGHLIGHT_CHARS) return plain();
-  let html: string;
-  try {
-    html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-  } catch {
-    return plain();
-  }
-  const out: string[] = [];
-  const open: string[] = [];
-  let cur = "";
-  let last = 0;
-  // Spans crossing a newline are closed at the line end and reopened on the next line.
-  for (const m of html.matchAll(/<span[^>]*>|<\/span>|\n/g)) {
-    cur += html.slice(last, m.index);
-    last = m.index + m[0].length;
-    if (m[0] === "\n") {
-      out.push(cur + "</span>".repeat(open.length));
-      cur = open.join("");
-    } else {
-      if (m[0] === "</span>") open.pop();
-      else open.push(m[0]);
-      cur += m[0];
-    }
-  }
-  out.push(cur + html.slice(last) + "</span>".repeat(open.length));
-  return { html: out, tokens: true };
-}
 
 const ENTITY_RE = /^&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i;
 
