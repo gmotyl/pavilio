@@ -394,6 +394,15 @@ vi.mock("../../terminal/useAllTerminalSessions", async (importOriginal) => ({
  * out of every test that is not about them.
  */
 const sessionList = vi.hoisted(() => ({ current: [] as Array<Record<string, unknown>> }));
+/**
+ * Lists the surface's cells in the session store, so the terminal's language
+ * port can place them: a cell the list does not hold has no language yet, and
+ * the host neither warms nor preloads its answers until it does. For the tests
+ * about warming, which the alerts they also raise do not disturb.
+ */
+const placeCells = (): void => {
+  sessionList.current = SESSIONS as unknown as Array<Record<string, unknown>>;
+};
 vi.mock("../../terminal/sessionStore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../terminal/sessionStore")>()),
   getSessions: () => sessionList.current,
@@ -737,6 +746,7 @@ describe("autoplay — the armed cell", () => {
   });
 
   it("an unarmed cell is warmed but silent", async () => {
+    placeCells();
     await renderProjectSurface();
     await arm("cell-a");
 
@@ -781,6 +791,7 @@ describe("autoplay — the armed cell", () => {
   });
 
   it("only the armed cell speaks when several utterances arrive", async () => {
+    placeCells();
     await renderProjectSurface();
     await arm("cell-b");
 
@@ -922,6 +933,7 @@ describe("autoplay — the surfaces and the voice language", () => {
   });
 
   it("the voice language decides, never the answers", async () => {
+    placeCells();
     await renderProjectSurface();
     await arm("cell-a");
 
@@ -1383,6 +1395,7 @@ describe("one speech host for the panel, not one per surface", () => {
   });
 
   it("a freshly hydrated tab does not start talking on its own", async () => {
+    placeCells();
     // The browser remembers an armed cell and the server still holds that
     // cell's last response, so the tab comes up armed with something unheard
     // in it — and nothing has been clicked yet.
@@ -1430,6 +1443,7 @@ describe("one speech host for the panel, not one per surface", () => {
  */
 describe("warming the first unit on arrival", () => {
   it("warms unit 0 only, and the click plays it without re-synthesizing", async () => {
+    placeCells();
     const markdown = shortResponse(4);
     const prepared = prepare(markdown);
     expect(prepared.units).toHaveLength(4);

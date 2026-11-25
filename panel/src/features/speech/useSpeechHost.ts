@@ -243,8 +243,14 @@ export interface SpeechHostOptions {
    * prepared in (placeholders and every unit's `lang`). Read at preparation
    * time, so a voice change reaches the next preparation and leaves an
    * utterance already prepared as it was. Nothing is detected from the text.
+   *
+   * `undefined` when the language is not known yet — a session the panel
+   * cannot place in its project until the session list loads. Such an
+   * utterance is prepared provisionally, in English, and that preparation is
+   * never kept: the next read asks the port again, and the first one it
+   * answers is the one kept.
    */
-  languageFor: (sessionId: string) => VoiceLanguage;
+  languageFor: (sessionId: string) => VoiceLanguage | undefined;
   /**
    * The cell's answer-waiting state: the hold on the text and the wave. See
    * {@link AnswerWaitingPort}.
@@ -377,13 +383,35 @@ export function useSpeechHost({
    * warming effect and the transport must not follow the caller's callback.
    */
   const languageForRef = useRef(languageFor);
+  /**
+   * Bumped each time the caller hands in a new port after the first: a new
+   * port may answer for a key it could not place before, so the warming
+   * effect, which skips what the port cannot answer yet, takes it as an
+   * opportunity, like a reconnect.
+   */
+  const [portChanges, setPortChanges] = useState(0);
+  const firstPortRef = useRef(true);
   useEffect(() => {
     languageForRef.current = languageFor;
+    if (firstPortRef.current) {
+      firstPortRef.current = false;
+      return;
+    }
+    setPortChanges((count) => count + 1);
   }, [languageFor]);
   /** The port as the channel takes it: stable, reading the mirror when asked. */
   const languageForKey = useCallback(
-    (sessionId: string): VoiceLanguage => languageForRef.current(sessionId),
+    (sessionId: string): VoiceLanguage | undefined => languageForRef.current(sessionId),
     [],
+  );
+  /**
+   * The port as the channel takes it. The channel only asks whether a text
+   * prepares to anything — a count, never kept — so a language not known yet
+   * reads as English, the provisional preparation's.
+   */
+  const languageForChannel = useCallback(
+    (sessionId: string): VoiceLanguage => languageForKey(sessionId) ?? "en",
+    [languageForKey],
   );
   /**
    * `answerWaiting`, mirrored for the same reason: `onPrevious` and `onNext`
@@ -409,6 +437,13 @@ export function useSpeechHost({
   // Keyed by utterance id: preparation is pure and the same utterance always
   // prepares the same way, so a replay must not pay for it twice.
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
+  /**
+   * Preparations made while the `languageFor` port did not know the key's
+   * language yet (a session not placed in its project), by utterance id. Kept
+   * only so a read per render does not re-prepare and hand out new units each
+   * time; never read once the port answers, and dropped then.
+   */
+  const provisionalRef = useRef<Map<string, PreparedSpeech>>(new Map());
   /**
    * Each autoplay cell's utterances that autoplay is done with, so none is
    * played twice. One record per cell in autoplay — keyed by session, created
@@ -652,7 +687,7 @@ export function useSpeechHost({
     // A catch-up after a reconnect is SHOWN, never spoken: see ADR 0017.
     recordAutoplayed,
     onAnswer,
-    languageFor: languageForKey,
+    languageFor: languageForChannel,
   });
   const {
     arriveLocal,
@@ -678,10 +713,11 @@ export function useSpeechHost({
    * the port resolves for that key. Asked once per utterance in effect:
    * `preparedFor` keeps what it prepared by id, so a later voice change leaves
    * an utterance already prepared alone (a page is re-prepared on its next
-   * Play; see `speakDocument`).
+   * Play; see `speakDocument`). `undefined` while the port does not know yet;
+   * see `preparedFor`.
    */
   const languageOf = useCallback(
-    (utterance: Utterance): VoiceLanguage => languageForKey(utterance.sessionId),
+    (utterance: Utterance): VoiceLanguage | undefined => languageForKey(utterance.sessionId),
     [languageForKey],
   );
   /** Each spoken page's key → the id of the utterance it landed. */
@@ -701,10 +737,30 @@ export function useSpeechHost({
     heardForRef.current = heardFor;
   }, [heardFor, speechModeOf]);
 
+  /**
+   * The utterance's preparation in `language`, kept by id: the first one made
+   * is the one every later read gets, whatever the voice does after.
+   *
+   * A `language` of `undefined` — the port cannot place the key yet — gets a
+   * PROVISIONAL preparation, in English: the bar and a run need units now, but
+   * it is not kept as the utterance's preparation, so the read after the port
+   * answers prepares it for real. Only that real one is kept for good.
+   */
   const preparedFor = useCallback(
-    (utterance: Utterance, language: VoiceLanguage): PreparedSpeech => {
+    (utterance: Utterance, language: VoiceLanguage | undefined): PreparedSpeech => {
       const cached = preparedRef.current.get(utterance.id);
       if (cached) return cached;
+
+      if (language === undefined) {
+        const provisional = provisionalRef.current.get(utterance.id);
+        if (provisional) return provisional;
+        const made = isDocSpeechKey(utterance.sessionId)
+          ? preparePageText(utterance.text, "en")
+          : prepare(utterance.text, { language: "en" });
+        provisionalRef.current.set(utterance.id, made);
+        return made;
+      }
+      provisionalRef.current.delete(utterance.id);
 
       // A page (`doc:` key) is prepared the one way every page is — block-
       // bounded (`preparePageText`), in its project's voice language — so the
@@ -1025,7 +1081,9 @@ export function useSpeechHost({
     // an arrival, a mode change, a catch-up that surfaced something, a
     // realtime reconnect even when it surfaced nothing new (`reconnects`), or
     // the tab coming back into view (`visibleReturns` — a socket that stayed
-    // OPEN publishes no reconnect frame). The stop only holds within one pass,
+    // OPEN publishes no reconnect frame), or a new `languageFor` port
+    // (`portChanges` — it may now place a session it could not, whose answer
+    // was skipped below). The stop only holds within one pass,
     // so a synthesizer that is down is walked once per opportunity rather than
     // through the whole answer, and a transient failure no longer leaves an
     // armed cell cold until its mode is cycled. The body is idempotent —
@@ -1033,8 +1091,14 @@ export function useSpeechHost({
     // requested, even one the synth LRU has evicted since — so the extra runs
     // re-request only what failed or was called off.
     preloadFailedRef.current.clear();
+    // An utterance whose language the port does not know yet is not warmed
+    // or preloaded: both are marked done by id, so a warm of the provisional
+    // units — in the provisional voice, too — would be the only one it ever
+    // got. It is warmed at the next opportunity after the port answers.
     for (const { utterance } of warmableUtterances) {
-      warmFirstUnit(utterance, preparedFor(utterance, languageOf(utterance)).units);
+      const language = languageOf(utterance);
+      if (language === undefined) continue;
+      warmFirstUnit(utterance, preparedFor(utterance, language).units);
     }
     // Only the cell's newest answer is preloaded whole, however old it is; an
     // older one the transport may still reach plays on demand. Newest arrival
@@ -1047,17 +1111,20 @@ export function useSpeechHost({
       .filter(({ mode, newest }) => mode !== "off" && newest)
       .sort((a, b) => b.utterance.at - a.utterance.at);
     for (const { utterance } of preloads) {
-      preloadRemainder(utterance, preparedFor(utterance, languageOf(utterance)).units);
+      const language = languageOf(utterance);
+      if (language === undefined) continue;
+      preloadRemainder(utterance, preparedFor(utterance, language).units);
     }
     // Warming reads nothing from the player any more: the supersession that
     // used to ride along inside this loop is its own effect below, because it
     // is about the QUEUE rather than about the cache, and a loop over every
     // speakable utterance in the panel was never the honest place to ask "is
     // this one cell's held run stale".
-    // `reconnects` and `visibleReturns` are read by nothing in the body: they
-    // are listed only so each opportunity re-runs it.
+    // `reconnects`, `visibleReturns` and `portChanges` are read by nothing in
+    // the body: they are listed only so each opportunity re-runs it.
   }, [
     languageOf,
+    portChanges,
     preparedFor,
     preloadRemainder,
     reconnects,
@@ -1277,6 +1344,7 @@ export function useSpeechHost({
   const forgetPageUtterance = useCallback((id: string): void => {
     warmedRef.current.delete(id);
     preparedRef.current.delete(id);
+    provisionalRef.current.delete(id);
   }, []);
 
   const speakDocument = useCallback(

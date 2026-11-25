@@ -71,7 +71,7 @@ export interface PanelPageSpeech extends PageSpeech {
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 const PageSpeechContext = createContext<PanelPageSpeech | null>(null);
 /** The `languageFor` port as the provider was handed it; null without a provider. */
-const LanguageForContext = createContext<((key: string) => VoiceLanguage) | null>(null);
+const LanguageForContext = createContext<((key: string) => VoiceLanguage | undefined) | null>(null);
 
 /**
  * Where the focused cell is read from. The provider combines it with the route
@@ -104,8 +104,11 @@ interface Props {
   onArrival: TransportArrival;
   answerWaiting: AnswerWaitingPort;
   voiceFor: (sessionId: string) => string;
-  /** The voice language of a session or page key; see `SpeechHostOptions.languageFor`. */
-  languageFor: (sessionId: string) => VoiceLanguage;
+  /**
+   * The voice language of a session or page key, or `undefined` while a
+   * session cannot be placed yet; see `SpeechHostOptions.languageFor`.
+   */
+  languageFor: (sessionId: string) => VoiceLanguage | undefined;
 }
 
 /** What the answer alert reads off the router, kept current by {@link RouterBridge}. */
@@ -381,14 +384,13 @@ export function usePanelSpeechIfMounted(): GridSpeech | null {
   return useContext(SpeechHostContext);
 }
 
-const ENGLISH = (): VoiceLanguage => "en";
-
 /**
  * The voice language port the host prepares with — the provider's
  * `languageFor` — for a surface that prepares a page itself (the toolbar's
  * `pageHasSpeech`, play-from-here's units), so it prepares the page as the host
  * will. Without a provider (viewers mounted bare in many suites) every key is
- * English, `prepare`'s default.
+ * English, `prepare`'s default; so is a key the port cannot answer yet, as the
+ * host's provisional preparation is (a page's key always has an answer).
  *
  * The caller reads the port during render, so this hook subscribes to
  * everything the answer depends on — the engine, the default and per-project
@@ -404,7 +406,8 @@ export function useLanguageFor(): (key: string) => VoiceLanguage {
   usePreference(preferences.speechVoiceByProject);
   usePreference(preferences.speechCascadeOrder);
   useOpenaiVoicesSnapshot();
-  return useContext(LanguageForContext) ?? ENGLISH;
+  const port = useContext(LanguageForContext);
+  return useCallback((key: string): VoiceLanguage => port?.(key) ?? "en", [port]);
 }
 
 export default SpeechHostProvider;

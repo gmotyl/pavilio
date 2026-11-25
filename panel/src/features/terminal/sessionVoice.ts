@@ -12,6 +12,7 @@ import {
   voiceForProject,
 } from "../speech/voices";
 import { projectOfSession } from "./sessionProject";
+import { getSessions } from "./sessionStore";
 
 /**
  * The voice a cell speaks with, through the project its session belongs to;
@@ -48,8 +49,19 @@ function projectOfSpeechKey(sessionId: string): string | undefined {
  * not known here: a member it skips (no key, no address) hands the text to a
  * later one, which reads it prepared in the first member's language, as any
  * fallback does. Read-only, like {@link voiceForSession}.
+ *
+ * `undefined` while the tab cannot place the session — it is not in the
+ * session list, which is empty until `/api/terminal/sessions` first answers:
+ * an answer that arrives first does not know its project yet, and the host
+ * prepares it only provisionally. That is not the same as a session the list
+ * does hold whose project has no voice of its own (or which carries no
+ * project): that one is placed, and speaks the default voice's language. A
+ * page's `doc:` key is always placed, through its path.
  */
-export function languageForSession(sessionId: string): VoiceLanguage {
+export function languageForSession(sessionId: string): VoiceLanguage | undefined {
+  if (!isDocSpeechKey(sessionId) && !getSessions().some((session) => session.id === sessionId)) {
+    return undefined;
+  }
   const project = projectOfSpeechKey(sessionId);
   const engine = getStoredEngine();
   if (engine === CASCADE) {

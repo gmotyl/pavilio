@@ -8,7 +8,7 @@
  * {@link SpeechHostProvider} as ports. Mount it once, where the provider would
  * go. See `App.tsx`.
  */
-import type { ReactNode } from "react";
+import { useCallback, useSyncExternalStore, type ReactNode } from "react";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { CASCADE } from "../speech/engines";
@@ -27,7 +27,7 @@ import {
   releaseAnswer,
 } from "./answerWaiting";
 import { dismissAttentionOnArrival } from "./attentionArrival";
-import { getSessions } from "./sessionStore";
+import { getSessions, subscribeSessions } from "./sessionStore";
 import { languageForSession, voiceForSession } from "./sessionVoice";
 import {
   readStandaloneTerminalFocus,
@@ -62,6 +62,11 @@ function isSessionOpen(sessionId: string): boolean {
   return sessions.length === 0 || sessions.some((session) => session.id === sessionId);
 }
 
+/** {@link subscribeSessions} as `useSyncExternalStore` takes it. */
+function subscribeSessionList(onChange: () => void): () => void {
+  return subscribeSessions(() => onChange());
+}
+
 /** The project's focus, the standalone page's, and every way either changes. */
 const focusedCell: FocusedCellPort = {
   read: readTerminalFocus,
@@ -93,6 +98,13 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   usePreference(preferences.speechEngine);
   usePreference(preferences.speechCascadeOrder);
   usePrimeOpenaiVoices(speaksWithOpenai());
+  // A new language port each time the session list changes: `languageForSession`
+  // answers `undefined` for a session the list does not hold yet, and the host
+  // takes a new port as the moment to warm what it skipped for that. The list
+  // only notifies on a real change, so this is not a re-render per poll.
+  const sessionList = useSyncExternalStore(subscribeSessionList, getSessions);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the list is the point: a new list, a new port
+  const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [sessionList]);
   return (
     <SpeechHostProvider
       sessionOf={sessionOf}
@@ -102,7 +114,7 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
       onArrival={dismissAttentionOnArrival}
       answerWaiting={answerWaiting}
       voiceFor={voiceForSession}
-      languageFor={languageForSession}
+      languageFor={languageFor}
     >
       {children}
     </SpeechHostProvider>

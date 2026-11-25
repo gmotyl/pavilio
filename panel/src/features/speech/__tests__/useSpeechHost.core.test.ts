@@ -1550,6 +1550,47 @@ describe("useSpeechHost — the voice language", () => {
     expect(second.spoken).toContain("blok kodu");
   });
 
+  it("an answer that arrives before its session is placed is read and played in the language the port gives once it answers", async () => {
+    // The session list has not loaded yet: the port cannot place the session.
+    let placed: "pl" | undefined;
+    setVoiceLanguage(() => placed);
+    const { result } = renderHost();
+
+    await emitUtterance("cell-a", "a1", ENGLISH);
+    // Read while unplaced: a provisional English preparation, so the bar has segments.
+    expect(preparedOf(result.current, "cell-a").langs).toEqual(["en"]);
+
+    // The list lands and places the session in a project with a Polish voice.
+    placed = "pl";
+    const read = preparedOf(result.current, "cell-a");
+    expect(read.langs).toEqual(["pl"]);
+    expect(read.spoken).toContain("blok kodu");
+
+    await clickControl(result.current, "cell-a");
+    expect(requestedTexts().some((text) => text.includes("blok kodu"))).toBe(true);
+    expect(requestedTexts().some((text) => text.includes("code block"))).toBe(false);
+  });
+
+  it("an answer not yet placed is warmed only once a new port places it, in its language", async () => {
+    const unplaced = (_sessionId: string): "pl" | "en" | undefined => undefined;
+    const { result, rerender } = renderHook(
+      ({ port }: { port: (sessionId: string) => "pl" | "en" | undefined }) =>
+        useSpeechHost({ voiceFor: voiceForSession, languageFor: port, answerWaiting: storeAnswerWaiting }),
+      { initialProps: { port: unplaced } },
+    );
+
+    await emitUtterance("cell-a", "a1", ENGLISH);
+    // Not warmed in the provisional language: the warm is marked done by id,
+    // so it would be the only one the answer ever got.
+    expect(requestedTexts()).toEqual([]);
+
+    // The session list lands; the host is handed a port that places the cell.
+    await settle(() => rerender({ port: () => "pl" }));
+    const polishUnits = prepare(ENGLISH, { language: "pl" }).units;
+    expect(requestedTexts()).toEqual([polishUnits[0].text]);
+    expect(result.current.unitsFor("cell-a")[0].lang).toBe("pl");
+  });
+
   it("play from here after a voice change reads the units the answer was prepared with", async () => {
     setVoiceLanguage("en");
     const { result } = renderHost();

@@ -302,18 +302,20 @@ export async function emitUtterance(
 // ---------------------------------------------------------------------------
 
 /** What the host's `languageFor` port answers: one language, or one per key. */
-let voiceLanguage: VoiceLanguage | ((sessionId: string) => VoiceLanguage) = "en";
+let voiceLanguage: VoiceLanguage | ((sessionId: string) => VoiceLanguage | undefined) = "en";
 
 /**
  * The host's `languageFor` port as the suites hand it in: English unless a test
  * says otherwise with {@link setVoiceLanguage}. Read at the moment of asking, so
  * a test that changes it between two arrivals sees only the later one move.
  */
-export const languageFor = (sessionId: string): VoiceLanguage =>
+export const languageFor = (sessionId: string): VoiceLanguage | undefined =>
   typeof voiceLanguage === "function" ? voiceLanguage(sessionId) : voiceLanguage;
 
 /** Sets what {@link languageFor} answers until the next reset. */
-export function setVoiceLanguage(next: VoiceLanguage | ((sessionId: string) => VoiceLanguage)): void {
+export function setVoiceLanguage(
+  next: VoiceLanguage | ((sessionId: string) => VoiceLanguage | undefined),
+): void {
   voiceLanguage = next;
 }
 

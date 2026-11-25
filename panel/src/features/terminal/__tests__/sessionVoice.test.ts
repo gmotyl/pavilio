@@ -181,6 +181,18 @@ describe("voice language of a session", () => {
     expect(languageForSession("sess-p")).toBe("en");
   });
 
+  it("a session the tab cannot place yet has no language; a placed one without a project voice has the default's", async () => {
+    setEngineVoice("edge", MAREK);
+    // The list has not loaded: nothing places "sess-p" yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    // Placed in a project with no voice of its own: the default voice decides.
+    await seedSessions([session("sess-p", "p")]);
+    expect(languageForSession("sess-p")).toBe("pl");
+    // A session still missing from a loaded list is not placed either.
+    expect(languageForSession("sess-gone")).toBeUndefined();
+  });
+
   it("a page key follows its project's voice", async () => {
     await loadLiveVoices();
     setStoredEngine("openai");
