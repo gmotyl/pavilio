@@ -56,8 +56,11 @@ export function storyPrOf(filePath: string, content: string): StoryPr | null {
 
 export type StoryPrData = PullRequest & { state: PrState };
 
-/** Why the header has no live PR: the provider's reasons, or the repo is not linked (404). */
-export type StoryPrProblem = Unavailable | "unlinked";
+/**
+ * Why the header has no live PR: the provider's reasons, the repo is not linked
+ * (404 `Repo not found`), or the project itself is gone (404 `Project not found`).
+ */
+export type StoryPrProblem = Unavailable | "unlinked" | "project-missing";
 
 export interface StoryPrStatus {
   pr: StoryPrData | null;
@@ -71,8 +74,13 @@ export interface StoryPrStatus {
 const UNAVAILABLE: readonly string[] = ["gh-missing", "gh-unauthenticated", "not-github", "failed"];
 
 async function problemOf(res: Response): Promise<StoryPrProblem> {
-  if (res.status === 404) return "unlinked";
-  const body = (await res.json().catch(() => null)) as { unavailable?: unknown } | null;
+  const body = (await res.json().catch(() => null)) as { unavailable?: unknown; error?: unknown } | null;
+  if (res.status === 404) {
+    // `/api/prs/one` 404s for two reasons; its `error` tells them apart.
+    if (body?.error === "Repo not found") return "unlinked";
+    if (body?.error === "Project not found") return "project-missing";
+    return "failed";
+  }
   const reason = body?.unavailable;
   return typeof reason === "string" && UNAVAILABLE.includes(reason) ? (reason as Unavailable) : "failed";
 }

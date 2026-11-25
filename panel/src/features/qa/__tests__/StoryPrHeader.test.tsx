@@ -238,6 +238,15 @@ describe("StoryPrHeader", () => {
     expect(within(header()).queryByRole("link", { name: /GitHub/ })).toBeNull();
   });
 
+  it("a missing project shows Project not found, not Repo not linked, and no Review", async () => {
+    stubFetch({ "/api/prs/one": () => jsonResponse({ error: "Project not found" }, { status: 404 }) });
+    renderHeader();
+    await within(header()).findByText("Project not found");
+    expect(within(header()).queryByText("Repo not linked")).toBeNull();
+    expect(within(header()).queryByRole("link", { name: "Review" })).toBeNull();
+    expect(within(header()).queryByRole("link", { name: /GitHub/ })).toBeNull();
+  });
+
   it("the header row is not a one-option listbox", async () => {
     stubFetch({ "/api/prs/one": OPEN });
     renderHeader();

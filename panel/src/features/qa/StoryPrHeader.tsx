@@ -11,6 +11,7 @@ const PROBLEM: Record<StoryPrProblem, string> = {
   "not-github": "No GitHub remote",
   failed: "Could not load PR status",
   unlinked: "Repo not linked",
+  "project-missing": "Project not found",
 };
 
 const HEX_SHA = /^[0-9a-f]{7,40}$/i;
@@ -31,7 +32,7 @@ const RefreshIcon = () => (
 );
 
 interface ActionsProps {
-  /** The Review route; null when the repo is not linked (the Review view could not open it). */
+  /** The Review route; null when the repo is not linked or the project is missing (the Review view could not open it). */
   review: string | null;
   /** GitHub's page for the PR; only a successful fetch knows it. */
   url: string | null;
@@ -101,7 +102,8 @@ function badges(story: StoryPr, pr: StoryPrData) {
 export default function StoryPrHeader({ story }: { story: StoryPr }) {
   const { pr, problem, loading, refresh } = useStoryPr(story.project, story.repo, story.number);
   const navigate = useNavigate();
-  const review = problem === "unlinked" ? null : reviewRoute(story);
+  // Neither an unlinked repo nor a missing project can open in the Review view.
+  const review = problem === "unlinked" || problem === "project-missing" ? null : reviewRoute(story);
 
   if (pr) {
     return (
