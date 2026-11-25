@@ -29,6 +29,16 @@ const DEEPEN_ROUNDS = 5;
 const DEEPEN_BY = 200;
 const PR_FIELDS =
   "number,title,author,isDraft,reviewRequests,reviewDecision,statusCheckRollup,headRefName,headRefOid,baseRefName,updatedAt,url";
+// Older gh (e.g. 2.7) rejects the whole --json list over this one field.
+const PR_FIELDS_NO_HEAD_OID = PR_FIELDS.replace(",headRefOid", "");
+const UNKNOWN_HEAD_OID = /Unknown JSON field: "headRefOid"/;
+// Per process: once gh said it lacks headRefOid, stop asking for it.
+let headRefOidUnsupported = false;
+
+export function __resetGhFieldSupportForTests(): void {
+  headRefOidUnsupported = false;
+}
+
 // gh exits 4 when it needs `gh auth login`; older versions only say so on stderr.
 const GH_AUTH_EXIT = 4;
 const AUTH_ERROR = /gh auth login|not logged in|authentication required|HTTP 401|bad credentials/i;
@@ -187,19 +197,40 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
   const now = deps.now ?? Date.now;
   let login: { at: number; value: Promise<string> } | null = null;
 
-  async function gh(args: string[], cwd: string): Promise<string> {
-    let r: RunResult;
+  async function runGh(args: string[], cwd: string): Promise<RunResult> {
     try {
-      r = await run("gh", args, { cwd });
+      return await run("gh", args, { cwd });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") throw new PrUnavailableError("gh-missing", "gh not found");
       throw new PrUnavailableError("failed", (err as Error).message);
     }
-    if (r.code === 0) return r.stdout;
+  }
+
+  function ghFailure(r: RunResult): PrUnavailableError {
     if (r.code === GH_AUTH_EXIT || AUTH_ERROR.test(r.stderr)) {
-      throw new PrUnavailableError("gh-unauthenticated", r.stderr.trim() || "gh is not authenticated");
+      return new PrUnavailableError("gh-unauthenticated", r.stderr.trim() || "gh is not authenticated");
     }
-    throw new PrUnavailableError("failed", r.stderr.trim() || `gh exited ${r.code}`);
+    return new PrUnavailableError("failed", r.stderr.trim() || `gh exited ${r.code}`);
+  }
+
+  async function gh(args: string[], cwd: string): Promise<string> {
+    const r = await runGh(args, cwd);
+    if (r.code === 0) return r.stdout;
+    throw ghFailure(r);
+  }
+
+  /** Runs `args(fields)` with PR_FIELDS; on a gh that lacks headRefOid, once more without it. */
+  async function ghPrFields(
+    args: (fields: string, hasHeadOid: boolean) => string[],
+    cwd: string,
+  ): Promise<{ out: string; hasHeadOid: boolean }> {
+    if (!headRefOidUnsupported) {
+      const r = await runGh(args(PR_FIELDS, true), cwd);
+      if (r.code === 0) return { out: r.stdout, hasHeadOid: true };
+      if (!UNKNOWN_HEAD_OID.test(r.stderr)) throw ghFailure(r);
+      headRefOidUnsupported = true;
+    }
+    return { out: await gh(args(PR_FIELDS_NO_HEAD_OID, false), cwd), hasHeadOid: false };
   }
 
   async function git(args: string[], cwd: string): Promise<string> {
@@ -261,8 +292,9 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
 
     async listOpen(repoPath) {
       const slug = await assertGitHub(repoPath);
-      const out = await gh(
-        ["pr", "list", "--repo", slug, "--state", "open", "--limit", "100", "--json", PR_FIELDS],
+      // Without headRefOid the rows carry headSha "", which the UI reads as unknown.
+      const { out } = await ghPrFields(
+        (fields) => ["pr", "list", "--repo", slug, "--state", "open", "--limit", "100", "--json", fields],
         repoPath,
       );
       let raw: RawPr[];
@@ -278,16 +310,29 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     async getPr(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
       const slug = await assertGitHub(repoPath);
-      const out = await gh(["pr", "view", String(n), "--repo", slug, "--json", `${PR_FIELDS},state`], repoPath);
-      let raw: RawPr & { state?: string };
+      // Without headRefOid, the head is the PR's last commit (`commits` lists all of them).
+      const { out, hasHeadOid } = await ghPrFields(
+        (fields, hasOid) => [
+          "pr",
+          "view",
+          String(n),
+          "--repo",
+          slug,
+          "--json",
+          hasOid ? `${fields},state` : `${fields},state,commits`,
+        ],
+        repoPath,
+      );
+      let raw: RawPr & { state?: string; commits?: { oid?: string }[] | null };
       try {
-        raw = JSON.parse(out) as RawPr & { state?: string };
+        raw = JSON.parse(out) as typeof raw;
       } catch {
         throw new PrUnavailableError("failed", "gh pr view returned invalid JSON");
       }
       if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new PrUnavailableError("failed", "gh pr view returned a non-object");
       }
+      if (!hasHeadOid) raw = { ...raw, headRefOid: raw.commits?.at(-1)?.oid ?? "" };
       return { ...mapPr(raw, repoPath), state: mapState(raw.state) };
     },
 
