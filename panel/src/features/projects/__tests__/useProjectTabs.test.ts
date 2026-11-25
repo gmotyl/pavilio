@@ -3,7 +3,7 @@ import { renderHook } from "@testing-library/react";
 
 import { useProjectTabs } from "../useProjectTabs";
 import { SPECIAL_SECTIONS } from "../sections";
-import { writeLastSectionFile } from "../../shell/lastPath";
+import { writeLastReposQuery, writeLastSectionFile } from "../../shell/lastPath";
 
 const PROJECT = "pavilio";
 
@@ -33,8 +33,8 @@ describe("the wiki tab", () => {
       "notes",
       "memo",
       "progress",
-      "qa",
       "mockups",
+      "qa",
     ]);
     expect(withWiki.indexOf("wiki")).toBe(withWiki.indexOf("context") + 1);
 
@@ -60,6 +60,31 @@ describe("the wiki tab", () => {
   });
 });
 
+describe("tab order and the Code label", () => {
+  const withRepos = (archived = false) =>
+    renderHook(() =>
+      useProjectTabs({ projectName: PROJECT, section: undefined, hasRepos: true, archived }),
+    ).result.current.tabs;
+
+  it("qa is the last tab with and without repos", () => {
+    expect(withRepos().map((t) => t.label).slice(-3)).toEqual(["mockups", "Code", "qa"]);
+    expect(tabsFor().map((t) => t.label).slice(-2)).toEqual(["mockups", "qa"]);
+  });
+
+  it("repos tab is labelled Code and still routes to /repos", () => {
+    const labels = withRepos().map((t) => t.label);
+    expect(labels).not.toContain("repos");
+    expect(withRepos().find((t) => t.label === "Code")?.to).toBe("/project/pavilio/repos");
+
+    writeLastReposQuery(PROJECT, "view=prs");
+    expect(withRepos().find((t) => t.label === "Code")?.to).toBe("/project/pavilio/repos?view=prs");
+  });
+
+  it("archived project ends with mockups then qa", () => {
+    expect(withRepos(true).map((t) => t.label).slice(-2)).toEqual(["mockups", "qa"]);
+  });
+});
+
 describe("an archived project's tabs", () => {
   it("archived project tabs omit iterm and repos", () => {
     const labels = renderHook(() =>
@@ -80,8 +105,8 @@ describe("an archived project's tabs", () => {
       "notes",
       "memo",
       "progress",
-      "qa",
       "mockups",
+      "qa",
     ]);
   });
 });

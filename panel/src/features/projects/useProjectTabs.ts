@@ -23,6 +23,9 @@ interface Options {
   archived?: boolean;
 }
 
+/** The repos tab reads "Code"; its route segment stays `repos`. */
+export const REPOS_LABEL = "Code";
+
 const SECTIONS = [
   "iterm",
   "plans",
@@ -30,8 +33,8 @@ const SECTIONS = [
   "notes",
   "memo",
   "progress",
-  "qa",
   "mockups",
+  "qa",
 ];
 
 export function useProjectTabs({
@@ -43,7 +46,8 @@ export function useProjectTabs({
 }: Options): { tabs: ProjectTab[]; activeTab: ProjectTab } {
   const sections = [...SECTIONS];
   if (hasWiki) sections.splice(sections.indexOf("context") + 1, 0, "wiki");
-  if (hasRepos && !archived) sections.push("repos");
+  // Code (the repos route) sits just before QA, which is always the last tab.
+  if (hasRepos && !archived) sections.splice(sections.indexOf("qa"), 0, "repos");
   const nonIterm = sections.filter((s) => s !== "iterm");
   const name = projectName ?? "";
 
@@ -68,7 +72,7 @@ export function useProjectTabs({
       if (s === "repos") {
         const storedQuery = readLastReposQuery(name);
         return {
-          label: s,
+          label: REPOS_LABEL,
           to: storedQuery ? `${base}?${storedQuery}` : base,
           active: section === s,
         };

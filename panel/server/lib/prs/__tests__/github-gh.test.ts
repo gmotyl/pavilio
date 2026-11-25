@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { createGitHubGhProvider, rollupChecks, type RunResult, type Runner } from "../github-gh.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  __resetGhFieldSupportForTests,
+  createGitHubGhProvider,
+  rollupChecks,
+  type RunResult,
+  type Runner,
+} from "../github-gh.js";
 import { PrUnavailableError } from "../provider.js";
 
 const fixture = (name: string) => readFileSync(join(__dirname, "fixtures", name), "utf-8");
@@ -32,6 +38,8 @@ const originIs = (url: string) => (cmd: string, args: string[]) =>
   cmd === "git" && args.join(" ") === "remote get-url origin" ? ok(`${url}\n`) : null;
 
 describe("GitHubGhProvider", () => {
+  beforeEach(() => __resetGhFieldSupportForTests());
+
   it("maps a mixed gh pr list into PullRequest rows", async () => {
     const origin = originIs("git@github.com:o/r.git");
     const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-mixed.json")));
@@ -55,6 +63,7 @@ describe("GitHubGhProvider", () => {
       reviewDecision: "required",
       checks: "running",
       head: "feat/search",
+      headSha: "sha1",
       base: "main",
       updatedAt: "2026-11-21T10:05:00Z",
       url: "https://github.com/o/r/pull/231",
@@ -65,6 +74,136 @@ describe("GitHubGhProvider", () => {
 
     const { run: emptyRun } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-empty.json")));
     expect(await createGitHubGhProvider({ run: emptyRun }).listOpen(REPO)).toEqual([]);
+  });
+
+  it("list entries carry headSha", async () => {
+    const origin = originIs("git@github.com:o/r.git");
+    const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-mixed.json")));
+    const prs = await createGitHubGhProvider({ run }).listOpen(REPO);
+    expect(prs.map((p) => p.headSha)).toEqual(["sha1", "sha2", "sha3", "sha4"]);
+    const ghCall = calls.find((c) => c.cmd === "gh")!;
+    expect(ghCall.args[ghCall.args.indexOf("--json") + 1].split(",")).toContain("headRefOid");
+  });
+
+  describe("getPr", () => {
+    const view = (state: string) =>
+      JSON.stringify({ ...(JSON.parse(fixture("gh-pr-list-mixed.json")) as object[])[0], state });
+
+    it("getPr maps MERGED, CLOSED and OPEN to state", async () => {
+      const origin = originIs("git@github.com:o/r.git");
+      for (const [raw, state] of [
+        ["MERGED", "merged"],
+        ["CLOSED", "closed"],
+        ["OPEN", "open"],
+        ["SOMETHING_NEW", "open"],
+      ]) {
+        const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(view(raw)));
+        const pr = await createGitHubGhProvider({ run }).getPr(REPO, 231);
+        expect(pr.state).toBe(state);
+        expect(pr).toEqual({
+          repo: "acme-web",
+          repoPath: REPO,
+          number: 231,
+          title: "Add search",
+          author: "alice",
+          isDraft: false,
+          reviewers: ["gmotyl"],
+          reviewDecision: "required",
+          checks: "running",
+          head: "feat/search",
+          headSha: "sha1",
+          base: "main",
+          updatedAt: "2026-11-21T10:05:00Z",
+          url: "https://github.com/o/r/pull/231",
+          state,
+        });
+      }
+    });
+
+    it("getPr passes the PR fields plus state to gh pr view", async () => {
+      const origin = originIs("git@github.com:o/r.git");
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(view("OPEN")));
+      await createGitHubGhProvider({ run }).listOpen(REPO).catch(() => undefined);
+      const listFields = calls.find((c) => c.cmd === "gh")!.args.at(-1)!;
+      calls.length = 0;
+      await createGitHubGhProvider({ run }).getPr(REPO, 231);
+      const ghCall = calls.find((c) => c.cmd === "gh")!;
+      expect(ghCall.cwd).toBe(REPO);
+      expect(ghCall.args).toEqual(["pr", "view", "231", "--repo", "github.com/o/r", "--json", `${listFields},state`]);
+    });
+  });
+
+  describe("older gh without headRefOid", () => {
+    const UNKNOWN = { code: 1, stdout: "", stderr: 'Unknown JSON field: "headRefOid"\nAvailable fields:\n  additions\n' };
+    const fieldsOf = (args: string[]) => args[args.indexOf("--json") + 1].split(",");
+    const rows = () => (JSON.parse(fixture("gh-pr-list-mixed.json")) as Record<string, unknown>[]).map(({ headRefOid: _, ...r }) => r);
+    const oldGh = (respond: (fields: string[]) => RunResult) => {
+      const origin = originIs("git@github.com:o/r.git");
+      return fakeRunner((cmd, args) => origin(cmd, args) ?? (fieldsOf(args).includes("headRefOid") ? UNKNOWN : respond(fieldsOf(args))));
+    };
+
+    it("list retries once without headRefOid, then skips it on the next call", async () => {
+      const { run, calls } = oldGh(() => ok(JSON.stringify(rows())));
+      const provider = createGitHubGhProvider({ run });
+      const prs = await provider.listOpen(REPO);
+      expect(prs.map((p) => p.headSha)).toEqual(["", "", "", ""]);
+      expect(prs[0]).toMatchObject({ number: 231, head: "feat/search", checks: "running" });
+      const ghCalls = calls.filter((c) => c.cmd === "gh");
+      expect(ghCalls.map((c) => fieldsOf(c.args).includes("headRefOid"))).toEqual([true, false]);
+
+      calls.length = 0;
+      await createGitHubGhProvider({ run }).listOpen(REPO);
+      expect(calls.filter((c) => c.cmd === "gh").map((c) => fieldsOf(c.args).includes("headRefOid"))).toEqual([false]);
+    });
+
+    it("view falls back to the last commit's oid", async () => {
+      const { run, calls } = oldGh((fields) =>
+        ok(
+          JSON.stringify({
+            ...rows()[0],
+            state: "OPEN",
+            ...(fields.includes("commits") ? { commits: [{ oid: "c1" }, { oid: "c2" }] } : {}),
+          }),
+        ),
+      );
+      const pr = await createGitHubGhProvider({ run }).getPr(REPO, 231);
+      expect(pr).toMatchObject({ number: 231, state: "open", headSha: "c2" });
+      const last = calls.filter((c) => c.cmd === "gh").at(-1)!;
+      expect(fieldsOf(last.args)).toEqual(expect.arrayContaining(["state", "commits"]));
+      expect(fieldsOf(last.args)).not.toContain("headRefOid");
+
+      const { run: noCommits } = oldGh(() => ok(JSON.stringify({ ...rows()[0], state: "MERGED", commits: [] })));
+      expect(await createGitHubGhProvider({ run: noCommits }).getPr(REPO, 231)).toMatchObject({ state: "merged", headSha: "" });
+    });
+
+    it("does not request commits when gh knows headRefOid", async () => {
+      const origin = originIs("git@github.com:o/r.git");
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(JSON.stringify({ ...rows()[0], headRefOid: "h", state: "OPEN" })));
+      expect((await createGitHubGhProvider({ run }).getPr(REPO, 231)).headSha).toBe("h");
+      expect(calls.filter((c) => c.cmd === "gh")).toHaveLength(1);
+      expect(fieldsOf(calls.find((c) => c.cmd === "gh")!.args)).not.toContain("commits");
+    });
+
+    it("maps unrelated gh failures as before, without a retry or remembering anything", async () => {
+      const origin = originIs("git@github.com:o/r.git");
+      const fail = { code: 1, stdout: "", stderr: 'Unknown JSON field: "somethingElse"' };
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? fail);
+      const err = await createGitHubGhProvider({ run }).listOpen(REPO).catch((e) => e);
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect((err as PrUnavailableError).reason).toBe("failed");
+      expect(calls.filter((c) => c.cmd === "gh")).toHaveLength(1);
+
+      const { run: auth } = fakeRunner((cmd, args) => origin(cmd, args) ?? { code: 4, stdout: "", stderr: "" });
+      expect(((await createGitHubGhProvider({ run: auth }).getPr(REPO, 1).catch((e) => e)) as PrUnavailableError).reason).toBe(
+        "gh-unauthenticated",
+      );
+
+      const { run: modern, calls: modernCalls } = fakeRunner(
+        (cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-mixed.json")),
+      );
+      await createGitHubGhProvider({ run: modern }).listOpen(REPO);
+      expect(fieldsOf(modernCalls.find((c) => c.cmd === "gh")!.args)).toContain("headRefOid");
+    });
   });
 
   it("rolls up status checks into pass/fail/running/none", () => {

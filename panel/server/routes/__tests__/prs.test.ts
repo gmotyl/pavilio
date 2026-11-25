@@ -27,6 +27,7 @@ function pr(repoPath: string, number: number, updatedAt: string): PullRequest {
     reviewDecision: null,
     checks: "none",
     head: "feat",
+    headSha: "abc123",
     base: "main",
     updatedAt,
     url: `https://github.com/o/r/pull/${number}`,
@@ -60,6 +61,7 @@ function setup() {
     }),
     openPr: vi.fn(async () => ({ head: "h", base: "b", body: "" })),
     reviewComments: vi.fn(async (): Promise<ReviewComment[]> => []),
+    getPr: vi.fn(async (p: string, n: number) => ({ ...pr(p, n, "2026-11-22T00:00:00Z"), state: "merged" as const })),
   } satisfies PrProvider;
   return { gh, gl, missing, provider };
 }
@@ -291,5 +293,104 @@ describe("/api/prs", () => {
     const open = await request(appFor(provider)).post("/api/prs/open").send({ repo: outRepo, number: 3 });
     expect(open.status).toBe(400);
     expect((await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 })).status).toBe(200);
+  });
+
+  describe("GET /api/prs/one", () => {
+    const one = (query: Record<string, string>) => ({ project: "proj", repo: "GitHub Repo", number: "3", ...query });
+
+    it("one: 400 on a bad number or empty repo", async () => {
+      const { provider } = setup();
+      const app = appFor(provider);
+      for (const number of [undefined, "", "0", "-1", "1.5", "abc", "3x", "99999999999999999999"]) {
+        const query = one({});
+        if (number === undefined) delete (query as Partial<typeof query>).number;
+        else query.number = number;
+        const res = await request(app).get("/api/prs/one").query(query);
+        expect(res.status).toBe(400);
+      }
+      for (const repo of ["", "  "]) {
+        const res = await request(app).get("/api/prs/one").query(one({ repo }));
+        expect(res.status).toBe(400);
+      }
+      expect(provider.getPr).not.toHaveBeenCalled();
+    });
+
+    it("one: 404 on an unknown project or unlinked repo", async () => {
+      const { provider } = setup();
+      const app = appFor(provider);
+      for (const query of [one({ project: "nope" }), one({ repo: "not-in-repos-json" }), one({ repo: "missing-repo" })]) {
+        const res = await request(app).get("/api/prs/one").query(query);
+        expect(res.status).toBe(404);
+      }
+      expect(provider.getPr).not.toHaveBeenCalled();
+    });
+
+    it("one: 502 carries the unavailable reason", async () => {
+      const { gl, provider } = setup();
+      provider.getPr.mockRejectedValueOnce(new PrUnavailableError("not-github"));
+      const app = appFor(provider);
+      const res = await request(app).get("/api/prs/one").query(one({ repo: "gl-repo" }));
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ unavailable: "not-github" });
+      expect(provider.getPr).toHaveBeenCalledWith(gl, 3);
+
+      provider.getPr.mockRejectedValueOnce(new Error("boom"));
+      const other = await request(app).get("/api/prs/one").query(one({ repo: "gl-repo", number: "4" }));
+      expect(other.status).toBe(502);
+      expect(other.body).toEqual({ unavailable: "failed" });
+    });
+
+    it("one: caches for 60 s and fresh=1 bypasses the cache", async () => {
+      const { provider } = setup();
+      let t = 1_000_000;
+      const app = appFor(provider, () => t);
+      await request(app).get("/api/prs/one").query(one({}));
+      t += 59_000;
+      const second = await request(app).get("/api/prs/one").query(one({}));
+      expect(second.status).toBe(200);
+      expect(provider.getPr).toHaveBeenCalledTimes(1);
+      // Another PR in the same repo is its own entry.
+      await request(app).get("/api/prs/one").query(one({ number: "4" }));
+      expect(provider.getPr).toHaveBeenCalledTimes(2);
+      await request(app).get("/api/prs/one").query(one({ fresh: "1" }));
+      expect(provider.getPr).toHaveBeenCalledTimes(3);
+      // PR 4 was fetched at +59 s: 60 s later it has expired.
+      t += 60_000;
+      await request(app).get("/api/prs/one").query(one({ number: "4" }));
+      expect(provider.getPr).toHaveBeenCalledTimes(4);
+    });
+
+    it("one: an older provider call finishing last never overwrites the newer cache entry", async () => {
+      const { gh, provider } = setup();
+      const deferred: ((title: string) => void)[] = [];
+      provider.getPr.mockImplementation(
+        (p: string, n: number) =>
+          new Promise((resolve) => {
+            deferred.push((title) => resolve({ ...pr(p, n, "2026-11-22T00:00:00Z"), title, state: "merged" as const }));
+          }),
+      );
+      const app = appFor(provider);
+      const older = request(app).get("/api/prs/one").query(one({ fresh: "1" })).then((r) => r);
+      await vi.waitFor(() => expect(deferred).toHaveLength(1));
+      const newer = request(app).get("/api/prs/one").query(one({ fresh: "1" })).then((r) => r);
+      await vi.waitFor(() => expect(deferred).toHaveLength(2));
+      deferred[1]("newer");
+      expect((await newer).body.title).toBe("newer");
+      deferred[0]("older");
+      expect((await older).body.title).toBe("older");
+      // The cache keeps the newest call's result.
+      const cached = await request(app).get("/api/prs/one").query(one({}));
+      expect(cached.body.title).toBe("newer");
+      expect(provider.getPr).toHaveBeenCalledTimes(2);
+      expect(provider.getPr).toHaveBeenCalledWith(gh, 3);
+    });
+
+    it("one: labels the PR with the repos.json name", async () => {
+      const { gh, provider } = setup();
+      const res = await request(appFor(provider)).get("/api/prs/one").query(one({}));
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ ...pr(gh, 3, "2026-11-22T00:00:00Z"), repo: "GitHub Repo", state: "merged" });
+      expect(provider.getPr).toHaveBeenCalledWith(gh, 3);
+    });
   });
 });

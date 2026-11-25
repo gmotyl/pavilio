@@ -1,7 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, Search, Terminal } from "lucide-react";
-import type { ProjectTab } from "./useProjectTabs";
+import { REPOS_LABEL, type ProjectTab } from "./useProjectTabs";
+
+/** Labels whose shown text is not the label itself; `capitalize` would turn `qa` into "Qa". */
+const TAB_TEXT: Record<string, string> = { qa: "QA" };
+
+/** The text a tab shows. */
+const tabText = (label: string) => TAB_TEXT[label] ?? label;
 
 interface MenuProps {
   tabs: ProjectTab[];
@@ -28,7 +34,7 @@ export function ProjectTabsMenu({ tabs, activeTab }: MenuProps) {
           {activeTab.label === "iterm" ? (
             <Terminal className="w-3 h-3" />
           ) : (
-            activeTab.label
+            tabText(activeTab.label)
           )}
         </span>
         <ChevronDown size={12} />
@@ -64,7 +70,7 @@ export function ProjectTabsMenu({ tabs, activeTab }: MenuProps) {
                 {tab.label === "iterm" ? (
                   <Terminal className="w-4 h-4" />
                 ) : (
-                  tab.label
+                  tabText(tab.label)
                 )}
               </Link>
             ))}
@@ -139,7 +145,7 @@ export function ProjectTabsBar({
             {tab.label === "iterm" ? (
               <Terminal className="w-4 h-4" />
             ) : (
-              tab.label
+              tabText(tab.label)
             )}
           </Link>
         ))}
@@ -156,7 +162,7 @@ export function ProjectTabsBar({
           (e.currentTarget.style.background = "transparent")
         }
         // ⌘P is the code file search on the repos tab, not this.
-        title={tabs.some((t) => t.active && t.label === "repos") ? "Search notes" : "Search notes (⌘P)"}
+        title={tabs.some((t) => t.active && t.label === REPOS_LABEL) ? "Search notes" : "Search notes (⌘P)"}
       >
         <Search size={14} />
       </button>

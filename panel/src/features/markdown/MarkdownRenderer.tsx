@@ -7,7 +7,9 @@ import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
 import CopyIconButton from "../shell/CopyIconButton";
 import WikiLinkHoverCard from "./WikiLinkHoverCard";
-import { HLJS_CLASS, numberStoryDiff } from "./storyDiff";
+import { numberStoryDiff } from "./storyDiff";
+import { createNoteHitStore, hastText, NoteHitContext, rehypeStoryNotes, type HastLike, type StoryHast } from "./storyNotes";
+import { StoryDiffCode, StoryNoteItem } from "./StoryDiffCode";
 import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
 import remarkWikiLinks, {
   owningProject,
@@ -138,20 +140,6 @@ function markBlockCode(children: ReactNode): ReactNode {
     if (child.props.node?.tagName !== "code") return child;
     return cloneElement(child, { [BLOCK_PROP]: true } as Record<string, unknown>);
   });
-}
-
-interface HastLike {
-  type?: string;
-  value?: string;
-  children?: HastLike[];
-  position?: { start?: { offset?: number }; end?: { offset?: number } };
-}
-
-/** Text content of a hast node — the fallback when there is no Markdown source to cut. */
-function hastText(node: HastLike | undefined): string {
-  if (!node) return "";
-  if (node.type === "text") return node.value ?? "";
-  return (node.children ?? []).map(hastText).join("");
 }
 
 /**
@@ -299,6 +287,8 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
   // whole tree (mermaid diagrams included) just to refresh the quote text.
   const contentRef = useRef(content);
   contentRef.current = content;
+  // One per renderer, so a note lights rows only in its own document.
+  const noteHitStore = useMemo(createNoteHitStore, []);
 
   const components = useMemo<Components>(() => {
     // Fenced-code handling does not depend on where the file lives. Keep it out
@@ -306,9 +296,9 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
     // projectsDir has no relative path, and used to lose every override with it,
     // which left its mermaid diagrams rendered as plain code blocks.
     const codeBlocks: Components = {
-      code: ({ className, children, ...rest }) => {
-        // Out of the props before they are spread, so the marker never
-        // becomes an attribute on the `code` element.
+      code: ({ node, className, children, ...rest }) => {
+        // Out of the props before they are spread, so neither the marker nor
+        // react-markdown's hast `node` becomes an attribute on the `code` element.
         const { [BLOCK_PROP]: isBlock, ...props } = rest as typeof rest & {
           [BLOCK_PROP]?: boolean;
         };
@@ -322,25 +312,13 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
             </span>
           );
         }
-        // A PR-explain story's diff block gets a line-number gutter. The
-        // numbers live in `data-line` and are drawn by CSS (`.diff-line::before`),
-        // so selecting and copying the code never picks them up; the copy
-        // button reads the original children in the `pre` override.
-        const storyLines = isBlock === true && /language-diff/.test(className || "") ? numberStoryDiff(extractText(children)) : null;
-        if (storyLines) {
-          return (
-            <code className={className} {...props}>
-              {storyLines.map((line, i) => {
-                const hljs = HLJS_CLASS[line.kind];
-                return (
-                  <span key={i} className="diff-line" data-line={line.number ?? ""}>
-                    {hljs ? <span className={hljs}>{line.text}</span> : line.text}
-                    {"\n"}
-                  </span>
-                );
-              })}
-            </code>
-          );
+        // A PR-explain story's diff block: numbered rows, coloured by language, lit by its notes.
+        if (isBlock === true && /language-diff/.test(className || "")) {
+          const text = extractText(children);
+          if (numberStoryDiff(text)) {
+            const block = (node as StoryHast | undefined)?.data?.storyBlock;
+            return <StoryDiffCode text={text} block={block} className={className} codeProps={props} />;
+          }
         }
         const code = <code className={className} {...props}>{children}</code>;
         // react-markdown no longer says whether a `code` is inline, and gives
@@ -363,7 +341,7 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
           </span>
         );
       },
-      pre: ({ children: rawChildren, ...props }) => {
+      pre: ({ node: _node, children: rawChildren, ...props }) => {
         const children = markBlockCode(rawChildren);
         const child = (Array.isArray(children) ? children[0] : children) as any;
         // DEAD BRANCH — this is NOT the mermaid path. react-markdown hands
@@ -401,6 +379,17 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
             <CopyIconButton value={text} label="Copy code" />
           </div>
         );
+      },
+      // A story line note: the item lights its block's rows, and its bold label is focusable so the
+      // keyboard can do the same. Both marks come from `rehypeStoryNotes`; anything else renders as usual.
+      li: ({ node, children, ...props }) => {
+        const note = (node as StoryHast | undefined)?.data?.storyNote;
+        if (!note) return <li {...props}>{children}</li>;
+        return <StoryNoteItem note={note} liProps={props}>{children}</StoryNoteItem>;
+      },
+      strong: ({ node, ...props }) => {
+        if ((node as StoryHast | undefined)?.data?.storyNoteLabel) return <strong tabIndex={0} {...props} />;
+        return <strong {...props} />;
       },
       // A quoted message (a reply the answer proposes) is meant to be pasted
       // somewhere else; copying it by selection drags the `>` markers along.
@@ -485,13 +474,15 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
 
   return (
     <div className="prose prose-invert prose-zinc max-w-none">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath, generated: generatedWikiLinks }]]}
-        rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw]}
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+      <NoteHitContext.Provider value={noteHitStore}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath, generated: generatedWikiLinks }]]}
+          rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw, rehypeStoryNotes]}
+          components={components}
+        >
+          {content}
+        </ReactMarkdown>
+      </NoteHitContext.Provider>
     </div>
   );
 }

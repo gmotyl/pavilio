@@ -59,6 +59,9 @@ export interface TerminalLauncher {
   runLoop?: string;
 }
 
+/** The language a PR story is written in; English unless the user picks Polish. */
+export type StoryLanguage = "en" | "pl";
+
 /** A number codec that pulls any stored value into [min, max]. */
 function clampedNum(min: number, max: number): PreferenceCodec<number> {
   return {
@@ -819,6 +822,17 @@ export const preferences = {
     scope: "global",
     default: "split",
     codec: oneOf(["split", "unified"] as const),
+    portable: true,
+  }),
+  /**
+   * The language Explain and ↻ ask a PR story for. Global, not per project:
+   * it is the reader's language, and the menu says "Applies to every project".
+   */
+  storyLanguage: definePreference<StoryLanguage>({
+    key: "repos.storyLanguage", // was: nothing — new with story languages
+    scope: "global",
+    default: "en",
+    codec: oneOf<StoryLanguage>(["en", "pl"]),
     portable: true,
   }),
 

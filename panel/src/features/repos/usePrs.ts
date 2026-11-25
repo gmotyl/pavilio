@@ -33,6 +33,18 @@ export function filterPrs(prs: PullRequest[], me: string, filter: PrFilter): { p
   };
 }
 
+/**
+ * The GitHub login from the last PRs list that named one. `/api/prs/one` carries
+ * no login, so a lone PR row (the QA tab's story header) borrows it here for its
+ * "Your review requested" badge; null until a list has loaded in this tab.
+ */
+let lastLogin: string | null = null;
+export const knownLogin = (): string | null => lastLogin;
+/** Tests only: forget the borrowed login so suites don't depend on run order. */
+export function __resetKnownLoginForTests(): void {
+  lastLogin = null;
+}
+
 /** A view entry refetches only past this age; the server caches lists for a minute anyway. */
 const FRESH_MS = 15_000;
 
@@ -77,7 +89,10 @@ export function usePrs(project: string, filter: PrFilter): PrsState {
         return (await res.json()) as PrsResponse;
       })
       .then((body) => {
-        if (!cancelled) setLoaded({ project, body });
+        if (cancelled) return;
+        // Only a current response may update the borrowed login.
+        if (body.me) lastLogin = body.me;
+        setLoaded({ project, body });
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));

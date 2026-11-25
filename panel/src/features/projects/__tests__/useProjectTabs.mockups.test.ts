@@ -23,7 +23,7 @@ describe("the mockups tab", () => {
     expect(tabsFor().map((t) => t.label)).toContain("mockups");
   });
 
-  it("places mockups after qa without reordering the existing tabs", () => {
+  it("places mockups right before qa without reordering the other tabs", () => {
     expect(tabsFor().map((t) => t.label)).toEqual([
       "iterm",
       "Overview",
@@ -32,8 +32,8 @@ describe("the mockups tab", () => {
       "notes",
       "memo",
       "progress",
-      "qa",
       "mockups",
+      "qa",
     ]);
   });
 

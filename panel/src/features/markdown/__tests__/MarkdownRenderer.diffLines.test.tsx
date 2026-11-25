@@ -1,7 +1,12 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import MarkdownRenderer from "../MarkdownRenderer";
+import { copyToClipboard } from "../../../lib/clipboard";
+
+vi.mock("../../../lib/clipboard", () => ({
+  copyToClipboard: vi.fn(),
+}));
 
 vi.mock("../MermaidDiagram", () => ({
   default: ({ chart }: { chart: string }) => <div data-testid="mermaid">{chart}</div>,
@@ -95,8 +100,8 @@ describe("MarkdownRenderer story diff line numbers", () => {
     expect(gutter(container)!.map(([n]) => n)).toEqual(["", "3", "4"]);
   });
 
-  it("keeps the diff colouring on numbered lines", () => {
-    const { container } = renderMd(fence("diff", ["@@ a.ts L1–2 @@", "-x", "+y"]));
+  it("keeps the diff colouring on numbered lines of an unknown language", () => {
+    const { container } = renderMd(fence("diff", ["@@ a.unknownext L1–2 @@", "-x", "+y"]));
     expect(container.querySelector(".diff-line .hljs-deletion")?.textContent).toBe("-x");
     expect(container.querySelector(".diff-line .hljs-addition")?.textContent).toBe("+y");
   });
@@ -118,5 +123,90 @@ describe("MarkdownRenderer story diff line numbers", () => {
     expect(gutter(container)).toBeNull();
     expect(container.querySelector("pre code")!.className).toContain("language-ts");
     expect(container.querySelector("pre code")!.textContent).toBe("@@ a.ts L1–2 @@\nconst a = 1;\n");
+  });
+});
+
+describe("MarkdownRenderer story diff syntax colours", () => {
+  /** The rendered story rows of the first block. */
+  function rows(container: HTMLElement): HTMLElement[] {
+    return [...container.querySelectorAll<HTMLElement>("pre code .story-line")];
+  }
+
+  it("tsx story block renders token spans with a sign column", () => {
+    const { container } = renderMd(
+      fence("diff", [
+        "@@ panel/src/x.tsx L40–41 @@",
+        "+  const [portChanges, setPortChanges] = useState(0);",
+        "+  const firstPortRef = useRef(true);",
+      ]),
+    );
+    const [first, second] = rows(container);
+    expect(rows(container)).toHaveLength(2);
+    expect(first.getAttribute("data-line")).toBe("40");
+    expect(second.getAttribute("data-line")).toBe("41");
+    for (const row of [first, second]) {
+      expect(row.classList.contains("story-line-added")).toBe(true);
+      expect(row.querySelector(".story-line-sign")?.textContent).toBe("+");
+      expect(row.querySelector(".story-line-code .hljs-keyword")?.textContent).toBe("const");
+      // Whole-line diff colouring is gone: the tint is the row's.
+      expect(row.querySelector(".hljs-addition")).toBeNull();
+    }
+    expect(first.querySelector(".story-line-code .hljs-number")?.textContent).toBe("0");
+    expect(second.querySelector(".story-line-code .hljs-literal")?.textContent).toBe("true");
+    // The code cell holds the line without its prefix.
+    expect(first.querySelector(".story-line-code")?.textContent).toBe("  const [portChanges, setPortChanges] = useState(0);");
+    // The header row stays as before, and the code's text is still the fenced text.
+    expect(container.querySelector("pre code")!.textContent).toBe(
+      "@@ panel/src/x.tsx L40–41 @@\n+  const [portChanges, setPortChanges] = useState(0);\n+  const firstPortRef = useRef(true);\n",
+    );
+  });
+
+  it("removed and context rows get their sign and tint", () => {
+    const { container } = renderMd(
+      fence("diff", ["@@ src/a.ts L10–11 base L20 @@", " const a = 1;", "-let b = 2;", "+const b = 2;", ""]),
+    );
+    const [context, removed, added, blank] = rows(container);
+    expect(context.querySelector(".story-line-sign")?.textContent).toBe(" ");
+    expect(context.classList.contains("story-line-added")).toBe(false);
+    expect(context.classList.contains("story-line-removed")).toBe(false);
+    expect(context.getAttribute("data-line")).toBe("10");
+    expect(context.getAttribute("data-base")).toBe("20");
+    expect(removed.querySelector(".story-line-sign")?.textContent).toBe("-");
+    expect(removed.classList.contains("story-line-removed")).toBe(true);
+    expect(removed.getAttribute("data-line")).toBe("");
+    expect(removed.getAttribute("data-base")).toBe("21");
+    expect(removed.querySelector(".story-line-code .hljs-keyword")?.textContent).toBe("let");
+    expect(added.classList.contains("story-line-added")).toBe(true);
+    expect(added.getAttribute("data-base")).toBe("");
+    // A bare empty context line keeps a blank sign cell.
+    expect(blank.querySelector(".story-line-sign")?.textContent).toBe("");
+    expect(blank.classList.contains("story-line-added") || blank.classList.contains("story-line-removed")).toBe(false);
+  });
+
+  it("unknown language keeps whole-line diff colouring", () => {
+    for (const header of ["@@ notes/x.unknownext L1–2 @@", "@@ Makefile L1–2 @@"]) {
+      const { container, unmount } = renderMd(fence("diff", [header, "-x = 1", "+x = 2"]));
+      expect(rows(container)).toHaveLength(0);
+      expect(container.querySelector(".story-line-sign")).toBeNull();
+      expect(container.querySelector(".diff-line .hljs-deletion")?.textContent).toBe("-x = 1");
+      expect(container.querySelector(".diff-line .hljs-addition")?.textContent).toBe("+x = 2");
+      unmount();
+    }
+    // No story header: rehype-highlight's own diff grammar, no rows at all.
+    const { container } = renderMd(fence("diff", ["@@ -1,2 +1,2 @@", "-const a = 1;", "+const a = 2;"]));
+    expect(rows(container)).toHaveLength(0);
+    expect(container.querySelector(".diff-line")).toBeNull();
+    expect(container.querySelector(".hljs-deletion")?.textContent).toBe("-const a = 1;");
+  });
+
+  it("copy still yields the original block text", async () => {
+    const copy = vi.mocked(copyToClipboard);
+    copy.mockReset();
+    copy.mockResolvedValue(true);
+    const lines = ["@@ panel/src/x.tsx L40–42 @@", " const a = 1;", "-let b = 2;", "+const b = 2;"];
+    renderMd(fence("diff", lines));
+    fireEvent.click(screen.getByLabelText("Copy code"));
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    expect(copy).toHaveBeenCalledWith(lines.join("\n"));
   });
 });

@@ -66,6 +66,8 @@
   color: var(--green);
 }
 .pr-ic-draft { color: var(--text-muted); }
+.pr-ic-merged { color: var(--purple); }
+.pr-ic-closed { color: var(--red); }
 .pr-tt {
   min-width: 0;
   font-weight: 600;
@@ -116,6 +118,9 @@
 .pr-badge-req { color: var(--accent); border-color: var(--accent); }
 .pr-badge-ok { color: var(--green); border-color: var(--green); }
 .pr-badge-chg { color: var(--red); border-color: var(--red); }
+.pr-badge-merged { color: var(--purple); border-color: var(--purple); }
+.pr-badge-closed { color: var(--red); border-color: var(--red); }
+.pr-badge-behind { color: var(--accent); border-color: var(--accent); border-style: dashed; }
 .pr-chk {
   font-size: 12px;
   font-weight: 700;
@@ -157,6 +162,7 @@
 /* Explain / Story / ↻ at a PR row's right (PRs view only). */
 .pr-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
@@ -173,7 +179,7 @@
   color: var(--text-primary);
   white-space: nowrap;
 }
-.pr-act:hover:not(:disabled) {
+.pr-act:hover:not(:disabled):not([aria-disabled="true"]) {
   border-color: var(--border-strong);
   background: var(--bg-active);
 }
@@ -191,12 +197,14 @@
   border-radius: 6px;
   color: var(--text-secondary);
 }
-.pr-act-icon:hover:not(:disabled) {
+.pr-act-icon:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--bg-active);
   color: var(--text-primary);
 }
 .pr-act:disabled,
-.pr-act-icon:disabled {
+.pr-act-icon:disabled,
+.pr-act[aria-disabled="true"],
+.pr-act-icon[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -209,4 +217,163 @@
   padding: 8px 16px;
   font-size: 12.5px;
   color: var(--red);
+}
+
+/*
+ * PRs view: the pane, not the window, decides when the actions drop under the
+ * title — the view is its own size container, so a narrow pane beside a wide
+ * window wraps too, with no horizontal scroll.
+ */
+.prs-view {
+  container-type: inline-size;
+}
+.prs-view .pr-row {
+  position: relative;
+}
+@container (max-width: 560px) {
+  .prs-view .pr-right {
+    grid-column: 2 / 4;
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+}
+
+/* Explain and ↻ are split buttons: the main half joined to the story-language half. */
+.pr-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.pr-split > .pr-act:first-child,
+.pr-split > .pr-act-icon:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.pr-split > .pr-act-icon {
+  border-color: var(--border-default);
+  background: var(--bg-elevated);
+}
+.pr-lang-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.pr-lang {
+  margin-left: -1px;
+  padding: 0 8px;
+  gap: 4px;
+  border-left-color: var(--border-strong);
+  border-radius: 0 6px 6px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+.pr-caret {
+  font-size: 9px;
+  opacity: 0.8;
+}
+.pr-lang-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+.pr-lang-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+}
+.pr-lang-hd {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pr-lang-menu [role="menuitemradio"] {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  text-align: left;
+  white-space: nowrap;
+}
+.pr-lang-menu [role="menuitemradio"]:hover,
+.pr-lang-menu [role="menuitemradio"]:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+.pr-lang-menu [aria-checked="true"]::after {
+  content: "✓";
+  color: var(--accent);
+}
+/* No room on the left within the pane (see StoryLanguageMenu): open rightwards. */
+.pr-lang-menu[data-align="start"] {
+  left: 0;
+  right: auto;
+}
+.pr-lang-ft {
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* "Explaining…": a ring that turns until the story lands. */
+.pr-spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pr-spin 0.9s linear infinite;
+}
+@keyframes pr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still, and two-sided so it reads as "in progress" rather than a blank ring. */
+  .pr-spin {
+    animation: none;
+    border-right-color: var(--accent);
+  }
+}
+.pr-act:has(.pr-spin)[aria-disabled="true"] {
+  cursor: progress;
+}
+
+/*
+ * A run that never produced its story: a red note under the row's meta line.
+ * It lives inside the actions (PrRow owns the grid), so it is pinned to the
+ * row's bottom edge and the row grows by two note lines to hold it. Clamped to
+ * those two lines, so even a very narrow pane never pushes it over the meta line.
+ */
+.prs-view .pr-row:has(.pr-hint) {
+  padding-bottom: calc(11px + 4px + 2 * 16px);
+}
+.pr-hint {
+  position: absolute;
+  /* The meta column: row padding + icon column + column gap. */
+  left: calc(16px + 18px + 10px);
+  right: 16px;
+  bottom: 11px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--red);
+  white-space: normal;
 }

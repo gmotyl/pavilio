@@ -1,12 +1,16 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { stubFetch } from "../../../test-utils";
+import { jsonResponse, stubFetch } from "../../../test-utils";
 import { preferences, type TerminalLauncher } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import { BLOCKED_TEXT, NO_LAUNCHER_TEXT } from "../../projects/useProjectLauncher";
 import { explainRunLine } from "../../projects/runPrompt";
 import { startTaskRun } from "../../projects/startTaskRun";
+import { refreshFileIndex } from "../../explorer/useFileIndex";
+import { __resetExplainingForTests, EXPLAIN_TIMEOUT_MS } from "../explainingStore";
 import ReposTab from "../ReposTab";
 import type { PrsResponse } from "../usePrs";
 import { ME, PRS, pr } from "./prFixtures";
@@ -51,11 +55,13 @@ function renderPrs(
   body: PrsResponse = { me: ME, prs: PRS, unavailable: [] },
   project = "pavilio",
   search = "?view=prs",
-  files: (string | { relativePath: string; archived: boolean })[] = [],
+  // Read on every index fetch, so a test can add a story and call `refreshFileIndex`.
+  files: (string | { relativePath: string; archived?: boolean; modified?: number })[] = [],
 ) {
   stubFetch({
     "/api/prs": body,
-    "/api/files/index": files.map((f) => ({ modified: 1, ...(typeof f === "string" ? { relativePath: f } : f) })),
+    "/api/files/index": () =>
+      jsonResponse(files.map((f) => ({ modified: 1, ...(typeof f === "string" ? { relativePath: f } : f) }))),
   });
   return render(
     <MemoryRouter initialEntries={[`/project/${project}/repos${search}`]}>
@@ -83,9 +89,12 @@ const rowNumbers = () => rows().map((r) => r.getAttribute("data-number"));
 beforeEach(() => {
   writePreference(preferences.reposPrFilter, { preset: "all", author: null }, "pavilio");
   writePreference(preferences.terminalLaunchers, [CLAUDE]);
+  writePreference(preferences.storyLanguage, "en");
   vi.mocked(startTaskRun).mockClear();
+  __resetExplainingForTests();
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -282,6 +291,8 @@ describe("PrsView", () => {
     const one = (over: Parameters<typeof pr>[0] = { number: 7 }) => ({ me: ME, prs: [pr(over)], unavailable: [] });
     const row = async () => {
       await waitFor(() => expect(rows()).toHaveLength(1));
+      // Explain / ↻ stay inert until the file index has loaded once.
+      await waitFor(() => expect(screen.queryAllByTitle("Loading stories…")).toHaveLength(0));
       return rows()[0];
     };
     const where = () => screen.getByTestId("search").textContent;
@@ -306,7 +317,7 @@ describe("PrsView", () => {
       await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
       expect(vi.mocked(startTaskRun).mock.calls[0][0]).toEqual({
         project: "pavilio",
-        runLine: explainRunLine(CLAUDE, "pavilio", "pavilio", 7),
+        runLine: explainRunLine(CLAUDE, "pavilio", "pavilio", 7, "en"),
       });
       expect(where()).toBe("?view=prs");
     });
@@ -329,6 +340,64 @@ describe("PrsView", () => {
       expect(screen.queryByTestId("prs-launch-error")).toBeNull();
     });
 
+    it("offers no launchable Explain until the file index has loaded", async () => {
+      let resolveIndex!: (r: Response) => void;
+      const index = new Promise<Response>((r) => (resolveIndex = r));
+      stubFetch({ "/api/prs": one(), "/api/files/index": () => index });
+      render(
+        <MemoryRouter initialEntries={["/project/pavilio/repos?view=prs"]}>
+          <Routes>
+            <Route path="/project/:name/:section" element={<ReposTab project="pavilio" repos={REPOS} />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      const r = rows()[0];
+      // The story exists but the index has not said so yet: nothing launchable, no Explain run.
+      const pending = within(r).getByRole("button", { name: "Explain" });
+      expect(pending).toBeDisabled();
+      expect(pending).toHaveAttribute("title", "Loading stories…");
+      fireEvent.click(pending);
+      expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+
+      await act(async () => resolveIndex(jsonResponse([{ relativePath: STORY, modified: 1 }])));
+      expect(await within(r).findByRole("button", { name: "Story" })).toBeEnabled();
+      expect(within(r).getByRole("button", { name: "Rebuild story for #7" })).toBeEnabled();
+      expect(within(r).queryByRole("button", { name: "Explain" })).toBeNull();
+    });
+
+    it("a failed file index keeps Explain disabled, says it is retrying, and recovers", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let indexUp = false;
+      stubFetch({
+        "/api/prs": { me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] },
+        "/api/files/index": () =>
+          indexUp ? jsonResponse([{ relativePath: STORY, modified: 1 }]) : new Response("boom", { status: 500 }),
+      });
+      render(
+        <MemoryRouter initialEntries={["/project/pavilio/repos?view=prs"]}>
+          <Routes>
+            <Route path="/project/:name/:section" element={<ReposTab project="pavilio" repos={REPOS} />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      const failed = () => screen.queryAllByTitle("Couldn't load stories — retrying…");
+      await waitFor(() => expect(failed()).toHaveLength(2));
+      for (const b of failed()) expect(b).toBeDisabled();
+      expect(screen.queryAllByTitle("Loading stories…")).toHaveLength(0);
+      fireEvent.click(failed()[0]);
+      expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+
+      indexUp = true;
+      await act(async () => void (await vi.advanceTimersByTimeAsync(2_000)));
+      expect(await within(rows()[0]).findByRole("button", { name: "Story" })).toBeEnabled();
+      expect(within(rows()[0]).getByRole("button", { name: "Rebuild story for #7" })).toBeEnabled();
+      expect(within(rows()[0]).queryByRole("button", { name: "Explain" })).toBeNull();
+      expect(within(rows()[1]).getByRole("button", { name: "Explain" })).toBeEnabled();
+      expect(failed()).toHaveLength(0);
+    });
+
     it("Story opens the file in the QA tab", async () => {
       renderPrs(one(), "pavilio", "?view=prs", [STORY]);
       fireEvent.click(await within(await row()).findByRole("button", { name: "Story" }));
@@ -346,6 +415,7 @@ describe("PrsView", () => {
       expect(within(r).queryByRole("button", { name: "Explain" })).toBeNull();
       expect(within(r).queryByRole("button", { name: "Story" })).toBeNull();
       expect(within(r).queryByRole("button", { name: /Rebuild/ })).toBeNull();
+      expect(within(r).queryByRole("button", { name: /^Story language:/ })).toBeNull();
     });
 
     it("Explain is disabled when the launcher is not ready", async () => {
@@ -394,13 +464,13 @@ describe("PrsView", () => {
       await waitFor(() => expect(rows()).toHaveLength(2));
       await within(rows()[0]).findByRole("button", { name: "Story" });
       const tabIndexes = () => rows().map((r) => within(r).getAllByRole("button").map((b) => b.tabIndex));
-      // Row 7: Story and rebuild; row 8: Explain.
-      expect(tabIndexes()).toEqual([[0, 0], [-1]]);
+      // Row 7: Story, rebuild and its language half; row 8: Explain and its language half.
+      expect(tabIndexes()).toEqual([[0, 0, 0], [-1, -1]]);
 
       rows()[0].focus();
       fireEvent.keyDown(rows()[0], { key: "ArrowDown" });
       expect(rows()[1]).toHaveFocus();
-      expect(tabIndexes()).toEqual([[-1, -1], [0]]);
+      expect(tabIndexes()).toEqual([[-1, -1, -1], [0, 0]]);
     });
 
     it("arrow keys from a row's action button move to the next row", async () => {
@@ -431,14 +501,47 @@ describe("PrsView", () => {
       fireEvent.click(explain);
       fireEvent.click(rebuild);
       expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1);
-      expect(explain).toBeDisabled();
-      expect(rebuild).toBeDisabled();
+      // Inert but still focusable, so a keyboard launch keeps its focus.
+      for (const b of [explain, rebuild]) {
+        expect(b).toHaveAttribute("aria-disabled", "true");
+        expect(b).not.toHaveAttribute("disabled");
+      }
       // Opening a story launches nothing, so it stays usable.
       expect(within(rows()[0]).getByRole("button", { name: "Story" })).toBeEnabled();
 
       await act(async () => finish("new-1"));
-      expect(explain).toBeEnabled();
-      expect(rebuild).toBeEnabled();
+      // The launched row now waits for its story; the other row is free again.
+      expect(within(rows()[1]).getByRole("button", { name: "Explaining…" })).toHaveAttribute("aria-disabled", "true");
+      const free = within(rows()[0]).getByRole("button", { name: "Rebuild story for #7" });
+      expect(free).toBeEnabled();
+      expect(free).not.toHaveAttribute("aria-disabled");
+    });
+
+    it("keyboard launch keeps focus on the row's main half", async () => {
+      let finish = (_id: string) => {};
+      vi.mocked(startTaskRun).mockImplementationOnce(() => new Promise<string>((done) => (finish = done)));
+      renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] });
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      const explain = await within(rows()[0]).findByRole("button", { name: "Explain" });
+      act(() => explain.focus());
+      // Enter on a focused button is a click.
+      fireEvent.click(explain);
+      // Pending: the same button keeps focus and is only aria-disabled.
+      expect(explain).toHaveFocus();
+      expect(explain).not.toHaveAttribute("disabled");
+
+      await act(async () => finish("new-1"));
+      const main = within(rows()[0]).getByRole("button", { name: "Explaining…" });
+      expect(main).toHaveFocus();
+      expect(main).not.toHaveAttribute("disabled");
+      expect(main).toHaveAttribute("aria-disabled", "true");
+      expect(main.tabIndex).toBe(0);
+      // A second press does nothing.
+      fireEvent.click(main);
+      expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1);
+      // The list's arrow navigation still works from it.
+      fireEvent.keyDown(main, { key: "ArrowDown" });
+      expect(rows()[1]).toHaveFocus();
     });
 
     it("a failed launch shows an error under the list", async () => {
@@ -451,6 +554,254 @@ describe("PrsView", () => {
       const list = screen.getByRole("listbox", { name: "Open pull requests" });
       expect(list.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(where()).toBe("?view=prs");
+    });
+
+    describe("story language and the explaining spinner", () => {
+      const langHalf = (r: HTMLElement) => within(r).getByRole("button", { name: /^Story language:/ });
+      const indexCalls = () =>
+        (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(([u]) => String(u) === "/api/files/index")
+          .length;
+      /** Re-reads the file index and waits until the fetch has been answered. */
+      const refreshIndex = async () => {
+        const before = indexCalls();
+        await act(async () => refreshFileIndex());
+        await waitFor(() => expect(indexCalls()).toBe(before + 1));
+        await act(async () => {});
+      };
+      const TIMEOUT_NOTE = "No story after 15 min — check the run in iterm.";
+
+      it("no story: Explain joined to the language half", async () => {
+        renderPrs(one());
+        const r = await row();
+        const explain = await within(r).findByRole("button", { name: "Explain" });
+        const half = langHalf(r);
+        expect(explain.closest(".pr-split")).toContainElement(half);
+        expect(explain.querySelector("svg")).not.toBeNull();
+        expect(half).toHaveTextContent("EN ▾");
+        expect(half).toHaveAttribute("aria-haspopup", "menu");
+        expect(half).toHaveAccessibleName("Story language: English");
+        expect(half).toBeEnabled();
+      });
+
+      it("picking PL writes the preference and every half reads PL", async () => {
+        renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] }, "pavilio", "?view=prs", [STORY]);
+        await waitFor(() => expect(rows()).toHaveLength(2));
+        await within(rows()[0]).findByRole("button", { name: "Story" });
+        // The ↻ carries the language too (option A).
+        expect(within(rows()[0]).getByRole("button", { name: "Rebuild story for #7" }).closest(".pr-split")).toContainElement(
+          langHalf(rows()[0]),
+        );
+
+        fireEvent.click(langHalf(rows()[1]));
+        fireEvent.click(screen.getByRole("menuitemradio", { name: "Polski — PL" }));
+        expect(readPreference(preferences.storyLanguage)).toBe("pl");
+        const halves = screen.getAllByRole("button", { name: "Story language: Polish" });
+        expect(halves).toHaveLength(2);
+        for (const h of halves) expect(h).toHaveTextContent("PL ▾");
+        expect(screen.queryByRole("button", { name: "Story language: English" })).toBeNull();
+        // Picking only sets the language; it starts nothing.
+        expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+      });
+
+      it("Polish launch sends the Polish line", async () => {
+        writePreference(preferences.storyLanguage, "pl");
+        renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] }, "pavilio", "?view=prs", [STORY]);
+        await waitFor(() => expect(rows()).toHaveLength(2));
+        fireEvent.click(await within(rows()[1]).findByRole("button", { name: "Explain" }));
+        await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
+        expect(vi.mocked(startTaskRun).mock.calls[0][0].runLine).toBe(explainRunLine(CLAUDE, "pavilio", "pavilio", 8, "pl"));
+        expect(vi.mocked(startTaskRun).mock.calls[0][0].runLine).toContain("Write the story in Polish.");
+
+        fireEvent.click(within(rows()[0]).getByRole("button", { name: "Rebuild story for #7" }));
+        await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(2));
+        expect(vi.mocked(startTaskRun).mock.calls[1][0].runLine).toBe(explainRunLine(CLAUDE, "pavilio", "pavilio", 7, "pl"));
+      });
+
+      it("spinner shows after a launch and disables both halves", async () => {
+        writePreference(preferences.storyLanguage, "pl");
+        renderPrs(one());
+        const r = await row();
+        fireEvent.click(await within(r).findByRole("button", { name: "Explain" }));
+        const main = await within(r).findByRole("button", { name: "Explaining…" });
+        expect(main).toHaveAttribute("aria-disabled", "true");
+        expect(main.querySelector(".pr-spin")).not.toBeNull();
+        expect(main).toHaveAttribute("title", "Writing the story (PL) — started 0 min ago");
+        expect(langHalf(r)).toBeDisabled();
+        expect(langHalf(r)).toHaveAccessibleName("Story language: Polish");
+        expect(within(r).queryByRole("button", { name: "Explain" })).toBeNull();
+      });
+
+      it("story appearing ends the explain spinner", async () => {
+        const files: { relativePath: string; modified: number }[] = [];
+        renderPrs(one(), "pavilio", "?view=prs", files);
+        const r = await row();
+        fireEvent.click(await within(r).findByRole("button", { name: "Explain" }));
+        await within(r).findByRole("button", { name: "Explaining…" });
+
+        files.push({ relativePath: STORY, modified: Date.now() });
+        await refreshIndex();
+        const story = await within(r).findByRole("button", { name: "Story" });
+        expect(story).toHaveClass("pr-act-story");
+        const rebuild = within(r).getByRole("button", { name: "Rebuild story for #7" });
+        expect(rebuild).toBeEnabled();
+        expect(rebuild.closest(".pr-split")).toContainElement(langHalf(r));
+        expect(langHalf(r)).toBeEnabled();
+        expect(within(r).queryByRole("button", { name: "Explaining…" })).toBeNull();
+      });
+
+      it("newer modified time ends the rebuild spinner", async () => {
+        const files = [{ relativePath: STORY, modified: 1 }];
+        renderPrs(one(), "pavilio", "?view=prs", files);
+        const r = await row();
+        fireEvent.click(await within(r).findByRole("button", { name: "Rebuild story for #7" }));
+        await within(r).findByRole("button", { name: "Explaining…" });
+        // The old file is still there: Story stays, the spinner sits in the ↻ half.
+        expect(within(r).getByRole("button", { name: "Story" })).toBeEnabled();
+        expect(within(r).queryByRole("button", { name: "Rebuild story for #7" })).toBeNull();
+
+        // An index re-read with the same old file does not end it.
+        await refreshIndex();
+        expect(within(r).getByRole("button", { name: "Explaining…" })).toHaveAttribute("aria-disabled", "true");
+
+        files[0] = { relativePath: STORY, modified: Date.now() + 1_000 };
+        await refreshIndex();
+        expect(await within(r).findByRole("button", { name: "Rebuild story for #7" })).toBeEnabled();
+        expect(within(r).queryByRole("button", { name: "Explaining…" })).toBeNull();
+      });
+
+      it("15 minutes without a story shows the timeout note", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        renderPrs(one());
+        const r = await row();
+        fireEvent.click(await within(r).findByRole("button", { name: "Explain" }));
+        const main = await within(r).findByRole("button", { name: "Explaining…" });
+
+        act(() => vi.advanceTimersByTime(3 * 60_000));
+        expect(main).toHaveAttribute("title", "Writing the story (EN) — started 3 min ago");
+        expect(within(r).queryByText(TIMEOUT_NOTE)).toBeNull();
+
+        // No file change at all: the clock alone ends the wait.
+        act(() => vi.advanceTimersByTime(EXPLAIN_TIMEOUT_MS - 3 * 60_000));
+        const explain = within(r).getByRole("button", { name: "Explain" });
+        expect(explain).toBeEnabled();
+        expect(langHalf(r)).toBeEnabled();
+        const note = within(r).getByRole("status");
+        expect(note).toHaveTextContent(TIMEOUT_NOTE);
+        expect(note).toHaveClass("pr-hint");
+        expect(note).toHaveAttribute("title", TIMEOUT_NOTE);
+
+        // The next launch on the row replaces the note.
+        fireEvent.click(explain);
+        await within(r).findByRole("button", { name: "Explaining…" });
+        expect(within(r).queryByText(TIMEOUT_NOTE)).toBeNull();
+      });
+
+      it("failed launch shows no spinner", async () => {
+        vi.mocked(startTaskRun).mockRejectedValueOnce(new Error("Could not create a terminal for the run"));
+        renderPrs(one());
+        const r = await row();
+        fireEvent.click(await within(r).findByRole("button", { name: "Explain" }));
+        expect(await screen.findByTestId("prs-launch-error")).toHaveTextContent("Could not create a terminal for the run");
+        expect(within(r).queryByRole("button", { name: "Explaining…" })).toBeNull();
+        expect(within(r).getByRole("button", { name: "Explain" })).toBeEnabled();
+        expect(langHalf(r)).toBeEnabled();
+      });
+
+      it("not-ready launcher still opens the language menu", async () => {
+        writePreference(preferences.terminalLaunchers, [WHOLE_LINE]);
+        renderPrs({ me: ME, prs: [pr({ number: 7 }), pr({ number: 8 })], unavailable: [] }, "pavilio", "?view=prs", [STORY]);
+        await waitFor(() => expect(rows()).toHaveLength(2));
+        const rebuild = await within(rows()[0]).findByRole("button", { name: "Rebuild story for #7" });
+        const explain = within(rows()[1]).getByRole("button", { name: "Explain" });
+        for (const b of [rebuild, explain]) {
+          expect(b).toBeDisabled();
+          expect(b).toHaveAttribute("title", BLOCKED_TEXT);
+        }
+        for (const r of rows()) expect(langHalf(r)).toBeEnabled();
+
+        fireEvent.click(langHalf(rows()[0]));
+        expect(screen.getByRole("menu", { name: "Story language" })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("menuitemradio", { name: "Polski — PL" }));
+        expect(readPreference(preferences.storyLanguage)).toBe("pl");
+        expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+      });
+
+      it("spinner survives leaving and re-entering the PRs view", async () => {
+        const first = renderPrs(one());
+        fireEvent.click(await within(await row()).findByRole("button", { name: "Explain" }));
+        await within(rows()[0]).findByRole("button", { name: "Explaining…" });
+        // Leaving for the QA tab unmounts the whole Code tab.
+        first.unmount();
+
+        renderPrs(one());
+        const r = await row();
+        await waitFor(() => expect(indexCalls()).toBeGreaterThan(0));
+        expect(await within(r).findByRole("button", { name: "Explaining…" })).toHaveAttribute("aria-disabled", "true");
+        expect(within(r).queryByRole("button", { name: "Explain" })).toBeNull();
+      });
+
+      const css = readFileSync(resolve("src/features/repos/Prs.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      /** The declarations of the first `selector {…}` rule inside `block` (or the whole sheet). */
+      const rule = (selector: string, block = css) => {
+        const at = block.indexOf(`${selector} {`);
+        expect(at, `${selector} rule`).toBeGreaterThanOrEqual(0);
+        return block.slice(at, block.indexOf("}", at));
+      };
+      /** The body of the at-rule whose prelude starts with `prelude`. */
+      const atBlock = (prelude: string) => {
+        const at = css.indexOf(prelude);
+        expect(at, prelude).toBeGreaterThanOrEqual(0);
+        let depth = 0;
+        for (let i = css.indexOf("{", at); i < css.length; i++) {
+          if (css[i] === "{") depth++;
+          else if (css[i] === "}" && --depth === 0) return css.slice(at, i + 1);
+        }
+        throw new Error(`unclosed ${prelude}`);
+      };
+
+      it("actions wrap at 390px", async () => {
+        renderPrs(one());
+        await row();
+        // The breakpoint follows the pane, not the window: the view is the size container.
+        expect(screen.getByTestId("prs-view")).toHaveClass("prs-view");
+        expect(rule(".prs-view")).toMatch(/container-type:\s*inline-size/);
+        expect(rule(".pr-actions")).toMatch(/flex-wrap:\s*wrap/);
+        const narrow = atBlock("@container (max-width: 560px)");
+        // Under the title, across the title and right columns, and free to wrap.
+        expect(rule(".prs-view .pr-right", narrow)).toMatch(/grid-column:\s*2\s*\/\s*4/);
+        expect(rule(".prs-view .pr-right", narrow)).toMatch(/flex-wrap:\s*wrap/);
+        expect(rule(".prs-view .pr-right", narrow)).toMatch(/justify-self:\s*start/);
+      });
+
+      it("timeout note is red, under the meta line, with room reserved", async () => {
+        const hint = rule(".pr-hint");
+        expect(hint).toMatch(/color:\s*var\(--red\)/);
+        // Pinned to the row's bottom edge, below the meta line, from the meta column
+        // (row padding + icon column + gap) to the row's right padding.
+        expect(hint).toMatch(/position:\s*absolute/);
+        expect(hint).toMatch(/bottom:\s*\d+px/);
+        expect(hint).toMatch(/left:\s*calc\(16px \+ 18px \+ 10px\)/);
+        expect(hint).toMatch(/right:\s*16px/);
+        // Never more than two lines, so the reserve below always holds it.
+        expect(hint).toMatch(/line-height:\s*16px/);
+        expect(hint).toMatch(/-webkit-line-clamp:\s*2/);
+        expect(hint).toMatch(/overflow:\s*hidden/);
+        // The row grows by two note lines, so a wrapped note never covers the meta line.
+        expect(rule(".prs-view .pr-row:has(.pr-hint)")).toMatch(/padding-bottom:\s*calc\([^;]*2 \* 16px[^;]*\)/);
+      });
+
+      it("busy story buttons get no hover", () => {
+        // A busy Explain / ↻ / spinner is aria-disabled, not disabled: hover must skip it too.
+        expect(css).toContain(".pr-act:hover:not(:disabled):not([aria-disabled=\"true\"]) {");
+        expect(css).toContain(".pr-act-icon:hover:not(:disabled):not([aria-disabled=\"true\"]) {");
+        expect(css).not.toMatch(/\.pr-act(-icon)?:hover:not\(:disabled\)\s*\{/);
+      });
+
+      it("reduced motion stops the spinner rotation", async () => {
+        expect(rule(".pr-spin")).toMatch(/animation:\s*pr-spin\b[^;]*infinite/);
+        const reduced = atBlock("@media (prefers-reduced-motion: reduce)");
+        expect(rule(".pr-spin", reduced)).toMatch(/animation:\s*none/);
+      });
     });
   });
 });

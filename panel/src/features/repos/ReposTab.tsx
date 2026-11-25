@@ -81,7 +81,7 @@ export default function ReposTab({ project, repos }: ReposTabProps) {
     <div className="rt" data-testid="repos-tab">
       <div className="rt-topbar">
         <span className="rt-crumb" data-testid="repos-crumb">
-          {project} / <b>Repos</b>
+          {project} / <b>Code</b>
         </span>
         <div className="rt-views" role="group" aria-label="Repos view">
           {PILLS.map(({ view: v, label }) => (
