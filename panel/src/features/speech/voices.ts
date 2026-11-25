@@ -3,12 +3,13 @@
  * globally and per project, all over anytts' catalog — the cascade order, the
  * per-engine pronunciation switch, and each cell's speech mode.
  *
- * The picked voice ALWAYS wins: nothing here consults
- * {@link import("./language").voteLanguage} or the per-session language
- * it feeds through {@link import("./language").nextLanguageState}, and
- * neither ever switches a voice. A single-language voice therefore reads every
- * answer in its own language; the Settings help text says so, and the
- * multilingual voices are grouped first for that reason.
+ * The picked voice ALWAYS wins, and it decides the language too: a text is
+ * prepared in the language of the voice that speaks it
+ * ({@link import("./voiceLanguage").voiceLanguageFor}), never the other way
+ * round — nothing here reads what an answer is written in, and nothing ever
+ * switches a voice. A single-language voice therefore reads every answer in
+ * its own language; the Settings help text says so, and the multilingual
+ * voices are grouped first for that reason.
  */
 
 // One source of truth, in the lower layer: the preference registry declares
@@ -220,6 +221,22 @@ export function voiceForProject(project: string | undefined): string {
     (project ? getProjectVoices(project)[engine] : undefined) ??
     resolveStoredVoice(readPreference(preferences.speechVoice), engine).voice
   );
+}
+
+/**
+ * The cascade member that speaks first in `project`: the first entry of
+ * {@link getCascadeOrder} that is on and has a {@link voiceFor} the project,
+ * with that voice. `undefined` when no enabled member has a voice. Read-only.
+ */
+export function firstCascadeVoice(
+  project: string | undefined,
+): { engine: string; voice: string } | undefined {
+  for (const entry of getCascadeOrder()) {
+    if (!entry.on) continue;
+    const voice = voiceFor(entry.id, project);
+    if (voice !== undefined) return { engine: entry.id, voice };
+  }
+  return undefined;
 }
 
 /** Stores `order` (repaired as `getCascadeOrder` reads it) and returns the order now in effect. */

@@ -1,8 +1,10 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { isDocSpeechKey } from "../speech/docKey";
+import { CASCADE } from "../speech/engines";
+import { isDocSpeechKey, projectOfDocKey } from "../speech/docKey";
 import { useOpenaiVoicesSnapshot } from "../speech/useOpenaiVoices";
-import { voiceForDocKey, voiceForProject } from "../speech/voices";
+import { voiceLanguageFor, type VoiceLanguage } from "../speech/voiceLanguage";
+import { firstCascadeVoice, getStoredEngine, voiceForProject } from "../speech/voices";
 import { projectOfSession } from "./sessionProject";
 
 /**
@@ -17,8 +19,35 @@ import { projectOfSession } from "./sessionProject";
  * `voiceFor` port.
  */
 export function voiceForSession(sessionId: string): string {
-  if (isDocSpeechKey(sessionId)) return voiceForDocKey(sessionId);
-  return voiceForProject(projectOfSession(sessionId) ?? undefined);
+  return voiceForProject(projectOfSpeechKey(sessionId));
+}
+
+/**
+ * The project a speech key speaks for: a `doc:` key through its path's
+ * project, a session through the tab's placement; `undefined` (the default
+ * voice) when neither places it.
+ */
+function projectOfSpeechKey(sessionId: string): string | undefined {
+  const project = isDocSpeechKey(sessionId)
+    ? projectOfDocKey(sessionId)
+    : projectOfSession(sessionId);
+  return project ?? undefined;
+}
+
+/**
+ * The language a cell's text is prepared in: the language of the voice that
+ * speaks it, through the same project as {@link voiceForSession}. Under the
+ * cascade that is the first enabled member with a voice for the project — the
+ * one that speaks unless it fails. Read-only, like {@link voiceForSession}.
+ */
+export function languageForSession(sessionId: string): VoiceLanguage {
+  const project = projectOfSpeechKey(sessionId);
+  const engine = getStoredEngine();
+  if (engine === CASCADE) {
+    const first = firstCascadeVoice(project);
+    return first ? voiceLanguageFor(first.engine, first.voice) : "en";
+  }
+  return voiceLanguageFor(engine, voiceForProject(project));
 }
 
 /**
