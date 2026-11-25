@@ -378,6 +378,13 @@ code, pre, .font-mono {
 .story-line-removed {
   background: var(--red-dim);
 }
+/* Rows the hovered or focused line note names (`StoryNoteItem`). Block, so the tint spans the row in the
+   whole-line fallback too, whose rows are otherwise inline; later than the add/remove tints, so it wins. */
+.diff-line.story-line-hit {
+  display: block;
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .story-line-sign {
   display: inline-block;
   width: 2ch;

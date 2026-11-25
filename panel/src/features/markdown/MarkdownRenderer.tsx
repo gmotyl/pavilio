@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Children, cloneElement, isValidElement, lazy, Suspense, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Children, cloneElement, createContext, isValidElement, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -9,6 +9,7 @@ import CopyIconButton from "../shell/CopyIconButton";
 import WikiLinkHoverCard from "./WikiLinkHoverCard";
 import { highlightLines } from "./highlight";
 import { HLJS_CLASS, numberStoryDiff, storyDiffLanguage, type StoryDiffLine } from "./storyDiff";
+import { noteHits, noteTarget, type NoteTarget } from "./noteTarget";
 import { extractWikiLinks } from "../../../server/lib/wiki/wikilinks";
 import remarkWikiLinks, {
   owningProject,
@@ -128,6 +129,209 @@ function colourStoryDiff(lines: StoryDiffLine[]): Array<string | null> | null {
   if (!tokens) return null;
   let next = 0;
   return lines.map((line) => (CODE_KINDS.has(line.kind) ? html[next++] : null));
+}
+
+/** A hast node as the story-note binding reads and marks it. */
+interface StoryHast {
+  type?: string;
+  value?: string;
+  tagName?: string;
+  properties?: { className?: unknown };
+  children?: StoryHast[];
+  data?: { storyBlock?: number; storyNote?: StoryNote; storyNoteLabel?: boolean };
+}
+
+/** A line note bound to a story block: the block's id within the document and the rows its label names. */
+interface StoryNote {
+  block: number;
+  label: string;
+  target: NoteTarget;
+}
+
+/** The first child that is not whitespace-only text. */
+function firstContent(node: StoryHast): StoryHast | undefined {
+  return (node.children ?? []).find((c) => !(c.type === "text" && !(c.value ?? "").trim()));
+}
+
+/** The `code` of a `pre` holding a numbered story `diff` block, else null. */
+function storyCode(pre: StoryHast): StoryHast | null {
+  if (pre.tagName !== "pre") return null;
+  const code = (pre.children ?? []).find((c) => c.type === "element");
+  if (code?.tagName !== "code") return null;
+  const cls = code.properties?.className;
+  const classes = Array.isArray(cls) ? cls.map(String) : typeof cls === "string" ? cls.split(/\s+/) : [];
+  if (!classes.includes("language-diff")) return null;
+  return numberStoryDiff(hastText(code)) ? code : null;
+}
+
+/** Mark each item of a bound note list whose content starts with a bold line label, and that label. */
+function bindNotes(ol: StoryHast, block: number): void {
+  for (const li of ol.children ?? []) {
+    if (li.tagName !== "li") continue;
+    let first = firstContent(li);
+    // A loose list wraps the item's text in a paragraph.
+    if (first?.tagName === "p") first = firstContent(first);
+    if (first?.type !== "element" || first.tagName !== "strong") continue;
+    const label = hastText(first);
+    const target = noteTarget(label);
+    if (!target) continue;
+    li.data = { ...li.data, storyNote: { block, label: label.trim(), target } };
+    first.data = { ...first.data, storyNoteLabel: true };
+  }
+}
+
+/**
+ * Rehype plugin, run after rehype-raw so the nodes it marks are the ones the components get: gives each
+ * numbered story `diff` block an id (on its `code`) and binds the ordered list directly after it — only
+ * whitespace between — to that id. The marks live in hast `data`, which no authored HTML can set.
+ */
+function rehypeStoryNotes() {
+  return (tree: StoryHast) => {
+    let nextBlock = 0;
+    const walk = (parent: StoryHast) => {
+      let previous: number | null = null;
+      for (const child of parent.children ?? []) {
+        if (child.type === "text" && !(child.value ?? "").trim()) continue;
+        if (child.type !== "element") {
+          previous = null;
+          continue;
+        }
+        if (previous !== null && child.tagName === "ol") bindNotes(child, previous);
+        const code = storyCode(child);
+        if (code) {
+          code.data = { ...code.data, storyBlock: nextBlock };
+          previous = nextBlock++;
+        } else {
+          previous = null;
+        }
+        walk(child);
+      }
+    };
+    walk(tree);
+  };
+}
+
+/** The note whose rows are lit: at most one in the document at a time. */
+interface NoteHit {
+  block: number;
+  target: NoteTarget;
+}
+
+/**
+ * Which note is lit, outside React state: a hover re-renders only the story blocks that subscribe
+ * to it, not the whole document (re-parsing the Markdown on every pointer move).
+ */
+function createNoteHitStore() {
+  let hit: NoteHit | null = null;
+  const listeners = new Set<() => void>();
+  const set = (next: NoteHit | null) => {
+    if (next === hit) return;
+    hit = next;
+    listeners.forEach((l) => l());
+  };
+  return {
+    get: () => hit,
+    set,
+    /** Clears only `mine`, so leaving one note does not unlight another that has since taken over. */
+    clear: (mine: NoteHit) => {
+      if (hit === mine) set(null);
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+type NoteHitStore = ReturnType<typeof createNoteHitStore>;
+
+const NoteHitContext = createContext<NoteHitStore | null>(null);
+
+const NO_STORE: NoteHitStore = createNoteHitStore();
+
+/** The lit target in this block, or null. */
+function useBlockHit(block: number | undefined): NoteTarget | null {
+  const store = useContext(NoteHitContext) ?? NO_STORE;
+  return useSyncExternalStore(store.subscribe, () => {
+    const hit = store.get();
+    return hit && block !== undefined && hit.block === block ? hit.target : null;
+  });
+}
+
+const HIT_CLASS = " story-line-hit";
+
+/**
+ * A numbered story `diff` block. The numbers live in `data-line` and are drawn by CSS
+ * (`.diff-line::before`), so selecting and copying the code never picks them up; the copy button
+ * reads the original children in the `pre` override. Rows a hovered note names get `story-line-hit`.
+ */
+function StoryDiffCode({ text, block, className, codeProps }: { text: string; block: number | undefined; className?: string; codeProps: Record<string, unknown> }) {
+  // Highlighting is the costly part, so it runs again only when the block's text changes.
+  const { lines, coloured } = useMemo(() => {
+    const numbered = numberStoryDiff(text) ?? [];
+    return { lines: numbered, coloured: colourStoryDiff(numbered) };
+  }, [text]);
+  const target = useBlockHit(block);
+  const hitClass = (line: StoryDiffLine) => (target && noteHits(target, line) ? HIT_CLASS : "");
+  if (coloured) {
+    return (
+      <code className={className} {...codeProps}>
+        {lines.map((line, i) => {
+          const code = coloured[i];
+          if (code === null) {
+            return (
+              <span key={i} className={`diff-line${hitClass(line)}`} data-line={line.number ?? ""}>
+                {line.text}
+                {"\n"}
+              </span>
+            );
+          }
+          const tint = line.kind === "added" ? " story-line-added" : line.kind === "removed" ? " story-line-removed" : "";
+          return (
+            <span key={i} className={`diff-line story-line${tint}${hitClass(line)}`} data-line={line.number ?? ""} data-base={line.base ?? ""}>
+              {/* The sign is the line's own prefix, as text, so selecting the block still copies the diff. */}
+              <span className="story-line-sign">{line.text.slice(0, 1)}</span>
+              <span className="story-line-code" dangerouslySetInnerHTML={{ __html: code }} />
+              {"\n"}
+            </span>
+          );
+        })}
+      </code>
+    );
+  }
+  return (
+    <code className={className} {...codeProps}>
+      {lines.map((line, i) => {
+        const hljs = HLJS_CLASS[line.kind];
+        return (
+          <span key={i} className={`diff-line${hitClass(line)}`} data-line={line.number ?? ""} data-base={line.base ?? ""}>
+            {hljs ? <span className={hljs}>{line.text}</span> : line.text}
+            {"\n"}
+          </span>
+        );
+      })}
+    </code>
+  );
+}
+
+/**
+ * A note bound to the story block above it: hovering it, or focusing inside it (its bold label is
+ * focusable), lights the rows its label names; leaving or blurring clears them.
+ */
+function StoryNoteItem({ note, children, liProps }: { note: StoryNote; children: ReactNode; liProps: Record<string, unknown> }) {
+  const store = useContext(NoteHitContext) ?? NO_STORE;
+  const { block } = note;
+  const { side, from, to } = note.target;
+  const hit = useMemo<NoteHit>(() => ({ block, target: { side, from, to } }), [block, side, from, to]);
+  const light = () => store.set(hit);
+  const clear = () => store.clear(hit);
+  return (
+    <li {...liProps} data-note-target={note.label} onMouseEnter={light} onMouseLeave={clear} onFocus={light} onBlur={clear}>
+      {children}
+    </li>
+  );
 }
 
 /** Extract plain text from React children (handles nested spans from rehype-highlight leftovers) */
@@ -318,6 +522,8 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
   // whole tree (mermaid diagrams included) just to refresh the quote text.
   const contentRef = useRef(content);
   contentRef.current = content;
+  // One per renderer, so a note lights rows only in its own document.
+  const noteHitStore = useMemo(createNoteHitStore, []);
 
   const components = useMemo<Components>(() => {
     // Fenced-code handling does not depend on where the file lives. Keep it out
@@ -341,52 +547,13 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
             </span>
           );
         }
-        // A PR-explain story's diff block gets a line-number gutter. The
-        // numbers live in `data-line` and are drawn by CSS (`.diff-line::before`),
-        // so selecting and copying the code never picks them up; the copy
-        // button reads the original children in the `pre` override.
-        const storyLines = isBlock === true && /language-diff/.test(className || "") ? numberStoryDiff(extractText(children)) : null;
-        const coloured = storyLines && colourStoryDiff(storyLines);
-        if (storyLines && coloured) {
-          return (
-            <code className={className} {...props}>
-              {storyLines.map((line, i) => {
-                const code = coloured[i];
-                if (code === null) {
-                  return (
-                    <span key={i} className="diff-line" data-line={line.number ?? ""}>
-                      {line.text}
-                      {"\n"}
-                    </span>
-                  );
-                }
-                const tint = line.kind === "added" ? " story-line-added" : line.kind === "removed" ? " story-line-removed" : "";
-                return (
-                  <span key={i} className={`diff-line story-line${tint}`} data-line={line.number ?? ""} data-base={line.base ?? ""}>
-                    {/* The sign is the line's own prefix, as text, so selecting the block still copies the diff. */}
-                    <span className="story-line-sign">{line.text.slice(0, 1)}</span>
-                    <span className="story-line-code" dangerouslySetInnerHTML={{ __html: code }} />
-                    {"\n"}
-                  </span>
-                );
-              })}
-            </code>
-          );
-        }
-        if (storyLines) {
-          return (
-            <code className={className} {...props}>
-              {storyLines.map((line, i) => {
-                const hljs = HLJS_CLASS[line.kind];
-                return (
-                  <span key={i} className="diff-line" data-line={line.number ?? ""}>
-                    {hljs ? <span className={hljs}>{line.text}</span> : line.text}
-                    {"\n"}
-                  </span>
-                );
-              })}
-            </code>
-          );
+        // A PR-explain story's diff block: numbered rows, coloured by language, lit by its notes.
+        if (isBlock === true && /language-diff/.test(className || "")) {
+          const text = extractText(children);
+          if (numberStoryDiff(text)) {
+            const block = (rest as { node?: StoryHast }).node?.data?.storyBlock;
+            return <StoryDiffCode text={text} block={block} className={className} codeProps={props} />;
+          }
         }
         const code = <code className={className} {...props}>{children}</code>;
         // react-markdown no longer says whether a `code` is inline, and gives
@@ -451,6 +618,17 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
       // A quoted message (a reply the answer proposes) is meant to be pasted
       // somewhere else; copying it by selection drags the `>` markers along.
       // Sibling button, positioned like the code block's.
+      // A story line note: the item lights its block's rows, and its bold label is focusable so the
+      // keyboard can do the same. Both marks come from `rehypeStoryNotes`; anything else renders as usual.
+      li: ({ node, children, ...props }) => {
+        const note = (node as StoryHast | undefined)?.data?.storyNote;
+        if (!note) return <li {...props}>{children}</li>;
+        return <StoryNoteItem note={note} liProps={props}>{children}</StoryNoteItem>;
+      },
+      strong: ({ node, ...props }) => {
+        if ((node as StoryHast | undefined)?.data?.storyNoteLabel) return <strong tabIndex={0} {...props} />;
+        return <strong {...props} />;
+      },
       blockquote: ({ node, children, ...props }) => (
         <div className="code-block quote-block">
           <blockquote {...props}>{children}</blockquote>
@@ -531,13 +709,15 @@ function TrustedMarkdown({ content, basePath }: { content: string; basePath?: st
 
   return (
     <div className="prose prose-invert prose-zinc max-w-none">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath, generated: generatedWikiLinks }]]}
-        rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw]}
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+      <NoteHitContext.Provider value={noteHitStore}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, [remarkWikiLinks, { basePath, generated: generatedWikiLinks }]]}
+          rehypePlugins={[[rehypeHighlight, { plainText: ["mermaid"] }], rehypeRaw, rehypeStoryNotes]}
+          components={components}
+        >
+          {content}
+        </ReactMarkdown>
+      </NoteHitContext.Provider>
     </div>
   );
 }
