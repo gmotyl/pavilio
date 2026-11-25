@@ -29,6 +29,14 @@ describe("voiceLanguage", () => {
     expect(languageOfLocale(undefined)).toBe("en");
   });
 
+  it("the match is on the primary subtag, in any case and with either separator", () => {
+    expect(languageOfLocale("PL-pl")).toBe("pl");
+    expect(languageOfLocale("pl_PL")).toBe("pl");
+    // Another language whose code starts with `pl` is not Polish.
+    expect(languageOfLocale("pli")).toBe("en");
+    expect(languageOfLocale("plt-MG")).toBe("en");
+  });
+
   it("OmniVoice twins map to their own language", async () => {
     await loadLiveVoices([BILL_EN, BILL_PL]);
     expect(voiceLanguageFor("openai", "bill-en")).toBe("en");
