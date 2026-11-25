@@ -37,6 +37,8 @@ import { prepare } from "../prepare";
 import { pageSpeechText, preparePage } from "../pageText";
 
 const KEY = "doc:pavilio/wiki/page.md";
+/** What the provider's `languageFor` port answers for every key: the page's voice language. */
+let pageLanguage: "pl" | "en" = "en";
 
 const answerWaiting: AnswerWaitingPort = {
   get: () => ({ waiting: false, pending: false }),
@@ -56,7 +58,7 @@ function Host({ children }: { children: ReactNode }) {
       onArrival={() => {}}
       answerWaiting={answerWaiting}
       voiceFor={() => "a-voice"}
-      languageFor={() => "en"}
+      languageFor={() => pageLanguage}
     >
       {children}
     </SpeechHostProvider>
@@ -172,6 +174,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stub.host = null;
+  pageLanguage = "en";
 });
 
 describe("PlayFromHere", () => {
@@ -467,7 +470,7 @@ describe("PlayFromHere", () => {
     }
   });
 
-  it("a Polish page starts at the unit the host prepared, not an English preparation's", () => {
+  it("a page under a Polish voice starts at the unit the host prepared, not an English preparation's", () => {
     // A Polish sentence full of images: "obrazek" is longer than "image", so
     // the Polish sentence crosses the unit ceiling and is cut where the English
     // one is not, and every block after it moves by one unit.
@@ -482,7 +485,8 @@ describe("PlayFromHere", () => {
       "Krótki akapit po nagłówku.",
       "",
     ].join("\n");
-    // What the host prepares: the page's own vote picks Polish.
+    // What the host prepares: the page's project voice is Polish, so is the port.
+    pageLanguage = "pl";
     const hostUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
     const englishUnits = prepare(pageSpeechText(polish)).units;
     const headingOf = (units: typeof hostUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
@@ -633,7 +637,7 @@ describe("PlayFromHere", () => {
     expect(screen.getByTestId("play-from-here-pinned")).toHaveAccessibleName("Play from here");
 
     const edited = PAGE.replace("## Example", "## Example\n\nA brand new paragraph now opens the first example.");
-    expect(preparePage(edited).units[playing].text).not.toBe(UNITS[playing].text);
+    expect(preparePage(edited, "en").units[playing].text).not.toBe(UNITS[playing].text);
     rerender(<Page text={edited} />);
     expect(screen.queryByTestId("play-from-here-pinned")).toBeNull();
     expect(stub.host!.speakDocument).not.toHaveBeenCalled();

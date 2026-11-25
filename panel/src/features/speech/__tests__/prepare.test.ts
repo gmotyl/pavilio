@@ -682,7 +682,7 @@ describe("sentence units", () => {
       "Short paragraph one. Short paragraph two.",
     ].join("\n");
 
-    expect(preparePage(markdown).units.map((unit) => unit.text)).toEqual(texts(markdown));
+    expect(preparePage(markdown, "en").units.map((unit) => unit.text)).toEqual(texts(markdown));
   });
 });
 

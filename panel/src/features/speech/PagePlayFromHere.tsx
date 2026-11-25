@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { preparePage } from "./pageText";
 import { PlayFromHere } from "./PlayFromHere";
-import { usePanelSpeechIfMounted } from "./SpeechHostProvider";
+import { useLanguageFor, usePanelSpeechIfMounted } from "./SpeechHostProvider";
 import type { SpeechUnit } from "./types";
 
 /*
@@ -93,9 +93,15 @@ export interface PagePlayFromHereProps {
 export function PagePlayFromHere({ docKey, text, children }: PagePlayFromHereProps) {
   const speech = usePanelSpeechIfMounted();
   // Prepared by the one page preparation the host plays from (`preparePage`:
-  // frontmatter dropped, sentence units, in the page's own language), so a unit
-  // index here is the same unit in the bar and in the run.
-  const units = useMemo(() => (docKey ? preparePage(text).units : NO_UNITS), [docKey, text]);
+  // frontmatter dropped, sentence units, in the voice language the host's port
+  // gives the page's key), so a unit index here is the same unit in the bar
+  // and in the run.
+  const languageFor = useLanguageFor();
+  const language = docKey ? languageFor(docKey) : "en";
+  const units = useMemo(
+    () => (docKey ? preparePage(text, language).units : NO_UNITS),
+    [docKey, text, language],
+  );
   // The playhead is an external store (it moves ~4 times a second); only the
   // unit index is taken, so a playhead moving within a unit renders nothing.
   // A run still reading an older text of the page (the toolbar does not

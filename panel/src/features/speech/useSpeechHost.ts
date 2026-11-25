@@ -671,30 +671,17 @@ export function useSpeechHost({
     warmableUtterances,
   } = channel;
 
-  /** Each landed page utterance's id → its language, as voted once. */
-  const pageLanguagesRef = useRef<Map<string, "pl" | "en">>(new Map());
   /**
-   * The language an utterance is prepared in. A cell's is its session's voice
-   * language, read from the `languageFor` port at the moment of preparation.
-   * A page still takes its own vote here until pages follow the voice too.
-   * Asked once per utterance in effect: `preparedFor` keeps what it prepared by
-   * id, so a later voice change leaves an utterance already prepared alone.
+   * The language an utterance is prepared in: its key's voice language, read
+   * from the `languageFor` port at the moment of preparation — a cell's from
+   * its session's voice, a page's (`doc:` key) from its project's voice, which
+   * the port resolves for that key. Asked once per utterance in effect:
+   * `preparedFor` keeps what it prepared by id, so a later voice change leaves
+   * an utterance already prepared alone (a page is re-prepared on its next
+   * Play; see `speakDocument`).
    */
   const languageOf = useCallback(
-    (utterance: Utterance): VoiceLanguage => {
-      if (!isDocSpeechKey(utterance.sessionId)) return languageForKey(utterance.sessionId);
-      // A page's vote reads its whole text, and the bar asks for its units on
-      // every render — so the vote is taken once per utterance and kept by id
-      // (the id is the key and text's hash, so it cannot go stale), until the
-      // page is dropped.
-      const known = pageLanguagesRef.current.get(utterance.id);
-      if (known) return known;
-      // The page's own preparation picks it, so the language a page plays in
-      // is the one every other reader of the page prepared it in.
-      const { language } = preparePageText(utterance.text);
-      pageLanguagesRef.current.set(utterance.id, language);
-      return language;
-    },
+    (utterance: Utterance): VoiceLanguage => languageForKey(utterance.sessionId),
     [languageForKey],
   );
   /** Each spoken page's key → the id of the utterance it landed. */
@@ -720,11 +707,11 @@ export function useSpeechHost({
       if (cached) return cached;
 
       // A page (`doc:` key) is prepared the one way every page is — block-
-      // bounded, in its own vote's language (`preparePageText`) — so the units
-      // the bar and play-from-here index are these units. An answer packs in
-      // its session's voice language.
+      // bounded (`preparePageText`), in its project's voice language — so the
+      // units the bar and play-from-here index are these units. An answer
+      // packs in its session's voice language.
       const prepared = isDocSpeechKey(utterance.sessionId)
-        ? preparePageText(utterance.text)
+        ? preparePageText(utterance.text, language)
         : prepare(utterance.text, { language });
       preparedRef.current.set(utterance.id, prepared);
       return prepared;
@@ -1281,14 +1268,13 @@ export function useSpeechHost({
   );
 
   /**
-   * Drops what the host keeps per page utterance: its language, its warm mark
-   * and its preparation. Only ever called with a page id (`pageUtteranceId`),
+   * Drops what the host keeps per page utterance: its warm mark and its
+   * preparation. Only ever called with a page id (`pageUtteranceId`),
    * which no cell utterance shares, so answers keep their caches. A run still
    * holding the dropped preparation keeps its own reference; a later ask
    * simply prepares again, which is pure.
    */
   const forgetPageUtterance = useCallback((id: string): void => {
-    pageLanguagesRef.current.delete(id);
     warmedRef.current.delete(id);
     preparedRef.current.delete(id);
   }, []);
@@ -1315,13 +1301,23 @@ export function useSpeechHost({
         forgetPageUtterance(previousId);
         dropKey(key);
       }
+      // The same text keeps its id, so a page prepared before a voice change
+      // would otherwise play on in the old voice's language. Its preparation
+      // and warm go, and it is prepared afresh in the language the port gives
+      // now: a page's language follows its voice from Play to Play.
+      const language = languageOf(utterance);
+      const held = preparedRef.current.get(utterance.id);
+      if (held && held.language !== language) {
+        abortUtterance(utterance.id);
+        forgetPageUtterance(utterance.id);
+      }
       pageUtterancesRef.current.set(key, utterance.id);
       arriveLocal(utterance);
 
       // What `onSpeak` does, on the utterance named here: the channel's
       // `utteranceFor` of this render has not seen the arrival yet.
       unlock();
-      const { units } = preparedFor(utterance, languageOf(utterance));
+      const { units } = preparedFor(utterance, language);
       if (units.length === 0) {
         // Nothing to say: the key stays `empty`, as the channel left it — and
         // the page's previous text, if it is still playing, stops with it

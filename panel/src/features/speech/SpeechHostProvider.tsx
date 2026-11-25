@@ -67,6 +67,8 @@ export interface PanelPageSpeech extends PageSpeech {
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 const PageSpeechContext = createContext<PanelPageSpeech | null>(null);
+/** The `languageFor` port as the provider was handed it; null without a provider. */
+const LanguageForContext = createContext<((key: string) => VoiceLanguage) | null>(null);
 
 /**
  * Where the focused cell is read from. The provider combines it with the route
@@ -308,8 +310,10 @@ export function SpeechHostProvider({
   return (
     <SpeechHostContext.Provider value={speech}>
       <PageSpeechContext.Provider value={pageSpeech}>
-        {inRouter && <RouterBridge view={routerView} onRouteChange={recheckLookedAt} />}
-        {children}
+        <LanguageForContext.Provider value={languageFor}>
+          {inRouter && <RouterBridge view={routerView} onRouteChange={recheckLookedAt} />}
+          {children}
+        </LanguageForContext.Provider>
       </PageSpeechContext.Provider>
     </SpeechHostContext.Provider>
   );
@@ -372,6 +376,19 @@ export function useStopPageRuns(): () => void {
  */
 export function usePanelSpeechIfMounted(): GridSpeech | null {
   return useContext(SpeechHostContext);
+}
+
+const ENGLISH = (): VoiceLanguage => "en";
+
+/**
+ * The voice language port the host prepares with — the provider's
+ * `languageFor` — for a surface that prepares a page itself (the toolbar's
+ * `pageHasSpeech`, play-from-here's units), so it prepares the page as the host
+ * will. Read at call time, like the host reads it. Without a provider (viewers
+ * mounted bare in many suites) every key is English, `prepare`'s default.
+ */
+export function useLanguageFor(): (key: string) => VoiceLanguage {
+  return useContext(LanguageForContext) ?? ENGLISH;
 }
 
 export default SpeechHostProvider;
