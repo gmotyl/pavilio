@@ -24,6 +24,7 @@ import {
   synthMock,
   unitsOf,
   useWebSocketMock,
+  languageFor,
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
@@ -52,7 +53,7 @@ const PAGE = docSpeechKey("p/wiki/page.md");
 
 function renderHost(onAnswer = vi.fn()) {
   const { result } = renderHook(() =>
-    useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting, onAnswer }),
+    useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting, onAnswer }),
   );
   return (): SpeechHost => result.current;
 }

@@ -21,11 +21,13 @@ import {
   emitUtterance,
   endCurrentUnit,
   endRun,
+  languageFor,
   played,
   requestedTexts,
   resetSpeechHarness,
   response,
   settle,
+  setVoiceLanguage,
   synth,
   synthMock,
   timesRequested,
@@ -80,7 +82,7 @@ describe("useSpeechHost warming", () => {
   it("warms the first unit of an unarmed cell on arrival", async () => {
     const units = unitsOf(response(3));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -94,7 +96,7 @@ describe("useSpeechHost warming", () => {
 
   it("warming makes no sound, even with the element unlocked", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     // Arming cell-a spends a gesture on the element, so nothing after this is
@@ -112,7 +114,7 @@ describe("useSpeechHost warming", () => {
   it("does not synthesize beyond the first unit before playback", async () => {
     const units = unitsOf(response(4));
     renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(4));
@@ -125,7 +127,7 @@ describe("useSpeechHost warming", () => {
     const units = unitsOf(response(3));
     synth.hold(units[0]);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -138,7 +140,7 @@ describe("useSpeechHost warming", () => {
   it("a click on a ready cell starts without synthesizing that unit again", async () => {
     const units = unitsOf(response(3));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -154,7 +156,7 @@ describe("useSpeechHost warming", () => {
     const units = unitsOf(response(2));
     synth.hold(units[0]);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(2));
@@ -176,7 +178,7 @@ describe("useSpeechHost warming", () => {
     const first = unitsOf(response(2))[0];
     const second = unitsOf(response(2, "Newer"))[0];
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(2));
@@ -197,7 +199,7 @@ describe("useSpeechHost warming", () => {
     synth.hold(first);
     synth.hold(second);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(2));
@@ -216,7 +218,7 @@ describe("useSpeechHost warming", () => {
   it("an armed cell autoplays without a double synthesis", async () => {
     const units = unitsOf(response(3));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await settle(() => {
@@ -264,7 +266,7 @@ describe("useSpeechHost — the session's project voice", () => {
     await seedSession("cell-p", "p");
     const units = unitsOf(response(3));
     renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-p", "u-1", response(3));
@@ -282,7 +284,7 @@ describe("useSpeechHost — the session's project voice", () => {
     await seedSession("cell-p", "p");
     const units = unitsOf(response(4));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await settle(() => result.current.cycleSpeechMode("cell-p")); // armed
@@ -313,7 +315,7 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
     // Fixture guard: two units, so a run that plays them both is a natural end.
     expect(prepare(markdown, { language: "en" }).units).toHaveLength(2);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", markdown);
@@ -331,7 +333,7 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
 
   it("a barge-in leaves the interrupted cell ready, not heard", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(2));
@@ -348,7 +350,7 @@ describe("useSpeechHost — heard is the end of the last unit", () => {
 
   it("a user stop leaves the cell ready, not heard", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -380,7 +382,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("a newer utterance takes a paused cell out of the paused state", async () => {
     const newer = unitsOf(response(3, "Newer"))[0];
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -404,7 +406,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
     const stale = unitsOf(response(3));
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -437,7 +439,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
     const stale = unitsOf(response(3));
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -463,7 +465,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("supersession does not disarm the armed cell", async () => {
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await settle(() => {
@@ -491,7 +493,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("a newer utterance for a speaking cell leaves the run alone", async () => {
     const stale = unitsOf(response(3));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -507,7 +509,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
   it("a newer utterance for an idle cell is unchanged", async () => {
     const newer = unitsOf(response(3, "Newer"))[0];
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -532,7 +534,7 @@ describe("useSpeechHost — a newer utterance abandons a paused run", () => {
    */
   it("a newer utterance for another cell leaves a paused cell paused", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -565,7 +567,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("a newer utterance queues behind a live run instead of superseding it", async () => {
     const stale = unitsOf(response(3));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -587,7 +589,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     const stale = unitsOf(response(2));
     const newer = unitsOf(response(2, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await settle(() => {
@@ -616,7 +618,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("an unarmed cell holds the queued utterance without speaking", async () => {
     const stale = unitsOf(response(2));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     // A click, not an arming: the run is the user's, and nothing about it says
@@ -641,7 +643,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     const stale = unitsOf(response(3));
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -676,7 +678,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("pausing a cell releases the answer queued behind it", async () => {
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -710,7 +712,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
   it("pausing a cell with two answers queued releases only the oldest", async () => {
     const newer = unitsOf(response(3, "Newer"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -749,7 +751,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"];
     const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3, words[0]));
@@ -785,7 +787,7 @@ describe("useSpeechHost — arrivals queue behind a live run", () => {
     for (const word of words) synth.hold(firstUnitOf(word));
 
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     for (let i = 0; i < words.length; i += 1) {
@@ -822,7 +824,7 @@ describe("useSpeechHost — pause and resume", () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", markdown);
@@ -878,7 +880,7 @@ describe("useSpeechHost — the transport walks the whole history", () => {
     const first = unitsOf(response(2, "First"));
     const second = unitsOf(response(2, "Second"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     // Three answers, none of them played: u-3 is current, u-2 and u-1 are the
@@ -950,7 +952,7 @@ describe("useSpeechHost — the transport walks the whole history", () => {
   it("a paused replay of history keeps its place when a newer answer arrives", async () => {
     const older = unitsOf(response(3, "Older"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3, "Older"));
@@ -1011,7 +1013,7 @@ describe("useSpeechHost — the transport walks the whole history", () => {
   it("a paused replay of history is not stepped forward to release a queued answer", async () => {
     const older = unitsOf(response(3, "Older"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3, "Older"));
@@ -1064,7 +1066,7 @@ describe("useSpeechHost — the snap to the newest answer", () => {
   it("returns the cursor to the newest answer without speaking", async () => {
     const first = unitsOf(response(2, "First"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(2, "First"));
@@ -1102,7 +1104,7 @@ describe("useSpeechHost — the snap to the newest answer", () => {
 
   it("changes nothing when the cursor is already on the newest answer", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(2, "First"));
@@ -1133,7 +1135,7 @@ describe("useSpeechHost — the idle transport", () => {
     const answerA1 = response(1, "AlphaOne");
     const isSessionOpen = (): boolean => true;
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting, isSessionOpen }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting, isSessionOpen }),
     );
     const host = (): SpeechHost => result.current;
     // The panel's open-cell test is handed through for `idleTransportTarget`,
@@ -1174,7 +1176,7 @@ describe("useSpeechHost — the voice's run events", () => {
     const events: SpeechRunEvent[] = [];
     const { result } = renderHook(() =>
       useSpeechHost({
-        voiceFor: voiceForSession,
+        voiceFor: voiceForSession, languageFor,
         answerWaiting: storeAnswerWaiting,
         onRunChange: (event) => events.push(event),
       }),
@@ -1209,7 +1211,7 @@ describe("useSpeechHost — the voice's run events", () => {
     const events: SpeechRunEvent[] = [];
     const { result } = renderHook(() =>
       useSpeechHost({
-        voiceFor: voiceForSession,
+        voiceFor: voiceForSession, languageFor,
         answerWaiting: storeAnswerWaiting,
         onRunChange: (event) => events.push(event),
       }),
@@ -1260,7 +1262,7 @@ describe("useSpeechHost — the speech-stopped alert", () => {
       return harnessPlay ? harnessPlay.call(this) : Promise.resolve();
     });
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(1, "Refused"));
@@ -1277,7 +1279,7 @@ describe("useSpeechHost — the speech-stopped alert", () => {
     const [only] = unitsOf(markdown);
     synth.hold(only);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", markdown);
@@ -1335,7 +1337,7 @@ describe("useSpeechHost — the answerWaiting port", () => {
   it("hold, release and transport notes reach the answerWaiting port in order", async () => {
     const { port, calls } = recordingAnswerWaiting();
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: port }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: port }),
     );
 
     await emitUtterance("cell-a", "u-1", response(1, "First"));
@@ -1377,7 +1379,7 @@ describe("useSpeechHost — the answerWaiting port", () => {
     // answer under the cursor and takes the hold without moving the cursor.
     const onTheWave = recordingAnswerWaiting(true);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: onTheWave.port }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: onTheWave.port }),
     );
     await emitUtterance("cell-a", "u-1", response(1, "First"));
     await emitUtterance("cell-a", "u-2", response(1, "Second"));
@@ -1393,7 +1395,7 @@ describe("useSpeechHost — the answerWaiting port", () => {
     // Not on the wave: the very first press steps.
     const offTheWave = recordingAnswerWaiting(false);
     const second = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: offTheWave.port }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: offTheWave.port }),
     );
     await emitUtterance("cell-b", "b-1", response(1, "First"));
     await emitUtterance("cell-b", "b-2", response(1, "Second"));
@@ -1413,7 +1415,7 @@ describe("useSpeechHost — play presses", () => {
 
   it("notes Play, Resume and Read from here for the cell pressed, never Pause", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await emitUtterance("cell-a", "u-1", response(3));
 
@@ -1431,7 +1433,7 @@ describe("useSpeechHost — play presses", () => {
   it("autoplay starting a run is not a press", async () => {
     const units = unitsOf(response(3));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await settle(() => {
       result.current.cycleSpeechMode("cell-a"); // armed
@@ -1440,5 +1442,90 @@ describe("useSpeechHost — play presses", () => {
     await emitUtterance("cell-a", "u-1", response(3));
     expect(played).toEqual([`blob:${units[0]}`]);
     expect(playPressCount("cell-a")).toBe(0);
+  });
+});
+
+/**
+ * The voice decides the language every answer is prepared in. The host reads it
+ * from its `languageFor` port at preparation time; nothing is detected from the
+ * text and nothing is tallied across answers.
+ */
+describe("useSpeechHost — the voice language", () => {
+  /** An answer with Polish diacritics and a code block between two sentences. */
+  const polish = (n: number) =>
+    `Zażółć gęślą jaźń, odpowiedź ${n}. Oto kod:\n\n\`\`\`ts\nconst x = ${n};\n\`\`\`\n\nI dalej po polsku.`;
+  const ENGLISH = "Here is the answer. The code:\n\n```ts\nconst x = 1;\n```\n\nAnd that is all.";
+
+  const renderHost = () =>
+    renderHook(() =>
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
+    );
+
+  /** Every unit's `lang`, and the cell's whole spoken text. */
+  const preparedOf = (host: SpeechHost, sessionId: string) => {
+    const units = host.unitsFor(sessionId);
+    return {
+      langs: [...new Set(units.map((unit) => unit.lang))],
+      spoken: units.map((unit) => unit.text).join(" "),
+    };
+  };
+
+  it("English voice prepares a Polish answer in English", async () => {
+    setVoiceLanguage("en");
+    const { result } = renderHost();
+
+    await emitUtterance("cell-a", "a1", polish(1));
+
+    const { langs, spoken } = preparedOf(result.current, "cell-a");
+    expect(langs).toEqual(["en"]);
+    expect(spoken).toContain("code block");
+    expect(spoken).not.toContain("blok kodu");
+  });
+
+  it("Polish voice prepares an English answer in Polish", async () => {
+    setVoiceLanguage("pl");
+    const { result } = renderHost();
+
+    await emitUtterance("cell-a", "a1", ENGLISH);
+
+    const { langs, spoken } = preparedOf(result.current, "cell-a");
+    expect(langs).toEqual(["pl"]);
+    expect(spoken).toContain("blok kodu");
+    expect(spoken).not.toContain("code block");
+  });
+
+  it("no vote: repeated Polish answers stay English under an English voice", async () => {
+    setVoiceLanguage("en");
+    const { result } = renderHost();
+
+    for (const n of [1, 2, 3]) {
+      await emitUtterance("cell-a", `a${n}`, polish(n), 1_000 * n);
+      // Idle, so each arrival lands under the cursor.
+      expect(utteranceUnderCursor(result.current.queueFor("cell-a"))?.id).toBe(`a${n}`);
+      const { langs, spoken } = preparedOf(result.current, "cell-a");
+      expect(langs).toEqual(["en"]);
+      expect(spoken).toContain("code block");
+    }
+  });
+
+  it("a voice change affects only later arrivals", async () => {
+    setVoiceLanguage("en");
+    const { result } = renderHost();
+
+    await emitUtterance("cell-a", "a1", polish(1), 1_000);
+    setVoiceLanguage("pl");
+    await emitUtterance("cell-a", "a2", ENGLISH, 2_000);
+
+    const second = preparedOf(result.current, "cell-a");
+    expect(utteranceUnderCursor(result.current.queueFor("cell-a"))?.id).toBe("a2");
+    expect(second.langs).toEqual(["pl"]);
+    expect(second.spoken).toContain("blok kodu");
+
+    // Back onto the first answer: it keeps the units it was prepared with.
+    await settle(() => result.current.onPrevious("cell-a"));
+    expect(utteranceUnderCursor(result.current.queueFor("cell-a"))?.id).toBe("a1");
+    const first = preparedOf(result.current, "cell-a");
+    expect(first.langs).toEqual(["en"]);
+    expect(first.spoken).toContain("code block");
   });
 });

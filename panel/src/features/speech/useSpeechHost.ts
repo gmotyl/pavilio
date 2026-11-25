@@ -69,6 +69,7 @@ import type { GridSpeech, PreparedSpeech, SpeechUnit, Utterance } from "./types"
 import type { MediaSessionTransportTarget } from "./useMediaSessionTransport";
 import { useSpeechPlayer, type SpeechPlaybackError, type SpeechProgress } from "./useSpeechPlayer";
 import { useUtteranceChannel } from "./useUtteranceChannel";
+import type { VoiceLanguage } from "./voiceLanguage";
 import { stepsOffTheWave, stepsOntoTheWave } from "./waveStep";
 import { MAX_PENDING, MAX_PREVIOUS, utteranceUnderCursor } from "./utteranceQueue";
 import { notePlayPress } from "./playPresses";
@@ -238,6 +239,13 @@ export interface SpeechHostOptions {
    */
   voiceFor: (sessionId: string) => string;
   /**
+   * The voice language of a session or page key: the language its text is
+   * prepared in (placeholders and every unit's `lang`). Read at preparation
+   * time, so a voice change reaches the next preparation and leaves an
+   * utterance already prepared as it was. Nothing is detected from the text.
+   */
+  languageFor: (sessionId: string) => VoiceLanguage;
+  /**
    * The cell's answer-waiting state: the hold on the text and the wave. See
    * {@link AnswerWaitingPort}.
    */
@@ -344,6 +352,7 @@ export function useSpeechHost({
   isSessionOpen = ALWAYS_OPEN,
   onRunChange,
   voiceFor,
+  languageFor,
   answerWaiting,
   lookedAtSessionId = null,
 }: SpeechHostOptions): SpeechHost {
@@ -363,6 +372,19 @@ export function useSpeechHost({
   useEffect(() => {
     voiceForRef.current = voiceFor;
   }, [voiceFor]);
+  /**
+   * `languageFor`, mirrored the same way: every preparation reads it, and the
+   * warming effect and the transport must not follow the caller's callback.
+   */
+  const languageForRef = useRef(languageFor);
+  useEffect(() => {
+    languageForRef.current = languageFor;
+  }, [languageFor]);
+  /** The port as the channel takes it: stable, reading the mirror when asked. */
+  const languageForKey = useCallback(
+    (sessionId: string): VoiceLanguage => languageForRef.current(sessionId),
+    [],
+  );
   /**
    * `answerWaiting`, mirrored for the same reason: `onPrevious` and `onNext`
    * are transport identities the grid and the media keys hold on to.
@@ -630,6 +652,7 @@ export function useSpeechHost({
     // A catch-up after a reconnect is SHOWN, never spoken: see ADR 0017.
     recordAutoplayed,
     onAnswer,
+    languageFor: languageForKey,
   });
   const {
     arriveLocal,
@@ -639,7 +662,6 @@ export function useSpeechHost({
     drop: dropKey,
     finishUtterance,
     heardFor,
-    languageFor,
     markHeard,
     queueFor,
     reconnects,
@@ -652,16 +674,15 @@ export function useSpeechHost({
   /** Each landed page utterance's id → its language, as voted once. */
   const pageLanguagesRef = useRef<Map<string, "pl" | "en">>(new Map());
   /**
-   * The language an utterance is prepared in. A cell's comes from its
-   * session's running tally — language is a property of the session. A page is
-   * not a session: it is one text, read once, so its own vote decides, and the
-   * tally (which needs two Polish votes to switch) would read every Polish page
-   * as English. Asked once per utterance in effect: `preparedFor` keeps what it
-   * prepared by id.
+   * The language an utterance is prepared in. A cell's is its session's voice
+   * language, read from the `languageFor` port at the moment of preparation.
+   * A page still takes its own vote here until pages follow the voice too.
+   * Asked once per utterance in effect: `preparedFor` keeps what it prepared by
+   * id, so a later voice change leaves an utterance already prepared alone.
    */
   const languageOf = useCallback(
-    (utterance: Utterance): "pl" | "en" => {
-      if (!isDocSpeechKey(utterance.sessionId)) return languageFor(utterance.sessionId);
+    (utterance: Utterance): VoiceLanguage => {
+      if (!isDocSpeechKey(utterance.sessionId)) return languageForKey(utterance.sessionId);
       // A page's vote reads its whole text, and the bar asks for its units on
       // every render — so the vote is taken once per utterance and kept by id
       // (the id is the key and text's hash, so it cannot go stale), until the
@@ -674,7 +695,7 @@ export function useSpeechHost({
       pageLanguagesRef.current.set(utterance.id, language);
       return language;
     },
-    [languageFor],
+    [languageForKey],
   );
   /** Each spoken page's key → the id of the utterance it landed. */
   const pageUtterancesRef = useRef<Map<string, string>>(new Map());
@@ -694,14 +715,14 @@ export function useSpeechHost({
   }, [heardFor, speechModeOf]);
 
   const preparedFor = useCallback(
-    (utterance: Utterance, language: "pl" | "en"): PreparedSpeech => {
+    (utterance: Utterance, language: VoiceLanguage): PreparedSpeech => {
       const cached = preparedRef.current.get(utterance.id);
       if (cached) return cached;
 
       // A page (`doc:` key) is prepared the one way every page is — block-
       // bounded, in its own vote's language (`preparePageText`) — so the units
       // the bar and play-from-here index are these units. An answer packs in
-      // its session's language, as it always has.
+      // its session's voice language.
       const prepared = isDocSpeechKey(utterance.sessionId)
         ? preparePageText(utterance.text)
         : prepare(utterance.text, { language });

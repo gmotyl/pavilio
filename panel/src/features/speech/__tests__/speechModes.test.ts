@@ -31,6 +31,7 @@ const options = () => ({
   waitingForSynthesis: false,
   preparingSessionIds: new Set<string>(),
   recordAutoplayed: () => {},
+  languageFor: () => "en" as const,
 });
 
 async function renderChannel() {

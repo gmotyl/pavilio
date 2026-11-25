@@ -420,7 +420,7 @@ import {
 } from "../../alerts/store";
 import { SPEAKING_ALERT_ID } from "../speakingAlert";
 import { prepare } from "../prepare";
-import { setStoredSpeechMode } from "../voices";
+import { getStoredEngine, setEngineVoice, setStoredSpeechMode } from "../voices";
 import { preferences } from "../../../preferences/declarations";
 import { clearPreference } from "../../../preferences/store";
 import { installMatchMedia } from "../../../test-utils";
@@ -885,7 +885,7 @@ describe("autoplay — synthesis failure", () => {
   });
 });
 
-describe("autoplay — the surfaces and the session language", () => {
+describe("autoplay — the surfaces and the voice language", () => {
   it("the terminals surface wires its cells to the channel", async () => {
     await renderProjectSurface();
 
@@ -921,19 +921,22 @@ describe("autoplay — the surfaces and the session language", () => {
     expect(armed("cell-a")).toBe("autoplay");
   });
 
-  it("the session language accumulates across utterances", async () => {
+  it("the voice language decides, never the answers", async () => {
     await renderProjectSurface();
     await arm("cell-a");
 
-    // One Polish utterance is not enough — a session's language is a tally, so
-    // no single response can flip the pronunciation map on.
+    // The default voice is English, so Polish answers stay English however
+    // many arrive: there is no vote to win.
     await emitUtterance("cell-a", "a1", "Zażółć gęślą jaźń. To jest odpowiedź.");
     expect(lastLanguage()).toBe("en");
 
     await emitUtterance("cell-a", "a2", "Drugie zdanie po polsku. Wciąż mówię tak samo.");
-    expect(lastLanguage()).toBe("pl");
+    expect(lastLanguage()).toBe("en");
 
-    await emitUtterance("cell-a", "a3", "Trzecie zdanie, dalej po polsku.");
+    // A Polish voice turns the next answer Polish, even an English one: the
+    // terminal's `languageForSession` reaches the host.
+    setEngineVoice(getStoredEngine(), "pl-PL-MarekNeural");
+    await emitUtterance("cell-a", "a3", "Third answer, in English this time.");
     expect(lastLanguage()).toBe("pl");
   });
 });

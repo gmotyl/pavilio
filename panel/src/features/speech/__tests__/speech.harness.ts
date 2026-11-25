@@ -23,6 +23,7 @@ import * as React from "react";
 import { vi } from "vitest";
 import { prepare } from "../prepare";
 import type { GridSpeech, SpeechUnit } from "../types";
+import type { VoiceLanguage } from "../voiceLanguage";
 import type { SpeechHost } from "../useSpeechHost";
 import { emptyUtteranceQueue } from "../utteranceQueue";
 import { createTieredSynth } from "./fakeTieredSynth";
@@ -297,6 +298,26 @@ export async function emitUtterance(
 }
 
 // ---------------------------------------------------------------------------
+// Voice language
+// ---------------------------------------------------------------------------
+
+/** What the host's `languageFor` port answers: one language, or one per key. */
+let voiceLanguage: VoiceLanguage | ((sessionId: string) => VoiceLanguage) = "en";
+
+/**
+ * The host's `languageFor` port as the suites hand it in: English unless a test
+ * says otherwise with {@link setVoiceLanguage}. Read at the moment of asking, so
+ * a test that changes it between two arrivals sees only the later one move.
+ */
+export const languageFor = (sessionId: string): VoiceLanguage =>
+  typeof voiceLanguage === "function" ? voiceLanguage(sessionId) : voiceLanguage;
+
+/** Sets what {@link languageFor} answers until the next reset. */
+export function setVoiceLanguage(next: VoiceLanguage | ((sessionId: string) => VoiceLanguage)): void {
+  voiceLanguage = next;
+}
+
+// ---------------------------------------------------------------------------
 // Media
 // ---------------------------------------------------------------------------
 
@@ -336,6 +357,7 @@ export function resetSpeechHarness(): void {
   synth.reset();
   tieredSynth.reset();
   selectSynth("simple");
+  voiceLanguage = "en";
   played.length = 0;
   elements.length = 0;
   unlocks.length = 0;

@@ -19,6 +19,7 @@ import {
   synthMock,
   unitsOf,
   useWebSocketMock,
+  languageFor,
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
@@ -113,7 +114,7 @@ async function playThrough(host: () => SpeechHost, text: string): Promise<void> 
 
 function renderHost() {
   return renderHook(() =>
-    useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting, onAnswer: vi.fn() }),
+    useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting, onAnswer: vi.fn() }),
   );
 }
 

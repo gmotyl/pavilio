@@ -41,6 +41,7 @@ import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessi
 import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
+import type { VoiceLanguage } from "./voiceLanguage";
 
 /**
  * {@link PageSpeech} as the provider publishes it: the host's pair, plus what
@@ -98,6 +99,8 @@ interface Props {
   onArrival: TransportArrival;
   answerWaiting: AnswerWaitingPort;
   voiceFor: (sessionId: string) => string;
+  /** The voice language of a session or page key; see `SpeechHostOptions.languageFor`. */
+  languageFor: (sessionId: string) => VoiceLanguage;
 }
 
 /** What the answer alert reads off the router, kept current by {@link RouterBridge}. */
@@ -139,6 +142,7 @@ export function SpeechHostProvider({
   onArrival,
   answerWaiting,
   voiceFor,
+  languageFor,
 }: Props) {
   // The answer alert (see `answerAlert.ts`): raised for a live arrival, read at
   // the moment it lands — what is on screen then, the session list then. The
@@ -242,6 +246,7 @@ export function SpeechHostProvider({
     isSessionOpen: isKeyOpen,
     onRunChange: speakingAlert.onRunChange,
     voiceFor,
+    languageFor,
     answerWaiting,
     lookedAtSessionId,
   });

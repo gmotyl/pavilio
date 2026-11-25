@@ -109,6 +109,7 @@ function Shell({ children }: { children: ReactNode }) {
       onArrival={() => {}}
       answerWaiting={answerWaiting}
       voiceFor={() => "a-voice"}
+      languageFor={() => "en"}
     >
       <BreadcrumbActionsProvider>
         <PageSpeechRowSlot>

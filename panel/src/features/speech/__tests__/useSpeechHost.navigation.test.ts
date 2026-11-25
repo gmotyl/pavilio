@@ -19,6 +19,7 @@ import {
   unitsOf,
   unlocks,
   useWebSocketMock,
+  languageFor,
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
@@ -111,7 +112,7 @@ describe("useSpeechHost jumps", () => {
   it("a segment click on a cell that has never spoken starts it at that unit", async () => {
     const units = unitsOf(response(4));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     // Arrived and warmed, never played: `player.jumpToUnit` would return here
@@ -127,7 +128,7 @@ describe("useSpeechHost jumps", () => {
   it("jumping inside a live run does not mark the cell heard", async () => {
     const units = unitsOf(response(4));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(4));
@@ -162,7 +163,7 @@ describe("useSpeechHost jumps", () => {
     // not leave it paused on a new unit.
     const units = unitsOf(response(4));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(4));
@@ -217,7 +218,7 @@ describe("useSpeechHost — what a silent step back still unlocks", () => {
     localStorage.setItem(MODES_KEY, '{"cell-a":"autoplay"}');
 
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     expect(result.current.speechModeOf("cell-a")).toBe("autoplay");
 
@@ -283,7 +284,7 @@ describe("useSpeechHost — what a silent step back still unlocks", () => {
 describe("useSpeechHost — stepping back navigates without playing", () => {
   it("previous walks the cursor back one answer per press, in silence, and hears nothing", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await threeAnswers("cell-a");
 
@@ -317,7 +318,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
 
   it("next moves the cursor forward, in silence, and hears nothing", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await threeAnswers("cell-a");
 
@@ -352,7 +353,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
     "$press speaks nothing on the ARMED cell either",
     async ({ press, stepsBeforeArming }) => {
       const { result } = renderHook(() =>
-        useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+        useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
       );
       await threeAnswers("cell-a");
       for (let i = 0; i < stepsBeforeArming; i += 1) {
@@ -381,7 +382,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
   ] as const)("play speaks what $step navigated to", async ({ presses }) => {
     const second = unitsOf(SECOND);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await threeAnswers("cell-a");
 
@@ -409,7 +410,7 @@ describe("useSpeechHost — stepping back navigates without playing", () => {
 describe("useSpeechHost — the wave is a position the transport stands on", () => {
   it("steps off the wave and back onto it without moving the cursor, and spends the autoplay grant", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await threeAnswers("cell-a");
     noteAgentStarting("cell-a");
@@ -445,7 +446,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
 
   it("walks into the history on the second press", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await threeAnswers("cell-a");
     noteAgentStarting("cell-a");
@@ -459,7 +460,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
 
   it("steps into a backlog rather than onto the wave while answers are waiting", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     // A live run with an answer QUEUED behind it: the newest answer the cell
@@ -502,7 +503,7 @@ describe("useSpeechHost — the wave is a position the transport stands on", () 
 describe("useSpeechHost — the wave step on the surfaces the row used to guard", () => {
   it("steps off a SEND-owned wave without skipping the newest answer", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await threeAnswers("cell-a");
 
@@ -558,7 +559,7 @@ describe("useSpeechHost — the wave step on the surfaces the row used to guard"
     },
   ])("$press", async ({ answers, preHeld, held, cursor }) => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     for (const [i, text] of answers.entries()) {
       await emitUtterance("cell-a", `u-${i + 1}`, text);
@@ -634,7 +635,7 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
   it("does not restart the run the user is listening to", async () => {
     const first = unitsOf(FIRST);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await settle(() => {
@@ -660,7 +661,7 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
 
   it("leaves a cursor parked in the history where the listener put it", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", FIRST, nextAt());
@@ -690,7 +691,7 @@ describe("useSpeechHost — a catch-up disturbs nothing the listener is on", () 
   it("a recovered answer reached by the transport is still not spoken", async () => {
     const first = unitsOf(FIRST);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await settle(() => {
