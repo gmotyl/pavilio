@@ -19,7 +19,7 @@ call or read any other plugin's story tooling.
 ## When to use
 
 - `/pavilio-pr-explain <project> <ref>`, typed
-- started by the **Explain** / **↻** button on a PR row in the Repos tab's PRs list, which types a
+- started by the **Explain** / **↻** button on a PR row in the Code tab's PRs list, which types a
   plain-language prompt (no slash command, so it works in every CLI): `Read and follow the
   instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project <project> and PR
   <repo>#<n>.`
@@ -54,12 +54,14 @@ call or read any other plugin's story tooling.
    the code. When the reason for a change is nowhere to be found, the story says so. Never invent.
 5. **Code is quoted only from git**, verbatim: `git show <head>:<path>` (after) or
    `git show <merge-base>:<path>` (before). Never retype from memory, never tidy a quoted line.
-6. **English**, unless the request names another language; the frontmatter records it as
-   `lang: en`. A request that ends with `Write the story in Polish.` (the line the panel types
-   when the story language is PL) → write the chapter questions, prose, line notes, section
-   headings and the Technical overview (its prose and diagram labels) in Polish, and
-   `lang: pl`. Diff blocks, quoted code, paths, note labels (`**L12**`, `**base L16**`) and
-   frontmatter keys stay unchanged. The §7 anti-slop pass runs in Polish.
+6. **English**, unless the request names another language; the frontmatter records the story's
+   language as its ISO 639-1 code, `lang: en` by default. A request that ends with `Write the
+   story in Polish.` (the line the panel types when the story language is PL) → write the chapter
+   questions, prose, line notes, section headings and the Technical overview (its prose and
+   diagram labels) in Polish, and `lang: pl`. Any other named language works the same way with
+   its own code (e.g. `lang: de`); the panel's language menu offers only EN and PL. Diff blocks,
+   quoted code, paths, note labels (`**L12**`, `**base L16**`) and frontmatter keys stay
+   unchanged. The §7 anti-slop pass runs in the story's language.
 7. **Write only the story file** (and `qa/stories/.gitignore`). Nothing under `projects/<p>/memo/`,
    no commit, no edits to PROJECT.md / STATUS.md / `_index.json`.
 
@@ -181,7 +183,7 @@ title: <the change in plain words>
 pr: <repo>#<n>
 head: <full head sha>
 base: <base ref, e.g. origin/main>
-lang: <en | pl, per rule 6>
+lang: <ISO 639-1 code: en, pl, …, per rule 6>
 ---
 # <title>
 
@@ -247,8 +249,9 @@ Rules:
 - **Diff blocks** are quoted from `git show`, never retyped:
   - each line keeps its prefix: `+` added, `-` removed, a space for unchanged context;
   - the line text is copied verbatim (leading indentation may be trimmed evenly); no added comments;
-  - the first line is `@@ <path> L<a>–<b> @@`, matching the location line above the block; a gap
-    inside a block is another `@@ <path> L<c> @@` line naming where the next line starts;
+  - the first line is `@@ <path> L<a>–<b> @@` (plus ` base L<c>` when the block holds `-` lines,
+    below), matching the location line above the block; a gap inside a block is another
+    `@@ <path> L<c> @@` line naming where the next line starts;
   - line numbers are the **head** version's (`git show <head>:<path> | cat -n`); a block quoting the
     file before the change writes `(before)` after the path and uses base line numbers;
   - code this change does not touch (from the repo or a dependency) is quoted the same way, all
@@ -321,10 +324,10 @@ Omit a type when the change has no such dimension: better 4 sharp diagrams than 
 ## 7. Clean the prose (only when available)
 
 When an `anti-slop` skill is in the skill list (e.g. `anti-slop` or `anti-slop:anti-slop`), run it
-once in file mode on the story, in the story's language (Polish for `lang: pl`), naming the sources read in step 3 as `source:`. It changes prose
-only; frontmatter, headings, `diff` / `mermaid` / code blocks and inline code stay byte for byte,
-and the bold `**L57**` note labels and source labels are the story's format, not slop. When no such
-skill exists, skip this step silently.
+once in file mode on the story, in the story's language (Polish for `lang: pl`), naming the sources
+read in step 3 as `source:`. It changes prose only; frontmatter, headings, `diff` / `mermaid` /
+code blocks and inline code stay byte for byte, and the bold `**L57**` note labels and source labels
+are the story's format, not slop. When no such skill exists, skip this step silently.
 
 ## 8. Report
 
