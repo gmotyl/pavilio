@@ -129,4 +129,33 @@ describe("MarkdownRenderer line-note highlight", () => {
     expect(noteItem(container, "Why").querySelector("strong")!.hasAttribute("tabindex")).toBe(false);
     expect(lit(container)).toEqual([]);
   });
+
+  it("a hovered note that a re-render removes leaves nothing lit", () => {
+    const { container, rerender } = renderMd([BLOCK, "1. **L12**: why c.", ""].join("\n"));
+    fireEvent.mouseEnter(noteItem(container, "L12"));
+    expect(lit(container)).toEqual(["12|+const c = 4;"]);
+    rerender(
+      <MemoryRouter>
+        <MarkdownRenderer content={[BLOCK, "1. Plain note, no label.", ""].join("\n")} />
+      </MemoryRouter>,
+    );
+    expect(lit(container)).toEqual([]);
+  });
+
+  it("a loose list (blank lines between items) binds and lights", () => {
+    const { container } = renderMd([BLOCK, "1. **L12**: why c.", "", "2. **L13**: why d.", ""].join("\n"));
+    const item = noteItem(container, "L13");
+    expect(item.querySelector("p > strong")).not.toBeNull();
+    expect(item.hasAttribute("data-note-target")).toBe(true);
+    fireEvent.mouseEnter(item);
+    expect(lit(container)).toEqual(["13| const d = 5;"]);
+  });
+
+  it("story blocks carry no node attribute", () => {
+    const { container } = renderMd([BLOCK, "1. **L12**: why c.", ""].join("\n"));
+    const pre = container.querySelector("pre")!;
+    expect(pre.querySelector(".diff-line")).not.toBeNull();
+    expect(pre.hasAttribute("node")).toBe(false);
+    expect(pre.querySelector("code")!.hasAttribute("node")).toBe(false);
+  });
 });
