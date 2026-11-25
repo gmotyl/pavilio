@@ -193,6 +193,44 @@ describe("voice language of a session", () => {
     expect(languageForSession("sess-gone")).toBeUndefined();
   });
 
+  it("a saved OmniVoice voice has no language until the live list loads; then its own", async () => {
+    setStoredEngine("openai");
+    // Saved before the reload; `setProjectEngineVoice` would refuse an id the empty list lacks.
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-pl" } });
+    await seedSessions([session("sess-p", "p")]);
+
+    // Listed, but the voice that decides cannot be looked up yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    await loadLiveVoices();
+    expect(languageForSession("sess-p")).toBe("pl");
+  });
+
+  it("cascade: a first member's saved OmniVoice voice has no language until the list loads", async () => {
+    setStoredEngine("cascade");
+    setCascadeOrder([
+      { id: "openai", on: true },
+      { id: "edge", on: true },
+    ]);
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-en", edge: MAREK } });
+    await seedSessions([session("sess-p", "p")]);
+
+    // Not edge's Polish: openai decides, and its voice is not known yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    await loadLiveVoices();
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
+  it("a stale saved OmniVoice id is not pending once the list has loaded", async () => {
+    setStoredEngine("openai");
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-gone" } });
+    await seedSessions([session("sess-p", "p")]);
+    await loadLiveVoices();
+
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
   it("a page key follows its project's voice", async () => {
     await loadLiveVoices();
     setStoredEngine("openai");

@@ -200,7 +200,10 @@ const synth = vi.hoisted(() => {
   };
 });
 
-vi.mock("../synth", () => ({
+vi.mock("../synth", async (importOriginal) => ({
+  // The real voice resolution: an openai voice resolves through it while the
+  // OmniVoice list is still loading.
+  resolveSpeechVoice: (await importOriginal<typeof import("../synth")>()).resolveSpeechVoice,
   synthesizeSpeech: synth.synthesizeSpeech,
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
@@ -442,9 +445,11 @@ import {
   setProjectEngineVoice,
   setStoredSpeechMode,
 } from "../voices";
+import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { EN_MALE, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "./openaiVoiceFixtures";
 import { __resetSessionStoreForTests, refreshSessions } from "../../terminal/sessionStore";
 import { preferences } from "../../../preferences/declarations";
-import { clearPreference } from "../../../preferences/store";
+import { clearPreference, writePreference } from "../../../preferences/store";
 import { installMatchMedia, jsonResponse } from "../../../test-utils";
 
 /** The newest alert, which is the one a failure under test just raised. */
@@ -1929,6 +1934,8 @@ describe("the answer alert, end to end", () => {
 describe("warming waits for the session to be placed", () => {
   /** Ends in a code block, which Polish and English read differently. */
   const ANSWER = `${shortResponse(2)}\n\n\`\`\`ts\nconst x = 1;\n\`\`\``;
+  const BILL_EN = { ...EN_MALE, id: "bill-en" };
+  const BILL_PL = { ...PL_FEMALE, id: "bill-pl" };
 
   beforeEach(() => {
     __resetSessionStoreForTests();
@@ -1938,7 +1945,9 @@ describe("warming waits for the session to be placed", () => {
   afterEach(() => {
     sessionList.real = false;
     __resetSessionStoreForTests();
+    __resetOpenaiVoicesForTests();
     clearPreference(preferences.speechVoiceByProject);
+    clearPreference(preferences.speechEngine);
   });
 
   /** One `/api/terminal/sessions` answer, through the store's own load and publish. */
@@ -2007,5 +2016,39 @@ describe("warming waits for the session to be placed", () => {
     // A session added: a new placement, so the pass runs and retries the preload.
     await publishSessions([{ ...SESSIONS[0], name: "renamed" }, SESSIONS[1]]);
     expect(synth.requests.slice(before)).toEqual(units.slice(1));
+  });
+
+  it("an answer before the OmniVoice list loads is warmed and preloaded in its saved voice's language once it lands", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoiceByProject, { vector: { openai: "bill-pl" } });
+    let landVoices = (): void => {};
+    const voicesLanded = new Promise<void>((resolve) => {
+      landVoices = resolve;
+    });
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(OPENAI_VOICES_URL)) {
+        await voicesLanded;
+        return jsonResponse(voicesBody([BILL_EN, BILL_PL]));
+      }
+      return { ok: true, json: async () => ({ utterances: [] }) } as Response;
+    }) as unknown as typeof fetch;
+    const polish = prepare(ANSWER, { language: "pl" }).units.map((unit) => unit.text);
+
+    await publishSessions(SESSIONS);
+    await renderProjectSurface();
+    await armOnly("cell-a");
+    await emitUtterance("cell-a", "a1", ANSWER);
+
+    // Listed, but its voice is not in a catalog yet: nothing is synthesized.
+    expect(synth.requests).toEqual([]);
+
+    await act(async () => {
+      landVoices();
+      await drain();
+    });
+
+    await waitFor(() => expect(synth.requests).toEqual(polish));
+    expect(synth.requestVoices.every((voice) => voice === "bill-pl")).toBe(true);
+    expect(synth.requestTiers).toEqual(["warm", ...polish.slice(1).map(() => "preload")]);
   });
 });
