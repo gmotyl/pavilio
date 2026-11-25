@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { REALTIME_RECONNECT_FRAME, subscribeRealtime } from "../realtime/channel";
 import { useWebSocket } from "../realtime/useWebSocket";
 import { prepare } from "./prepare";
-import {
-  INITIAL_LANGUAGE_STATE,
-  nextLanguageState,
-  voteLanguage,
-  type LanguageState,
-} from "./language";
 import type { CellSpeechState, SpeechMode, Utterance } from "./types";
+import type { VoiceLanguage } from "./voiceLanguage";
 import {
   emptyUtteranceQueue,
   newestUtteranceId,
@@ -64,9 +59,7 @@ interface SessionSpeech {
   /**
    * The cell's whole transport state: up to five steps of history, the
    * utterance the transport is on, and the answers waiting behind it. Empty
-   * until the session has received something speakable — the vote below still
-   * had to be recorded for a response with nothing to say, and a record exists
-   * for that alone.
+   * until the session has received something speakable.
    */
   queue: UtteranceQueue;
   /**
@@ -78,13 +71,6 @@ interface SessionSpeech {
    * would report whichever of them the cursor was not on.
    */
   heard: ReadonlySet<string>;
-  /**
-   * The session's running language tally. Language is a property of the
-   * SESSION, not of one response, so the vote is folded in here — where the
-   * rest of the per-session knowledge already lives — the moment an utterance
-   * arrives, and `languageFor` is what preparation reads.
-   */
-  language: LanguageState;
   /**
    * Whether the record was landed by {@link Channel.arriveLocal} — a page the
    * browser built itself, not an answer the server broadcast. A local record is
@@ -99,38 +85,23 @@ interface SessionSpeech {
   local: boolean;
 }
 
-/** Folds one arriving utterance's vote into a session's tally. */
-function advanceLanguage(previous: LanguageState | undefined, text: string): LanguageState {
-  return nextLanguageState(previous ?? INITIAL_LANGUAGE_STATE, voteLanguage(text));
-}
-
 /**
  * Whether an arriving response has anything to say at all. A response that is
  * only code strips to nothing and prepares to zero units, and announcing that
  * would be a notification that can never be met.
  */
-function hasSomethingToSay(text: string, language: "pl" | "en"): boolean {
+function hasSomethingToSay(text: string, language: VoiceLanguage): boolean {
   return prepare(text, { language }).units.length > 0;
-}
-
-/**
- * The record an unspeakable arrival leaves: the session's tally advances and
- * nothing else changes — the cell keeps whichever utterance and `heard` flag it
- * already had, so there is no pulse, no pip and no audio.
- */
-function languageOnly(existing: SessionSpeech | undefined, language: LanguageState): SessionSpeech {
-  return existing ? { ...existing, language } : emptySession(language);
 }
 
 /** Shared so a panel of silent cells does not allocate a Set per session. */
 const NOTHING_HEARD: ReadonlySet<string> = new Set<string>();
 
-const emptySession = (language: LanguageState): SessionSpeech => ({
+const EMPTY_SESSION: SessionSpeech = {
   queue: emptyUtteranceQueue,
   heard: NOTHING_HEARD,
-  language,
   local: false,
-});
+};
 
 /**
  * The session's heard set with the utterance under the cursor folded into it.
@@ -192,10 +163,9 @@ function prunedHeard(heard: ReadonlySet<string>, queue: UtteranceQueue): Readonl
 function withArrival(
   existing: SessionSpeech | undefined,
   utterance: Utterance,
-  language: LanguageState,
   speaking: boolean,
 ): SessionSpeech {
-  const base = existing ?? emptySession(language);
+  const base = existing ?? EMPTY_SESSION;
   // An arrival is an advance like any other, so the heard set is cut back with
   // it. It usually drops nothing now: an idle arrival pushes what it
   // superseded onto the front of the history rather than discarding it, and
@@ -204,7 +174,7 @@ function withArrival(
   // the queue's reach changes and `prunedHeard` returns the set it was handed
   // when nothing has actually fallen out.
   const queue = utteranceQueueReducer(base.queue, { type: "arrived", utterance, speaking });
-  return { ...base, language, queue, heard: prunedHeard(base.heard, queue) };
+  return { ...base, queue, heard: prunedHeard(base.heard, queue) };
 }
 
 /**
@@ -345,6 +315,13 @@ export interface UtteranceChannelOptions {
    * a recovered answer is shown, never announced. The answer alert hangs off it.
    */
   onAnswer?: (utterance: Utterance, recovered: boolean) => void;
+  /**
+   * The host's `languageFor`: the voice language of a session, read at the
+   * moment an arrival is checked for something to say. Nothing about the
+   * language is kept per session — the voice decides it, so there is nothing
+   * to tally.
+   */
+  languageFor: (sessionId: string) => VoiceLanguage;
 }
 
 /**
@@ -375,11 +352,6 @@ export interface Channel {
    * `heard` is a flag and never a deletion, so a click still replays it.
    */
   finishUtterance(sessionId: string): void;
-  /**
-   * The session's accumulated language, for `prepare`. Never a detection of
-   * one response: it is the tally every utterance so far has voted into.
-   */
-  languageFor(sessionId: string): "pl" | "en";
   /**
    * What the host warms, across every session, armed or not: per cell the
    * utterance under the cursor and the one the transport would reach next, plus
@@ -416,7 +388,7 @@ export interface Channel {
    * about it goes to the server.
    */
   arriveLocal(utterance: Utterance): void;
-  /** Forgets a key's queue, heard set and language entirely. */
+  /** Forgets a key's queue and heard set entirely. */
   drop(sessionId: string): void;
   /** Realtime reconnects seen since mount; monotonic, 0 on mount. A warming opportunity. */
   reconnects: number;
@@ -425,15 +397,13 @@ export interface Channel {
 const LATEST_URL = "/api/speech/latest";
 
 /**
- * One `/latest` entry, decided: what it is, what it does to the session's tally
- * and whether it has anything to say. Settled before the state update so the
- * updater stays pure and the `recordAutoplayed` calls can be made outside it.
+ * One `/latest` entry, decided: what it is and whether it has anything to say.
+ * Settled before the state update so the updater stays pure and the
+ * `recordAutoplayed` calls can be made outside it.
  */
 interface CaughtUp {
   utterance: Utterance;
-  /** The session's tally with this response's vote folded in. */
-  language: LanguageState;
-  /** False for a response with nothing to say: it votes, and seeds no pip. */
+  /** False for a response with nothing to say: it seeds no pip. */
   speakable: boolean;
 }
 
@@ -474,8 +444,8 @@ interface FetchedLatest {
  * passes this gate displaces what the cell is showing and un-hears it. This is
  * the whole of the ordering.
  *
- * A record with nothing under `current` — a session that has only ever cast a
- * language vote, or one whose single arrival queued behind a live run — is
+ * A record with nothing under `current` — one whose single arrival queued
+ * behind a live run — is
  * covered by neither half and the entry is taken up, which is right: there is
  * nothing there for it to displace.
  */
@@ -509,16 +479,13 @@ export function useUtteranceChannel({
   preparingSessionIds,
   recordAutoplayed,
   onAnswer,
+  languageFor,
 }: UtteranceChannelOptions): Channel {
   const { lastMessage } = useWebSocket();
   const [sessions, setSessions] = useState<Map<string, SessionSpeech>>(() => new Map());
   /**
-   * The rendered `sessions`, mirrored so the *callbacks* below can read the
-   * current tally without taking it as a dependency. The host's warming effect
-   * is keyed on `languageFor` and `warmableUtterances` together, so both have
-   * to hold their identity across a `markHeard` or the effect churns on every
-   * cell that finishes speaking — and stabilising only one of them changes
-   * nothing, because the effect re-runs when either moves.
+   * The rendered `sessions`, mirrored so the arrival effects below can decide
+   * against the committed state outside their updaters.
    */
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -561,6 +528,14 @@ export function useUtteranceChannel({
   useEffect(() => {
     onAnswerRef.current = onAnswer;
   }, [onAnswer]);
+  /**
+   * `languageFor`, mirrored for the same reason: an arrival reads the voice
+   * language when it lands, and must not re-run when the port changes identity.
+   */
+  const languageForRef = useRef(languageFor);
+  useEffect(() => {
+    languageForRef.current = languageFor;
+  }, [languageFor]);
   // Read once at mount, so a remount restores every cell's mode (DECISION 12).
   const [speechModes, setSpeechModes] =
     useState<Readonly<Record<string, SpeechMode>>>(getStoredSpeechModes);
@@ -658,32 +633,30 @@ export function useUtteranceChannel({
     for (const utterance of utterances) {
       const existing = sessionsRef.current.get(utterance.sessionId);
       if (covers(existing, utterance)) continue;
-      const language = advanceLanguage(existing?.language, utterance.text);
       taken.push({
         utterance,
-        language,
-        speakable: hasSomethingToSay(utterance.text, language.lang),
+        speakable: hasSomethingToSay(
+          utterance.text,
+          languageForRef.current(utterance.sessionId),
+        ),
       });
     }
     if (taken.length === 0) return;
 
     setSessions((current) => {
       const next = new Map(current);
-      for (const { utterance, language, speakable } of taken) {
+      for (const { utterance, speakable } of taken) {
         const existing = next.get(utterance.sessionId);
         // Hydration is an arrival too, so it gets the same gate: a stored
         // pure-code answer must not seed a pip either.
-        if (!speakable) {
-          next.set(utterance.sessionId, languageOnly(existing, language));
-          continue;
-        }
+        if (!speakable) continue;
         // A tab that was not there for the broadcast has not heard what it is
         // being handed, so the cell it seeds is unheard and the answer counts
         // towards the unread pip. A cell the user has PAUSED does not count as
         // speaking, exactly as on the live-frame path.
         const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
         const speaking = live === utterance.sessionId && held !== utterance.sessionId;
-        next.set(utterance.sessionId, withArrival(existing, utterance, language, speaking));
+        next.set(utterance.sessionId, withArrival(existing, utterance, speaking));
       }
       return next;
     });
@@ -715,7 +688,7 @@ export function useUtteranceChannel({
     const held = sessionsRef.current.get(utterance.sessionId);
     if (
       !(held && queueHolds(held.queue, utterance.id)) &&
-      hasSomethingToSay(utterance.text, advanceLanguage(held?.language, utterance.text).lang)
+      hasSomethingToSay(utterance.text, languageForRef.current(utterance.sessionId))
     ) {
       onAnswerRef.current?.(utterance, false);
     }
@@ -728,16 +701,12 @@ export function useUtteranceChannel({
       // the reducer past this gate has no dedupe of its own.
       if (existing && queueHolds(existing.queue, utterance.id)) return current;
 
-      const next = new Map(current);
-      // The vote is folded in whatever the response turns out to be: language is
-      // a property of the SESSION, not of one response, so a pure-code answer
-      // written in Polish still tells the session which language it is in.
-      const language = advanceLanguage(existing?.language, utterance.text);
-
-      if (!hasSomethingToSay(utterance.text, language.lang)) {
-        next.set(utterance.sessionId, languageOnly(existing, language));
-        return next;
+      // Nothing to say leaves the cell exactly as it was: no pulse, no pip.
+      if (!hasSomethingToSay(utterance.text, languageForRef.current(utterance.sessionId))) {
+        return current;
       }
+
+      const next = new Map(current);
 
       // A frame can be the first news of a session — a terminal's response may
       // arrive before anything else told the channel the cell exists.
@@ -747,7 +716,7 @@ export function useUtteranceChannel({
       // arrival supersedes the held run rather than queueing behind it.
       const { speakingSessionId: live, pausedSessionId: held } = playbackRef.current;
       const speaking = live === utterance.sessionId && held !== utterance.sessionId;
-      next.set(utterance.sessionId, withArrival(existing, utterance, language, speaking));
+      next.set(utterance.sessionId, withArrival(existing, utterance, speaking));
       return next;
     });
   }, [lastMessage]);
@@ -756,8 +725,7 @@ export function useUtteranceChannel({
     (sessionId: string): CellSpeechState => {
       const record = sessions.get(sessionId);
       // A record whose queue has nothing under the cursor is as inert as no
-      // record at all: it exists only to carry the session's language tally.
-      // Checked first, so a stray preparing, paused or speaking id cannot
+      // record at all. Checked first, so a stray preparing, paused or speaking id cannot
       // invent a state for a cell that has nothing to play.
       const under = record ? utteranceUnderCursor(record.queue) : null;
       if (!record || !under) return "empty";
@@ -816,16 +784,6 @@ export function useUtteranceChannel({
   const heardFor = useCallback(
     (sessionId: string): ReadonlySet<string> => sessions.get(sessionId)?.heard ?? NOTHING_HEARD,
     [sessions],
-  );
-
-  // Reads the mirror, so its identity never changes. It is only ever called
-  // from the host's effects and callbacks — never rendered — so there is
-  // nothing for a changing identity to refresh, and holding it still is what
-  // keeps the warming effect from re-running on every `sessions` update.
-  const languageFor = useCallback(
-    (sessionId: string): "pl" | "en" =>
-      sessionsRef.current.get(sessionId)?.language.lang ?? INITIAL_LANGUAGE_STATE.lang,
-    [],
   );
 
   /** The last list handed out, so an unchanged set keeps its identity. */
@@ -931,25 +889,24 @@ export function useUtteranceChannel({
       const existing = current.get(utterance.sessionId);
       if (existing && queueHolds(existing.queue, utterance.id)) return current;
 
-      const next = new Map(current);
-      const language = advanceLanguage(existing?.language, utterance.text);
-      if (!hasSomethingToSay(utterance.text, language.lang)) {
-        next.set(utterance.sessionId, { ...languageOnly(existing, language), local: true });
-        return next;
+      if (!hasSomethingToSay(utterance.text, languageForRef.current(utterance.sessionId))) {
+        return current;
       }
+
+      const next = new Map(current);
 
       // Never behind a run: the host speaks a local arrival the moment it lands,
       // so it is the key's current utterance even while the player still
       // reports the key's previous run — which a re-speak with new text has
       // just dropped, in the same batch as this arrival.
-      const record = withArrival(existing, utterance, language, false);
+      const record = withArrival(existing, utterance, false);
       next.set(utterance.sessionId, { ...record, local: true });
       return next;
     });
   }, []);
 
-  // The whole record goes, tally included: a page closed and reopened starts
-  // from nothing, as a reload would.
+  // The whole record goes: a page closed and reopened starts from nothing, as a
+  // reload would.
   const drop = useCallback((sessionId: string) => {
     setSessions((current) => {
       if (!current.has(sessionId)) return current;
@@ -994,7 +951,6 @@ export function useUtteranceChannel({
     heardFor,
     dispatchQueue,
     finishUtterance,
-    languageFor,
     warmableUtterances,
     speechModeOf,
     cycleSpeechMode,

@@ -24,6 +24,7 @@ import {
   timesRequested,
   unitsOf,
   useWebSocketMock,
+  languageFor,
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
@@ -93,7 +94,7 @@ Object.defineProperty(HTMLMediaElement.prototype, "src", {
 let host: GridSpeech;
 
 function ScrubberHarness({ sessionId }: { sessionId: string }) {
-  const speech = useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting });
+  const speech = useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting });
   host = speech;
   return createElement(SpeechControlBar, {
     sessionId,
@@ -145,7 +146,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(5);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -169,7 +170,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a", 2); // autoplay
@@ -183,7 +184,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", markdown);
@@ -199,7 +200,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(4);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", markdown);
@@ -211,7 +212,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
   it("heard answers are never preloaded", async () => {
     const markdown = response(4);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", markdown);
@@ -234,7 +235,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(4);
     const [first, ...rest] = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -268,7 +269,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(3);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -292,7 +293,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"];
     const firstUnitOf = (word: string): string => unitsOf(response(3, word))[0];
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     // u-1 speaks and is never let finish, so everything after it queues.
@@ -322,7 +323,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -363,7 +364,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(4);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -393,7 +394,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(4);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -424,7 +425,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -454,7 +455,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
     // StrictMode mounts, unmounts and remounts the host on the same state, so
     // the cleanup that aborts on the way out must not leave it dead.
     const { result } = renderHook(
-      () => useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      () => useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
       { reactStrictMode: true },
     );
 
@@ -477,7 +478,7 @@ describe("useSpeechHost — armed cells preload whole answers", () => {
       return createElement(Activity, { mode, children });
     }
     const { result, unmount } = renderHook(
-      () => useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      () => useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
       { wrapper: Wrapper },
     );
 
@@ -523,7 +524,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const answerY = response(4, "Yankee");
     const x = unitsOf(answerX);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-x");
@@ -549,7 +550,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const x = holdAll(answerX);
     const y = holdAll(answerY);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-x");
@@ -568,7 +569,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a");
@@ -590,7 +591,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const markdown = response(5);
     const units = unitsOf(markdown);
     const first = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await cycle(() => first.result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -601,7 +602,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     first.unmount();
     synth.clearCache();
     const second = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     // The cell's mode is persisted, so it comes back armed.
     expect(second.result.current.speechModeOf("cell-a")).toBe("armed");
@@ -621,7 +622,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const p = unitsOf(answerP);
     synth.hold(p[2]);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-x");
@@ -642,7 +643,7 @@ describe("useSpeechHost — armed cell preload survives other cells", () => {
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -687,7 +688,7 @@ describe("useSpeechHost — an armed cell preloads only its newest answer", () =
     const older = unitsOf(response(4, "Bravo"));
     const newer = unitsOf(response(4, "Charlie"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "a-0", playing);
@@ -710,7 +711,7 @@ describe("useSpeechHost — an armed cell preloads only its newest answer", () =
     const markdown = response(5);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
@@ -726,7 +727,7 @@ describe("useSpeechHost — an armed cell preloads only its newest answer", () =
     const older = holdAll(response(5, "Bravo"));
     const newer = unitsOf(response(4, "Charlie"));
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -750,7 +751,7 @@ describe("useSpeechHost — an armed cell preloads only its newest answer", () =
     // Its later units stay in flight, so their preloads are still out.
     for (const unit of playing.slice(2)) synth.hold(unit);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await cycle(() => result.current, "cell-a"); // armed
@@ -783,7 +784,7 @@ describe("useSpeechHost — preload order: the looked-at cell, then newest first
     const rendered = renderHook(
       ({ lookedAt }: { lookedAt: string | null }) =>
         useSpeechHost({
-          voiceFor: voiceForSession,
+          voiceFor: voiceForSession, languageFor,
           answerWaiting: storeAnswerWaiting,
           lookedAtSessionId: lookedAt,
         }),
@@ -886,6 +887,7 @@ describe("useSpeechHost — preload order: the looked-at cell, then newest first
       ({ lookedAt }: { lookedAt: string | null }) =>
         useSpeechHost({
           voiceFor: () => voice,
+          languageFor,
           answerWaiting: storeAnswerWaiting,
           lookedAtSessionId: lookedAt,
         }),
@@ -988,7 +990,7 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
     const markdown = response(5);
     const units = holdAll(markdown);
     const rendered = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await cycle(() => rendered.result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -1036,7 +1038,7 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
     const markdown = response(5);
     const units = unitsOf(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -1057,7 +1059,7 @@ describe("useSpeechHost — tab return and reconnect retry a failed preload", ()
     const markdown = response(5);
     const units = holdAll(markdown);
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
     await cycle(() => result.current, "cell-a"); // armed
     await emitUtterance("cell-a", "u-1", markdown);
@@ -1404,7 +1406,7 @@ describe("the speech context outlives the playhead", () => {
 
   it("a timeupdate moves the progress store and leaves GridSpeech identical", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));
@@ -1434,7 +1436,7 @@ describe("the speech context outlives the playhead", () => {
 
   it("a unit reporting its real duration leaves GridSpeech identical too", async () => {
     const { result } = renderHook(() =>
-      useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting }),
+      useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting }),
     );
 
     await emitUtterance("cell-a", "u-1", response(3));

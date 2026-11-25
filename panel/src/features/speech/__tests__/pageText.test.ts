@@ -24,27 +24,51 @@ describe("pageSpeechText", () => {
 
 describe("pageHasSpeech", () => {
   it("is false for empty, code-only and frontmatter-only pages", () => {
-    expect(pageHasSpeech("")).toBe(false);
-    expect(pageHasSpeech("```ts\nconst x = 1;\n```")).toBe(false);
-    expect(pageHasSpeech("---\ntitle: X\n---\n")).toBe(false);
-    expect(pageHasSpeech("---\ntitle: X\n---\n# Hello")).toBe(true);
+    expect(pageHasSpeech("", "en")).toBe(false);
+    expect(pageHasSpeech("```ts\nconst x = 1;\n```", "en")).toBe(false);
+    expect(pageHasSpeech("---\ntitle: X\n---\n", "pl")).toBe(false);
+    expect(pageHasSpeech("---\ntitle: X\n---\n# Hello", "en")).toBe(true);
   });
 });
 
 describe("preparePage", () => {
-  it("prepares a page in its own vote's language, frontmatter dropped", () => {
+  it("prepares a page in the given language, frontmatter dropped", () => {
     const polish = "---\ntitle: X\n---\n# Zażółć\n\nKod: `const x = 1;` i ![zdjęcie](a.png) dalej.";
-    const prepared = preparePage(polish);
+    const prepared = preparePage(polish, "pl");
     expect(prepared.language).toBe("pl");
     expect(prepared.units).toEqual(
       prepare(pageSpeechText(polish), { language: "pl" }).units,
     );
-    expect(preparePage("# Hello\n\nPlain English.").language).toBe("en");
   });
 
-  it("is memoised on the stripped text", () => {
-    const text = "# Memo\n\nOne paragraph to prepare once.";
-    expect(preparePageText(text)).toBe(preparePageText(text));
-    expect(preparePage(`---\ntitle: Y\n---\n${text}`)).toBe(preparePageText(text));
+  it("page text uses the given language, not its own", () => {
+    // Polish by its diacritics, English by its words: each is prepared in the
+    // language it is handed, placeholders and every unit's `lang` with it.
+    const polish = "# Zażółć gęślą jaźń\n\nZdjęcie: ![zdjęcie](a.png) i dalej po polsku.";
+    const english = "# Hello\n\nA picture: ![photo](a.png) and more in English.";
+
+    const polishInEnglish = preparePageText(polish, "en");
+    expect(polishInEnglish.language).toBe("en");
+    expect(polishInEnglish.units.map((unit) => unit.lang)).toEqual(
+      polishInEnglish.units.map(() => "en"),
+    );
+    expect(polishInEnglish.units).toEqual(prepare(polish, { language: "en" }).units);
+
+    const englishInPolish = preparePageText(english, "pl");
+    expect(englishInPolish.language).toBe("pl");
+    expect(englishInPolish.units).toEqual(prepare(english, { language: "pl" }).units);
+
+    // The placeholders are what differ, so the two preparations of one text
+    // really are different units.
+    expect(preparePageText(english, "en").units).not.toEqual(englishInPolish.units);
+  });
+
+  it("is memoised on the stripped text and the language", () => {
+    const text = "# Memo\n\nOne paragraph to prepare once, with ![an image](a.png).";
+    expect(preparePageText(text, "en")).toBe(preparePageText(text, "en"));
+    expect(preparePage(`---\ntitle: Y\n---\n${text}`, "en")).toBe(preparePageText(text, "en"));
+    // A page prepared under one voice language is never served under the other.
+    expect(preparePageText(text, "pl")).not.toBe(preparePageText(text, "en"));
+    expect(preparePageText(text, "pl").language).toBe("pl");
   });
 });

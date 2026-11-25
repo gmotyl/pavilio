@@ -250,7 +250,7 @@ describe("CommentMarker", () => {
     render(<CommentMarker thread={thread([KILO, FIXED])} speechKey={KEY} />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
-    const units = preparePage(speech.speakDocument.mock.calls[0][0].text).units.map((u) => u.text);
+    const units = preparePage(speech.speakDocument.mock.calls[0][0].text, "en").units.map((u) => u.text);
     const spoken = units.join(" ");
     expect(units[0]).toBe("kilo-code-bot[bot]:");
     expect(spoken).toContain("TL;DR: If a note starts with a code sample, Play can read the code and skip the words that explain it.");

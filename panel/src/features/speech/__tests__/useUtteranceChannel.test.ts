@@ -73,9 +73,7 @@ const utterance = (sessionId: string, id: string, at = 1_000): Utterance => ({
 
 /**
  * A response that is only code. It strips to nothing and prepares to zero
- * units, so it has nothing to say — and the Polish comment inside the fence is
- * still evidence of the session's language, which `voteLanguage` reads off the
- * raw text.
+ * units, so it has nothing to say — whatever language its Polish comment is in.
  */
 const CODE_ONLY_PL = "```ts\n// zażółć gęślą jaźń\nconst x = 1;\n```\n";
 
@@ -108,6 +106,9 @@ let recordAutoplayed = vi.fn();
 /** The host's answer listener: live frames and recoveries, told apart. */
 let onAnswer = vi.fn();
 
+/** The host's `languageFor` port: the voice language, English unless a test says otherwise. */
+let languageFor = vi.fn((_sessionId: string): "pl" | "en" => "en");
+
 /** The playback/synthesis inputs, as of whatever the variables now say. */
 const options = () => ({
   speakingSessionId: speaking,
@@ -116,6 +117,7 @@ const options = () => ({
   preparingSessionIds: preparing,
   recordAutoplayed,
   onAnswer,
+  languageFor,
 });
 
 /** Renders the hook and lets the mount fetch settle, so no assertion races hydration. */
@@ -192,6 +194,7 @@ beforeEach(() => {
   preparing = new Set<string>();
   recordAutoplayed = vi.fn();
   onAnswer = vi.fn();
+  languageFor = vi.fn((_sessionId: string): "pl" | "en" => "en");
   realtimeListeners.clear();
   serveLatest([]);
 });
@@ -265,17 +268,17 @@ describe("useUtteranceChannel", () => {
     expect(result.current.utteranceFor("cell-a")).toEqual(utterance("cell-a", "a2", 2_000));
   });
 
-  it("a response with nothing to say still casts its language vote", async () => {
+  it("a response with nothing to say is checked in the voice language and leaves the cell empty", async () => {
     const { result, rerender } = await renderChannel();
 
-    // The frame was processed — it just was not announced. Language is a
-    // property of the SESSION, not of one response, so a pure-code answer
-    // written in Polish is still evidence about the session.
+    // The frame was processed — it just was not announced. The language it is
+    // checked in is the session's voice language, read from the port; the
+    // Polish inside the fence decides nothing.
     lastMessage = frame(codeOnly("cell-a", "a1"));
     await act(async () => {
       rerender();
     });
-    expect(result.current.languageFor("cell-a")).toBe("en");
+    expect(languageFor).toHaveBeenCalledWith("cell-a");
     // No pulse, no pip, no audio: the cell is as inert as one that never
     // received anything, and nothing can be handed to the player either.
     expect(result.current.stateFor("cell-a")).toBe("empty");
@@ -285,9 +288,8 @@ describe("useUtteranceChannel", () => {
     await act(async () => {
       rerender();
     });
-    // Two votes are the threshold, exactly as for a spoken response.
-    expect(result.current.languageFor("cell-a")).toBe("pl");
     expect(result.current.stateFor("cell-a")).toBe("empty");
+    expect(result.current.utteranceFor("cell-a")).toBeNull();
   });
 
   it("a response with nothing to say changes no control state", async () => {
@@ -1086,7 +1088,7 @@ describe("useUtteranceChannel", () => {
     });
     expect(result.current.stateFor("cell-never")).toBe("empty");
 
-    // A record that exists only to carry a language tally is just as inert.
+    // An answer with nothing to say leaves the cell just as inert.
     lastMessage = frame(codeOnly("cell-never", "c1"));
     await act(async () => {
       rerender();
@@ -1102,12 +1104,9 @@ describe("useUtteranceChannel", () => {
       rerender();
     });
 
-    // The host's warming effect is keyed on both of these. If either changes
-    // identity on every `sessions` update the effect churns on every heard
-    // cell — and stabilising only one of them changes nothing, because the
-    // effect re-runs when *either* moves.
+    // The host's warming effect is keyed on this. If it changes identity on
+    // every `sessions` update the effect churns on every heard cell.
     const utterances = result.current.warmableUtterances;
-    const language = result.current.languageFor;
 
     await act(async () => {
       result.current.markHeard("cell-a");
@@ -1115,7 +1114,6 @@ describe("useUtteranceChannel", () => {
     expect(result.current.stateFor("cell-a")).toBe("heard");
 
     expect(result.current.warmableUtterances).toBe(utterances);
-    expect(result.current.languageFor).toBe(language);
 
     // A genuinely new arrival still moves the list — stability must not mean
     // staleness, or nothing would ever be warmed again.

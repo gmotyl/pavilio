@@ -16,9 +16,9 @@
  * text is the exact string handed to synthesis, so a marker that survives to
  * here is a marker the voice reads out loud.
  *
- * Language is **received, not detected**. It is a property of the session (see
- * `voteLanguage` / `nextLanguageState` in `language.ts`), accumulated
- * across utterances, and defaults to English — the branch that changes nothing.
+ * Language is **received, not detected**. It is the voice language of the voice
+ * that will speak the text (see `voiceLanguage.ts`), never read off the text
+ * itself, and defaults to English — the branch that changes nothing.
  *
  * It is also this module that turns `strip.ts`'s neutral sentinels into words,
  * which must happen **before** anytts' Pronunciation map sees the text — see
@@ -36,7 +36,7 @@ export const UNIT_MAX_CHARS = 450;
 
 export interface PrepareOptions {
   /**
-   * The session's language, as accumulated by `nextLanguageState`. Defaults to
+   * The voice language of the voice that will speak it. Defaults to
    * `"en"`. It words the placeholders here and is what synthesis receives as
    * `lang`, where it picks the Pronunciation map.
    */
@@ -196,7 +196,7 @@ function tidyAroundPlaceholder(text: string): string {
 }
 
 /**
- * Substitutes each sentinel for its spoken form in the session's language.
+ * Substitutes each sentinel for its spoken form in the voice language.
  *
  * This MUST happen before anytts' Pronunciation map (applied at synthesis)
  * sees the text, and the reason is concrete rather than stylistic: the Polish

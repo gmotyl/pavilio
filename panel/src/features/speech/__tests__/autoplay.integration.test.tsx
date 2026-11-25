@@ -22,7 +22,7 @@
  * instead of quietly arming nothing.
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { drain, emitUtterance, useWebSocketMock, ws } from "./speech.harness";
 
@@ -200,7 +200,10 @@ const synth = vi.hoisted(() => {
   };
 });
 
-vi.mock("../synth", () => ({
+vi.mock("../synth", async (importOriginal) => ({
+  // The real voice resolution: an openai voice resolves through it while the
+  // OmniVoice list is still loading.
+  resolveSpeechVoice: (await importOriginal<typeof import("../synth")>()).resolveSpeechVoice,
   synthesizeSpeech: synth.synthesizeSpeech,
   prefetchSpeech: synth.prefetchSpeech,
   toSpeechBlob: synth.toSpeechBlob,
@@ -393,11 +396,27 @@ vi.mock("../../terminal/useAllTerminalSessions", async (importOriginal) => ({
  * cell and to arrive at it. Empty unless a test fills it, so the alerts stay
  * out of every test that is not about them.
  */
-const sessionList = vi.hoisted(() => ({ current: [] as Array<Record<string, unknown>> }));
-vi.mock("../../terminal/sessionStore", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../terminal/sessionStore")>()),
-  getSessions: () => sessionList.current,
+const sessionList = vi.hoisted(() => ({
+  current: [] as Array<Record<string, unknown>>,
+  /** Reads the real store instead: for the tests that publish through it. */
+  real: false,
 }));
+/**
+ * Lists the surface's cells in the session store, so the terminal's language
+ * port can place them: a cell the list does not hold has no language yet, and
+ * the host neither warms nor preloads its answers until it does. For the tests
+ * about warming, which the alerts they also raise do not disturb.
+ */
+const placeCells = (): void => {
+  sessionList.current = SESSIONS as unknown as Array<Record<string, unknown>>;
+};
+vi.mock("../../terminal/sessionStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../terminal/sessionStore")>();
+  return {
+    ...actual,
+    getSessions: () => (sessionList.real ? actual.getSessions() : sessionList.current),
+  };
+});
 vi.mock("../../terminal/useTerminalMaximized", () => ({
   useTerminalMaximized: () => [false, () => {}, () => {}],
 }));
@@ -420,10 +439,18 @@ import {
 } from "../../alerts/store";
 import { SPEAKING_ALERT_ID } from "../speakingAlert";
 import { prepare } from "../prepare";
-import { setStoredSpeechMode } from "../voices";
+import {
+  getStoredEngine,
+  setEngineVoice,
+  setProjectEngineVoice,
+  setStoredSpeechMode,
+} from "../voices";
+import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { EN_MALE, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "./openaiVoiceFixtures";
+import { __resetSessionStoreForTests, refreshSessions } from "../../terminal/sessionStore";
 import { preferences } from "../../../preferences/declarations";
-import { clearPreference } from "../../../preferences/store";
-import { installMatchMedia } from "../../../test-utils";
+import { clearPreference, writePreference } from "../../../preferences/store";
+import { installMatchMedia, jsonResponse } from "../../../test-utils";
 
 /** The newest alert, which is the one a failure under test just raised. */
 function lastAlert() {
@@ -737,6 +764,7 @@ describe("autoplay — the armed cell", () => {
   });
 
   it("an unarmed cell is warmed but silent", async () => {
+    placeCells();
     await renderProjectSurface();
     await arm("cell-a");
 
@@ -781,6 +809,7 @@ describe("autoplay — the armed cell", () => {
   });
 
   it("only the armed cell speaks when several utterances arrive", async () => {
+    placeCells();
     await renderProjectSurface();
     await arm("cell-b");
 
@@ -885,7 +914,7 @@ describe("autoplay — synthesis failure", () => {
   });
 });
 
-describe("autoplay — the surfaces and the session language", () => {
+describe("autoplay — the surfaces and the voice language", () => {
   it("the terminals surface wires its cells to the channel", async () => {
     await renderProjectSurface();
 
@@ -921,19 +950,23 @@ describe("autoplay — the surfaces and the session language", () => {
     expect(armed("cell-a")).toBe("autoplay");
   });
 
-  it("the session language accumulates across utterances", async () => {
+  it("the voice language decides, never the answers", async () => {
+    placeCells();
     await renderProjectSurface();
     await arm("cell-a");
 
-    // One Polish utterance is not enough — a session's language is a tally, so
-    // no single response can flip the pronunciation map on.
+    // The default voice is English, so Polish answers stay English however
+    // many arrive: there is no vote to win.
     await emitUtterance("cell-a", "a1", "Zażółć gęślą jaźń. To jest odpowiedź.");
     expect(lastLanguage()).toBe("en");
 
     await emitUtterance("cell-a", "a2", "Drugie zdanie po polsku. Wciąż mówię tak samo.");
-    expect(lastLanguage()).toBe("pl");
+    expect(lastLanguage()).toBe("en");
 
-    await emitUtterance("cell-a", "a3", "Trzecie zdanie, dalej po polsku.");
+    // A Polish voice turns the next answer Polish, even an English one: the
+    // terminal's `languageForSession` reaches the host.
+    setEngineVoice(getStoredEngine(), "pl-PL-MarekNeural");
+    await emitUtterance("cell-a", "a3", "Third answer, in English this time.");
     expect(lastLanguage()).toBe("pl");
   });
 });
@@ -1380,6 +1413,7 @@ describe("one speech host for the panel, not one per surface", () => {
   });
 
   it("a freshly hydrated tab does not start talking on its own", async () => {
+    placeCells();
     // The browser remembers an armed cell and the server still holds that
     // cell's last response, so the tab comes up armed with something unheard
     // in it — and nothing has been clicked yet.
@@ -1427,6 +1461,7 @@ describe("one speech host for the panel, not one per surface", () => {
  */
 describe("warming the first unit on arrival", () => {
   it("warms unit 0 only, and the click plays it without re-synthesizing", async () => {
+    placeCells();
     const markdown = shortResponse(4);
     const prepared = prepare(markdown);
     expect(prepared.units).toHaveLength(4);
@@ -1886,5 +1921,181 @@ describe("the answer alert, end to end", () => {
     // It did land — in its cell — so the silence below is not a missed fetch.
     expect(speakState("cell-b")).toBe("ready");
     expect(answerAlerts()).toEqual([]);
+  });
+});
+
+/**
+ * The session list decides an answer's voice language: a cell it does not list
+ * yet has no project, so its answer is prepared provisionally and neither
+ * warmed nor preloaded. These publish through the REAL session store — its
+ * fetch, its change gate, its subscribers — so the host learns of the cell
+ * being placed exactly as the panel does.
+ */
+describe("warming waits for the session to be placed", () => {
+  /** Ends in a code block, which Polish and English read differently. */
+  const ANSWER = `${shortResponse(2)}\n\n\`\`\`ts\nconst x = 1;\n\`\`\``;
+  const BILL_EN = { ...EN_MALE, id: "bill-en" };
+  const BILL_PL = { ...PL_FEMALE, id: "bill-pl" };
+
+  beforeEach(() => {
+    __resetSessionStoreForTests();
+    sessionList.real = true;
+  });
+
+  afterEach(() => {
+    sessionList.real = false;
+    __resetSessionStoreForTests();
+    __resetOpenaiVoicesForTests();
+    clearPreference(preferences.speechVoiceByProject);
+    clearPreference(preferences.speechEngine);
+  });
+
+  /** One `/api/terminal/sessions` answer, through the store's own load and publish. */
+  async function publishSessions(list: readonly SessionMeta[]): Promise<void> {
+    const fallback = global.fetch;
+    global.fetch = vi.fn((input: RequestInfo | URL) =>
+      String(input) === "/api/terminal/sessions"
+        ? Promise.resolve(jsonResponse(list))
+        : fallback(input),
+    ) as unknown as typeof fetch;
+    await act(async () => {
+      await refreshSessions();
+      await drain();
+    });
+    global.fetch = fallback;
+  }
+
+  /** One step round the speech mode: armed, which preloads and stays silent. */
+  async function armOnly(sessionId: string): Promise<void> {
+    await openBar(sessionId);
+    await click(testIdFor("bar-autoplay", sessionId));
+    expect(armed(sessionId)).toBe("armed");
+  }
+
+  it("an answer before its session is listed is warmed and preloaded once the list places it, in its project's language", async () => {
+    setProjectEngineVoice("vector", getStoredEngine(), "pl-PL-MarekNeural");
+    const polish = prepare(ANSWER, { language: "pl" }).units.map((unit) => unit.text);
+    // Fixture guard: the language shows in the requested texts.
+    expect(polish).not.toEqual(prepare(ANSWER, { language: "en" }).units.map((unit) => unit.text));
+    expect(polish.length).toBeGreaterThan(1);
+
+    await renderProjectSurface();
+    await armOnly("cell-a");
+    await emitUtterance("cell-a", "a1", ANSWER);
+
+    // The store is still empty: nothing places cell-a, so nothing is synthesized.
+    expect(synth.requests).toEqual([]);
+
+    await publishSessions(SESSIONS);
+
+    expect(synth.requests).toEqual(polish);
+    expect(synth.requestTiers).toEqual(["warm", ...polish.slice(1).map(() => "preload")]);
+  });
+
+  it("a list change that keeps every session's place is no warming opportunity; a session added is", async () => {
+    await publishSessions([SESSIONS[0]]);
+    const units = prepare(shortResponse(4)).units.map((unit) => unit.text);
+    await renderProjectSurface();
+    await armOnly("cell-a");
+
+    // Unit 0 warms; the synthesizer is down for the preloads after it, so the
+    // pass stops at the first one and leaves it for the next opportunity.
+    synth.setHealthyRequests(1);
+    await emitUtterance("cell-a", "a1", shortResponse(4));
+    await act(async () => {
+      await drain();
+    });
+    const before = synth.requests.length;
+    expect(synth.requests.slice(0, 2)).toEqual(units.slice(0, 2));
+    synth.setHealthyRequests(Number.POSITIVE_INFINITY);
+
+    // A rename: the same sessions in the same projects.
+    await publishSessions([{ ...SESSIONS[0], name: "renamed" }]);
+    expect(synth.requests).toHaveLength(before);
+
+    // A session added: a new placement, so the pass runs and retries the preload.
+    await publishSessions([{ ...SESSIONS[0], name: "renamed" }, SESSIONS[1]]);
+    expect(synth.requests.slice(before)).toEqual(units.slice(1));
+  });
+
+  it("an answer before the OmniVoice list loads is warmed and preloaded in its saved voice's language once it lands", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoiceByProject, { vector: { openai: "bill-pl" } });
+    let landVoices = (): void => {};
+    const voicesLanded = new Promise<void>((resolve) => {
+      landVoices = resolve;
+    });
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(OPENAI_VOICES_URL)) {
+        await voicesLanded;
+        return jsonResponse(voicesBody([BILL_EN, BILL_PL]));
+      }
+      return { ok: true, json: async () => ({ utterances: [] }) } as Response;
+    }) as unknown as typeof fetch;
+    const polish = prepare(ANSWER, { language: "pl" }).units.map((unit) => unit.text);
+
+    await publishSessions(SESSIONS);
+    await renderProjectSurface();
+    await armOnly("cell-a");
+    await emitUtterance("cell-a", "a1", ANSWER);
+
+    // Listed, but its voice is not in a catalog yet: nothing is synthesized.
+    expect(synth.requests).toEqual([]);
+
+    await act(async () => {
+      landVoices();
+      await drain();
+    });
+
+    await waitFor(() => expect(synth.requests).toEqual(polish));
+    expect(synth.requestVoices.every((voice) => voice === "bill-pl")).toBe(true);
+    expect(synth.requestTiers).toEqual(["warm", ...polish.slice(1).map(() => "preload")]);
+  });
+
+  it("after a failed catalog load, a later successful load makes new answers Polish; already prepared answers keep their units", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoiceByProject, { vector: { openai: "bill-pl" } });
+    let listAnswers = false;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(OPENAI_VOICES_URL)) {
+        if (!listAnswers) throw new TypeError("Failed to fetch");
+        return jsonResponse(voicesBody([BILL_EN, BILL_PL]));
+      }
+      return { ok: true, json: async () => ({ utterances: [] }) } as Response;
+    }) as unknown as typeof fetch;
+    const LATER = `${shortResponse(3)}\n\n\`\`\`ts\nconst y = 2;\n\`\`\``;
+    const english = prepare(ANSWER, { language: "en" }).units.map((unit) => unit.text);
+    const polish = prepare(LATER, { language: "pl" }).units.map((unit) => unit.text);
+    // Fixture guard: the later answer's language shows in its requested texts.
+    expect(polish).not.toEqual(prepare(LATER, { language: "en" }).units.map((unit) => unit.text));
+
+    await publishSessions(SESSIONS);
+    await renderProjectSurface();
+    await armOnly("cell-a");
+    await emitUtterance("cell-a", "a1", ANSWER);
+
+    // The failed load settles the language: the answer is warmed and preloaded
+    // in English, not held back while the OmniVoice list cannot be read.
+    await waitFor(() => expect(synth.requests).toEqual(english));
+    expect(synth.requestVoices).not.toContain("bill-pl");
+
+    // The list recovers on the next window focus.
+    listAnswers = true;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await drain();
+    });
+    // The recovered load is a warming opportunity, and a1 was already warmed:
+    // nothing is asked again, in either language.
+    expect(synth.requests).toEqual(english);
+
+    const before = synth.requests.length;
+    await emitUtterance("cell-a", "a2", LATER);
+
+    // Exactly a2's Polish units, in bill-pl: a1 keeps its English units, none
+    // of it re-requested in Polish.
+    await waitFor(() => expect(synth.requests.slice(before)).toEqual(polish));
+    expect(synth.requestVoices.slice(before).every((voice) => voice === "bill-pl")).toBe(true);
+    expect(synth.requests.slice(0, before)).toEqual(english);
   });
 });

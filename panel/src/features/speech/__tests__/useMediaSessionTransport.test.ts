@@ -28,6 +28,7 @@ import {
   settle,
   synthMock,
   useWebSocketMock,
+  languageFor,
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
@@ -465,7 +466,7 @@ describe("the transport acts on the playback, never on the focused cell", () => 
 
   it("pause acts on the speaking cell, not the focused one", async () => {
     const { result } = renderHook(() => {
-      const host = useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting });
+      const host = useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting });
       useMediaSessionTransport(host, arrival);
       return host;
     });
@@ -516,7 +517,7 @@ describe("the transport acts on the playback, never on the focused cell", () => 
 
   it("media play with nothing active starts the oldest unheard autoplay answer", async () => {
     const { result } = renderHook(() => {
-      const host = useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting });
+      const host = useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting });
       useMediaSessionTransport(host, arrival);
       return host;
     });
@@ -548,7 +549,7 @@ describe("the transport acts on the playback, never on the focused cell", () => 
 
   it("media play with nothing unheard in autoplay replays the last speaker", async () => {
     const { result } = renderHook(() => {
-      const host = useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting });
+      const host = useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting });
       useMediaSessionTransport(host, arrival);
       return host;
     });

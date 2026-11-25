@@ -28,6 +28,8 @@ import {
   type ReactNode,
 } from "react";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
+import { preferences } from "../../preferences/declarations";
+import { usePreference } from "../../preferences/usePreference";
 import {
   alertOnAnswer,
   drawerShowsProject,
@@ -38,9 +40,11 @@ import {
 import { isDocSpeechKey } from "./docKey";
 import { createSpeakingAlert } from "./speakingAlert";
 import { useMediaSessionTransport, type TransportArrival } from "./useMediaSessionTransport";
+import { useOpenaiVoicesSnapshot } from "./useOpenaiVoices";
 import { useSpeechHost, type AnswerWaitingPort, type PageSpeech } from "./useSpeechHost";
 import { useSpeechKeys } from "./useSpeechKeys";
 import type { GridSpeech, Utterance } from "./types";
+import type { VoiceLanguage } from "./voiceLanguage";
 
 /**
  * {@link PageSpeech} as the provider publishes it: the host's pair, plus what
@@ -66,6 +70,8 @@ export interface PanelPageSpeech extends PageSpeech {
 
 const SpeechHostContext = createContext<GridSpeech | null>(null);
 const PageSpeechContext = createContext<PanelPageSpeech | null>(null);
+/** The `languageFor` port as the provider was handed it; null without a provider. */
+const LanguageForContext = createContext<((key: string) => VoiceLanguage | undefined) | null>(null);
 
 /**
  * Where the focused cell is read from. The provider combines it with the route
@@ -98,6 +104,11 @@ interface Props {
   onArrival: TransportArrival;
   answerWaiting: AnswerWaitingPort;
   voiceFor: (sessionId: string) => string;
+  /**
+   * The voice language of a session or page key, or `undefined` while a
+   * session cannot be placed yet; see `SpeechHostOptions.languageFor`.
+   */
+  languageFor: (sessionId: string) => VoiceLanguage | undefined;
 }
 
 /** What the answer alert reads off the router, kept current by {@link RouterBridge}. */
@@ -139,6 +150,7 @@ export function SpeechHostProvider({
   onArrival,
   answerWaiting,
   voiceFor,
+  languageFor,
 }: Props) {
   // The answer alert (see `answerAlert.ts`): raised for a live arrival, read at
   // the moment it lands — what is on screen then, the session list then. The
@@ -242,6 +254,7 @@ export function SpeechHostProvider({
     isSessionOpen: isKeyOpen,
     onRunChange: speakingAlert.onRunChange,
     voiceFor,
+    languageFor,
     answerWaiting,
     lookedAtSessionId,
   });
@@ -303,8 +316,10 @@ export function SpeechHostProvider({
   return (
     <SpeechHostContext.Provider value={speech}>
       <PageSpeechContext.Provider value={pageSpeech}>
-        {inRouter && <RouterBridge view={routerView} onRouteChange={recheckLookedAt} />}
-        {children}
+        <LanguageForContext.Provider value={languageFor}>
+          {inRouter && <RouterBridge view={routerView} onRouteChange={recheckLookedAt} />}
+          {children}
+        </LanguageForContext.Provider>
       </PageSpeechContext.Provider>
     </SpeechHostContext.Provider>
   );
@@ -367,6 +382,32 @@ export function useStopPageRuns(): () => void {
  */
 export function usePanelSpeechIfMounted(): GridSpeech | null {
   return useContext(SpeechHostContext);
+}
+
+/**
+ * The voice language port the host prepares with — the provider's
+ * `languageFor` — for a surface that prepares a page itself (the toolbar's
+ * `pageHasSpeech`, play-from-here's units), so it prepares the page as the host
+ * will. Without a provider (viewers mounted bare in many suites) every key is
+ * English, `prepare`'s default; so is a key the port cannot answer yet, as the
+ * host's provisional preparation is (a page's key always has an answer).
+ *
+ * The caller reads the port during render, so this hook subscribes to
+ * everything the answer depends on — the engine, the default and per-project
+ * voices, the cascade order, and the live OmniVoice list (which lands after a
+ * reload and turns a saved openai voice from "unknown" into a known locale) —
+ * as the terminal's `useVoiceForSession` does. A voice changed in Settings or
+ * on the project card then re-renders a mounted page, which re-prepares its
+ * units in the new language. The values are discarded: subscribing IS the point.
+ */
+export function useLanguageFor(): (key: string) => VoiceLanguage {
+  usePreference(preferences.speechEngine);
+  usePreference(preferences.speechVoice);
+  usePreference(preferences.speechVoiceByProject);
+  usePreference(preferences.speechCascadeOrder);
+  useOpenaiVoicesSnapshot();
+  const port = useContext(LanguageForContext);
+  return useCallback((key: string): VoiceLanguage => port?.(key) ?? "en", [port]);
 }
 
 export default SpeechHostProvider;

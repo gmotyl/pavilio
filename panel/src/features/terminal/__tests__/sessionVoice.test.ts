@@ -11,14 +11,38 @@ import { preferences } from "../../../preferences/declarations";
 import { readPreference, writePreference } from "../../../preferences/store";
 import { jsonResponse, stubFetch } from "../../../test-utils";
 import { __resetOpenaiVoicesForTests, reloadOpenaiVoices } from "../../speech/useOpenaiVoices";
-import { setProjectVoice } from "../../speech/voices";
-import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "../../speech/__tests__/openaiVoiceFixtures";
+import type { OmniVoiceInfo } from "../../speech/openaiVoices";
+import {
+  setCascadeOrder,
+  setEngineVoice,
+  setProjectEngineVoice,
+  setProjectVoice,
+  setStoredEngine,
+} from "../../speech/voices";
+import {
+  EN_MALE,
+  LIVE_VOICES,
+  OPENAI_VOICES_URL,
+  PL_FEMALE,
+  voicesBody,
+} from "../../speech/__tests__/openaiVoiceFixtures";
 import { refreshSessions } from "../sessionStore";
-import { useVoiceForSession, voiceForSession } from "../sessionVoice";
+import { languageForSession, useVoiceForSession, voiceForSession } from "../sessionVoice";
 import type { SessionMeta } from "../useTerminalSessions";
 
 const VIVIENNE = "fr-FR-VivienneMultilingualNeural";
 const EMMA = "en-US-EmmaMultilingualNeural";
+const MAREK = "pl-PL-MarekNeural";
+
+/** The twin OmniVoice voices: one speaker, one record per language. */
+const BILL_EN: OmniVoiceInfo = { ...EN_MALE, id: "bill-en", label: "Bill (English)", source: "custom" };
+const BILL_PL: OmniVoiceInfo = { ...PL_FEMALE, id: "bill-pl", label: "Bill (Polish)", source: "custom" };
+
+/** Loads the live OmniVoice list, so the openai picks below are catalog voices. */
+async function loadLiveVoices(voices: readonly OmniVoiceInfo[] = [BILL_EN, BILL_PL]): Promise<void> {
+  stubFetch({ [OPENAI_VOICES_URL]: () => jsonResponse(voicesBody(voices)) });
+  await reloadOpenaiVoices();
+}
 
 function session(id: string, project: string): SessionMeta {
   return {
@@ -100,5 +124,123 @@ describe("session voice", () => {
     await act(() => reloadOpenaiVoices());
     expect(result.current).toBe(PL_FEMALE.id);
     expect(readPreference(preferences.speechVoice)).toEqual({ openai: PL_FEMALE.id });
+  });
+});
+
+describe("voice language of a session", () => {
+  it("single engine: the project's voice decides", async () => {
+    await loadLiveVoices();
+    setStoredEngine("openai");
+    setEngineVoice("openai", "bill-en");
+    setProjectEngineVoice("p", "openai", "bill-pl");
+    await seedSessions([session("sess-p", "p"), session("sess-q", "q")]);
+
+    expect(languageForSession("sess-p")).toBe("pl");
+    expect(languageForSession("sess-q")).toBe("en");
+  });
+
+  it("cascade: the first enabled member's voice decides", async () => {
+    await loadLiveVoices();
+    setStoredEngine("cascade");
+    setProjectEngineVoice("p", "openai", "bill-en");
+    setProjectEngineVoice("p", "edge", MAREK);
+    await seedSessions([session("sess-p", "p")]);
+
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
+  it("cascade: a disabled first member is skipped", async () => {
+    await loadLiveVoices();
+    setStoredEngine("cascade");
+    setCascadeOrder([
+      { id: "openai", on: false },
+      { id: "edge", on: true },
+    ]);
+    setProjectEngineVoice("p", "openai", "bill-en");
+    setProjectEngineVoice("p", "edge", MAREK);
+    await seedSessions([session("sess-p", "p")]);
+
+    expect(languageForSession("sess-p")).toBe("pl");
+  });
+
+  it("cascade: no enabled member with a voice gives English", async () => {
+    // No live OmniVoice list: openai has no voice, and every other member is off.
+    setStoredEngine("cascade");
+    setCascadeOrder([
+      { id: "openai", on: true },
+      { id: "kokoro", on: false },
+      { id: "elevenlabs", on: false },
+      { id: "cartesia", on: false },
+      { id: "speechify", on: false },
+      { id: "azure", on: false },
+      { id: "edge", on: false },
+    ]);
+    setProjectEngineVoice("p", "edge", MAREK);
+    await seedSessions([session("sess-p", "p")]);
+
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
+  it("a session the tab cannot place yet has no language; a placed one without a project voice has the default's", async () => {
+    setEngineVoice("edge", MAREK);
+    // The list has not loaded: nothing places "sess-p" yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    // Placed in a project with no voice of its own: the default voice decides.
+    await seedSessions([session("sess-p", "p")]);
+    expect(languageForSession("sess-p")).toBe("pl");
+    // A session still missing from a loaded list is not placed either.
+    expect(languageForSession("sess-gone")).toBeUndefined();
+  });
+
+  it("a saved OmniVoice voice has no language until the live list loads; then its own", async () => {
+    setStoredEngine("openai");
+    // Saved before the reload; `setProjectEngineVoice` would refuse an id the empty list lacks.
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-pl" } });
+    await seedSessions([session("sess-p", "p")]);
+
+    // Listed, but the voice that decides cannot be looked up yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    await loadLiveVoices();
+    expect(languageForSession("sess-p")).toBe("pl");
+  });
+
+  it("cascade: a first member's saved OmniVoice voice has no language until the list loads", async () => {
+    setStoredEngine("cascade");
+    setCascadeOrder([
+      { id: "openai", on: true },
+      { id: "edge", on: true },
+    ]);
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-en", edge: MAREK } });
+    await seedSessions([session("sess-p", "p")]);
+
+    // Not edge's Polish: openai decides, and its voice is not known yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    await loadLiveVoices();
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
+  it("a stale saved OmniVoice id is not pending once the list has loaded", async () => {
+    setStoredEngine("openai");
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-gone" } });
+    await seedSessions([session("sess-p", "p")]);
+    await loadLiveVoices();
+
+    expect(languageForSession("sess-p")).toBe("en");
+  });
+
+  it("a page key follows its project's voice", async () => {
+    await loadLiveVoices();
+    setStoredEngine("openai");
+    setEngineVoice("openai", "bill-en");
+    setProjectEngineVoice("pavilio", "openai", "bill-pl");
+    setProjectEngineVoice("..", "openai", "bill-pl");
+
+    expect(languageForSession("doc:pavilio/wiki/index.md")).toBe("pl");
+    expect(languageForSession("doc:quiet/wiki/index.md")).toBe("en");
+    // A file outside projects speaks with the default voice.
+    expect(languageForSession("doc:../repo/x.md")).toBe("en");
   });
 });

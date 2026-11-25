@@ -3,12 +3,13 @@
  * globally and per project, all over anytts' catalog — the cascade order, the
  * per-engine pronunciation switch, and each cell's speech mode.
  *
- * The picked voice ALWAYS wins: nothing here consults
- * {@link import("./language").voteLanguage} or the per-session language
- * it feeds through {@link import("./language").nextLanguageState}, and
- * neither ever switches a voice. A single-language voice therefore reads every
- * answer in its own language; the Settings help text says so, and the
- * multilingual voices are grouped first for that reason.
+ * The picked voice ALWAYS wins, and it decides the language too: a text is
+ * prepared in the language of the voice that speaks it
+ * ({@link import("./voiceLanguage").voiceLanguageFor}), never the other way
+ * round — nothing here reads what an answer is written in, and nothing ever
+ * switches a voice. A single-language voice therefore reads every answer in
+ * its own language; the Settings help text says so, and the multilingual
+ * voices are grouped first for that reason.
  */
 
 // One source of truth, in the lower layer: the preference registry declares
@@ -27,6 +28,7 @@ import { projectOfDocKey } from "./docKey";
 import { CASCADE, cascadeVoiceKey, getCascadeOrder, speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
+import { openaiVoicesLoaded } from "./useOpenaiVoices";
 import { voicesOf } from "./voicesOf";
 
 export { DEFAULT_SPEECH_VOICE, getCascadeOrder };
@@ -200,6 +202,29 @@ export function voiceFor(engine: string, project?: string): string | undefined {
 }
 
 /**
+ * Whether `engine`'s voice in `project` is one that is saved but cannot be
+ * looked up yet: a stored OmniVoice id (the project's or the default's) while
+ * the live list has not loaded. Until it does, every openai id is outside the
+ * catalog, so {@link voiceFor} drops it and the voice — and its language — are
+ * not known. Once the list has loaded, an id it still lacks is stale, and is
+ * dropped as any stale id is; a static catalog is always loaded. A load that
+ * failed, or found the OmniVoice server down, counts as loaded: the voice
+ * could not speak then, so the language settles without it and answers are
+ * still warmed. A later load that names it decides for the answers after it;
+ * those already prepared keep their units.
+ */
+export function isVoiceAwaitingCatalog(engine: string, project: string | undefined): boolean {
+  if (engine !== "openai" || openaiVoicesLoaded()) return false;
+  const byProject = asRecord<unknown>(readPreference(preferences.speechVoiceByProject));
+  const own = project && Object.hasOwn(byProject, project) ? asRecord<unknown>(byProject[project]) : {};
+  const fallback = asRecord<unknown>(readPreference(preferences.speechVoice));
+  return [own, fallback].some((stored) => {
+    const id = Object.hasOwn(stored, engine) ? stored[engine] : undefined;
+    return typeof id === "string" && id !== "" && !isCatalogVoice(engine, id);
+  });
+}
+
+/**
  * The voice a project speaks with on the current engine: its own, else the
  * default voice. Under the cascade it is every member's {@link voiceFor} the
  * project, as one {@link cascadeVoiceKey} the seam opens into the request's
@@ -220,6 +245,22 @@ export function voiceForProject(project: string | undefined): string {
     (project ? getProjectVoices(project)[engine] : undefined) ??
     resolveStoredVoice(readPreference(preferences.speechVoice), engine).voice
   );
+}
+
+/**
+ * The cascade member that speaks first in `project`: the first entry of
+ * {@link getCascadeOrder} that is on and has a {@link voiceFor} the project,
+ * with that voice. `undefined` when no enabled member has a voice. Read-only.
+ */
+export function firstCascadeVoice(
+  project: string | undefined,
+): { engine: string; voice: string } | undefined {
+  for (const entry of getCascadeOrder()) {
+    if (!entry.on) continue;
+    const voice = voiceFor(entry.id, project);
+    if (voice !== undefined) return { engine: entry.id, voice };
+  }
+  return undefined;
 }
 
 /** Stores `order` (repaired as `getCascadeOrder` reads it) and returns the order now in effect. */
@@ -251,13 +292,23 @@ export function setEnginePronunciation(engine: string, on: boolean | null): void
 }
 
 /**
+ * The project a page's `doc:` key speaks for: the project its path lives in,
+ * `undefined` (the default voice) for a file outside projects. The one rule
+ * {@link voiceForDocKey} and the terminal's `languageForSession` read, so a
+ * page's text is prepared in the language of the voice it is spoken with.
+ */
+export function projectOfDocVoice(key: string): string | undefined {
+  return projectOfDocKey(key) ?? undefined;
+}
+
+/**
  * The voice a page speaks with: the voice of the project its `doc:` key's path
- * lives in, else the default — a file outside projects has no project. The one
- * rule both the host's `voiceFor` port and the document bar read, so the bar
- * peeks the cache in the voice the host synthesized in.
+ * lives in ({@link projectOfDocVoice}), else the default. The one rule both the
+ * host's `voiceFor` port (through `voiceForSession`) and the document bar read,
+ * so the bar peeks the cache in the voice the host synthesized in.
  */
 export function voiceForDocKey(key: string): string {
-  return voiceForProject(projectOfDocKey(key) ?? undefined);
+  return voiceForProject(projectOfDocVoice(key));
 }
 
 /** One click on a cell's speech control: `off → armed → autoplay → off`. */

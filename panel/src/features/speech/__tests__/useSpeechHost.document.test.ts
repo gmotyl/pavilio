@@ -24,23 +24,18 @@ import {
   synthMock,
   unitsOf,
   useWebSocketMock,
+  languageFor,
+  setVoiceLanguage,
 } from "./speech.harness";
 
 vi.mock("../synth", () => synthMock());
 // Empty by default: every page unit is a miss the fake synthesizer answers.
 vi.mock("../pageCache", () => pageCacheMock());
 vi.mock("../../realtime/useWebSocket", () => useWebSocketMock());
-// The real vote, counted: a page's language is voted once per utterance, not
-// on every render that asks for its units.
-vi.mock("../language", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../language")>();
-  return { ...actual, voteLanguage: vi.fn(actual.voteLanguage) };
-});
 
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { voiceForSession } from "../../terminal/sessionVoice";
 import { docSpeechKey } from "../docKey";
-import { voteLanguage } from "../language";
 import { prepare } from "../prepare";
 import { useSpeechHost, type SpeechHost } from "../useSpeechHost";
 import { utteranceUnderCursor } from "../utteranceQueue";
@@ -52,7 +47,7 @@ const PAGE = docSpeechKey("p/wiki/page.md");
 
 function renderHost(onAnswer = vi.fn()) {
   const { result } = renderHook(() =>
-    useSpeechHost({ voiceFor: voiceForSession, answerWaiting: storeAnswerWaiting, onAnswer }),
+    useSpeechHost({ voiceFor: voiceForSession, languageFor, answerWaiting: storeAnswerWaiting, onAnswer }),
   );
   return (): SpeechHost => result.current;
 }
@@ -105,37 +100,54 @@ describe("useSpeechHost — page speech", () => {
     expect(utteranceUnderCursor(host().queueFor(PAGE))?.id).not.toBe(landed?.id);
   });
 
-  it("speakDocument prepares with the page's own language", async () => {
-    // Polish by its diacritics. One Polish vote never switches a channel tally
-    // on (it takes two), so a tally-prepared page would be read as English.
-    // `user_id` is labelled in the page's language ("zmienna" / "variable").
-    const text = "Zażółć gęślą jaźń: zrób deploy i build na `main` w `src/app.ts` z `user_id`.";
-    const polish = prepare(text, { language: "pl" }).units.map((unit) => unit.text);
-    const english = prepare(text, { language: "en" }).units.map((unit) => unit.text);
-    expect(polish).not.toEqual(english);
+  it("a page follows its project's voice language", async () => {
+    // Polish by its diacritics, English by its words — and each spoken in the
+    // language its voice gives, not the one its text reads as. `user_id` is
+    // labelled in the prepared language ("zmienna" / "variable").
+    const polishPage = "Zażółć gęślą jaźń: zrób deploy i build na `main` w `src/app.ts` z `user_id`.";
+    const englishPage = "Run the build on `main` in `src/app.ts` with `user_id` set.";
+    const textsIn = (text: string, language: "pl" | "en") =>
+      prepare(text, { language }).units.map((unit) => unit.text);
+    expect(textsIn(polishPage, "en")).not.toEqual(textsIn(polishPage, "pl"));
+    expect(textsIn(englishPage, "pl")).not.toEqual(textsIn(englishPage, "en"));
+    const OTHER = docSpeechKey("q/wiki/other.md");
+    // Asked per key: the port is what resolves a `doc:` key to its project's voice.
+    setVoiceLanguage((key) => (key === PAGE ? "en" : key === OTHER ? "pl" : "en"));
     const host = renderHost();
 
-    await settle(() => host().speakDocument({ key: PAGE, text }));
+    await settle(() => host().speakDocument({ key: PAGE, text: polishPage }));
+    const polishUnits = host().unitsFor(PAGE);
+    expect(polishUnits.map((unit) => unit.text)).toEqual(textsIn(polishPage, "en"));
+    expect(new Set(polishUnits.map((unit) => unit.lang))).toEqual(new Set(["en"]));
+    expect(requestedTexts()[0]).toBe(textsIn(polishPage, "en")[0]);
 
-    expect(host().unitsFor(PAGE).map((unit) => unit.text)).toEqual(polish);
-    expect(requestedTexts()[0]).toBe(polish[0]);
+    await settle(() => host().speakDocument({ key: OTHER, text: englishPage }));
+    const englishUnits = host().unitsFor(OTHER);
+    expect(englishUnits.map((unit) => unit.text)).toEqual(textsIn(englishPage, "pl"));
+    expect(new Set(englishUnits.map((unit) => unit.lang))).toEqual(new Set(["pl"]));
   });
 
-  it("a page's language is voted once per utterance", async () => {
-    const text = response(3, "Page");
+  it("a page played again after a voice change follows the new voice", async () => {
+    const text = "Run the build on `main` in `src/app.ts` with `user_id` set.";
+    const textsIn = (language: "pl" | "en") =>
+      prepare(text, { language }).units.map((unit) => unit.text);
+    setVoiceLanguage("en");
     const host = renderHost();
-    const votes = () =>
-      vi.mocked(voteLanguage).mock.calls.filter(([voted]) => voted === text).length;
+
     await settle(() => host().speakDocument({ key: PAGE, text }));
-    // The channel's own tally votes on arrival; that is per arrival, not per ask.
-    const landed = votes();
-    expect(host().unitsFor(PAGE).length).toBeGreaterThan(0);
+    expect(host().unitsFor(PAGE).map((unit) => unit.text)).toEqual(textsIn("en"));
 
-    for (let i = 0; i < 5; i += 1) host().unitsFor(PAGE);
-    await endCurrentUnit();
-    host().unitsFor(PAGE);
+    // The page is still loaded under the same id; until it is played again it
+    // keeps what it was prepared with…
+    setVoiceLanguage("pl");
+    expect(host().unitsFor(PAGE).map((unit) => unit.text)).toEqual(textsIn("en"));
 
-    expect(votes()).toBe(landed);
+    // …and the next Play prepares it in the new voice's language rather than
+    // serving the English preparation under a Polish voice.
+    await settle(() => host().speakDocument({ key: PAGE, text }));
+    const units = host().unitsFor(PAGE);
+    expect(units.map((unit) => unit.text)).toEqual(textsIn("pl"));
+    expect(new Set(units.map((unit) => unit.lang))).toEqual(new Set(["pl"]));
   });
 
   it("a page's frontmatter is not spoken", async () => {

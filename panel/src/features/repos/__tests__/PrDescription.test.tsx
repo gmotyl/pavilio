@@ -50,6 +50,7 @@ function Host({ children }: { children: ReactNode }) {
       onArrival={() => {}}
       answerWaiting={answerWaiting}
       voiceFor={() => "a-voice"}
+      languageFor={() => "en"}
     >
       {children}
     </SpeechHostProvider>
@@ -173,7 +174,7 @@ describe("prDescriptionSource", () => {
     // The same text reaches the toolbar, the host and play-from-here, so all
     // three keep the paragraph.
     expect(pageSpeechText(src)).toContain("Summary of the change.");
-    expect(pageHasSpeech(src)).toBe(true);
+    expect(pageHasSpeech(src, "en")).toBe(true);
   });
 });
 

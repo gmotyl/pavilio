@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { copyToClipboard } from "../../lib/clipboard";
 import { DocumentSpeechBar } from "../speech/DocumentSpeechBar";
-import { usePageSpeech } from "../speech/SpeechHostProvider";
+import { useLanguageFor, usePageSpeech } from "../speech/SpeechHostProvider";
 import { usePageSpeechRowHost } from "../speech/PageSpeechRowHost";
 import { usePlayFromHereHandler, usePlayHint } from "../speech/PagePlayFromHere";
 import { pageHasSpeech } from "../speech/pageText";
@@ -269,10 +269,14 @@ export function SpeakingToolbar({
   const hintUnit = usePlayHint(speech.key);
 
   // A page that prepares to nothing — still loading, code blocks only,
-  // frontmatter only — offers no Play. Prepared once per text, not per render.
+  // frontmatter only — offers no Play. Prepared once per text and voice
+  // language, not per render, in the language the host will play it in.
   // An unfolded bar keeps its Stop whatever the text became: folding is how
   // the run ends.
-  const speakable = useMemo(() => pageHasSpeech(speech.text), [speech.text]);
+  const language = useLanguageFor()(speech.key);
+  // Speakability does not depend on the language; passing it only warms the
+  // LRU entry the host will play from.
+  const speakable = useMemo(() => pageHasSpeech(speech.text, language), [speech.text, language]);
   const disabled = !open && !speakable;
   const reasonId = useId();
 

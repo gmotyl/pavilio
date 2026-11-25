@@ -90,6 +90,7 @@ describe("SpeechHostProvider", () => {
         onArrival={onArrival}
         answerWaiting={answerWaiting}
         voiceFor={voiceFor}
+        languageFor={() => "en"}
       >
         <Reader />
       </SpeechHostProvider>,
@@ -134,6 +135,7 @@ describe("SpeechHostProvider", () => {
           isHeld: () => false,
         }}
         voiceFor={() => "a-voice"}
+        languageFor={() => "en"}
       >
         <Reader />
       </SpeechHostProvider>,
@@ -177,6 +179,7 @@ describe("SpeechHostProvider", () => {
           isHeld: () => false,
         }}
         voiceFor={() => "a-voice"}
+        languageFor={() => "en"}
       >
         <Speaker text={text} />
       </SpeechHostProvider>
@@ -238,6 +241,7 @@ describe("SpeechHostProvider", () => {
               isHeld: () => false,
             }}
             voiceFor={() => "a-voice"}
+            languageFor={() => "en"}
           >
             <Navigator />
           </SpeechHostProvider>

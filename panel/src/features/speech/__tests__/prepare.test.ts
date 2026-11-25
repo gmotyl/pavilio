@@ -383,7 +383,7 @@ describe("prepare", () => {
     // `blok HTML` goes to synthesis as written: anytts' map says the acronym there.
     ["pl", ["blok kodu", "tabela", "blok HTML", "obrazek", "link", "wyrażenie"]],
     ["en", ["code block", "table", "HTML block", "image", "link", "expression"]],
-  ])("speaks every sentinel in the session language (%s)", (lang, words) => {
+  ])("speaks every sentinel in the voice language (%s)", (lang, words) => {
     const text = spoken(everySentinelResponse, lang);
 
     for (const word of words) expect(text).toContain(word);
@@ -682,7 +682,7 @@ describe("sentence units", () => {
       "Short paragraph one. Short paragraph two.",
     ].join("\n");
 
-    expect(preparePage(markdown).units.map((unit) => unit.text)).toEqual(texts(markdown));
+    expect(preparePage(markdown, "en").units.map((unit) => unit.text)).toEqual(texts(markdown));
   });
 });
 

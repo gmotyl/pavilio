@@ -35,8 +35,19 @@ import { PagePlayFromHere } from "../PagePlayFromHere";
 import type { CellSpeechState, SpeechUnit } from "../types";
 import { prepare } from "../prepare";
 import { pageSpeechText, preparePage } from "../pageText";
+import { preferences } from "../../../preferences/declarations";
+import { writePreference } from "../../../preferences/store";
+import { getStoredEngine, voiceForDocKey } from "../voices";
+import { voiceLanguageFor, type VoiceLanguage } from "../voiceLanguage";
 
 const KEY = "doc:pavilio/wiki/page.md";
+/** What the provider's `languageFor` port answers for every key: the page's voice language. */
+let pageLanguage: "pl" | "en" = "en";
+/**
+ * A port that reads the stored voices instead, as the panel's does; null
+ * (the default) answers {@link pageLanguage}.
+ */
+let storedLanguagePort: ((key: string) => VoiceLanguage) | null = null;
 
 const answerWaiting: AnswerWaitingPort = {
   get: () => ({ waiting: false, pending: false }),
@@ -56,6 +67,7 @@ function Host({ children }: { children: ReactNode }) {
       onArrival={() => {}}
       answerWaiting={answerWaiting}
       voiceFor={() => "a-voice"}
+      languageFor={(key) => (storedLanguagePort ? storedLanguagePort(key) : pageLanguage)}
     >
       {children}
     </SpeechHostProvider>
@@ -171,6 +183,8 @@ beforeEach(() => {
 
 afterEach(() => {
   stub.host = null;
+  pageLanguage = "en";
+  storedLanguagePort = null;
 });
 
 describe("PlayFromHere", () => {
@@ -466,7 +480,7 @@ describe("PlayFromHere", () => {
     }
   });
 
-  it("a Polish page starts at the unit the host prepared, not an English preparation's", () => {
+  it("a page under a Polish voice starts at the unit the host prepared, not an English preparation's", () => {
     // A Polish sentence full of images: "obrazek" is longer than "image", so
     // the Polish sentence crosses the unit ceiling and is cut where the English
     // one is not, and every block after it moves by one unit.
@@ -481,7 +495,8 @@ describe("PlayFromHere", () => {
       "Krótki akapit po nagłówku.",
       "",
     ].join("\n");
-    // What the host prepares: the page's own vote picks Polish.
+    // What the host prepares: the page's project voice is Polish, so is the port.
+    pageLanguage = "pl";
     const hostUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
     const englishUnits = prepare(pageSpeechText(polish)).units;
     const headingOf = (units: typeof hostUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
@@ -497,6 +512,97 @@ describe("PlayFromHere", () => {
       key: KEY,
       text: polish,
       startUnit: headingOf(hostUnits),
+    });
+  });
+
+  it("a mounted page whose voice language changes starts at the units prepared in the new language", () => {
+    // The same Polish page as above: "obrazek" outgrows "image", so the two
+    // preparations put the last heading at different units.
+    const images = Array.from({ length: 46 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+    const polish = [
+      "# Tytuł strony",
+      "",
+      `To jest długi akapit o tym, jak działa nasz system i dlaczego warto go poznać. ${images} Następnie opisujemy, co się dzieje dalej w tej części dokumentu, żeby było jasne. Kolejne zdanie jest tutaj, aby akapit był wystarczająco długi.`,
+      "",
+      "## Następny nagłówek",
+      "",
+      "Krótki akapit po nagłówku.",
+      "",
+    ].join("\n");
+    const englishUnits = prepare(pageSpeechText(polish)).units;
+    const polishUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
+    const headingOf = (units: typeof polishUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
+    expect(headingOf(polishUnits)).not.toBe(headingOf(englishUnits));
+
+    // First under an English voice...
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? englishUnits : []) });
+    const { container, rerender } = render(<Page text={polish} />);
+    expect(block(container, "Następny nagłówek")).toHaveAttribute(
+      "data-speak-unit",
+      String(headingOf(englishUnits)),
+    );
+
+    // ...then the project's voice becomes Polish while the page stays mounted,
+    // with the same text: only the language changed.
+    pageLanguage = "pl";
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? polishUnits : []) });
+    act(() => {
+      rerender(<Page text={polish} />);
+    });
+    const heading = block(container, "Następny nagłówek");
+    expect(heading).toHaveAttribute("data-speak-unit", String(headingOf(polishUnits)));
+    fireEvent.mouseOver(heading);
+    fireEvent.click(playOf(container, heading)!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({
+      key: KEY,
+      text: polish,
+      startUnit: headingOf(polishUnits),
+    });
+  });
+
+  it("a mounted page follows a stored project voice change and plays the units of the new language", () => {
+    // The port reads the stored voices, as the panel's does; nothing rerenders
+    // the page by hand — only the preference write can reach it.
+    storedLanguagePort = (key) => voiceLanguageFor(getStoredEngine(), voiceForDocKey(key));
+    const images = Array.from({ length: 46 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+    const polish = [
+      "# Tytuł strony",
+      "",
+      `To jest długi akapit o tym, jak działa nasz system i dlaczego warto go poznać. ${images} Następnie opisujemy, co się dzieje dalej w tej części dokumentu, żeby było jasne. Kolejne zdanie jest tutaj, aby akapit był wystarczająco długi.`,
+      "",
+      "## Następny nagłówek",
+      "",
+      "Krótki akapit po nagłówku.",
+      "",
+    ].join("\n");
+    const englishUnits = prepare(pageSpeechText(polish)).units;
+    const polishUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
+    const headingOf = (units: typeof polishUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
+    expect(headingOf(polishUnits)).not.toBe(headingOf(englishUnits));
+
+    // The default Edge voice is English... (one host throughout: the write
+    // re-renders the page, not the provider, so the host is not swapped)
+    let hostUnits = englishUnits;
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? hostUnits : []) });
+    const { container } = render(<Page text={polish} />);
+    expect(block(container, "Następny nagłówek")).toHaveAttribute(
+      "data-speak-unit",
+      String(headingOf(englishUnits)),
+    );
+
+    // ...then the page's project gets a Polish voice while the page is mounted.
+    hostUnits = polishUnits;
+    act(() => {
+      writePreference(preferences.speechVoiceByProject, { pavilio: { edge: "pl-PL-ZofiaNeural" } });
+    });
+    const heading = block(container, "Następny nagłówek");
+    expect(heading).toHaveAttribute("data-speak-unit", String(headingOf(polishUnits)));
+    fireEvent.mouseOver(heading);
+    fireEvent.click(playOf(container, heading)!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({
+      key: KEY,
+      text: polish,
+      startUnit: headingOf(polishUnits),
     });
   });
 
@@ -632,7 +738,7 @@ describe("PlayFromHere", () => {
     expect(screen.getByTestId("play-from-here-pinned")).toHaveAccessibleName("Play from here");
 
     const edited = PAGE.replace("## Example", "## Example\n\nA brand new paragraph now opens the first example.");
-    expect(preparePage(edited).units[playing].text).not.toBe(UNITS[playing].text);
+    expect(preparePage(edited, "en").units[playing].text).not.toBe(UNITS[playing].text);
     rerender(<Page text={edited} />);
     expect(screen.queryByTestId("play-from-here-pinned")).toBeNull();
     expect(stub.host!.speakDocument).not.toHaveBeenCalled();

@@ -89,6 +89,7 @@ function Speech({ children }: { children: ReactNode }) {
       onArrival={() => {}}
       answerWaiting={answerWaiting}
       voiceFor={() => "a-voice"}
+      languageFor={() => "en"}
     >
       {children}
     </SpeechHostProvider>
