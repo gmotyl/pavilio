@@ -22,8 +22,14 @@ export function refreshFileIndex() {
   window.dispatchEvent(new Event(REFRESH_EVENT));
 }
 
-export function useFileIndex(root: RootId = "projects") {
+/**
+ * The file index and whether it has loaded at least once: until then `files`
+ * is an empty placeholder, not "no files", so a caller that reads absence as
+ * meaning (e.g. "this PR has no story") must wait for `loaded`.
+ */
+export function useFileIndexState(root: RootId = "projects"): { files: FileEntry[]; loaded: boolean } {
   const [files, setFiles] = useState<FileEntry[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const { lastMessage } = useWebSocket();
 
   const fetchFiles = useCallback(async () => {
@@ -45,6 +51,7 @@ export function useFileIndex(root: RootId = "projects") {
         root,
       }))
     );
+    setLoaded(true);
   }, [root]);
 
   useEffect(() => {
@@ -61,5 +68,9 @@ export function useFileIndex(root: RootId = "projects") {
     return () => window.removeEventListener(REFRESH_EVENT, onRefresh);
   }, [fetchFiles]);
 
-  return files;
+  return { files, loaded };
+}
+
+export function useFileIndex(root: RootId = "projects") {
+  return useFileIndexState(root).files;
 }

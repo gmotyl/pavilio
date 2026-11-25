@@ -291,6 +291,8 @@ describe("PrsView", () => {
     const one = (over: Parameters<typeof pr>[0] = { number: 7 }) => ({ me: ME, prs: [pr(over)], unavailable: [] });
     const row = async () => {
       await waitFor(() => expect(rows()).toHaveLength(1));
+      // Explain / ↻ stay inert until the file index has loaded once.
+      await waitFor(() => expect(screen.queryAllByTitle("Loading stories…")).toHaveLength(0));
       return rows()[0];
     };
     const where = () => screen.getByTestId("search").textContent;
@@ -336,6 +338,32 @@ describe("PrsView", () => {
       });
       expect(where()).toBe("?view=prs");
       expect(screen.queryByTestId("prs-launch-error")).toBeNull();
+    });
+
+    it("offers no launchable Explain until the file index has loaded", async () => {
+      let resolveIndex!: (r: Response) => void;
+      const index = new Promise<Response>((r) => (resolveIndex = r));
+      stubFetch({ "/api/prs": one(), "/api/files/index": () => index });
+      render(
+        <MemoryRouter initialEntries={["/project/pavilio/repos?view=prs"]}>
+          <Routes>
+            <Route path="/project/:name/:section" element={<ReposTab project="pavilio" repos={REPOS} />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      const r = rows()[0];
+      // The story exists but the index has not said so yet: nothing launchable, no Explain run.
+      const pending = within(r).getByRole("button", { name: "Explain" });
+      expect(pending).toBeDisabled();
+      expect(pending).toHaveAttribute("title", "Loading stories…");
+      fireEvent.click(pending);
+      expect(vi.mocked(startTaskRun)).not.toHaveBeenCalled();
+
+      await act(async () => resolveIndex(jsonResponse([{ relativePath: STORY, modified: 1 }])));
+      expect(await within(r).findByRole("button", { name: "Story" })).toBeEnabled();
+      expect(within(r).getByRole("button", { name: "Rebuild story for #7" })).toBeEnabled();
+      expect(within(r).queryByRole("button", { name: "Explain" })).toBeNull();
     });
 
     it("Story opens the file in the QA tab", async () => {

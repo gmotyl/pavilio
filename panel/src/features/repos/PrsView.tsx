@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { Unavailable } from "../../../server/lib/prs/provider";
 import { preferences, type StoryLanguage } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { useFileIndex } from "../explorer/useFileIndex";
+import { useFileIndexState } from "../explorer/useFileIndex";
 import { explainable, explainRunLine } from "../projects/runPrompt";
 import { useLaunchRun } from "../projects/useLaunchRun";
 import { launcherBlockedReason, useProjectLauncher } from "../projects/useProjectLauncher";
@@ -69,19 +69,25 @@ const storyPath = (project: string, pr: Pick<PullRequest, "repo" | "number">) =>
  * The project's story files with their index `modified` times, from the same
  * file index the QA tab lists: read on mount and again whenever the index
  * changes on disk, so a finished Explain turns its row's button into Story and
- * a rewritten story ends a rebuild's spinner.
+ * a rewritten story ends a rebuild's spinner. Null until the index has loaded
+ * once: an empty placeholder would read as "no story" and offer Explain for a
+ * PR that has one.
  */
-function useStoryPaths(project: string): Map<string, number> {
-  const files = useFileIndex();
+function useStoryPaths(project: string): Map<string, number> | null {
+  const { files, loaded } = useFileIndexState();
   return useMemo(() => {
+    if (!loaded) return null;
     const prefix = `${project}/qa/stories/`;
     return new Map(
       files
         .filter((f) => f.project === project && !f.archived && f.relativePath.startsWith(prefix))
         .map((f) => [f.relativePath, f.modified]),
     );
-  }, [files, project]);
+  }, [files, loaded, project]);
 }
+
+/** Why Explain / ↻ cannot launch yet: the file index has not said which PRs have a story. */
+const LOADING_STORIES = "Loading stories…";
 
 /**
  * How often a live explaining entry is re-checked with no file change: the
@@ -99,10 +105,12 @@ const SETTLE_EVERY_MS = 30_000;
 function useSettleExplaining(
   project: string,
   prs: readonly PullRequest[],
-  stories: Map<string, number>,
+  stories: Map<string, number> | null,
   explaining: ReadonlyMap<string, Explaining>,
 ): number {
   const storyModified = useMemo(() => {
+    // Not loaded yet: nothing to settle against.
+    if (!stories) return null;
     const m = new Map<string, number>();
     for (const p of prs) {
       const modified = stories.get(storyPath(project, p));
@@ -113,7 +121,7 @@ function useSettleExplaining(
   const latest = useRef(storyModified);
   useEffect(() => {
     latest.current = storyModified;
-    settleExplaining(project, storyModified);
+    if (storyModified) settleExplaining(project, storyModified);
   }, [project, storyModified]);
 
   const [now, setNow] = useState(Date.now);
@@ -123,7 +131,7 @@ function useSettleExplaining(
     setNow(Date.now());
     const id = setInterval(() => {
       setNow(Date.now());
-      settleExplaining(project, latest.current);
+      if (latest.current) settleExplaining(project, latest.current);
     }, SETTLE_EVERY_MS);
     return () => clearInterval(id);
   }, [project, waiting]);
@@ -331,12 +339,14 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
     // A PR whose repo is not a slug never reaches a prompt: no controls at all.
     if (!explainable(project, p.repo, p.number)) return null;
     const { launcher } = projectLauncher;
+    // Until the index loads, a PR's story is unknown: nothing may launch (an Explain
+    // over an existing story would be settled by that old file at once).
     const line =
-      blockedReason === null && launcher
+      stories && blockedReason === null && launcher
         ? explainRunLine(launcher, project, p.repo, p.number, lang)
         : null;
     const path = storyPath(project, p);
-    const story = stories.has(path) ? path : null;
+    const story = stories?.has(path) ? path : null;
     const key = prKey(p);
     return (
       <StoryActions
@@ -346,7 +356,9 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
         pending={launching}
         tabbable={tabbable}
         launchTitle={
-          blockedReason ?? `Start ${launcher?.name ?? ""} running pavilio-pr-explain for ${project} ${p.repo}#${p.number}`
+          (stories ? null : LOADING_STORIES) ??
+          blockedReason ??
+          `Start ${launcher?.name ?? ""} running pavilio-pr-explain for ${project} ${p.repo}#${p.number}`
         }
         lang={lang}
         onLang={setLang}
