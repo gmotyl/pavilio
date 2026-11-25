@@ -1528,4 +1528,44 @@ describe("useSpeechHost — the voice language", () => {
     expect(first.langs).toEqual(["en"]);
     expect(first.spoken).toContain("code block");
   });
+
+  it("a new languageFor port is followed from the next arrival", async () => {
+    // The port is read through a mirror synced in an effect: a host re-rendered
+    // with a different function must ask the new one, not the first it saw.
+    const { result, rerender } = renderHook(
+      ({ port }: { port: (sessionId: string) => "pl" | "en" }) =>
+        useSpeechHost({ voiceFor: voiceForSession, languageFor: port, answerWaiting: storeAnswerWaiting }),
+      { initialProps: { port: (_sessionId: string): "pl" | "en" => "en" } },
+    );
+
+    await emitUtterance("cell-a", "a1", ENGLISH, 1_000);
+    expect(preparedOf(result.current, "cell-a").langs).toEqual(["en"]);
+
+    rerender({ port: () => "pl" });
+    await emitUtterance("cell-a", "a2", ENGLISH, 2_000);
+
+    expect(utteranceUnderCursor(result.current.queueFor("cell-a"))?.id).toBe("a2");
+    const second = preparedOf(result.current, "cell-a");
+    expect(second.langs).toEqual(["pl"]);
+    expect(second.spoken).toContain("blok kodu");
+  });
+
+  it("play from here after a voice change reads the units the answer was prepared with", async () => {
+    setVoiceLanguage("en");
+    const { result } = renderHost();
+
+    await emitUtterance("cell-a", "a1", polish(1));
+    const prepared = result.current.unitsFor("cell-a");
+    expect(prepared.map((unit) => unit.text)).toEqual(
+      prepare(polish(1), { language: "en" }).units.map((unit) => unit.text),
+    );
+
+    // Play from here indexes the answer's units through `unitsFor`; after the
+    // switch it must still get the host's English preparation — the same
+    // result, not a Polish re-preparation whose indexes name other units.
+    setVoiceLanguage("pl");
+    const after = result.current.unitsFor("cell-a");
+    expect(after).toBe(prepared);
+    expect(new Set(after.map((unit) => unit.lang))).toEqual(new Set(["en"]));
+  });
 });
