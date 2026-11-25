@@ -306,7 +306,7 @@ describe("PrsView", () => {
       await waitFor(() => expect(vi.mocked(startTaskRun)).toHaveBeenCalledTimes(1));
       expect(vi.mocked(startTaskRun).mock.calls[0][0]).toEqual({
         project: "pavilio",
-        runLine: explainRunLine(CLAUDE, "pavilio", "pavilio", 7),
+        runLine: explainRunLine(CLAUDE, "pavilio", "pavilio", 7, "en"),
       });
       expect(where()).toBe("?view=prs");
     });

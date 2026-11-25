@@ -8,7 +8,7 @@
  * variables (this change, this file, this project) and the launcher's wrapper.
  */
 
-import type { TerminalLauncher } from "../../preferences/declarations";
+import type { StoryLanguage, TerminalLauncher } from "../../preferences/declarations";
 import { resolveRunLoop } from "../agents/launcherRunLoop";
 
 const PROMPT = "{prompt}";
@@ -193,23 +193,32 @@ const EXPLAIN_OBJECTIVE =
   "Read and follow the instructions in skills/pavilio-pr-explain/SKILL.md exactly, for project {project} and PR {repo}#{number}.";
 
 /**
+ * Appended to the Explain objective for a Polish story. English is the
+ * skill's default and is never named, so an `en` line stays as it always was.
+ */
+const POLISH_REQUEST = " Write the story in Polish.";
+
+/**
  * The line an Explain run types for `launcher`: {@link EXPLAIN_OBJECTIVE} —
  * the skill file plus project, repo and PR number — as the start prompt on
  * its own, NOT wrapped in the run loop; like {@link archiveRunLine}, one
- * interactive session. Null when the launcher's run loop is not ready, when
- * `project` or `repo` is not a slug ({@link CHANGE_ID}: they land in a prompt
- * the agent reads), or when `number` is not a positive integer.
+ * interactive session; `lang` `pl` appends {@link POLISH_REQUEST}. Null when
+ * the launcher's run loop is not ready, when `project` or `repo` is not a slug
+ * ({@link CHANGE_ID}: they land in a prompt the agent reads), or when `number`
+ * is not a positive integer.
  */
 export function explainRunLine(
   launcher: TerminalLauncher,
   project: string,
   repo: string,
   number: number,
+  lang: StoryLanguage,
 ): string | null {
   if (!explainable(project, repo, number)) return null;
   const state = resolveRunLoop(launcher);
   if (state.kind !== "ready") return null;
   const vars: Record<string, string> = { project, repo, number: String(number) };
-  const prompt = EXPLAIN_OBJECTIVE.replace(/\{(project|repo|number)\}/g, (_, name: string) => vars[name]);
+  const objective = EXPLAIN_OBJECTIVE.replace(/\{(project|repo|number)\}/g, (_, name: string) => vars[name]);
+  const prompt = lang === "pl" ? `${objective}${POLISH_REQUEST}` : objective;
   return `${head(launcher.command, state.promptFlag)}${inSingleQuotes(prompt)}'`;
 }

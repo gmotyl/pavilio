@@ -190,8 +190,11 @@ export default function PrsView({ project, prs, filter, setFilter, params, setPa
     // A PR whose repo is not a slug never reaches a prompt: no controls at all.
     if (!explainable(project, p.repo, p.number)) return null;
     const { launcher } = projectLauncher;
+    // English until the story-language menu lands; the line is today's.
     const line =
-      blockedReason === null && launcher && !launching ? explainRunLine(launcher, project, p.repo, p.number) : null;
+      blockedReason === null && launcher && !launching
+        ? explainRunLine(launcher, project, p.repo, p.number, "en")
+        : null;
     const path = storyPath(project, p);
     return (
       <StoryActions

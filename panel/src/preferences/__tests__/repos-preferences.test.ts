@@ -59,4 +59,19 @@ describe("repos preferences", () => {
     expect(readPreference(reposView, "pavilio")).toBe("code");
     expect(readPreference(fileViewerDiffLayout)).toBe("split");
   });
+
+  it("storyLanguage falls back to en for unknown values", () => {
+    const { storyLanguage } = preferences;
+    expect(storyLanguage.scope).toBe("global");
+    expect(readPreference(storyLanguage)).toBe("en");
+
+    writePreference(storyLanguage, "pl");
+    expect(readPreference(storyLanguage)).toBe("pl");
+
+    for (const junk of ["de", "PL", "", 42, null, ["pl"], { lang: "pl" }]) {
+      globals.__PAVILIO_PREFS__ = { version: 1, "repos.storyLanguage": junk };
+      __resetPreferenceStoreForTests();
+      expect(readPreference(storyLanguage), JSON.stringify(junk)).toBe("en");
+    }
+  });
 });
