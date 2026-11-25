@@ -730,6 +730,13 @@ describe("PrsView", () => {
         expect(rule(".prs-view .pr-row:has(.pr-hint)")).toMatch(/padding-bottom:\s*calc\([^;]*2 \* 16px[^;]*\)/);
       });
 
+      it("busy story buttons get no hover", () => {
+        // A busy Explain / ↻ / spinner is aria-disabled, not disabled: hover must skip it too.
+        expect(css).toContain(".pr-act:hover:not(:disabled):not([aria-disabled=\"true\"]) {");
+        expect(css).toContain(".pr-act-icon:hover:not(:disabled):not([aria-disabled=\"true\"]) {");
+        expect(css).not.toMatch(/\.pr-act(-icon)?:hover:not\(:disabled\)\s*\{/);
+      });
+
       it("reduced motion stops the spinner rotation", async () => {
         expect(rule(".pr-spin")).toMatch(/animation:\s*pr-spin\b[^;]*infinite/);
         const reduced = atBlock("@media (prefers-reduced-motion: reduce)");

@@ -48,6 +48,19 @@ describe("StoryLanguageMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("closes an open menu when the half becomes disabled", () => {
+    const { rerender } = render(<StoryLanguageMenu lang="en" onPick={() => {}} />);
+    const half = screen.getByRole("button", { name: "Story language: English" });
+    fireEvent.click(half);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    rerender(<StoryLanguageMenu lang="en" onPick={() => {}} disabled />);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(half).toHaveAttribute("aria-expanded", "false");
+    // Re-enabling does not reopen it.
+    rerender(<StoryLanguageMenu lang="en" onPick={() => {}} />);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("backdrop click closes the menu and returns focus to the half", () => {
     const onPick = vi.fn();
     const { container } = render(<StoryLanguageMenu lang="en" onPick={onPick} />);

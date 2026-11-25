@@ -37,6 +37,8 @@ export function StoryLanguageMenu({ lang, onPick, disabled = false, tabIndex, te
   const items = useRef<(HTMLButtonElement | null)[]>([]);
   const menu = useRef<HTMLDivElement>(null);
   const [alignStart, setAlignStart] = useState(false);
+  // A half that turns disabled while its menu is open (its story just started) shuts the menu.
+  if (disabled && open) setOpen(false);
 
   useLayoutEffect(() => {
     if (!open) return setAlignStart(false);

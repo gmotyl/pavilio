@@ -179,7 +179,7 @@
   color: var(--text-primary);
   white-space: nowrap;
 }
-.pr-act:hover:not(:disabled) {
+.pr-act:hover:not(:disabled):not([aria-disabled="true"]) {
   border-color: var(--border-strong);
   background: var(--bg-active);
 }
@@ -197,7 +197,7 @@
   border-radius: 6px;
   color: var(--text-secondary);
 }
-.pr-act-icon:hover:not(:disabled) {
+.pr-act-icon:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--bg-active);
   color: var(--text-primary);
 }
