@@ -34,7 +34,7 @@ import {
   subscribeStandaloneTerminalFocus,
 } from "./standaloneTerminalFocus";
 import { useTerminalDrawerVisible } from "./useTerminalDrawer";
-import { readTerminalFocus, TERMINAL_FOCUS_EVENT } from "./useTerminalSessions";
+import { readTerminalFocus, TERMINAL_FOCUS_EVENT, type SessionMeta } from "./useTerminalSessions";
 
 /** The terminal's answer-waiting store, as the host's port. One object, so its
  *  identity is stable across renders. */
@@ -65,6 +65,31 @@ function isSessionOpen(sessionId: string): boolean {
 /** {@link subscribeSessions} as `useSyncExternalStore` takes it. */
 function subscribeSessionList(onChange: () => void): () => void {
   return subscribeSessions(() => onChange());
+}
+
+/** The last list {@link placementSignature} read, and its signature. */
+let lastPlacement: { sessions: readonly SessionMeta[]; signature: string } | null = null;
+
+/**
+ * Where the session list places each session: its ids with their projects, as
+ * one string. A primitive, so `useSyncExternalStore` compares it by value and a
+ * list that changes something else — a rename, an OSC title (a busy spinner
+ * ticking in it) — gives the same snapshot and no new port. Removing a session
+ * changes it too, and so is a warming pass with nothing new to place; that is
+ * accepted rather than told apart, since the pass is idempotent and re-requests
+ * only what failed or was called off. Memoised by the list's reference, which
+ * the store keeps for an unchanged list, so a read per render does not rebuild
+ * the string.
+ */
+function placementSignature(): string {
+  const sessions = getSessions();
+  if (lastPlacement?.sessions !== sessions) {
+    lastPlacement = {
+      sessions,
+      signature: sessions.map((session) => `${session.id}\u0000${session.project}`).join("\u0001"),
+    };
+  }
+  return lastPlacement.signature;
 }
 
 /** The project's focus, the standalone page's, and every way either changes. */
@@ -98,13 +123,14 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   usePreference(preferences.speechEngine);
   usePreference(preferences.speechCascadeOrder);
   usePrimeOpenaiVoices(speaksWithOpenai());
-  // A new language port each time the session list changes: `languageForSession`
-  // answers `undefined` for a session the list does not hold yet, and the host
-  // takes a new port as the moment to warm what it skipped for that. The list
-  // only notifies on a real change, so this is not a re-render per poll.
-  const sessionList = useSyncExternalStore(subscribeSessionList, getSessions);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- the list is the point: a new list, a new port
-  const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [sessionList]);
+  // A new language port each time a session becomes placed:
+  // `languageForSession` answers `undefined` for a session the list does not
+  // hold yet, and the host takes a new port as the moment to warm what it
+  // skipped for that. Keyed on the placement, not the list, so a rename or a
+  // title change is no warming opportunity.
+  const placement = useSyncExternalStore(subscribeSessionList, placementSignature);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the point: a new placement, a new port
+  const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [placement]);
   return (
     <SpeechHostProvider
       sessionOf={sessionOf}

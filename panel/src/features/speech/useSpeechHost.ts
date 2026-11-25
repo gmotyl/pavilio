@@ -439,11 +439,16 @@ export function useSpeechHost({
   const preparedRef = useRef<Map<string, PreparedSpeech>>(new Map());
   /**
    * Preparations made while the `languageFor` port did not know the key's
-   * language yet (a session not placed in its project), by utterance id. Kept
-   * only so a read per render does not re-prepare and hand out new units each
-   * time; never read once the port answers, and dropped then.
+   * language yet (a session not placed in its project), by utterance id, with
+   * the session they belong to. Kept only so a read per render does not
+   * re-prepare and hand out new units each time; never read once the port
+   * answers, and dropped then — or when the utterance leaves its queue, so a
+   * session killed before it was ever placed does not leave them behind (see
+   * the release effect).
    */
-  const provisionalRef = useRef<Map<string, PreparedSpeech>>(new Map());
+  const provisionalRef = useRef<Map<string, { sessionId: string; prepared: PreparedSpeech }>>(
+    new Map(),
+  );
   /**
    * Each autoplay cell's utterances that autoplay is done with, so none is
    * played twice. One record per cell in autoplay — keyed by session, created
@@ -753,11 +758,11 @@ export function useSpeechHost({
 
       if (language === undefined) {
         const provisional = provisionalRef.current.get(utterance.id);
-        if (provisional) return provisional;
+        if (provisional) return provisional.prepared;
         const made = isDocSpeechKey(utterance.sessionId)
           ? preparePageText(utterance.text, "en")
           : prepare(utterance.text, { language: "en" });
-        provisionalRef.current.set(utterance.id, made);
+        provisionalRef.current.set(utterance.id, { sessionId: utterance.sessionId, prepared: made });
         return made;
       }
       provisionalRef.current.delete(utterance.id);
@@ -1014,18 +1019,28 @@ export function useSpeechHost({
   // the live run is speaking is exempt from that rule: a newer one queueing
   // behind it does not make it any less heard-right-now, and its preloads are
   // the run's lookahead.
+  //
+  // A provisional preparation goes with its utterance's place in the queue
+  // too: nothing reaches it once it is out, and a session killed before the
+  // list ever placed it would otherwise keep it for the page's lifetime.
   useEffect(() => {
+    const isQueued = (sessionId: string, id: string): boolean => {
+      const queue = queueFor(sessionId);
+      return (
+        queue.current?.id === id ||
+        queue.previous.some((utterance) => utterance.id === id) ||
+        queue.pending.some((utterance) => utterance.id === id)
+      );
+    };
+    for (const [id, { sessionId }] of [...provisionalRef.current]) {
+      if (!isQueued(sessionId, id)) provisionalRef.current.delete(id);
+    }
     const newestIds = new Set(
       warmableUtterances.filter((entry) => entry.newest).map((entry) => entry.utterance.id),
     );
     const playingId = runRef.current?.utteranceId;
     for (const [id, { sessionId, preload }] of [...synthesesRef.current]) {
-      const queue = queueFor(sessionId);
-      const queued =
-        queue.current?.id === id ||
-        queue.previous.some((utterance) => utterance.id === id) ||
-        queue.pending.some((utterance) => utterance.id === id);
-      if (!queued || heardFor(sessionId).has(id)) abortUtterance(id);
+      if (!isQueued(sessionId, id) || heardFor(sessionId).has(id)) abortUtterance(id);
       else if (
         preload &&
         (speechModeOf(sessionId) === "off" || (!newestIds.has(id) && id !== playingId))
