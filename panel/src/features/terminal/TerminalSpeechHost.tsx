@@ -12,7 +12,11 @@ import { useCallback, useSyncExternalStore, type ReactNode } from "react";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { CASCADE } from "../speech/engines";
-import { useOpenaiVoicesSnapshot, usePrimeOpenaiVoices } from "../speech/useOpenaiVoices";
+import {
+  type OpenaiVoices,
+  useOpenaiVoicesSnapshot,
+  usePrimeOpenaiVoices,
+} from "../speech/useOpenaiVoices";
 import { getCascadeOrder, getStoredEngine } from "../speech/voices";
 import {
   SpeechHostProvider,
@@ -72,7 +76,8 @@ let lastPlacement: { sessions: readonly SessionMeta[]; signature: string } | nul
 
 /**
  * Where the session list places each session: its ids with their projects, as
- * one string. A primitive, so `useSyncExternalStore` compares it by value and a
+ * one string — JSON of `[id, project]` pairs, so no id or project can run into
+ * the next whatever characters it holds. A primitive, so `useSyncExternalStore` compares it by value and a
  * list that changes something else — a rename, an OSC title (a busy spinner
  * ticking in it) — gives the same snapshot and no new port. Removing a session
  * changes it too, and so is a warming pass with nothing new to place; that is
@@ -86,10 +91,16 @@ function placementSignature(): string {
   if (lastPlacement?.sessions !== sessions) {
     lastPlacement = {
       sessions,
-      signature: sessions.map((session) => `${session.id}\u0000${session.project}`).join("\u0001"),
+      signature: JSON.stringify(sessions.map((session) => [session.id, session.project])),
     };
   }
   return lastPlacement.signature;
+}
+
+/** The OmniVoice list's load state, as the language port's key sees it. */
+function catalogState({ loaded, failed, unreachable }: OpenaiVoices): string {
+  if (!loaded) return "";
+  return failed || unreachable ? "down" : "voices";
 }
 
 /** The project's focus, the standalone page's, and every way either changes. */
@@ -129,9 +140,14 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   // has not named yet, and the host takes a new port as the moment to warm
   // what it skipped for that. Keyed on the placement, not the list, so a
   // rename or a title change is no warming opportunity.
+  //
+  // A load that failed, or found the OmniVoice server down, has landed too: it
+  // settles the language (a saved openai voice it cannot name is dropped, as a
+  // stale one is), so answers are not left unwarmed while the server is away.
+  // A later load that succeeds is a new port again, so the answers after it
+  // are warmed in the voice it names; those already prepared keep their units.
   const placement = useSyncExternalStore(subscribeSessionList, placementSignature);
-  const voicesLoaded = useOpenaiVoicesSnapshot().loaded;
-  const portKey = `${placement}|${voicesLoaded ? "voices" : ""}`;
+  const portKey = `${placement}|${catalogState(useOpenaiVoicesSnapshot())}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the point: a new placement, a new port
   const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [portKey]);
   return (

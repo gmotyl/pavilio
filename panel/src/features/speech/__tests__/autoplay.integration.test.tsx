@@ -2051,4 +2051,51 @@ describe("warming waits for the session to be placed", () => {
     expect(synth.requestVoices.every((voice) => voice === "bill-pl")).toBe(true);
     expect(synth.requestTiers).toEqual(["warm", ...polish.slice(1).map(() => "preload")]);
   });
+
+  it("after a failed catalog load, a later successful load makes new answers Polish; already prepared answers keep their units", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoiceByProject, { vector: { openai: "bill-pl" } });
+    let listAnswers = false;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(OPENAI_VOICES_URL)) {
+        if (!listAnswers) throw new TypeError("Failed to fetch");
+        return jsonResponse(voicesBody([BILL_EN, BILL_PL]));
+      }
+      return { ok: true, json: async () => ({ utterances: [] }) } as Response;
+    }) as unknown as typeof fetch;
+    const LATER = `${shortResponse(3)}\n\n\`\`\`ts\nconst y = 2;\n\`\`\``;
+    const english = prepare(ANSWER, { language: "en" }).units.map((unit) => unit.text);
+    const polish = prepare(LATER, { language: "pl" }).units.map((unit) => unit.text);
+    // Fixture guard: the later answer's language shows in its requested texts.
+    expect(polish).not.toEqual(prepare(LATER, { language: "en" }).units.map((unit) => unit.text));
+
+    await publishSessions(SESSIONS);
+    await renderProjectSurface();
+    await armOnly("cell-a");
+    await emitUtterance("cell-a", "a1", ANSWER);
+
+    // The failed load settles the language: the answer is warmed and preloaded
+    // in English, not held back while the OmniVoice list cannot be read.
+    await waitFor(() => expect(synth.requests).toEqual(english));
+    expect(synth.requestVoices).not.toContain("bill-pl");
+
+    // The list recovers on the next window focus.
+    listAnswers = true;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await drain();
+    });
+    // The recovered load is a warming opportunity, and a1 was already warmed:
+    // nothing is asked again, in either language.
+    expect(synth.requests).toEqual(english);
+
+    const before = synth.requests.length;
+    await emitUtterance("cell-a", "a2", LATER);
+
+    // Exactly a2's Polish units, in bill-pl: a1 keeps its English units, none
+    // of it re-requested in Polish.
+    await waitFor(() => expect(synth.requests.slice(before)).toEqual(polish));
+    expect(synth.requestVoices.slice(before).every((voice) => voice === "bill-pl")).toBe(true);
+    expect(synth.requests.slice(0, before)).toEqual(english);
+  });
 });

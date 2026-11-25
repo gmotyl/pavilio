@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import type { SpeechHostProvider } from "../../speech/SpeechHostProvider";
 
@@ -32,9 +32,9 @@ vi.mock("../useTerminalDrawer", async (importOriginal) => ({
 }));
 
 import { preferences } from "../../../preferences/declarations";
-import { writePreference } from "../../../preferences/store";
+import { clearPreference, writePreference } from "../../../preferences/store";
 import { jsonResponse, stubFetch } from "../../../test-utils";
-import { __resetOpenaiVoicesForTests } from "../../speech/useOpenaiVoices";
+import { __resetOpenaiVoicesForTests, reloadOpenaiVoices } from "../../speech/useOpenaiVoices";
 import { voiceForProject } from "../../speech/voices";
 import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "../../speech/__tests__/openaiVoiceFixtures";
 import { TerminalSpeechHost } from "../TerminalSpeechHost";
@@ -53,6 +53,8 @@ afterEach(() => {
   state.drawerVisible = false;
   publishStandaloneTerminalFocus(null);
   __resetOpenaiVoicesForTests();
+  clearPreference(preferences.speechEngine);
+  clearPreference(preferences.speechVoiceByProject);
   vi.unstubAllGlobals();
 });
 
@@ -132,5 +134,34 @@ describe("TerminalSpeechHost", () => {
     ]);
     render(<TerminalSpeechHost>child</TerminalSpeechHost>);
     await waitFor(() => expect(listed()).toHaveLength(1));
+  });
+  it("a failed OmniVoice load settles the language; a later successful load is a new port", async () => {
+    writePreference(preferences.speechEngine, "openai");
+    writePreference(preferences.speechVoiceByProject, { p: { openai: PL_FEMALE.id } });
+    state.sessions = [{ id: "s1", project: "p", name: "one" }];
+    let answers = false;
+    const fetchMock = stubFetch({
+      [OPENAI_VOICES_URL]: () =>
+        answers ? jsonResponse(voicesBody(LIVE_VOICES)) : jsonResponse({ error: "boom" }, { status: 500 }),
+    });
+    const listed = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(OPENAI_VOICES_URL));
+
+    render(<TerminalSpeechHost>child</TerminalSpeechHost>);
+    const pending = state.props!.languageFor;
+    expect(pending("s1")).toBeUndefined();
+
+    // Failed: the language settles without the saved voice, on a new port.
+    await waitFor(() => expect(state.props!.languageFor).not.toBe(pending));
+    const failed = state.props!.languageFor;
+    expect(failed("s1")).toBe("en");
+
+    // Recovered: a new port again, and the saved voice decides.
+    answers = true;
+    await act(async () => {
+      await reloadOpenaiVoices();
+    });
+    expect(listed().length).toBeGreaterThan(1);
+    expect(state.props!.languageFor).not.toBe(failed);
+    expect(state.props!.languageFor("s1")).toBe("pl");
   });
 });

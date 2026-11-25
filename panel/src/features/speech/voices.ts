@@ -207,7 +207,11 @@ export function voiceFor(engine: string, project?: string): string | undefined {
  * the live list has not loaded. Until it does, every openai id is outside the
  * catalog, so {@link voiceFor} drops it and the voice — and its language — are
  * not known. Once the list has loaded, an id it still lacks is stale, and is
- * dropped as any stale id is; a static catalog is always loaded.
+ * dropped as any stale id is; a static catalog is always loaded. A load that
+ * failed, or found the OmniVoice server down, counts as loaded: the voice
+ * could not speak then, so the language settles without it and answers are
+ * still warmed. A later load that names it decides for the answers after it;
+ * those already prepared keep their units.
  */
 export function isVoiceAwaitingCatalog(engine: string, project: string | undefined): boolean {
   if (engine !== "openai" || openaiVoicesLoaded()) return false;
