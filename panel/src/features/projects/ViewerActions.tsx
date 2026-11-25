@@ -274,6 +274,8 @@ export function SpeakingToolbar({
   // An unfolded bar keeps its Stop whatever the text became: folding is how
   // the run ends.
   const language = useLanguageFor()(speech.key);
+  // Speakability does not depend on the language; passing it only warms the
+  // LRU entry the host will play from.
   const speakable = useMemo(() => pageHasSpeech(speech.text, language), [speech.text, language]);
   const disabled = !open && !speakable;
   const reasonId = useId();

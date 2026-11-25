@@ -505,6 +505,51 @@ describe("PlayFromHere", () => {
     });
   });
 
+  it("a mounted page whose voice language changes starts at the units prepared in the new language", () => {
+    // The same Polish page as above: "obrazek" outgrows "image", so the two
+    // preparations put the last heading at different units.
+    const images = Array.from({ length: 46 }, (_, i) => `![zdjęcie ${i}](a${i}.png)`).join(" ");
+    const polish = [
+      "# Tytuł strony",
+      "",
+      `To jest długi akapit o tym, jak działa nasz system i dlaczego warto go poznać. ${images} Następnie opisujemy, co się dzieje dalej w tej części dokumentu, żeby było jasne. Kolejne zdanie jest tutaj, aby akapit był wystarczająco długi.`,
+      "",
+      "## Następny nagłówek",
+      "",
+      "Krótki akapit po nagłówku.",
+      "",
+    ].join("\n");
+    const englishUnits = prepare(pageSpeechText(polish)).units;
+    const polishUnits = prepare(pageSpeechText(polish), { language: "pl" }).units;
+    const headingOf = (units: typeof polishUnits) => units.findIndex((u) => u.source.includes("Następny nagłówek"));
+    expect(headingOf(polishUnits)).not.toBe(headingOf(englishUnits));
+
+    // First under an English voice...
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? englishUnits : []) });
+    const { container, rerender } = render(<Page text={polish} />);
+    expect(block(container, "Następny nagłówek")).toHaveAttribute(
+      "data-speak-unit",
+      String(headingOf(englishUnits)),
+    );
+
+    // ...then the project's voice becomes Polish while the page stays mounted,
+    // with the same text: only the language changed.
+    pageLanguage = "pl";
+    stub.host = makeSpeech({ unitsFor: (key) => (key === KEY ? polishUnits : []) });
+    act(() => {
+      rerender(<Page text={polish} />);
+    });
+    const heading = block(container, "Następny nagłówek");
+    expect(heading).toHaveAttribute("data-speak-unit", String(headingOf(polishUnits)));
+    fireEvent.mouseOver(heading);
+    fireEvent.click(playOf(container, heading)!);
+    expect(stub.host!.speakDocument).toHaveBeenCalledWith({
+      key: KEY,
+      text: polish,
+      startUnit: headingOf(polishUnits),
+    });
+  });
+
   it("blocks the markdown remounts with the same text get their play button back", async () => {
     const { container } = render(<Page />);
     const old = block(container, "The second example paragraph");
