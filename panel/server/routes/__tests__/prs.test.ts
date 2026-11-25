@@ -360,6 +360,31 @@ describe("/api/prs", () => {
       expect(provider.getPr).toHaveBeenCalledTimes(4);
     });
 
+    it("one: an older provider call finishing last never overwrites the newer cache entry", async () => {
+      const { gh, provider } = setup();
+      const deferred: ((title: string) => void)[] = [];
+      provider.getPr.mockImplementation(
+        (p: string, n: number) =>
+          new Promise((resolve) => {
+            deferred.push((title) => resolve({ ...pr(p, n, "2026-11-22T00:00:00Z"), title, state: "merged" as const }));
+          }),
+      );
+      const app = appFor(provider);
+      const older = request(app).get("/api/prs/one").query(one({ fresh: "1" })).then((r) => r);
+      await vi.waitFor(() => expect(deferred).toHaveLength(1));
+      const newer = request(app).get("/api/prs/one").query(one({ fresh: "1" })).then((r) => r);
+      await vi.waitFor(() => expect(deferred).toHaveLength(2));
+      deferred[1]("newer");
+      expect((await newer).body.title).toBe("newer");
+      deferred[0]("older");
+      expect((await older).body.title).toBe("older");
+      // The cache keeps the newest call's result.
+      const cached = await request(app).get("/api/prs/one").query(one({}));
+      expect(cached.body.title).toBe("newer");
+      expect(provider.getPr).toHaveBeenCalledTimes(2);
+      expect(provider.getPr).toHaveBeenCalledWith(gh, 3);
+    });
+
     it("one: labels the PR with the repos.json name", async () => {
       const { gh, provider } = setup();
       const res = await request(appFor(provider)).get("/api/prs/one").query(one({}));

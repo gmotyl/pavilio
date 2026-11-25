@@ -45,13 +45,17 @@ export function createPrsRouter(
 
   // Per-PR cache for /one, keyed `repoPath#n`; successes only, like the list cache.
   const oneCache = new Map<string, { at: number; pr: PullRequest & { state: PrState } }>();
+  // Latest provider call per key: an older call finishing last must not overwrite a newer result.
+  const oneGeneration = new Map<string, number>();
 
   async function getPr(repoPath: string, n: number, fresh: boolean): Promise<PullRequest & { state: PrState }> {
     const key = `${repoPath}#${n}`;
     const hit = oneCache.get(key);
     if (!fresh && hit && now() - hit.at < CACHE_TTL_MS) return hit.pr;
+    const generation = (oneGeneration.get(key) ?? 0) + 1;
+    oneGeneration.set(key, generation);
     const pr = await provider.getPr(repoPath, n);
-    oneCache.set(key, { at: now(), pr });
+    if (oneGeneration.get(key) === generation) oneCache.set(key, { at: now(), pr });
     return pr;
   }
 
