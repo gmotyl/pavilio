@@ -345,4 +345,26 @@ describe("useBranches", () => {
     await waitFor(() => expect(result.current.local).toEqual(["old"]));
     expect(result.current.current).toBe("old");
   });
+  it("a listing issued before a successful fetch can't land after it", async () => {
+    const { state } = stubServer({ "/r/pre": listing("main", ["main"]) });
+    const { result } = renderHook(() => useBranches("/r/pre"));
+    await waitFor(() => expect(result.current.local).toEqual(["main"]));
+
+    // A pre-fetch listing goes out and stalls.
+    let releaseOld!: () => void;
+    state.lists["/r/pre"] = listing("stale", ["stale"]);
+    state.gates["/r/pre"] = new Promise<void>((r) => (releaseOld = r));
+    act(() => ws.setLast({ type: "git-change" }));
+
+    // The fetch succeeds, but its own re-list fails.
+    delete state.lists["/r/pre"];
+    state.gates["/r/pre"] = undefined;
+    await act(async () => {
+      await result.current.fetch();
+    });
+
+    await act(async () => releaseOld());
+    expect(result.current.local).toEqual(["main"]);
+    expect(result.current.current).toBe("main");
+  });
 });

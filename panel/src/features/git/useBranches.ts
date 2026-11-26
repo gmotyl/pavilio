@@ -37,7 +37,8 @@ export function useBranches(root: string | null) {
   rootRef.current = root;
   // Newest answer wins: a slow answer for a left root, or one older than an
   // answer already applied for this root, is dropped. A failed request does
-  // not advance `applied`, so it never discards an earlier success.
+  // not advance `applied`, so it never discards an earlier success; a
+  // successful fetch raises it past every listing issued before it.
   const seq = useRef(0);
   const applied = useRef(0);
 
@@ -83,6 +84,9 @@ export function useBranches(root: string | null) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || "Fetch failed");
         lastFetch.set(r, Date.now());
+        // Listings issued before the fetch read pre-fetch refs: drop them even if
+        // the re-list below fails. Unrelated failures still keep last-good data.
+        if (rootRef.current === r) applied.current = Math.max(applied.current, seq.current);
         await list(r);
         // Only end this root's fetch; another root's in-flight one stays.
         setFetchState((s) => (s.root === r ? { root: r, fetching: false, error: "" } : s));
