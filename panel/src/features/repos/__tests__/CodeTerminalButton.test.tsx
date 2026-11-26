@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -128,5 +130,35 @@ describe("CodeTerminalButton", () => {
     expect(button()).toHaveAttribute("title", `Open a terminal at ${ROOT}`);
     expect(button()).toHaveTextContent("Terminal");
     expect(button().querySelector("svg")).not.toBeNull();
+  });
+
+  it("terminal button names the session after the repo inside another project", async () => {
+    store.sessions = [session("w1", "woozle", "woozle-api-1"), session("o1", "other", "woozle-api-2")];
+    render(
+      <MemoryRouter initialEntries={["/project/woozle/repos"]}>
+        <CodeTerminalButton project="woozle" root="/x/woozle-api" repoName="woozle-api" />
+      </MemoryRouter>,
+    );
+    await click();
+    expect(createTerminalSession).toHaveBeenCalledWith("woozle", [store.sessions[0]], {
+      cwd: "/x/woozle-api",
+      name: "woozle-api-2",
+    });
+  });
+
+  it("terminal button shows the failure alert when opening throws", async () => {
+    vi.mocked(createTerminalSession).mockRejectedValueOnce(new Error("network down"));
+    renderButton();
+    await click();
+    expect(screen.getByRole("alert")).toHaveTextContent(`Couldn't open a terminal at ${ROOT}`);
+    expect(button()).not.toBeDisabled();
+    expect(button()).toHaveTextContent("Terminal");
+    expect(dispatchTerminalFocus).not.toHaveBeenCalled();
+    expect(path()).toBe("/project/pavilio/repos");
+  });
+
+  it("terminal button shows a focus ring for keyboard focus", () => {
+    const css = readFileSync(resolve("src/features/repos/CodeTerminalButton.css"), "utf8");
+    expect(css).toMatch(/\.cv-term-btn:focus-visible \{[^}]*outline:\s*2px solid var\(--accent\)/);
   });
 });

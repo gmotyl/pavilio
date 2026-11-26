@@ -30,7 +30,8 @@ export function CodeTerminalButton({
     setBusy(true);
     setFailed(false);
     try {
-      const id = await openCodeTerminal({ project, root, repoName });
+      // A rejection (session list or create threw) is a failure like a null create.
+      const id = await openCodeTerminal({ project, root, repoName }).catch(() => null);
       if (id === null) {
         setFailed(true);
         return;

@@ -259,6 +259,51 @@ describe("useBranches", () => {
     expect(result.current.fetching).toBe(false);
   });
 
+  it("a failed fetch for a left root neither ends nor errors the new root's fetch", async () => {
+    const { state } = stubServer({
+      "/r/ea": listing("a-main", ["a-main"]),
+      "/r/eb": listing("b-main", ["b-main"]),
+    });
+    const { result, rerender } = renderHook(({ root }) => useBranches(root), {
+      initialProps: { root: "/r/ea" as string | null },
+    });
+    await waitFor(() => expect(result.current.local).toEqual(["a-main"]));
+
+    // A's fetch will fail; its answer is taken when asked, released by the gate.
+    state.fetchAnswer = { status: 502, body: { error: "could not read from remote" } };
+    let releaseA!: () => void;
+    state.fetchGates["/r/ea"] = new Promise<void>((r) => (releaseA = r));
+    let doneA!: Promise<void>;
+    act(() => {
+      doneA = result.current.fetch();
+    });
+
+    rerender({ root: "/r/eb" });
+    await waitFor(() => expect(result.current.local).toEqual(["b-main"]));
+    state.fetchAnswer = { status: 200, body: { ok: true } };
+    let releaseB!: () => void;
+    state.fetchGates["/r/eb"] = new Promise<void>((r) => (releaseB = r));
+    let doneB!: Promise<void>;
+    act(() => {
+      doneB = result.current.fetch();
+    });
+    expect(result.current.fetching).toBe(true);
+
+    await act(async () => {
+      releaseA();
+      await doneA;
+    });
+    expect(result.current.fetching).toBe(true);
+    expect(result.current.fetchError).toBe("");
+
+    await act(async () => {
+      releaseB();
+      await doneB;
+    });
+    expect(result.current.fetching).toBe(false);
+    expect(result.current.fetchError).toBe("");
+  });
+
   it("an older listing answer for the same root is ignored", async () => {
     const { state } = stubServer({ "/r/seq": listing("main", ["main"]) });
     const { result } = renderHook(() => useBranches("/r/seq"));
