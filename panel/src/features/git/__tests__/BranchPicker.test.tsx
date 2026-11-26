@@ -198,6 +198,34 @@ describe("BranchPicker", () => {
         expect(parseFloat(list().style.maxHeight)).toBeLessThan(300 - 124 - 8);
       }));
 
+    // The footer sits under the scroll list, so its height (~28px) comes out of the list's room too.
+    const footerList = () => screen.getByTestId("bp-footer").previousElementSibling as HTMLElement;
+
+    it("with a footer, flips above when the room below holds the list but not the footer", () =>
+      withViewportHeight(800, async () => {
+        const user = userEvent.setup();
+        render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" footer="Fetched just now" />);
+        const toggle = screen.getByTestId("bp-toggle");
+        // Room below: 800 − 508 − 4 gap − 8 gutter = 280, enough for list + filter (272) only.
+        toggle.getBoundingClientRect = () => rect(600, 700, 488, 508);
+        await user.click(toggle);
+        const pop = screen.getByTestId("bp-popover");
+        expect(pop.style.top).toBe("");
+        expect(pop.style.bottom).toBe(`${800 - 488 + 4}px`);
+        expect(footerList().style.maxHeight).toBe("240px");
+      }));
+
+    it("with a footer, the capped list leaves room for filter and footer inside the viewport", () =>
+      withViewportHeight(300, async () => {
+        const user = userEvent.setup();
+        render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" footer="Fetched just now" />);
+        const toggle = screen.getByTestId("bp-toggle");
+        toggle.getBoundingClientRect = () => rect(600, 700, 100, 120);
+        await user.click(toggle);
+        // Room below: 300 − 120 − 4 − 8 = 168, minus a 32px filter row and a 28px footer.
+        expect(parseFloat(footerList().style.maxHeight)).toBeLessThanOrEqual(168 - 32 - 28);
+      }));
+
     it("follows the trigger when the layout above it shifts while open", async () => {
       const user = userEvent.setup();
       render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" />);

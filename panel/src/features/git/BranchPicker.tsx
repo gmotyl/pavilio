@@ -9,6 +9,8 @@ const GAP = 4;
 const LIST_MAX = 240;
 // Filter row above the list; approximate, only used to size the list to the room left.
 const FILTER_ROW = 32;
+// Footer under the list (one line of small text plus padding); approximate, like FILTER_ROW.
+const FOOTER_ROW = 28;
 
 interface Place {
   /** Exactly one of top (opens below) / bottom (flipped above) is set. */
@@ -23,7 +25,7 @@ interface Place {
  * Fixed-position box under the trigger, flipped above when the room below cannot hold the list
  * and above has more; kept inside the viewport horizontally, list capped to the chosen side's room.
  */
-function placeFor(trigger: DOMRect, align: "left" | "right"): Place {
+function placeFor(trigger: DOMRect, align: "left" | "right", hasFooter: boolean): Place {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const width = Math.max(0, Math.min(POPOVER_WIDTH, vw - 2 * GUTTER));
@@ -31,8 +33,10 @@ function placeFor(trigger: DOMRect, align: "left" | "right"): Place {
   const left = Math.max(GUTTER, Math.min(wanted, vw - GUTTER - width));
   const below = vh - trigger.bottom - GAP - GUTTER;
   const above = trigger.top - GAP - GUTTER;
-  const flip = below < LIST_MAX + FILTER_ROW && above > below;
-  const listMax = Math.max(0, Math.min(LIST_MAX, (flip ? above : below) - FILTER_ROW));
+  // Rows outside the scroll list that share the chosen side's room.
+  const chrome = FILTER_ROW + (hasFooter ? FOOTER_ROW : 0);
+  const flip = below < LIST_MAX + chrome && above > below;
+  const listMax = Math.max(0, Math.min(LIST_MAX, (flip ? above : below) - chrome));
   return flip ? { bottom: vh - trigger.top + GAP, left, width, listMax } : { top: trigger.bottom + GAP, left, width, listMax };
 }
 
@@ -146,6 +150,7 @@ export default function BranchPicker({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  const hasFooter = footer != null;
   // Portalled + fixed so an overflow-clipped or narrow ancestor never cuts the popover off.
   useLayoutEffect(() => {
     if (!open) return;
@@ -155,7 +160,7 @@ export default function BranchPicker({
       const key = r && `${r.top} ${r.bottom} ${r.left} ${r.right} ${window.innerWidth} ${window.innerHeight}`;
       if (r && key !== last) {
         last = key!;
-        setPlace(placeFor(r, align));
+        setPlace(placeFor(r, align, hasFooter));
       }
       return r;
     };
@@ -181,7 +186,7 @@ export default function BranchPicker({
       window.removeEventListener("resize", follow);
       window.removeEventListener("scroll", follow, true);
     };
-  }, [open, align]);
+  }, [open, align, hasFooter]);
 
   useEffect(() => {
     if (open) {
@@ -339,7 +344,7 @@ export default function BranchPicker({
               ))
             )}
           </div>
-          {footer != null && (
+          {hasFooter && (
             <div
               data-testid={`${testIdPrefix}-footer`}
               className="px-2 py-1.5 text-[10px]"
