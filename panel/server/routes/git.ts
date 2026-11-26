@@ -1051,13 +1051,16 @@ interface RemoteBranch {
   name: string;
 }
 
-/** Local heads, and remote branches without a local twin (symbolic refs such as origin/HEAD dropped). */
+/**
+ * Local heads, and remote branches without a local twin (symbolic refs such as origin/HEAD dropped).
+ * `lstrip=2`, not `short`: `short` prefixes `heads/` or `remotes/` when a tag shares the name.
+ */
 async function listLocalAndRemote(cwd: string): Promise<{ local: string[]; remote: RemoteBranch[] }> {
   const lines = async (args: string[]) => (await gitArgv(args, cwd)).toString("utf-8").split("\n").filter(Boolean);
-  const local = await lines(["for-each-ref", "refs/heads", "--format=%(refname:short)"]);
+  const local = await lines(["for-each-ref", "refs/heads", "--format=%(refname:lstrip=2)"]);
   const localSet = new Set(local);
   const remote: RemoteBranch[] = [];
-  for (const line of await lines(["for-each-ref", "refs/remotes", "--format=%(refname:short)%00%(symref)"])) {
+  for (const line of await lines(["for-each-ref", "refs/remotes", "--format=%(refname:lstrip=2)%00%(symref)"])) {
     const [ref, symref] = line.split("\0");
     const slash = ref.indexOf("/");
     if (symref || slash < 0) continue;

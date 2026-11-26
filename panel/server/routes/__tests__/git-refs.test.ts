@@ -628,4 +628,29 @@ describe("GET /branches", () => {
     expect(res.body.branches).toEqual(legacy);
     expect(res.body.branches).toContain("origin");
   });
+
+  it("branches dedupes a remote branch whose local twin shares a name with a tag", async () => {
+    withOrigin();
+    // A tag and a branch both named v1 make `%(refname:short)` answer `heads/v1`.
+    sh("branch -q v1");
+    sh("push -q origin v1");
+    sh("tag v1");
+    sh("fetch -q origin");
+    const res = await get("branches", {});
+    expect(res.status).toBe(200);
+    expect(res.body.local).toContain("v1");
+    expect(res.body.local).not.toContain("heads/v1");
+    const refs = res.body.remote.map((r: { ref: string }) => r.ref);
+    expect(refs).not.toContain("origin/v1");
+  });
+
+  it("branches skips a remote ref with no slash", async () => {
+    withOrigin();
+    sh("update-ref refs/remotes/stray HEAD");
+    // A same-named tag makes `%(refname:short)` answer `remotes/stray`, which has a slash.
+    sh("tag stray");
+    const res = await get("branches", {});
+    expect(res.status).toBe(200);
+    expect(res.body.remote).toEqual([{ ref: "origin/feat/b", remote: "origin", name: "feat/b" }]);
+  });
 });
