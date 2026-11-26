@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { execSync } from "child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { configMock, makeApp } from "../../test-kit";
@@ -172,5 +172,25 @@ describe("GET /branch", () => {
     const res = await branch();
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ branch: "HEAD" });
+  });
+});
+
+describe("POST /checkout outside a git repo", () => {
+  it("tracking checkout on an existing non-git directory answers the same error as plain checkout", async () => {
+    const plain = join(tmp, "not-a-repo");
+    mkdirSync(plain);
+    // GIT_CEILING_DIRECTORIES keeps git from discovering an enclosing repo.
+    vi.stubEnv("GIT_CEILING_DIRECTORIES", tmp);
+    try {
+      const send = (body: Record<string, unknown>) => request(app()).post("/api/git/checkout").send({ repo: plain, ...body });
+      const flat = await send({ branch: "origin/feat/b" });
+      const tracked = await send({ branch: "origin/feat/b", track: true });
+      expect(flat.status).toBe(409);
+      expect(flat.body.error).toMatch(/not a git repository/i);
+      expect(tracked.status).toBe(flat.status);
+      expect(tracked.body.error).toMatch(/not a git repository/i);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

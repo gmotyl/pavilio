@@ -981,13 +981,22 @@ router.get("/grep", async (req, res) => {
 });
 
 // Checkout branch
+/**
+ * Whether git ran and answered "no" (exit 1), as `show-ref --verify --quiet` does for a
+ * missing ref and `symbolic-ref -q` for a plain ref. Exit 128 is fatal (not a repo, bad
+ * config) and must surface as that error, never as "no such ref".
+ */
+function gitAnsweredNo(e: any): boolean {
+  return gitExitedNonZero(e) && e.code === 1;
+}
+
 /** Whether the full ref name exists (`git show-ref --verify`); git's other failures throw. */
 async function refExists(ref: string, cwd: string): Promise<boolean> {
   try {
     await gitArgv(["show-ref", "--verify", "--quiet", ref], cwd);
     return true;
   } catch (e: any) {
-    if (gitExitedNonZero(e)) return false;
+    if (gitAnsweredNo(e)) return false;
     throw e;
   }
 }
@@ -1015,7 +1024,7 @@ async function isSymref(ref: string, cwd: string): Promise<boolean> {
     await gitArgv(["symbolic-ref", "-q", ref], cwd);
     return true;
   } catch (e: any) {
-    if (gitExitedNonZero(e)) return false;
+    if (gitAnsweredNo(e)) return false;
     throw e;
   }
 }
