@@ -173,10 +173,15 @@ function refReadEnv(): NodeJS.ProcessEnv {
   };
 }
 
-async function gitArgv(args: string[], cwd: string, timeout = REF_TIMEOUT_MS): Promise<Buffer> {
+async function gitArgv(
+  args: string[],
+  cwd: string,
+  timeout = REF_TIMEOUT_MS,
+  env: NodeJS.ProcessEnv = refReadEnv(),
+): Promise<Buffer> {
   const { stdout } = await execFileAsync("git", args, {
     cwd,
-    env: refReadEnv(),
+    env,
     encoding: "buffer",
     maxBuffer: REF_MAX_BUFFER,
     timeout,
@@ -729,21 +734,63 @@ router.post("/push", (req, res) => {
   }
 });
 
-// Fetch: refresh remote-tracking refs. With no remote configured git exits 0, so that is a no-op.
+const FETCH_TIMEOUT_MS = 60_000;
+let fetchTimeoutMs = FETCH_TIMEOUT_MS;
+export function _setFetchTimeoutForTests(ms = FETCH_TIMEOUT_MS): void {
+  fetchTimeoutMs = ms;
+}
+
+class FetchTimeoutError extends Error {}
+
+/** Fetches running per repo root; a concurrent request joins the one in flight. Resolves to fetchedAt. */
+const fetching = new Map<string, Promise<number>>();
+
+async function fetchAll(cwd: string): Promise<number> {
+  // No tty to answer a credential, host-key or passphrase prompt: fail instead of hanging.
+  const env: NodeJS.ProcessEnv = { ...refReadEnv(), GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
+  // BatchMode only when nothing else picks the ssh command: a repo's own key setup must survive.
+  const ownSsh =
+    !!env.GIT_SSH_COMMAND ||
+    !!env.GIT_SSH ||
+    (await gitArgv(["config", "--get", "core.sshCommand"], cwd).then(
+      (out) => out.toString("utf-8").trim() !== "",
+      (e) => {
+        if (!gitExitedNonZero(e)) throw e;
+        return false;
+      },
+    ));
+  const ssh = ownSsh ? [] : ["-c", "core.sshCommand=ssh -o BatchMode=yes"];
+  const timeout = fetchTimeoutMs;
+  try {
+    await gitArgv([...ssh, "fetch", "--all", "--prune"], cwd, timeout, env);
+  } catch (e: any) {
+    if (e?.killed) throw new FetchTimeoutError(`git fetch timed out after ${timeout / 1000} s`);
+    throw e;
+  }
+  broadcast({ type: "git-change" });
+  return Date.now();
+}
+
+// Fetch: refresh every remote's tracking refs. With no remote configured git exits 0, so that is a no-op.
 router.post("/fetch", async (req, res) => {
   try {
     const { repo } = req.body || {};
     const cwd = getRepoRoot(repo);
     assertRepoDirectory(cwd);
+    const key = resolve(cwd);
+    let run = fetching.get(key);
+    if (!run) {
+      // Bounded, unlike push: a fetch is a background refresh, and a stuck one would block the next.
+      run = fetchAll(cwd).finally(() => fetching.delete(key));
+      fetching.set(key, run);
+    }
     try {
-      // Same (no) timeout as push: a slow network is not a failure.
-      await gitArgv(["fetch", "--prune"], cwd, WRITE_TIMEOUT_MS);
+      res.json({ ok: true, fetchedAt: await run });
     } catch (e: any) {
+      if (e instanceof FetchTimeoutError) return res.status(504).json({ error: e.message });
       if (!gitExitedNonZero(e)) throw e;
       return res.status(502).json({ error: String(e.stderr ?? "").trim() || e.message });
     }
-    broadcast({ type: "git-change" });
-    res.json({ ok: true, fetchedAt: Date.now() });
   } catch (e: any) {
     sendGitError(res, e);
   }
