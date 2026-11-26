@@ -63,7 +63,11 @@ export function CodeBranchPicker({ changes: g, branches: b, head, onSwitch, vari
       remote={b.remote}
       value={g.branch}
       onChange={(value, meta) => onSwitch(value, { track: !!meta?.remote })}
-      onFetch={(reason) => void b.fetch(reason === "open" ? { ifStaleMs: FETCH_STALE_MS } : undefined)}
+      onFetch={(reason) => {
+        // Reopening mid-fetch must not start a second one.
+        if (reason === "open" && b.fetching) return;
+        void b.fetch(reason === "open" ? { ifStaleMs: FETCH_STALE_MS } : undefined);
+      }}
       fetching={b.fetching}
       footer={footer}
       disabled={!!g.loading}

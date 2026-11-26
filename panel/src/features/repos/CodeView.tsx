@@ -129,7 +129,8 @@ function RootCode({ project, repoName, root, tools, params, setParams, searchReq
   const { files: commitFiles, error: commitError, loading: commitLoading } = useCommitFiles(root, commit?.sha ?? null, attempt);
   const { lastMessage } = useWebSocket();
   // One instance for the toolbar picker and the Changes panel, so a switch from either shows in both.
-  const changes = useGitChanges(root);
+  // The picker lists branches through useBranches, so the flat list is not read here.
+  const changes = useGitChanges(root, { branches: false });
   const branches = useBranches(root);
   const head = useDetachedHead(root, changes.branch === "HEAD", changes.files);
   // The branch the last switch asked for, named in the toolbar's error.

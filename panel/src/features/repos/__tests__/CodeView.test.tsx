@@ -376,6 +376,8 @@ describe("CodeView", () => {
       // No horizontal scroll: the slot may shrink below its content.
       expect(reposCss).toMatch(/\.rt-context \{[^}]*min-width:\s*0/);
       expect(reposCss).toMatch(/\.rt-topbar \{[^}]*flex-wrap:\s*wrap/);
+      // The phone row is only taken when a view portals into the slot (PRs leaves it empty).
+      expect(reposCss).toMatch(/\.rt-context:empty \{[^}]*display:\s*none/);
     });
   });
 });

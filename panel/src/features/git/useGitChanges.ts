@@ -19,9 +19,10 @@ async function mutate(url: string, body: unknown, fallback: string): Promise<voi
 
 /**
  * Working-tree changes of one repo plus the stage / commit / push / checkout
- * actions on it. `repo` undefined targets the workspace repo.
+ * actions on it. `repo` undefined targets the workspace repo. `branches: false`
+ * skips the flat `/api/git/branches` list, for callers listing branches elsewhere.
  */
-export function useGitChanges(repo?: string) {
+export function useGitChanges(repo?: string, { branches: listBranches = true }: { branches?: boolean } = {}) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
@@ -62,6 +63,7 @@ export function useGitChanges(repo?: string) {
   };
 
   const fetchBranches = async () => {
+    if (!listBranches) return;
     try {
       const res = await fetch(`/api/git/branches${qs}`);
       if (res.ok) setBranches((await res.json()).branches);

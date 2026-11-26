@@ -34,6 +34,8 @@ describe("CodeBranchPicker", () => {
   it("code branch trigger shows detached sha", async () => {
     const { fetch } = renderCode("?view=code", { "/api/git/branch?": () => jsonResponse({ branch: "HEAD" }) });
     await waitFor(() => expect(toggle()).toHaveTextContent(`detached ${HEAD_SHA.slice(0, 7)}`));
+    // Exactly the 7-char short sha, never the full one.
+    expect(toggle().textContent).toBe(`⎇ detached ${HEAD_SHA.slice(0, 7)} ▾`);
     expect(toggle()).not.toHaveTextContent("HEAD");
     // The sha is read for the open checkout.
     expect(fetch.mock.calls.some(([u]) => String(u) === `/api/git/resolve?repo=${encodeURIComponent(MAIN)}&ref=HEAD`)).toBe(true);
@@ -130,6 +132,32 @@ describe("CodeBranchPicker", () => {
     await waitFor(() => expect(posts(fetch, "/api/git/fetch")).toHaveLength(3));
   });
 
+  it("opening the picker while a fetch is in flight does not fetch again", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 90 * 60_000);
+    let release!: () => void;
+    const { fetch } = renderCode("?view=code", {
+      "/api/git/fetch": () => new Promise<Response>((r) => (release = () => r(jsonResponse({ ok: true })))),
+    });
+    await openPicker();
+    await waitFor(() => expect(posts(fetch, "/api/git/fetch")).toHaveLength(1));
+    await waitFor(() => expect(within(popover()).getByTestId("code-branch-fetch")).toHaveTextContent("Fetching…"));
+    closePicker();
+    fireEvent.click(toggle());
+    await screen.findByTestId("code-branch-popover");
+    await act(async () => {});
+    expect(posts(fetch, "/api/git/fetch")).toHaveLength(1);
+    await act(async () => release());
+  });
+
+  it("code view mount lists branches once per checkout", async () => {
+    const { fetch } = renderCode("?view=code");
+    await waitFor(() => expect(toggle()).toHaveTextContent("⎇ main ▾"));
+    await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/git/tree"))).toBe(true));
+    await act(async () => {});
+    const listed = fetch.mock.calls.map(([u]) => String(u)).filter((u) => u.startsWith("/api/git/branches"));
+    expect(listed).toEqual([`/api/git/branches?repo=${encodeURIComponent(MAIN)}`]);
+  });
+
   it("picking a remote branch checks out with track", async () => {
     let on = "main";
     const { fetch } = renderCode("?view=code", {
@@ -140,9 +168,13 @@ describe("CodeBranchPicker", () => {
         return jsonResponse({ ok: true, branch: on });
       },
     });
+    const trees = () => fetch.mock.calls.filter(([u]) => String(u) === `/api/git/tree?repo=${encodeURIComponent(MAIN)}`).length;
     const pop = await openPicker();
+    await waitFor(() => expect(trees()).toBe(1));
     fireEvent.click(await within(pop).findByTestId("code-branch-remote-option-origin/feat/story-pr-header"));
     await waitFor(() => expect(posts(fetch, "/api/git/checkout")).toEqual([{ branch: "origin/feat/story-pr-header", repo: MAIN, track: true }]));
+    // The tree reloads for the branch just checked out.
+    await waitFor(() => expect(trees()).toBe(2));
     // The trigger reads the local tracking branch, never the remote ref.
     await waitFor(() => expect(toggle()).toHaveTextContent("⎇ feat/story-pr-header ▾"));
     expect(toggle()).not.toHaveTextContent("origin/");
