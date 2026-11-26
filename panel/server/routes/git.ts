@@ -981,8 +981,34 @@ router.get("/grep", async (req, res) => {
 });
 
 // Checkout branch
+/** Whether the full ref name exists (`git show-ref --verify`); git's other failures throw. */
+async function refExists(ref: string, cwd: string): Promise<boolean> {
+  try {
+    await gitArgv(["show-ref", "--verify", "--quiet", ref], cwd);
+    return true;
+  } catch (e: any) {
+    if (gitExitedNonZero(e)) return false;
+    throw e;
+  }
+}
+
+/**
+ * With `track`, `branch` is a remote ref (`origin/feat/b`): check out its local twin
+ * `feat/b` when one exists (never reset to the remote), else create it tracking the remote.
+ */
+async function checkoutArgs(branch: string, track: boolean, cwd: string): Promise<string[] | null> {
+  // Trailing `--` pins the argument to a branch, never a pathspec.
+  if (!track) return ["checkout", branch, "--"];
+  const slash = branch.indexOf("/");
+  if (slash < 0 || !(await refExists(`refs/remotes/${branch}`, cwd))) return null;
+  const name = branch.slice(slash + 1);
+  if (await refExists(`refs/heads/${name}`, cwd)) return ["checkout", name, "--"];
+  // The leading-dash guard keeps `branch` from parsing as an option.
+  return ["switch", "--track", branch];
+}
+
 router.post("/checkout", async (req, res) => {
-  const { branch, repo } = req.body ?? {};
+  const { branch, repo, track } = req.body ?? {};
   if (typeof branch !== "string" || !branch)
     return res.status(400).json({ error: "branch parameter required" });
   // A leading `-` would be parsed as an option (e.g. --orphan).
@@ -997,8 +1023,9 @@ router.post("/checkout", async (req, res) => {
   }
   try {
     const cwd = getRepoRoot(repo);
-    // Trailing `--` pins the argument to a branch, never a pathspec.
-    const output = (await gitArgv(["checkout", branch, "--"], cwd, WRITE_TIMEOUT_MS)).toString("utf-8");
+    const args = await checkoutArgs(branch, track === true, cwd);
+    if (!args) return res.status(400).json({ error: "unknown remote branch" });
+    const output = (await gitArgv(args, cwd, WRITE_TIMEOUT_MS)).toString("utf-8");
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
     broadcast({ type: "git-change" });
     res.json({ ok: true, branch: current, output: output.trim() });
