@@ -156,3 +156,21 @@ describe("POST /checkout with track", () => {
     expect(sh("branch --list x")).toBe("");
   });
 });
+
+describe("GET /branch", () => {
+  const branch = () => request(app()).get(`/api/git/branch?repo=${encodeURIComponent(repoDir)}`);
+
+  it("branch reports the plain name when a tag shares it", async () => {
+    sh("tag main main");
+    const res = await branch();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ branch: "main" });
+  });
+
+  it("branch reports HEAD when detached", async () => {
+    sh("checkout -q --detach main");
+    const res = await branch();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ branch: "HEAD" });
+  });
+});

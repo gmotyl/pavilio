@@ -922,11 +922,11 @@ router.post("/clone", async (req, res) => {
 });
 
 // Branch info
-router.get("/branch", (req, res) => {
+router.get("/branch", async (req, res) => {
   try {
-    const repo = req.query.repo as string | undefined;
-    const branch = git("rev-parse --abbrev-ref HEAD", repo).trim();
-    res.json({ branch });
+    const cwd = getRepoRoot(req.query.repo as string | undefined);
+    assertRepoDirectory(cwd);
+    res.json({ branch: await currentBranch(cwd) });
   } catch (e: any) {
     sendGitError(res, e);
   }
