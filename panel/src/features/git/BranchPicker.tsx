@@ -9,7 +9,8 @@ const GAP = 4;
 const LIST_MAX = 240;
 // Filter row above the list; approximate, only used to size the list to the room left.
 const FILTER_ROW = 32;
-// Footer under the list (one line of small text plus padding); approximate, like FILTER_ROW.
+// Footer under the list (one line of small text plus padding). Only a fallback until the
+// rendered footer is measured: its text can wrap to several lines in a narrow popover.
 const FOOTER_ROW = 28;
 
 interface Place {
@@ -25,7 +26,7 @@ interface Place {
  * Fixed-position box under the trigger, flipped above when the room below cannot hold the list
  * and above has more; kept inside the viewport horizontally, list capped to the chosen side's room.
  */
-function placeFor(trigger: DOMRect, align: "left" | "right", hasFooter: boolean): Place {
+function placeFor(trigger: DOMRect, align: "left" | "right", footerHeight: number): Place {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const width = Math.max(0, Math.min(POPOVER_WIDTH, vw - 2 * GUTTER));
@@ -34,7 +35,7 @@ function placeFor(trigger: DOMRect, align: "left" | "right", hasFooter: boolean)
   const below = vh - trigger.bottom - GAP - GUTTER;
   const above = trigger.top - GAP - GUTTER;
   // Rows outside the scroll list that share the chosen side's room.
-  const chrome = FILTER_ROW + (hasFooter ? FOOTER_ROW : 0);
+  const chrome = FILTER_ROW + footerHeight;
   const flip = below < LIST_MAX + chrome && above > below;
   const listMax = Math.max(0, Math.min(LIST_MAX, (flip ? above : below) - chrome));
   return flip ? { bottom: vh - trigger.top + GAP, left, width, listMax } : { top: trigger.bottom + GAP, left, width, listMax };
@@ -105,6 +106,7 @@ export default function BranchPicker({
   const [place, setPlace] = useState<Place | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(
     () => (filter ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())) : branches),
@@ -157,10 +159,13 @@ export default function BranchPicker({
     let last = "";
     const place = () => {
       const r = triggerRef.current?.getBoundingClientRect();
-      const key = r && `${r.top} ${r.bottom} ${r.left} ${r.right} ${window.innerWidth} ${window.innerHeight}`;
+      // The footer renders only once placed, so the first pass uses FOOTER_ROW.
+      const measured = footerRef.current?.getBoundingClientRect().height;
+      const footerHeight = hasFooter ? measured || FOOTER_ROW : 0;
+      const key = r && `${r.top} ${r.bottom} ${r.left} ${r.right} ${window.innerWidth} ${window.innerHeight} ${footerHeight}`;
       if (r && key !== last) {
         last = key!;
-        setPlace(placeFor(r, align, hasFooter));
+        setPlace(placeFor(r, align, footerHeight));
       }
       return r;
     };
@@ -346,6 +351,7 @@ export default function BranchPicker({
           </div>
           {hasFooter && (
             <div
+              ref={footerRef}
               data-testid={`${testIdPrefix}-footer`}
               className="px-2 py-1.5 text-[10px]"
               style={{ color: "var(--text-muted)", borderTop: "1px solid var(--border-subtle)" }}

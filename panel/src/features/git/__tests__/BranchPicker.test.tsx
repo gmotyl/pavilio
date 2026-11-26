@@ -198,7 +198,7 @@ describe("BranchPicker", () => {
         expect(parseFloat(list().style.maxHeight)).toBeLessThan(300 - 124 - 8);
       }));
 
-    // The footer sits under the scroll list, so its height (~28px) comes out of the list's room too.
+    // The footer sits under the scroll list, so its measured height comes out of the list's room too.
     const footerList = () => screen.getByTestId("bp-footer").previousElementSibling as HTMLElement;
 
     it("with a footer, flips above when the room below holds the list but not the footer", () =>
@@ -224,6 +224,25 @@ describe("BranchPicker", () => {
         await user.click(toggle);
         // Room below: 300 − 120 − 4 − 8 = 168, minus a 32px filter row and a 28px footer.
         expect(parseFloat(footerList().style.maxHeight)).toBeLessThanOrEqual(168 - 32 - 28);
+      }));
+
+    it("with a footer that wraps, the capped list leaves room for filter and the measured footer", () =>
+      withViewportHeight(300, async () => {
+        const real = HTMLElement.prototype.getBoundingClientRect;
+        const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+          return this.dataset.testid === "bp-footer" ? rect(600, 700, 0, 44) : real.call(this);
+        });
+        try {
+          const user = userEvent.setup();
+          render(<BranchPicker branches={branches} value="main" onChange={() => {}} testIdPrefix="bp" footer="Fetched just now" />);
+          const toggle = screen.getByTestId("bp-toggle");
+          toggle.getBoundingClientRect = () => rect(600, 700, 100, 120);
+          await user.click(toggle);
+          // Room below: 300 − 120 − 4 − 8 = 168, minus a 32px filter row and the 44px footer it measured.
+          await waitFor(() => expect(parseFloat(footerList().style.maxHeight)).toBeLessThanOrEqual(168 - 32 - 44));
+        } finally {
+          spy.mockRestore();
+        }
       }));
 
     it("follows the trigger when the layout above it shifts while open", async () => {
