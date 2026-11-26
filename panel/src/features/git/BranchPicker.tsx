@@ -68,8 +68,8 @@ interface BranchPickerProps {
   disabled?: boolean;
   /** Grouped mode: when given, the list shows a Local group then one "Remote · <remote>" group per remote. */
   remote?: RemoteBranch[];
-  /** Shows a "↻ Fetch" button in the filter row; also called once each time the popover opens. */
-  onFetch?: () => void;
+  /** Shows a "↻ Fetch" button in the filter row (`"button"`); also called once each time the popover opens (`"open"`). */
+  onFetch?: (reason: "open" | "button") => void;
   /** A fetch is running: the Fetch button reads "Fetching…" and is disabled. */
   fetching?: boolean;
   /** Rendered under the list. */
@@ -130,7 +130,7 @@ export default function BranchPicker({
 
   const onFetchRef = useRef(onFetch);
   useEffect(() => { onFetchRef.current = onFetch; });
-  useEffect(() => { if (open) onFetchRef.current?.(); }, [open]);
+  useEffect(() => { if (open) onFetchRef.current?.("open"); }, [open]);
 
   useEffect(() => { setHighlightIdx(0); }, [filter]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
@@ -280,7 +280,7 @@ export default function BranchPicker({
               <button
                 type="button"
                 data-testid={`${testIdPrefix}-fetch`}
-                onClick={() => onFetch()}
+                onClick={() => onFetch("button")}
                 disabled={fetching}
                 className="text-[10px] rounded px-1.5 py-0.5 shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                 style={{ color: "var(--text-muted)", border: "1px solid var(--border-subtle)", background: "transparent" }}

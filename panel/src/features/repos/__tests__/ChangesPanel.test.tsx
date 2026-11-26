@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse, type FetchHandler } from "../../../test-utils";
-import { calls, DrivenResizeObserver, MAIN, renderCode } from "./codeHarness";
+import { branchListing, calls, DrivenResizeObserver, MAIN, renderCode } from "./codeHarness";
 
 const outline = () => screen.queryByRole("complementary", { name: "Outline" });
 const panel = () => screen.queryByRole("complementary", { name: "Changes" });
@@ -15,7 +15,7 @@ function committing() {
   let committed = false;
   const routes: Record<string, FetchHandler> = {
     "/api/git/suggest-message": () => jsonResponse({ suggestion: "chore: tweak a" }),
-    "/api/git/branches": () => jsonResponse({ current: "main", branches: ["main", "feat/y"] }),
+    "/api/git/branches": () => jsonResponse({ current: "main", branches: ["main", "feat/y"], local: ["main", "feat/y"], remote: [] }),
     "/api/git/branch?": () => jsonResponse({ branch: "main" }),
     "/api/git/stage": () => jsonResponse({ ok: true }),
     "/api/git/commit": () => {
@@ -140,5 +140,77 @@ describe("ChangesPanel", () => {
     await waitFor(() => expect(branch).toBeDisabled());
     release();
     await waitFor(() => expect(branch).toBeEnabled());
+  });
+
+  it("toolbar checkout error shows once when the Changes panel is open", async () => {
+    const routes = committing();
+    routes["/api/git/branches"] = () => jsonResponse(branchListing(MAIN));
+    routes["/api/git/checkout"] = () => jsonResponse({ error: "your local changes would be overwritten" }, { status: 409 });
+    renderCode("?view=code", routes);
+    fireEvent.click(await screen.findByTestId("code-changes-toggle"));
+    const p = await waitFor(() => panel()!);
+    const picker = screen.getByTestId("code-branch-toggle");
+    await waitFor(() => expect(picker).toHaveTextContent("main"));
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByTestId("code-branch-option-feat/x"));
+
+    expect(await within(p).findByRole("alert")).toHaveTextContent("your local changes would be overwritten");
+    expect(screen.queryByTestId("code-checkout-error")).toBeNull();
+    expect(screen.getAllByText(/your local changes would be overwritten/)).toHaveLength(1);
+
+    // Closing the panel hands the same error to the toolbar alert.
+    fireEvent.click(toggle());
+    expect(await screen.findByTestId("code-checkout-error")).toHaveTextContent("Couldn't switch to feat/x: your local changes would be overwritten");
+    expect(screen.getAllByText(/your local changes would be overwritten/)).toHaveLength(1);
+  });
+
+  it("toolbar switch updates the open Changes panel", async () => {
+    let on = "main";
+    const routes = committing();
+    routes["/api/git/branches"] = () => jsonResponse(branchListing(MAIN, ["main", "feat/y"]));
+    routes["/api/git/branch?"] = () => jsonResponse({ branch: on });
+    routes["/api/git/checkout"] = (_u, init) => {
+      on = JSON.parse(String(init!.body)).branch;
+      return jsonResponse({ ok: true, branch: on });
+    };
+    routes[`/api/git/status?repo=${encodeURIComponent(MAIN)}`] = () =>
+      jsonResponse(on === "main" ? [{ status: "M", path: "src/a.ts" }] : [{ status: "??", path: "src/new.ts" }]);
+    const { fetch } = renderCode("?view=code", routes);
+    fireEvent.click(await screen.findByTestId("code-changes-toggle"));
+    const p = await waitFor(() => panel()!);
+    await within(p).findByTestId("changes-file-src/a.ts");
+    expect(within(p).getByTestId("changes-branch-toggle")).toHaveTextContent("main");
+
+    fireEvent.click(screen.getByTestId("code-branch-toggle"));
+    fireEvent.click(await screen.findByTestId("code-branch-option-feat/y"));
+    await waitFor(() => expect(posts(fetch, "/api/git/checkout")).toEqual([{ branch: "feat/y", repo: MAIN }]));
+
+    await waitFor(() => expect(within(p).getByTestId("changes-branch-toggle")).toHaveTextContent("feat/y"));
+    expect(await within(p).findByTestId("changes-file-src/new.ts")).toBeInTheDocument();
+    expect(within(p).queryByTestId("changes-file-src/a.ts")).toBeNull();
+    expect(screen.getByTestId("code-branch-toggle")).toHaveTextContent("⎇ feat/y ▾");
+  });
+
+  it("changes panel branch label opens the grouped picker", async () => {
+    let on = "main";
+    const routes = committing();
+    routes["/api/git/branches"] = () => jsonResponse(branchListing(MAIN));
+    routes["/api/git/branch?"] = () => jsonResponse({ branch: on });
+    routes["/api/git/checkout"] = () => jsonResponse({ ok: true, branch: (on = "feat/story-pr-header") });
+    const { fetch } = renderCode("?view=code", routes);
+    fireEvent.click(await screen.findByTestId("code-changes-toggle"));
+    const p = await waitFor(() => panel()!);
+    fireEvent.click(await within(p).findByTestId("changes-branch-toggle"));
+
+    const pop = await screen.findByTestId("changes-branch-popover");
+    expect(within(pop).getByTestId("changes-branch-group-local")).toHaveTextContent("Local");
+    expect(within(pop).getByTestId("changes-branch-group-remote-origin")).toHaveTextContent("Remote · origin");
+    expect(within(pop).getByTestId("changes-branch-option-main")).toHaveTextContent("current");
+    expect(within(pop).getByTestId("changes-branch-fetch")).toBeInTheDocument();
+    expect(within(pop).getByTestId("changes-branch-footer")).toHaveTextContent("a remote branch becomes a local tracking branch");
+
+    fireEvent.click(within(pop).getByTestId("changes-branch-remote-option-origin/feat/story-pr-header"));
+    await waitFor(() => expect(posts(fetch, "/api/git/checkout")).toEqual([{ branch: "origin/feat/story-pr-header", repo: MAIN, track: true }]));
+    await waitFor(() => expect(within(p).getByTestId("changes-branch-toggle")).toHaveTextContent("feat/story-pr-header"));
   });
 });

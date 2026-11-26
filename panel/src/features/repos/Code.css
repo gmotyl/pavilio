@@ -24,6 +24,46 @@
   font-size: 12px;
   color: var(--text-tertiary);
 }
+/* Toolbar after the switcher: the open checkout's branch picker, then Terminal (CodeTerminalButton.css). */
+.cv-ctx-tools { display: contents; }
+.cv-br { flex-shrink: 0; margin-left: 8px; }
+.cv-br-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: 12px var(--font-mono, monospace);
+  cursor: pointer;
+}
+.cv-br-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.cv-br-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cv-br-btn:disabled { opacity: 0.6; cursor: default; }
+.cv-br-name { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-br-err { color: var(--red); }
+/* A failed switch with the Changes panel closed; an open panel shows it in its own alert. */
+.cv-checkout-err {
+  margin: 8px 10px;
+  padding: 6px 8px;
+  max-width: 76ch;
+  border-left: 3px solid var(--red);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  color: var(--red);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cv-checkout-err button { margin-left: 6px; color: var(--accent); }
+/* Phones: the path gives way so the picker and Terminal stay in view. */
+@media (max-width: 767px) {
+  .cv-sw-btn { overflow: hidden; }
+  .cv-sw-btn .pr-repo ~ .cv-sw-path { display: none; }
+  .cv-sw-btn .cv-sw-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cv-br-name { max-width: 120px; }
+}
 .cv-sw-pop {
   position: absolute;
   top: calc(100% + 6px);

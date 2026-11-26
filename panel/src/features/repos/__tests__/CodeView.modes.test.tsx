@@ -129,12 +129,15 @@ describe("CodeView modes", () => {
   it("an open switcher lists branches once across re-renders", async () => {
     const { fetch } = renderCode("?view=code", history);
     await screen.findByTestId("ft-file-README.md");
+    // The toolbar's branch picker lists this checkout too; count only what the switcher adds.
+    await screen.findByTestId("code-branch-toggle");
+    const before = calls(fetch, `/api/git/branches?repo=${q(MAIN)}`).length;
     fireEvent.click(screen.getByTestId("repo-switcher"));
-    await waitFor(() => expect(calls(fetch, `/api/git/branches?repo=${q(MAIN)}`)).toHaveLength(1));
+    await waitFor(() => expect(calls(fetch, `/api/git/branches?repo=${q(MAIN)}`)).toHaveLength(before + 1));
 
     fireEvent.click(screen.getByTestId("ft-file-README.md"));
     await waitFor(() => expect(screen.getByTestId("file-viewer-header")).toHaveTextContent("README.md"));
-    expect(calls(fetch, `/api/git/branches?repo=${q(MAIN)}`)).toHaveLength(1);
+    expect(calls(fetch, `/api/git/branches?repo=${q(MAIN)}`)).toHaveLength(before + 1);
   });
 
   it("a commit whose files can't be listed says so in the tree", async () => {

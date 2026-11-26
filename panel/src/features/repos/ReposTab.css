@@ -46,6 +46,10 @@
   flex: 1;
   min-width: 0;
 }
+/* Phones: the slot takes its own row instead of squeezing beside the pills. */
+@media (max-width: 767px) {
+  .rt-context { flex-basis: 100%; }
+}
 .rt-body { min-width: 0; }
 .rt-placeholder {
   padding: 12px;
