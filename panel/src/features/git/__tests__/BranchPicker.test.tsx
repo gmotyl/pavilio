@@ -223,4 +223,130 @@ describe("BranchPicker", () => {
       expect(screen.queryByTestId("bp-popover")).toBeNull();
     });
   });
+  describe("grouped mode", () => {
+    const local = ["main", "develop"];
+    const remote = [
+      { ref: "origin/feat/story-pr-header", remote: "origin", name: "feat/story-pr-header" },
+      { ref: "origin/fix/story-index-retry", remote: "origin", name: "fix/story-index-retry" },
+      { ref: "origin/kilo/story-lint", remote: "origin", name: "kilo/story-lint" },
+      { ref: "upstream/main-next", remote: "upstream", name: "main-next" },
+    ];
+    const open = async (props: Partial<React.ComponentProps<typeof BranchPicker>> = {}) => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<BranchPicker branches={local} remote={remote} value="main" onChange={onChange} testIdPrefix="bp" {...props} />);
+      await user.click(screen.getByTestId("bp-toggle"));
+      return { user, onChange };
+    };
+    const rowsInOrder = () =>
+      Array.from(screen.getByTestId("bp-popover").querySelectorAll("[data-testid]"))
+        .map((el) => el.getAttribute("data-testid")!)
+        .filter((id) => id.startsWith("bp-option-") || id.startsWith("bp-remote-option-") || id.startsWith("bp-group-"));
+
+    it("grouped picker renders Local then Remote · origin headings with counts", async () => {
+      await open();
+      expect(screen.getByTestId("bp-group-local")).toHaveTextContent("Local");
+      expect(screen.getByTestId("bp-group-local-count")).toHaveTextContent("2");
+      expect(screen.getByTestId("bp-group-remote-origin")).toHaveTextContent("Remote · origin");
+      expect(screen.getByTestId("bp-group-remote-origin-count")).toHaveTextContent("3");
+      expect(screen.getByTestId("bp-group-remote-upstream")).toHaveTextContent("Remote · upstream");
+      expect(screen.getByTestId("bp-group-remote-upstream-count")).toHaveTextContent("1");
+      expect(rowsInOrder()).toEqual([
+        "bp-group-local", "bp-group-local-count", "bp-option-main", "bp-option-develop",
+        "bp-group-remote-origin", "bp-group-remote-origin-count",
+        "bp-remote-option-origin/feat/story-pr-header", "bp-remote-option-origin/fix/story-index-retry", "bp-remote-option-origin/kilo/story-lint",
+        "bp-group-remote-upstream", "bp-group-remote-upstream-count", "bp-remote-option-upstream/main-next",
+      ]);
+    });
+
+    it("grouped picker marks the current local branch", async () => {
+      await open();
+      const cur = screen.getByTestId("bp-option-main");
+      expect(cur).toHaveTextContent("current");
+      expect(cur.style.color).toBe("var(--accent)");
+      const other = screen.getByTestId("bp-option-develop");
+      expect(other).not.toHaveTextContent("current");
+      expect(other.style.color).not.toBe("var(--accent)");
+    });
+
+    it("grouped picker remote rows read origin/name with a + track hint", async () => {
+      await open();
+      const row = screen.getByTestId("bp-remote-option-origin/kilo/story-lint");
+      expect(row.querySelector(".truncate")).toHaveTextContent(/^origin\/kilo\/story-lint$/);
+      expect(row).toHaveTextContent("+ track");
+      expect(row).toHaveAttribute("title", "origin/kilo/story-lint");
+    });
+
+    it("grouped picker filters both groups and hides empty headings", async () => {
+      const { user } = await open();
+      await user.type(screen.getByPlaceholderText("Filter branches..."), "story");
+      expect(screen.queryByTestId("bp-group-local")).toBeNull();
+      expect(screen.queryByTestId("bp-option-main")).toBeNull();
+      expect(screen.getByTestId("bp-group-remote-origin-count")).toHaveTextContent("3");
+      expect(screen.queryByTestId("bp-group-remote-upstream")).toBeNull();
+      await user.clear(screen.getByPlaceholderText("Filter branches..."));
+      await user.type(screen.getByPlaceholderText("Filter branches..."), "main");
+      expect(screen.getByTestId("bp-group-local-count")).toHaveTextContent("1");
+      expect(screen.getByTestId("bp-option-main")).toBeInTheDocument();
+      expect(screen.queryByTestId("bp-group-remote-origin")).toBeNull();
+      expect(screen.getByTestId("bp-group-remote-upstream-count")).toHaveTextContent("1");
+    });
+
+    it("grouped picker keyboard runs across groups and reports remote picks", async () => {
+      const { user, onChange } = await open();
+      await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowUp}{ArrowDown}{Enter}");
+      expect(onChange).toHaveBeenLastCalledWith("origin/fix/story-index-retry", { remote: true });
+      await user.click(screen.getByTestId("bp-toggle"));
+      await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowDown}{Enter}");
+      expect(onChange).toHaveBeenLastCalledWith("develop", { remote: false });
+      await user.click(screen.getByTestId("bp-toggle"));
+      await user.click(screen.getByTestId("bp-remote-option-upstream/main-next"));
+      expect(onChange).toHaveBeenLastCalledWith("upstream/main-next", { remote: true });
+    });
+
+    it("grouped picker Fetch button shows Fetching while fetching and fetches on open", async () => {
+      const onFetch = vi.fn();
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <BranchPicker branches={local} remote={remote} value="main" onChange={() => {}} testIdPrefix="bp" onFetch={onFetch} />
+      );
+      expect(onFetch).not.toHaveBeenCalled();
+      await user.click(screen.getByTestId("bp-toggle"));
+      expect(onFetch).toHaveBeenCalledTimes(1);
+      const btn = screen.getByTestId("bp-fetch");
+      expect(btn).toHaveTextContent("↻ Fetch");
+      expect(btn).toBeEnabled();
+      expect(btn.parentElement).toBe(screen.getByPlaceholderText("Filter branches...").parentElement);
+      await user.click(btn);
+      expect(onFetch).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("bp-popover")).toBeInTheDocument();
+      rerender(
+        <BranchPicker branches={local} remote={remote} value="main" onChange={() => {}} testIdPrefix="bp" onFetch={onFetch} fetching />
+      );
+      expect(screen.getByTestId("bp-fetch")).toHaveTextContent("Fetching…");
+      expect(screen.getByTestId("bp-fetch")).toBeDisabled();
+      expect(onFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("grouped picker renders the footer", async () => {
+      await open({ footer: "Fetched 12 s ago · a remote branch becomes a local tracking branch" });
+      const foot = screen.getByTestId("bp-footer");
+      expect(foot).toHaveTextContent("Fetched 12 s ago · a remote branch becomes a local tracking branch");
+      expect(screen.getByTestId("bp-popover").lastElementChild).toBe(foot);
+    });
+
+    it("flat picker is unchanged without remote", async () => {
+      const user = userEvent.setup();
+      render(<BranchPicker branches={local} value="main" onChange={() => {}} testIdPrefix="bp" />);
+      await user.click(screen.getByTestId("bp-toggle"));
+      const pop = screen.getByTestId("bp-popover");
+      expect(pop.querySelector("[data-testid^='bp-group-']")).toBeNull();
+      expect(screen.queryByTestId("bp-fetch")).toBeNull();
+      expect(screen.queryByTestId("bp-footer")).toBeNull();
+      const list = pop.lastElementChild as HTMLElement;
+      expect(Array.from(list.children).map((c) => c.getAttribute("data-testid"))).toEqual(["bp-option-main", "bp-option-develop"]);
+      expect(screen.getByTestId("bp-option-main")).not.toHaveTextContent("current");
+      expect(screen.getByTestId("bp-option-main").textContent).toBe("main");
+    });
+  });
 });

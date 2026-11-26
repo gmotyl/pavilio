@@ -1,6 +1,7 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Fragment, useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Search } from "lucide-react";
+import type { RemoteBranch } from "./branchTypes";
 
 const POPOVER_WIDTH = 320;
 const GUTTER = 8;
@@ -35,10 +36,22 @@ function placeFor(trigger: DOMRect, align: "left" | "right"): Place {
   return flip ? { bottom: vh - trigger.top + GAP, left, width, listMax } : { top: trigger.bottom + GAP, left, width, listMax };
 }
 
+/** One selectable row in display order; `remote` says which group it came from. */
+interface Row {
+  value: string;
+  remote: boolean;
+}
+
+interface RemoteGroup {
+  remote: string;
+  rows: RemoteBranch[];
+}
+
 interface BranchPickerProps {
   branches: string[];
   value: string;
-  onChange: (branch: string) => void;
+  /** `meta.remote` is set in grouped mode (when `remote` is given) and says which group the pick came from. */
+  onChange: (branch: string, meta?: { remote: boolean }) => void;
   /** Align dropdown left or right (default: right) */
   align?: "left" | "right";
   /** Placeholder when no value selected */
@@ -53,6 +66,14 @@ interface BranchPickerProps {
   testIdPrefix?: string;
   /** Blocks opening while another git mutation is in flight. */
   disabled?: boolean;
+  /** Grouped mode: when given, the list shows a Local group then one "Remote · <remote>" group per remote. */
+  remote?: RemoteBranch[];
+  /** Shows a "↻ Fetch" button in the filter row; also called once each time the popover opens. */
+  onFetch?: () => void;
+  /** A fetch is running: the Fetch button reads "Fetching…" and is disabled. */
+  fetching?: boolean;
+  /** Rendered under the list. */
+  footer?: React.ReactNode;
 }
 
 export default function BranchPicker({
@@ -66,6 +87,10 @@ export default function BranchPicker({
   triggerStyle,
   testIdPrefix = "branch-picker",
   disabled = false,
+  remote,
+  onFetch,
+  fetching = false,
+  footer,
 }: BranchPickerProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -81,6 +106,32 @@ export default function BranchPicker({
     () => (filter ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())) : branches),
     [branches, filter]
   );
+
+  const remoteGroups = useMemo<RemoteGroup[]>(() => {
+    if (!remote) return [];
+    const needle = filter.toLowerCase();
+    const groups: RemoteGroup[] = [];
+    for (const r of remote) {
+      let g = groups.find((x) => x.remote === r.remote);
+      if (!g) groups.push((g = { remote: r.remote, rows: [] }));
+      if (!needle || r.ref.toLowerCase().includes(needle)) g.rows.push(r);
+    }
+    return groups.filter((g) => g.rows.length > 0);
+  }, [remote, filter]);
+
+  // Every selectable row in display order, so keyboard navigation runs across groups.
+  // `branches` can still be unset while a caller's first fetch is in flight (it was only read once open).
+  const rows = useMemo<Row[]>(
+    () => [
+      ...(filtered ?? []).map((b) => ({ value: b, remote: false })),
+      ...remoteGroups.flatMap((g) => g.rows.map((r) => ({ value: r.ref, remote: true }))),
+    ],
+    [filtered, remoteGroups]
+  );
+
+  const onFetchRef = useRef(onFetch);
+  useEffect(() => { onFetchRef.current = onFetch; });
+  useEffect(() => { if (open) onFetchRef.current?.(); }, [open]);
 
   useEffect(() => { setHighlightIdx(0); }, [filter]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
@@ -142,18 +193,42 @@ export default function BranchPicker({
 
   useEffect(() => {
     if (!open || !listRef.current) return;
-    const item = listRef.current.children[highlightIdx] as HTMLElement | undefined;
+    const item = listRef.current.querySelectorAll("button")[highlightIdx] as HTMLElement | undefined;
     item?.scrollIntoView({ block: "nearest" });
   }, [highlightIdx, open]);
 
-  const select = (b: string) => { onChange(b); setOpen(false); };
+  const select = (row: Row) => {
+    if (remote) onChange(row.value, { remote: row.remote });
+    else onChange(row.value);
+    setOpen(false);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { setOpen(false); return; }
-    if (e.key === "ArrowDown") { e.preventDefault(); setHighlightIdx((i) => Math.min(i + 1, filtered.length - 1)); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setHighlightIdx((i) => Math.min(i + 1, rows.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setHighlightIdx((i) => Math.max(i - 1, 0)); }
-    else if (e.key === "Enter" && filtered[highlightIdx]) { select(filtered[highlightIdx]); }
+    else if (e.key === "Enter" && rows[highlightIdx]) { select(rows[highlightIdx]); }
   };
+
+  const renderRow = (row: Row, i: number, testId: string, hint: string | null) => (
+    <button
+      key={`${row.remote ? "r" : "l"}:${row.value}`}
+      data-testid={testId}
+      onClick={() => select(row)}
+      className="flex items-center w-full px-2 py-1 text-left text-[11px] font-mono transition-colors"
+      style={{
+        color: !row.remote && row.value === value ? "var(--accent)" : "var(--text-secondary)",
+        background: i === highlightIdx ? "var(--bg-hover)" : "transparent",
+      }}
+      onMouseEnter={() => setHighlightIdx(i)}
+      title={row.value}
+    >
+      <span className="truncate min-w-0">{row.value}</span>
+      {hint && (
+        <span className="ml-auto pl-2 shrink-0 text-[10px]" style={{ color: "var(--text-muted)" }}>{hint}</span>
+      )}
+    </button>
+  );
 
   return (
     <div ref={containerRef} className="relative">
@@ -200,18 +275,58 @@ export default function BranchPicker({
               spellCheck={false}
             />
             {filter && (
-              <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{filtered.length}</span>
+              <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{rows.length}</span>
+            )}
+            {onFetch && (
+              <button
+                type="button"
+                data-testid={`${testIdPrefix}-fetch`}
+                onClick={() => onFetch()}
+                disabled={fetching}
+                className="text-[10px] rounded px-1.5 py-0.5 shrink-0"
+                style={{ color: "var(--text-muted)", border: "1px solid var(--border-subtle)", background: "transparent" }}
+              >
+                {fetching ? "Fetching…" : "↻ Fetch"}
+              </button>
             )}
           </div>
           <div ref={listRef} style={{ maxHeight: `${place.listMax}px`, overflowY: "auto" }}>
-            {filtered.length === 0 ? (
+            {remote ? (
+              rows.length === 0 ? (
+                <div className="px-2 py-2 text-[11px]" style={{ color: "var(--text-muted)" }}>No matching branches</div>
+              ) : (
+                <>
+                  {filtered.length > 0 && (
+                    <GroupHeading testId={`${testIdPrefix}-group-local`} label="Local" count={filtered.length} />
+                  )}
+                  {filtered.map((b, i) =>
+                    renderRow({ value: b, remote: false }, i, `${testIdPrefix}-option-${b}`, b === value ? "current" : null)
+                  )}
+                  {remoteGroups.map((g) => {
+                    const start = rows.findIndex((r) => r.remote && r.value === g.rows[0].ref);
+                    return (
+                      <Fragment key={`remote-${g.remote}`}>
+                        <GroupHeading
+                          testId={`${testIdPrefix}-group-remote-${g.remote}`}
+                          label={`Remote · ${g.remote}`}
+                          count={g.rows.length}
+                        />
+                        {g.rows.map((r, j) =>
+                          renderRow({ value: r.ref, remote: true }, start + j, `${testIdPrefix}-remote-option-${r.ref}`, "+ track")
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </>
+              )
+            ) : filtered.length === 0 ? (
               <div className="px-2 py-2 text-[11px]" style={{ color: "var(--text-muted)" }}>No matching branches</div>
             ) : (
               filtered.map((b, i) => (
                 <button
                   key={b}
                   data-testid={`${testIdPrefix}-option-${b}`}
-                  onClick={() => select(b)}
+                  onClick={() => select({ value: b, remote: false })}
                   className="flex items-center w-full px-2 py-1 text-left text-[11px] font-mono transition-colors"
                   style={{
                     color: b === value ? "var(--accent)" : "var(--text-secondary)",
@@ -225,9 +340,31 @@ export default function BranchPicker({
               ))
             )}
           </div>
+          {footer !== undefined && (
+            <div
+              data-testid={`${testIdPrefix}-footer`}
+              className="px-2 py-1.5 text-[10px]"
+              style={{ color: "var(--text-muted)", borderTop: "1px solid var(--border-subtle)" }}
+            >
+              {footer}
+            </div>
+          )}
         </div>,
         document.body
       )}
+    </div>
+  );
+}
+
+function GroupHeading({ testId, label, count }: { testId: string; label: string; count: number }) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex items-center justify-between px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wider"
+      style={{ color: "var(--text-muted)" }}
+    >
+      <span>{label}</span>
+      <span data-testid={`${testId}-count`}>{count}</span>
     </div>
   );
 }
