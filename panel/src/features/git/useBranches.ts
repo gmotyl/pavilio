@@ -35,9 +35,11 @@ export function useBranches(root: string | null) {
   const [fetchState, setFetchState] = useState<FetchState>({ root, fetching: false, error: "" });
   const rootRef = useRef(root);
   rootRef.current = root;
-  // Only the latest listing request may land: a slow answer for a left root
-  // (or an older one for this root) is dropped.
+  // Newest answer wins: a slow answer for a left root, or one older than an
+  // answer already applied for this root, is dropped. A failed request does
+  // not advance `applied`, so it never discards an earlier success.
   const seq = useRef(0);
+  const applied = useRef(0);
 
   const list = useCallback(async (r: string) => {
     // A request for a left root must not bump seq, or it drops the current
@@ -48,7 +50,8 @@ export function useBranches(root: string | null) {
       const res = await fetch(`/api/git/branches?repo=${encodeURIComponent(r)}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (mine !== seq.current || rootRef.current !== r) return;
+      if (mine <= applied.current || rootRef.current !== r) return;
+      applied.current = mine;
       setListing({ root: r, current: data.current ?? null, local: data.local ?? [], remote: data.remote ?? [] });
     } catch {}
   }, []);

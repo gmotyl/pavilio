@@ -325,4 +325,24 @@ describe("useBranches", () => {
     expect(result.current.local).toEqual(["new"]);
     expect(result.current.current).toBe("new");
   });
+  it("an older listing answer still lands when the newer request fails", async () => {
+    const { state } = stubServer({ "/r/fail": listing("main", ["main"]) });
+    const { result } = renderHook(() => useBranches("/r/fail"));
+    await waitFor(() => expect(result.current.local).toEqual(["main"]));
+
+    let releaseOld!: () => void;
+    state.lists["/r/fail"] = listing("old", ["old"]);
+    state.gates["/r/fail"] = new Promise<void>((r) => (releaseOld = r));
+    act(() => ws.setLast({ type: "git-change" }));
+
+    let releaseNew!: () => void;
+    delete state.lists["/r/fail"];
+    state.gates["/r/fail"] = new Promise<void>((r) => (releaseNew = r));
+    act(() => ws.setLast({ type: "git-change" }));
+
+    await act(async () => releaseNew());
+    await act(async () => releaseOld());
+    await waitFor(() => expect(result.current.local).toEqual(["old"]));
+    expect(result.current.current).toBe("old");
+  });
 });
