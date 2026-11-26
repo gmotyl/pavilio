@@ -580,7 +580,7 @@ export default function GitChanges({
             <BranchPicker
               branches={branches}
               value={branch}
-              onChange={handleCheckout}
+              onChange={(next) => handleCheckout(next)}
               disabled={!!loading}
               align="left"
               triggerClassName="text-xs px-2 py-0.5 rounded-full font-mono cursor-pointer flex items-center gap-1 transition-colors"

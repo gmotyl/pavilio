@@ -66,7 +66,8 @@ export function useGitChanges(repo?: string) {
     } catch {}
   };
 
-  const checkout = (target: string) =>
+  /** `track` checks a remote branch out as a local tracking branch. */
+  const checkout = (target: string, opts?: { track?: boolean }) =>
     target === branch
       ? Promise.resolve()
       : exclusive(
@@ -74,7 +75,11 @@ export function useGitChanges(repo?: string) {
           async () => {
             setCheckoutError("");
             try {
-              const res = await post("/api/git/checkout", { branch: target, repo });
+              const res = await post("/api/git/checkout", {
+                branch: target,
+                repo,
+                ...(opts?.track ? { track: true } : {}),
+              });
               const data = await res.json();
               if (res.ok) {
                 setBranch(data.branch);
