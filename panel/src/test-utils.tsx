@@ -24,7 +24,13 @@ export function renderWithRouter(
 
 type FetchMap = Record<string, unknown>;
 
+/**
+ * Stub `fetch` from a map of URL substrings to JSON bodies. When several keys
+ * occur in a URL the longest one wins, so "/api/git/branch" never answers a
+ * "/api/git/branches" request whatever order the keys are written in.
+ */
 export function mockFetchResponses(map: FetchMap) {
+  const patterns = Object.keys(map).sort((a, b) => b.length - a.length);
   const mockFetch = vi.fn((input: string | URL | Request) => {
     const url =
       typeof input === "string"
@@ -32,13 +38,12 @@ export function mockFetchResponses(map: FetchMap) {
         : input instanceof URL
           ? input.href
           : input.url;
-    for (const [pattern, data] of Object.entries(map)) {
-      if (url.includes(pattern)) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(data),
-        } as Response);
-      }
+    const pattern = patterns.find((p) => url.includes(p));
+    if (pattern !== undefined) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(map[pattern]),
+      } as Response);
     }
     return Promise.resolve({
       ok: false,

@@ -251,6 +251,9 @@ describe("BranchPicker", () => {
       expect(screen.getByTestId("bp-group-remote-origin-count")).toHaveTextContent("3");
       expect(screen.getByTestId("bp-group-remote-upstream")).toHaveTextContent("Remote · upstream");
       expect(screen.getByTestId("bp-group-remote-upstream-count")).toHaveTextContent("1");
+      expect(screen.getByRole("heading", { name: "Local, 2 branches" })).toBe(screen.getByTestId("bp-group-local"));
+      expect(screen.getByRole("heading", { name: "Remote · origin, 3 branches" })).toBe(screen.getByTestId("bp-group-remote-origin"));
+      expect(screen.getByRole("heading", { name: "Remote · upstream, 1 branch" })).toBe(screen.getByTestId("bp-group-remote-upstream"));
       expect(rowsInOrder()).toEqual([
         "bp-group-local", "bp-group-local-count", "bp-option-main", "bp-option-develop",
         "bp-group-remote-origin", "bp-group-remote-origin-count",
@@ -290,11 +293,25 @@ describe("BranchPicker", () => {
       expect(screen.getByTestId("bp-option-main")).toBeInTheDocument();
       expect(screen.queryByTestId("bp-group-remote-origin")).toBeNull();
       expect(screen.getByTestId("bp-group-remote-upstream-count")).toHaveTextContent("1");
+      await user.clear(screen.getByPlaceholderText("Filter branches..."));
+      await user.type(screen.getByPlaceholderText("Filter branches..."), "fix");
+      expect(screen.queryByTestId("bp-group-local")).toBeNull();
+      expect(screen.getByTestId("bp-group-remote-origin-count")).toHaveTextContent(/^1$/);
+      expect(screen.getByTestId("bp-remote-option-origin/fix/story-index-retry")).toBeInTheDocument();
+      expect(screen.queryByTestId("bp-remote-option-origin/feat/story-pr-header")).toBeNull();
+      expect(screen.queryByTestId("bp-group-remote-upstream")).toBeNull();
     });
 
     it("grouped picker keyboard runs across groups and reports remote picks", async () => {
       const { user, onChange } = await open();
-      await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowUp}{ArrowDown}{Enter}");
+      await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowUp}{ArrowDown}");
+      const highlighted = () =>
+        Array.from(screen.getByTestId("bp-popover").querySelectorAll<HTMLElement>("[data-testid^='bp-option-'], [data-testid^='bp-remote-option-']"))
+          .filter((el) => el.style.background === "var(--bg-hover)")
+          .map((el) => el.getAttribute("data-testid"));
+      expect(screen.getByTestId("bp-remote-option-origin/fix/story-index-retry").style.background).toBe("var(--bg-hover)");
+      expect(highlighted()).toEqual(["bp-remote-option-origin/fix/story-index-retry"]);
+      await user.keyboard("{Enter}");
       expect(onChange).toHaveBeenLastCalledWith("origin/fix/story-index-retry", { remote: true });
       await user.click(screen.getByTestId("bp-toggle"));
       await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowDown}{Enter}");
@@ -317,6 +334,8 @@ describe("BranchPicker", () => {
       expect(btn).toHaveTextContent("↻ Fetch");
       expect(btn).toBeEnabled();
       expect(btn.parentElement).toBe(screen.getByPlaceholderText("Filter branches...").parentElement);
+      expect(btn.parentElement!.lastElementChild).toBe(btn);
+      expect(btn.className).toContain("focus-visible:outline-[var(--accent)]");
       await user.click(btn);
       expect(onFetch).toHaveBeenCalledTimes(2);
       expect(screen.getByTestId("bp-popover")).toBeInTheDocument();
@@ -333,6 +352,11 @@ describe("BranchPicker", () => {
       const foot = screen.getByTestId("bp-footer");
       expect(foot).toHaveTextContent("Fetched 12 s ago · a remote branch becomes a local tracking branch");
       expect(screen.getByTestId("bp-popover").lastElementChild).toBe(foot);
+    });
+
+    it("grouped picker renders no footer for a null footer", async () => {
+      await open({ footer: null });
+      expect(screen.queryByTestId("bp-footer")).toBeNull();
     });
 
     it("flat picker is unchanged without remote", async () => {

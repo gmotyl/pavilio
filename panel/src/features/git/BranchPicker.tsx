@@ -120,10 +120,9 @@ export default function BranchPicker({
   }, [remote, filter]);
 
   // Every selectable row in display order, so keyboard navigation runs across groups.
-  // `branches` can still be unset while a caller's first fetch is in flight (it was only read once open).
   const rows = useMemo<Row[]>(
     () => [
-      ...(filtered ?? []).map((b) => ({ value: b, remote: false })),
+      ...filtered.map((b) => ({ value: b, remote: false })),
       ...remoteGroups.flatMap((g) => g.rows.map((r) => ({ value: r.ref, remote: true }))),
     ],
     [filtered, remoteGroups]
@@ -283,7 +282,7 @@ export default function BranchPicker({
                 data-testid={`${testIdPrefix}-fetch`}
                 onClick={() => onFetch()}
                 disabled={fetching}
-                className="text-[10px] rounded px-1.5 py-0.5 shrink-0"
+                className="text-[10px] rounded px-1.5 py-0.5 shrink-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                 style={{ color: "var(--text-muted)", border: "1px solid var(--border-subtle)", background: "transparent" }}
               >
                 {fetching ? "Fetching…" : "↻ Fetch"}
@@ -340,7 +339,7 @@ export default function BranchPicker({
               ))
             )}
           </div>
-          {footer !== undefined && (
+          {footer != null && (
             <div
               data-testid={`${testIdPrefix}-footer`}
               className="px-2 py-1.5 text-[10px]"
@@ -360,6 +359,9 @@ function GroupHeading({ testId, label, count }: { testId: string; label: string;
   return (
     <div
       data-testid={testId}
+      role="heading"
+      aria-level={3}
+      aria-label={`${label}, ${count} ${count === 1 ? "branch" : "branches"}`}
       className="flex items-center justify-between px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wider"
       style={{ color: "var(--text-muted)" }}
     >
