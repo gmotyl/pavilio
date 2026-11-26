@@ -19,9 +19,10 @@ async function mutate(url: string, body: unknown, fallback: string): Promise<voi
 
 /**
  * Working-tree changes of one repo plus the stage / commit / push / checkout
- * actions on it. `repo` undefined targets the workspace repo.
+ * actions on it. `repo` undefined targets the workspace repo. `branches: false`
+ * skips the flat `/api/git/branches` list, for callers listing branches elsewhere.
  */
-export function useGitChanges(repo?: string) {
+export function useGitChanges(repo?: string, { branches: listBranches = true }: { branches?: boolean } = {}) {
   const [files, setFiles] = useState<GitFile[]>([]);
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
@@ -54,19 +55,23 @@ export function useGitChanges(repo?: string) {
       fetch(`/api/git/branch${qs}`),
       fetch(`/api/git/suggest-message${qs}`),
     ]);
-    if (statusRes.ok) setFiles(await statusRes.json());
-    if (branchRes.ok) setBranch((await branchRes.json()).branch);
-    if (suggestRes.ok) setSuggestion((await suggestRes.json()).suggestion);
+    // Shape-checked: the Code view mounts this with every checkout, so an odd answer must not throw.
+    const [status, head, suggest] = await Promise.all([statusRes, branchRes, suggestRes].map((r) => (r.ok ? r.json().catch(() => null) : null)));
+    if (Array.isArray(status)) setFiles(status);
+    if (typeof head?.branch === "string") setBranch(head.branch);
+    if (typeof suggest?.suggestion === "string") setSuggestion(suggest.suggestion);
   };
 
   const fetchBranches = async () => {
+    if (!listBranches) return;
     try {
       const res = await fetch(`/api/git/branches${qs}`);
       if (res.ok) setBranches((await res.json()).branches);
     } catch {}
   };
 
-  const checkout = (target: string) =>
+  /** `track` checks a remote branch out as a local tracking branch. */
+  const checkout = (target: string, opts?: { track?: boolean }) =>
     target === branch
       ? Promise.resolve()
       : exclusive(
@@ -74,7 +79,11 @@ export function useGitChanges(repo?: string) {
           async () => {
             setCheckoutError("");
             try {
-              const res = await post("/api/git/checkout", { branch: target, repo });
+              const res = await post("/api/git/checkout", {
+                branch: target,
+                repo,
+                ...(opts?.track ? { track: true } : {}),
+              });
               const data = await res.json();
               if (res.ok) {
                 setBranch(data.branch);
@@ -95,7 +104,7 @@ export function useGitChanges(repo?: string) {
   const { lastMessage } = useWebSocket();
 
   useEffect(() => {
-    refresh();
+    refresh().catch(() => {});
     fetchBranches();
   }, [repo]);
 
@@ -103,7 +112,7 @@ export function useGitChanges(repo?: string) {
   // honoured: sync-status fires on every tick and would refetch for nothing.
   useEffect(() => {
     if (lastMessage?.type !== "git-change") return;
-    refresh();
+    refresh().catch(() => {});
     fetchBranches();
   }, [lastMessage]);
   useEffect(() => {

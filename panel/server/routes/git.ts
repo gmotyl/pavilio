@@ -173,10 +173,15 @@ function refReadEnv(): NodeJS.ProcessEnv {
   };
 }
 
-async function gitArgv(args: string[], cwd: string, timeout = REF_TIMEOUT_MS): Promise<Buffer> {
+async function gitArgv(
+  args: string[],
+  cwd: string,
+  timeout = REF_TIMEOUT_MS,
+  env: NodeJS.ProcessEnv = refReadEnv(),
+): Promise<Buffer> {
   const { stdout } = await execFileAsync("git", args, {
     cwd,
-    env: refReadEnv(),
+    env,
     encoding: "buffer",
     maxBuffer: REF_MAX_BUFFER,
     timeout,
@@ -729,6 +734,68 @@ router.post("/push", (req, res) => {
   }
 });
 
+const FETCH_TIMEOUT_MS = 60_000;
+let fetchTimeoutMs = FETCH_TIMEOUT_MS;
+export function _setFetchTimeoutForTests(ms = FETCH_TIMEOUT_MS): void {
+  fetchTimeoutMs = ms;
+}
+
+class FetchTimeoutError extends Error {}
+
+/** Fetches running per repo root; a concurrent request joins the one in flight. Resolves to fetchedAt. */
+const fetching = new Map<string, Promise<number>>();
+
+async function fetchAll(cwd: string): Promise<number> {
+  // No tty to answer a credential, host-key or passphrase prompt: fail instead of hanging.
+  const env: NodeJS.ProcessEnv = { ...refReadEnv(), GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
+  // BatchMode only when nothing else picks the ssh command: a repo's own key setup must survive.
+  const ownSsh =
+    !!env.GIT_SSH_COMMAND ||
+    !!env.GIT_SSH ||
+    (await gitArgv(["config", "--get", "core.sshCommand"], cwd).then(
+      (out) => out.toString("utf-8").trim() !== "",
+      (e) => {
+        if (!gitExitedNonZero(e)) throw e;
+        return false;
+      },
+    ));
+  const ssh = ownSsh ? [] : ["-c", "core.sshCommand=ssh -o BatchMode=yes"];
+  const timeout = fetchTimeoutMs;
+  try {
+    await gitArgv([...ssh, "fetch", "--all", "--prune"], cwd, timeout, env);
+  } catch (e: any) {
+    if (e?.killed) throw new FetchTimeoutError(`git fetch timed out after ${timeout / 1000} s`);
+    throw e;
+  }
+  broadcast({ type: "git-change" });
+  return Date.now();
+}
+
+// Fetch: refresh every remote's tracking refs. With no remote configured git exits 0, so that is a no-op.
+router.post("/fetch", async (req, res) => {
+  try {
+    const { repo } = req.body || {};
+    const cwd = getRepoRoot(repo);
+    assertRepoDirectory(cwd);
+    const key = resolve(cwd);
+    let run = fetching.get(key);
+    if (!run) {
+      // Bounded, unlike push: a fetch is a background refresh, and a stuck one would block the next.
+      run = fetchAll(cwd).finally(() => fetching.delete(key));
+      fetching.set(key, run);
+    }
+    try {
+      res.json({ ok: true, fetchedAt: await run });
+    } catch (e: any) {
+      if (e instanceof FetchTimeoutError) return res.status(504).json({ error: e.message });
+      if (!gitExitedNonZero(e)) throw e;
+      return res.status(502).json({ error: String(e.stderr ?? "").trim() || e.message });
+    }
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
 const CLONE_TIMEOUT_MS = 10 * 60_000;
 // Transports a linked repo may name; anything else (git://, ext::, …) is refused.
 // Set in the child env too: an inherited GIT_ALLOW_PROTOCOL would otherwise override the -c allowlist.
@@ -855,11 +922,11 @@ router.post("/clone", async (req, res) => {
 });
 
 // Branch info
-router.get("/branch", (req, res) => {
+router.get("/branch", async (req, res) => {
   try {
-    const repo = req.query.repo as string | undefined;
-    const branch = git("rev-parse --abbrev-ref HEAD", repo).trim();
-    res.json({ branch });
+    const cwd = getRepoRoot(req.query.repo as string | undefined);
+    assertRepoDirectory(cwd);
+    res.json({ branch: await currentBranch(cwd) });
   } catch (e: any) {
     sendGitError(res, e);
   }
@@ -914,8 +981,65 @@ router.get("/grep", async (req, res) => {
 });
 
 // Checkout branch
+/**
+ * Whether git ran and answered "no" (exit 1), as `show-ref --verify --quiet` does for a
+ * missing ref and `symbolic-ref -q` for a plain ref. Exit 128 is fatal (not a repo, bad
+ * config) and must surface as that error, never as "no such ref".
+ */
+function gitAnsweredNo(e: any): boolean {
+  return gitExitedNonZero(e) && e.code === 1;
+}
+
+/** Whether the full ref name exists (`git show-ref --verify`); git's other failures throw. */
+async function refExists(ref: string, cwd: string): Promise<boolean> {
+  try {
+    await gitArgv(["show-ref", "--verify", "--quiet", ref], cwd);
+    return true;
+  } catch (e: any) {
+    if (gitAnsweredNo(e)) return false;
+    throw e;
+  }
+}
+
+/**
+ * With `track`, `branch` is a remote ref (`origin/feat/b`): check out its local twin
+ * `feat/b` when one exists (never reset to the remote), else create it tracking the remote.
+ */
+async function checkoutArgs(branch: string, track: boolean, cwd: string): Promise<string[] | null> {
+  // Trailing `--` pins the argument to a branch, never a pathspec.
+  if (!track) return ["checkout", branch, "--"];
+  const slash = branch.indexOf("/");
+  const ref = `refs/remotes/${branch}`;
+  if (slash < 0 || !(await refExists(ref, cwd)) || (await isSymref(ref, cwd))) return null;
+  const name = branch.slice(slash + 1);
+  if (await refExists(`refs/heads/${name}`, cwd)) return ["checkout", name, "--"];
+  // The full ref, so a local branch or tag literally named `origin/feat/b` cannot win;
+  // git still derives the local name (`feat/b`) from it.
+  return ["switch", "--track", ref];
+}
+
+/** Whether `ref` is symbolic (`origin/HEAD`), which names no branch of its own to track. */
+async function isSymref(ref: string, cwd: string): Promise<boolean> {
+  try {
+    await gitArgv(["symbolic-ref", "-q", ref], cwd);
+    return true;
+  } catch (e: any) {
+    if (gitAnsweredNo(e)) return false;
+    throw e;
+  }
+}
+
+/**
+ * The checked-out branch's plain name, or `HEAD` when detached. Not `--abbrev-ref`:
+ * that answers `heads/v1` when a tag shares the branch's name.
+ */
+async function currentBranch(cwd: string): Promise<string> {
+  const full = (await gitArgv(["rev-parse", "--symbolic-full-name", "HEAD"], cwd)).toString("utf-8").trim();
+  return full.startsWith("refs/heads/") ? full.slice("refs/heads/".length) : full;
+}
+
 router.post("/checkout", async (req, res) => {
-  const { branch, repo } = req.body ?? {};
+  const { branch, repo, track } = req.body ?? {};
   if (typeof branch !== "string" || !branch)
     return res.status(400).json({ error: "branch parameter required" });
   // A leading `-` would be parsed as an option (e.g. --orphan).
@@ -930,9 +1054,10 @@ router.post("/checkout", async (req, res) => {
   }
   try {
     const cwd = getRepoRoot(repo);
-    // Trailing `--` pins the argument to a branch, never a pathspec.
-    const output = (await gitArgv(["checkout", branch, "--"], cwd, WRITE_TIMEOUT_MS)).toString("utf-8");
-    const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
+    const args = await checkoutArgs(branch, track === true, cwd);
+    if (!args) return res.status(400).json({ error: "unknown remote branch" });
+    const output = (await gitArgv(args, cwd, WRITE_TIMEOUT_MS)).toString("utf-8");
+    const current = await currentBranch(cwd);
     broadcast({ type: "git-change" });
     res.json({ ok: true, branch: current, output: output.trim() });
   } catch (e: any) {
@@ -977,8 +1102,34 @@ router.get("/worktrees", (req, res) => {
   }
 });
 
+/** A remote-tracking branch: `ref` = `origin/feat/b`, `remote` = `origin`, `name` = `feat/b`. */
+interface RemoteBranch {
+  ref: string;
+  remote: string;
+  name: string;
+}
+
+/**
+ * Local heads, and remote branches without a local twin (symbolic refs such as origin/HEAD dropped).
+ * `lstrip=2`, not `short`: `short` prefixes `heads/` or `remotes/` when a tag shares the name.
+ */
+async function listLocalAndRemote(cwd: string): Promise<{ local: string[]; remote: RemoteBranch[] }> {
+  const lines = async (args: string[]) => (await gitArgv(args, cwd)).toString("utf-8").split("\n").filter(Boolean);
+  const local = await lines(["for-each-ref", "refs/heads", "--format=%(refname:lstrip=2)"]);
+  const localSet = new Set(local);
+  const remote: RemoteBranch[] = [];
+  for (const line of await lines(["for-each-ref", "refs/remotes", "--format=%(refname:lstrip=2)%00%(symref)"])) {
+    const [ref, symref] = line.split("\0");
+    const slash = ref.indexOf("/");
+    if (symref || slash < 0) continue;
+    const name = ref.slice(slash + 1);
+    if (!localSet.has(name)) remote.push({ ref, remote: ref.slice(0, slash), name });
+  }
+  return { local, remote };
+}
+
 // List branches
-router.get("/branches", (req, res) => {
+router.get("/branches", async (req, res) => {
   try {
     const repo = req.query.repo as string | undefined;
     const raw = git("branch -a --format='%(refname:short)'", repo);
@@ -987,8 +1138,10 @@ router.get("/branches", (req, res) => {
       .split("\n")
       .filter(Boolean)
       .map((b) => b.trim());
-    const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
-    res.json({ current, branches });
+    const cwd = getRepoRoot(repo);
+    const current = await currentBranch(cwd);
+    const { local, remote } = await listLocalAndRemote(cwd);
+    res.json({ current, branches, local, remote });
   } catch (e: any) {
     sendGitError(res, e);
   }

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonResponse } from "../../../test-utils";
@@ -276,4 +278,128 @@ describe("CodeView", () => {
     });
     expect(search().get("repo")).toBe("site");
   });
+
+  describe("toolbar", () => {
+    const context = () => screen.getByTestId("repos-context");
+    const checkoutPosts = (fetch: ReturnType<typeof renderCode>["fetch"]) =>
+      fetch.mock.calls.filter(([u, init]) => String(u) === "/api/git/checkout" && init?.method === "POST").map(([, init]) => JSON.parse(String(init!.body)));
+
+    it("code toolbar renders switcher, branch picker, then Terminal", async () => {
+      renderCode("?view=code");
+      const picker = await within(context()).findByTestId("code-branch-toggle");
+      await waitFor(() => expect(picker).toHaveTextContent("⎇ main ▾"));
+      const switcher = within(context()).getByTestId("repo-switcher");
+      const terminal = within(context()).getByTestId("code-terminal");
+      // Check item 1: switcher, picker, Terminal, in that order.
+      const order = [...context().querySelectorAll("[data-testid]")]
+        .map((el) => el.getAttribute("data-testid"))
+        .filter((id) => id === "repo-switcher" || id === "code-branch-toggle" || id === "code-terminal");
+      expect(order).toEqual(["repo-switcher", "code-branch-toggle", "code-terminal"]);
+      expect(switcher.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(terminal).toHaveTextContent("Terminal");
+      expect(terminal.querySelector("svg")).not.toBeNull();
+      expect(terminal).toHaveAttribute("title", `Open a terminal at ${MAIN}`);
+      // Terminal sits at the right end.
+      expect(termCss).toMatch(/\.cv-term \{[^}]*margin-left:\s*auto/);
+    });
+
+    it("code toolbar hides picker and Terminal without a present repo", async () => {
+      renderCode(`?view=code&repo=notes`);
+      await screen.findByText("notes is not on this machine. Pick another repository above.");
+      expect(within(context()).getByTestId("repo-switcher")).toBeInTheDocument();
+      expect(screen.queryByTestId("code-branch-toggle")).toBeNull();
+      expect(screen.queryByTestId("code-terminal")).toBeNull();
+    });
+
+    it("code toolbar hides picker and Terminal with no linked repos", async () => {
+      renderCode("?view=code", {}, []);
+      await screen.findByText("This project has no linked repositories.");
+      expect(screen.queryByTestId("code-branch-toggle")).toBeNull();
+      expect(screen.queryByTestId("code-terminal")).toBeNull();
+    });
+
+    it("code branch picker targets the open worktree", async () => {
+      const { fetch } = renderCode(`?view=code&wt=${encodeURIComponent(FEAT)}`, {
+        "/api/git/checkout": () => jsonResponse({ ok: true, branch: "main" }),
+      });
+      const picker = await within(context()).findByTestId("code-branch-toggle");
+      await waitFor(() => expect(picker).toHaveTextContent("⎇ feat/x ▾"));
+      expect(within(context()).getByTestId("code-terminal")).toHaveAttribute("title", `Open a terminal at ${FEAT}`);
+      fireEvent.click(picker);
+      fireEvent.click(await screen.findByTestId("code-branch-option-main"));
+      await waitFor(() => expect(checkoutPosts(fetch)).toEqual([{ branch: "main", repo: FEAT }]));
+      expect(calls(fetch, `/api/git/branches?repo=${encodeURIComponent(FEAT)}`).length).toBeGreaterThan(0);
+      expect(fetch.mock.calls.some(([u, init]) => String(u) === "/api/git/fetch" && JSON.parse(String(init?.body)).repo === FEAT)).toBe(true);
+    });
+
+    it("toolbar checkout error shows an inline alert with dismiss", async () => {
+      const dirty = "error: Your local changes to the following files would be overwritten by checkout:\n\tpanel/src/App.tsx";
+      renderCode("?view=code", { "/api/git/checkout": () => jsonResponse({ error: dirty }, { status: 409 }) });
+      const picker = await within(context()).findByTestId("code-branch-toggle");
+      await waitFor(() => expect(picker).toHaveTextContent("main"));
+      fireEvent.click(picker);
+      fireEvent.click(await screen.findByTestId("code-branch-remote-option-origin/feat/story-pr-header"));
+
+      // Check item 6: red, names the branch, carries git's message and dismiss.
+      const alert = await screen.findByTestId("code-checkout-error");
+      expect(alert).toHaveAttribute("role", "alert");
+      expect(alert).toHaveClass("cv-checkout-err");
+      expect(css).toMatch(/\.cv-checkout-err \{[^}]*color:\s*var\(--red\)/);
+      expect(alert).toHaveTextContent("Couldn't switch to feat/story-pr-header:");
+      expect(within(alert).getByText("feat/story-pr-header").tagName).toBe("B");
+      expect(alert).toHaveTextContent("panel/src/App.tsx");
+      // Under the toolbar: in the Code view, not in the context slot.
+      expect(within(context()).queryByTestId("code-checkout-error")).toBeNull();
+      expect(picker).toHaveTextContent("⎇ main ▾");
+
+      fireEvent.click(within(alert).getByRole("button", { name: "dismiss" }));
+      expect(screen.queryByTestId("code-checkout-error")).toBeNull();
+    });
+
+    it("narrow layout hides the switcher path but keeps picker and Terminal", async () => {
+      renderCode("?view=code");
+      await within(context()).findByTestId("code-branch-toggle");
+      expect(within(context()).getByTestId("code-terminal")).toBeInTheDocument();
+      // The switcher's path is the span after the repo name; the placeholder is not.
+      const path = within(context()).getByTestId("repo-switcher").querySelector(".pr-repo ~ .cv-sw-path");
+      expect(path).toHaveTextContent(MAIN);
+
+      const narrow = atBlock("@media (max-width: 767px)");
+      expect(rule(".cv-sw-btn .pr-repo ~ .cv-sw-path", narrow)).toMatch(/display:\s*none/);
+      // Picker and Terminal never shrink away; the switcher gives way instead.
+      expect(rule(".cv-br")).toMatch(/flex-shrink:\s*0/);
+      expect(rule(".cv-br-name")).toMatch(/text-overflow:\s*ellipsis/);
+      expect(rule(".cv-br-name")).toMatch(/max-width:/);
+      expect(rule(".cv-sw")).toMatch(/min-width:\s*0/);
+      expect(rule(".cv-sw-btn")).toMatch(/min-width:\s*0/);
+      expect(termCss).toMatch(/\.cv-term-btn \{[^}]*flex-shrink:\s*0/);
+      // No horizontal scroll: the slot may shrink below its content.
+      expect(reposCss).toMatch(/\.rt-context \{[^}]*min-width:\s*0/);
+      expect(reposCss).toMatch(/\.rt-topbar \{[^}]*flex-wrap:\s*wrap/);
+      // The phone row is only taken when a view portals into the slot (PRs leaves it empty).
+      expect(reposCss).toMatch(/\.rt-context:empty \{[^}]*display:\s*none/);
+    });
+  });
 });
+
+const read = (f: string) => readFileSync(resolve(`src/features/repos/${f}`), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = read("Code.css");
+const termCss = read("CodeTerminalButton.css");
+const reposCss = read("ReposTab.css");
+/** The declarations of the first `selector {…}` rule inside `block` (or the whole sheet). */
+function rule(selector: string, block = css) {
+  const at = block.indexOf(`${selector} {`);
+  expect(at, `${selector} rule`).toBeGreaterThanOrEqual(0);
+  return block.slice(at, block.indexOf("}", at));
+}
+/** The body of the at-rule whose prelude starts with `prelude`. */
+function atBlock(prelude: string) {
+  const at = css.indexOf(prelude);
+  expect(at, prelude).toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  for (let i = css.indexOf("{", at); i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return css.slice(at, i + 1);
+  }
+  throw new Error(`unclosed ${prelude}`);
+}

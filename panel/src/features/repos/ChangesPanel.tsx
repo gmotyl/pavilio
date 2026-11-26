@@ -1,12 +1,18 @@
-import BranchPicker from "../git/BranchPicker";
-import { useGitChanges } from "../git/useGitChanges";
+import type { useBranches } from "../git/useBranches";
+import type { useGitChanges } from "../git/useGitChanges";
+import { CodeBranchPicker } from "./CodeBranchPicker";
 
 interface Props {
-  /** Repo or worktree directory. */
-  root: string;
+  /** The checkout's `useGitChanges`, lifted so the toolbar picker shares it. */
+  changes: ReturnType<typeof useGitChanges>;
+  branches: ReturnType<typeof useBranches>;
+  /** HEAD's sha while detached. */
+  head: string | null;
+  /** A branch pick from the panel's label; the same checkout the toolbar picker runs. */
+  onSwitch: (target: string, opts: { track: boolean }) => void;
   selected?: string | null;
   onOpen: (path: string) => void;
-  /** After a stage, commit or checkout: the tree's badges are stale. */
+  /** After a stage or commit: the tree's badges are stale. */
   onChanged: () => void;
 }
 
@@ -14,8 +20,7 @@ interface Props {
 const letter = (s: string) => (s === "??" ? "U" : s.charAt(0));
 
 /** Working-tree changes with stage, commit, push and branch checkout. */
-export default function ChangesPanel({ root, selected, onOpen, onChanged }: Props) {
-  const g = useGitChanges(root);
+export default function ChangesPanel({ changes: g, branches, head, onSwitch, selected, onOpen, onChanged }: Props) {
   const after = (p: Promise<unknown>) => p.then(onChanged);
   const busy = !!g.loading;
 
@@ -23,19 +28,7 @@ export default function ChangesPanel({ root, selected, onOpen, onChanged }: Prop
     <aside className="cv-rail cv-panel" aria-label="Changes" data-testid="code-changes-panel">
       <div className="cv-panel-head">
         <h4>Changes</h4>
-        {g.branch && (
-          <BranchPicker
-            branches={g.branches}
-            value={g.branch}
-            onChange={(b) => after(g.checkout(b))}
-            disabled={busy}
-            align="right"
-            testIdPrefix="changes-branch"
-            trigger={<>{g.loading === "switching" ? "switching…" : g.branch} ▾</>}
-            triggerClassName="cv-panel-branch"
-            triggerStyle={{}}
-          />
-        )}
+        <CodeBranchPicker changes={g} branches={branches} head={head} onSwitch={onSwitch} variant="panel" testIdPrefix="changes-branch" />
       </div>
       {g.checkoutError && (
         <p className="cv-panel-err" role="alert">

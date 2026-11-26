@@ -66,6 +66,22 @@ const STATUS: Record<string, { status: string; path: string }[]> = {
   ],
 };
 
+/** What `/api/git/branch` reports per checkout. */
+export const HEADS: Record<string, string> = { [MAIN]: "main", [FEAT]: "feat/x", [SITE]: "main" };
+
+export const REMOTE = [
+  { ref: "origin/feat/story-pr-header", remote: "origin", name: "feat/story-pr-header" },
+  { ref: "origin/fix/story-index-retry", remote: "origin", name: "fix/story-index-retry" },
+];
+
+/** `/api/git/branches` for a checkout: local branches split from remote-only ones. */
+export const branchListing = (repo: string, local = ["main", "feat/x"], remote = REMOTE) => ({
+  current: HEADS[repo] ?? "main",
+  branches: [...local, ...remote.map((r) => r.ref)],
+  local,
+  remote,
+});
+
 export const GREP = [
   { relativePath: "src/a.ts", project: "", matches: [{ line: 15, text: "const area = width * height;" }] },
   {
@@ -97,6 +113,10 @@ export function codeFetch(routes: Record<string, FetchHandler> = {}) {
     if (u.pathname === "/api/git/worktrees") return jsonResponse(WORKTREES[repo] ?? []);
     if (u.pathname === "/api/git/status") return jsonResponse(STATUS[repo] ?? []);
     if (u.pathname === "/api/git/grep") return jsonResponse(GREP);
+    if (u.pathname === "/api/git/branch") return jsonResponse({ branch: HEADS[repo] ?? "main" });
+    if (u.pathname === "/api/git/branches") return jsonResponse(branchListing(repo));
+    if (u.pathname === "/api/git/suggest-message") return jsonResponse({ suggestion: "" });
+    if (u.pathname === "/api/git/fetch") return jsonResponse({ ok: true });
     if (u.pathname === "/api/git/diff") return jsonResponse({ diff: u.searchParams.get("file") === "src/a.ts" ? A_DIFF : "" });
     if (u.pathname === "/api/git/file") {
       const path = u.searchParams.get("path");

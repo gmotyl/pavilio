@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from "react-dom";
 import FileSearch, { type OpenRequest } from "./FileSearch";
 import FileTree, { type TreeFile } from "./FileTree";
+import { useBranches } from "../git/useBranches";
+import { useGitChanges } from "../git/useGitChanges";
 import { useCommitFiles, type Commit } from "../git/useGitHistory";
 import { useWebSocket } from "../realtime/useWebSocket";
 import ChangesPanel from "./ChangesPanel";
+import { CodeBranchPicker } from "./CodeBranchPicker";
+import { CodeTerminalButton } from "./CodeTerminalButton";
 import HistoryPanel from "./HistoryPanel";
 import Outline, { OUTLINE_FILE, outlineOf } from "./Outline";
 import RefSwitcher, { useWorktrees } from "./RefSwitcher";
@@ -87,8 +91,12 @@ function DefinitionChooser({ choices, onChoose, onDismiss }: ChooserProps) {
 }
 
 interface RootProps {
+  project: string;
+  repoName: string;
   /** Directory every read targets: the repo's main checkout or one of its worktrees. */
   root: string;
+  /** Toolbar spot after the repo switcher: this checkout's branch picker and Terminal go here. */
+  tools: HTMLElement | null;
   params: URLSearchParams;
   setParams: (patch: ParamsPatch) => void;
   searchRequest: SearchRequest | null;
@@ -102,7 +110,7 @@ type Listing = TreeFile[] | { error: string } | null;
 const treeStatus = (s: string): TreeFile["status"] => (s === "A" || s === "D" || s === "R" ? s : "M");
 
 /** One checkout's code; keyed by root so a switch drops stale state and responses. */
-function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: RootProps) {
+function RootCode({ project, repoName, root, tools, params, setParams, searchRequest, onSearchHandled }: RootProps) {
   const [attempt, setAttempt] = useState(0);
   const [files, setFiles] = useState<Listing>(null);
   // `pin`: base and HEAD resolved once per comparison; every compare read uses these shas.
@@ -120,6 +128,17 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   const cmp = commit ? null : askedCmp;
   const { files: commitFiles, error: commitError, loading: commitLoading } = useCommitFiles(root, commit?.sha ?? null, attempt);
   const { lastMessage } = useWebSocket();
+  // One instance for the toolbar picker and the Changes panel, so a switch from either shows in both.
+  // The picker lists branches through useBranches, so the flat list is not read here.
+  const changes = useGitChanges(root, { branches: false });
+  const branches = useBranches(root);
+  const head = useDetachedHead(root, changes.branch === "HEAD", changes.files);
+  // The branch the last switch asked for, named in the toolbar's error.
+  const [target, setTarget] = useState("");
+  const switchTo = (to: string, { track }: { track: boolean }) => {
+    setTarget(track ? (branches.remote.find((r) => r.ref === to)?.name ?? to.slice(to.indexOf("/") + 1)) : to);
+    void changes.checkout(to, track ? { track } : undefined).then(() => setAttempt((n) => n + 1));
+  };
 
   // Commits and auto-sync elsewhere change the tree; sync-status ticks don't.
   useEffect(() => {
@@ -329,61 +348,109 @@ function RootCode({ root, params, setParams, searchRequest, onSearchHandled }: R
   let rail: ReactNode = null;
   if (panel === "changes")
     // Changes are working-tree edits, so a click leaves compare.
-    rail = <ChangesPanel root={root} selected={selected} onOpen={(p) => open(p, {}, { cmp: null })} onChanged={() => setAttempt((n) => n + 1)} />;
+    rail = (
+      <ChangesPanel
+        changes={changes}
+        branches={branches}
+        head={head}
+        onSwitch={switchTo}
+        selected={selected}
+        onOpen={(p) => open(p, {}, { cmp: null })}
+        onChanged={() => setAttempt((n) => n + 1)}
+      />
+    );
   else if (panel === "history") rail = <HistoryPanel root={root} sha={commit?.sha ?? null} onPick={pickCommit} />;
   else if (showRail) rail = <Outline items={outline} onJump={jump} />;
 
   return (
-    <div
-      ref={bodyRef}
-      className={`cv-body${showRail ? "" : " cv-norail"}${panel !== "outline" ? " cv-widerail" : ""}${stack ? " cv-stack" : ""}`}
-      data-testid="code-body"
-    >
-      <div className="cv-side">
-        <FileSearch root={root} paths={paths} request={searchRequest} onRequestHandled={onSearchHandled} onOpen={open} />
-        <div className="cv-tree">{tree}</div>
-      </div>
-      <div className="cv-main">
-        <div className="cv-backbar" data-testid="code-backbar">
-          <button type="button" data-testid="code-back" disabled={!nav.canBack} onClick={nav.back}>
-            ← Back
+    <>
+      {tools &&
+        createPortal(
+          <>
+            <CodeBranchPicker changes={changes} branches={branches} head={head} onSwitch={switchTo} />
+            <CodeTerminalButton project={project} root={root} repoName={repoName} />
+          </>,
+          tools,
+        )}
+      {/* An open Changes panel shows the error itself; never both. */}
+      {changes.checkoutError && panel !== "changes" && (
+        <p className="cv-checkout-err" role="alert" data-testid="code-checkout-error">
+          Couldn't switch to <b>{target}</b>: {changes.checkoutError}{" "}
+          <button type="button" data-testid="code-checkout-error-dismiss" onClick={() => changes.setCheckoutError("")}>
+            dismiss
           </button>
-          {nav.notice && (
-            <span className="cv-notice" role="status">
-              No definition found
-            </span>
-          )}
-          {nav.choices && <DefinitionChooser choices={nav.choices} onChoose={nav.choose} onDismiss={nav.dismiss} />}
-          {commit && (
-            <span className="cv-mode" data-testid="code-commit-indicator">
-              Commit <code>{commit.shortSha}</code> {commit.message}
-              <button type="button" data-testid="code-commit-exit" onClick={leaveCommit}>
-                Exit
-              </button>
-            </span>
-          )}
-          {cmp && (
-            <span className="cv-mode" data-testid="code-compare-indicator">
-              Comparing with {cmp}
-              <button type="button" data-testid="code-compare-exit" onClick={() => setParams({ cmp: null })}>
-                Exit compare
-              </button>
-            </span>
-          )}
-          <span className="cv-tools">
-            <button type="button" data-testid="code-changes-toggle" aria-pressed={panel === "changes"} onClick={() => togglePanel("changes")}>
-              Changes {changedCount}
-            </button>
-            <button type="button" data-testid="code-history-toggle" aria-pressed={panel === "history"} onClick={() => togglePanel("history")}>
-              History
-            </button>
-          </span>
+        </p>
+      )}
+      <div
+        ref={bodyRef}
+        className={`cv-body${showRail ? "" : " cv-norail"}${panel !== "outline" ? " cv-widerail" : ""}${stack ? " cv-stack" : ""}`}
+        data-testid="code-body"
+      >
+        <div className="cv-side">
+          <FileSearch root={root} paths={paths} request={searchRequest} onRequestHandled={onSearchHandled} onOpen={open} />
+          <div className="cv-tree">{tree}</div>
         </div>
-        <div className="cv-viewer">{viewer}</div>
+        <div className="cv-main">
+          <div className="cv-backbar" data-testid="code-backbar">
+            <button type="button" data-testid="code-back" disabled={!nav.canBack} onClick={nav.back}>
+              ← Back
+            </button>
+            {nav.notice && (
+              <span className="cv-notice" role="status">
+                No definition found
+              </span>
+            )}
+            {nav.choices && <DefinitionChooser choices={nav.choices} onChoose={nav.choose} onDismiss={nav.dismiss} />}
+            {commit && (
+              <span className="cv-mode" data-testid="code-commit-indicator">
+                Commit <code>{commit.shortSha}</code> {commit.message}
+                <button type="button" data-testid="code-commit-exit" onClick={leaveCommit}>
+                  Exit
+                </button>
+              </span>
+            )}
+            {cmp && (
+              <span className="cv-mode" data-testid="code-compare-indicator">
+                Comparing with {cmp}
+                <button type="button" data-testid="code-compare-exit" onClick={() => setParams({ cmp: null })}>
+                  Exit compare
+                </button>
+              </span>
+            )}
+            <span className="cv-tools">
+              <button type="button" data-testid="code-changes-toggle" aria-pressed={panel === "changes"} onClick={() => togglePanel("changes")}>
+                Changes {changedCount}
+              </button>
+              <button type="button" data-testid="code-history-toggle" aria-pressed={panel === "history"} onClick={() => togglePanel("history")}>
+                History
+              </button>
+            </span>
+          </div>
+          <div className="cv-viewer">{viewer}</div>
+        </div>
+        {rail}
       </div>
-      {rail}
-    </div>
+    </>
   );
+}
+
+/** HEAD's sha while it is detached, re-read whenever the working tree is re-listed. */
+function useDetachedHead(root: string, detached: boolean, files: unknown): string | null {
+  const [head, setHead] = useState<string | null>(null);
+  useEffect(() => {
+    if (!detached) return;
+    let cancelled = false;
+    fetch(`/api/git/resolve?repo=${q(root)}&ref=HEAD`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { sha?: unknown } | null) => {
+        if (!cancelled && typeof data?.sha === "string") setHead(data.sha);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [root, detached, files]);
+  return detached ? head : null;
 }
 
 /** Browse a linked repo or one of its worktrees: switcher in the context slot, search + tree, viewer, outline. */
@@ -424,6 +491,9 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
     if (stale) setParams({ wt: null });
   }, [stale, setParams]);
 
+  // State, not a ref: RootCode portals into it and must re-render once it exists.
+  const [tools, setTools] = useState<HTMLElement | null>(null);
+
   const pick = (name: string, path: string | null) => setParams({ repo: name, wt: path, file: null, line: null, cmp: null });
 
   let body: ReactNode;
@@ -436,7 +506,10 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
     body = (
       <RootCode
         key={root}
+        project={project}
+        repoName={repo.name}
         root={root}
+        tools={tools}
         params={params}
         setParams={setParams}
         searchRequest={searchRequest}
@@ -448,17 +521,21 @@ export default function CodeView({ project, repos, params, setParams, contextSlo
     <div className="cv" data-testid="code-view">
       {contextSlot &&
         createPortal(
-          <RefSwitcher
-            project={project}
-            repos={repos}
-            worktrees={worktrees}
-            repo={repo?.name ?? null}
-            wt={wt}
-            onPick={pick}
-            root={root}
-            compare={params.get("cmp")}
-            onCompare={(ref) => setParams({ cmp: ref })}
-          />,
+          <>
+            <RefSwitcher
+              project={project}
+              repos={repos}
+              worktrees={worktrees}
+              repo={repo?.name ?? null}
+              wt={wt}
+              onPick={pick}
+              root={root}
+              compare={params.get("cmp")}
+              onCompare={(ref) => setParams({ cmp: ref })}
+            />
+            {/* The open checkout's branch picker and Terminal, portalled in by RootCode. */}
+            <span className="cv-ctx-tools" ref={setTools} />
+          </>,
           contextSlot,
         )}
       {body}
