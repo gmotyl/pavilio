@@ -729,6 +729,26 @@ router.post("/push", (req, res) => {
   }
 });
 
+// Fetch: refresh remote-tracking refs. With no remote configured git exits 0, so that is a no-op.
+router.post("/fetch", async (req, res) => {
+  try {
+    const { repo } = req.body || {};
+    const cwd = getRepoRoot(repo);
+    assertRepoDirectory(cwd);
+    try {
+      // Same (no) timeout as push: a slow network is not a failure.
+      await gitArgv(["fetch", "--prune"], cwd, WRITE_TIMEOUT_MS);
+    } catch (e: any) {
+      if (!gitExitedNonZero(e)) throw e;
+      return res.status(502).json({ error: String(e.stderr ?? "").trim() || e.message });
+    }
+    broadcast({ type: "git-change" });
+    res.json({ ok: true, fetchedAt: Date.now() });
+  } catch (e: any) {
+    sendGitError(res, e);
+  }
+});
+
 const CLONE_TIMEOUT_MS = 10 * 60_000;
 // Transports a linked repo may name; anything else (git://, ext::, …) is refused.
 // Set in the child env too: an inherited GIT_ALLOW_PROTOCOL would otherwise override the -c allowlist.

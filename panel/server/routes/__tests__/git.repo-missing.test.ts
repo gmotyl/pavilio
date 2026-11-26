@@ -107,6 +107,10 @@ describe("git routes and a repo missing on this machine", () => {
         () => request(app()).post("/api/git/push").send({ repo: missing }),
       ],
       [
+        "fetch",
+        () => request(app()).post("/api/git/fetch").send({ repo: missing }),
+      ],
+      [
         "checkout",
         () =>
           request(app())
