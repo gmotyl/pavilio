@@ -59,7 +59,7 @@ export function CodeTerminalButton({
       {failed && (
         <span className="cv-term-err" role="alert">
           Couldn't open a terminal at {root}
-          <button type="button" onClick={() => setFailed(false)}>
+          <button type="button" data-testid="code-terminal-error-dismiss" onClick={() => setFailed(false)}>
             Dismiss
           </button>
         </span>

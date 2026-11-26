@@ -376,7 +376,7 @@ function RootCode({ project, repoName, root, tools, params, setParams, searchReq
       {changes.checkoutError && panel !== "changes" && (
         <p className="cv-checkout-err" role="alert" data-testid="code-checkout-error">
           Couldn't switch to <b>{target}</b>: {changes.checkoutError}{" "}
-          <button type="button" onClick={() => changes.setCheckoutError("")}>
+          <button type="button" data-testid="code-checkout-error-dismiss" onClick={() => changes.setCheckoutError("")}>
             dismiss
           </button>
         </p>
