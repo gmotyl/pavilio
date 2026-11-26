@@ -41,18 +41,21 @@ function stubServer(lists: Record<string, Listing>) {
     lists,
     fetchAnswer: { status: 200, body: { ok: true, fetchedAt: 1 } as unknown },
     gates: {} as Record<string, Promise<void> | undefined>,
+    fetchGates: {} as Record<string, Promise<void> | undefined>,
   };
   const calls: Call[] = [];
   const mock = vi.fn(async (input: string, init?: RequestInit) => {
     calls.push({ url: input, init });
     if (input.startsWith("/api/git/branches")) {
       const repo = new URL(input, "http://x").searchParams.get("repo") ?? "";
-      await state.gates[repo];
+      // The answer is what the server held when asked, released by the gate.
       const body = state.lists[repo];
+      await state.gates[repo];
       return { ok: !!body, status: body ? 200 : 404, json: async () => body ?? {} } as Response;
     }
     if (input === "/api/git/fetch") {
       const { status, body } = state.fetchAnswer;
+      await state.fetchGates[JSON.parse(String(init?.body)).repo];
       return { ok: status < 300, status, json: async () => body } as Response;
     }
     return { ok: false, status: 404, json: async () => ({}) } as Response;
@@ -184,5 +187,97 @@ describe("useBranches", () => {
     await act(async () => releaseA());
     expect(result.current.local).toEqual(["b-main"]);
     expect(result.current.current).toBe("b-main");
+  });
+  it("a fetch for a left root does not starve the new root's listing", async () => {
+    const { state } = stubServer({
+      "/r/sa": listing("a-main", ["a-main"]),
+      "/r/sb": listing("b-main", ["b-main"]),
+    });
+    const { result, rerender } = renderHook(({ root }) => useBranches(root), {
+      initialProps: { root: "/r/sa" as string | null },
+    });
+    await waitFor(() => expect(result.current.local).toEqual(["a-main"]));
+
+    let releaseFetch!: () => void;
+    state.fetchGates["/r/sa"] = new Promise<void>((r) => (releaseFetch = r));
+    let done!: Promise<void>;
+    act(() => {
+      done = result.current.fetch();
+    });
+
+    let releaseB!: () => void;
+    state.gates["/r/sb"] = new Promise<void>((r) => (releaseB = r));
+    rerender({ root: "/r/sb" });
+
+    // A's fetch lands while B's listing is still in flight.
+    await act(async () => {
+      releaseFetch();
+      await done;
+    });
+    await act(async () => releaseB());
+    await waitFor(() => expect(result.current.local).toEqual(["b-main"]));
+    expect(result.current.current).toBe("b-main");
+  });
+
+  it("a fetch for a left root does not end the new root's fetching", async () => {
+    const { state } = stubServer({
+      "/r/fa": listing("a-main", ["a-main"]),
+      "/r/fb": listing("b-main", ["b-main"]),
+    });
+    const { result, rerender } = renderHook(({ root }) => useBranches(root), {
+      initialProps: { root: "/r/fa" as string | null },
+    });
+    await waitFor(() => expect(result.current.local).toEqual(["a-main"]));
+
+    let releaseA!: () => void;
+    state.fetchGates["/r/fa"] = new Promise<void>((r) => (releaseA = r));
+    let doneA!: Promise<void>;
+    act(() => {
+      doneA = result.current.fetch();
+    });
+
+    rerender({ root: "/r/fb" });
+    await waitFor(() => expect(result.current.local).toEqual(["b-main"]));
+    let releaseB!: () => void;
+    state.fetchGates["/r/fb"] = new Promise<void>((r) => (releaseB = r));
+    let doneB!: Promise<void>;
+    act(() => {
+      doneB = result.current.fetch();
+    });
+    expect(result.current.fetching).toBe(true);
+
+    await act(async () => {
+      releaseA();
+      await doneA;
+    });
+    expect(result.current.fetching).toBe(true);
+
+    await act(async () => {
+      releaseB();
+      await doneB;
+    });
+    expect(result.current.fetching).toBe(false);
+  });
+
+  it("an older listing answer for the same root is ignored", async () => {
+    const { state } = stubServer({ "/r/seq": listing("main", ["main"]) });
+    const { result } = renderHook(() => useBranches("/r/seq"));
+    await waitFor(() => expect(result.current.local).toEqual(["main"]));
+
+    let releaseOld!: () => void;
+    state.lists["/r/seq"] = listing("old", ["old"]);
+    state.gates["/r/seq"] = new Promise<void>((r) => (releaseOld = r));
+    act(() => ws.setLast({ type: "git-change" }));
+
+    let releaseNew!: () => void;
+    state.lists["/r/seq"] = listing("new", ["new"]);
+    state.gates["/r/seq"] = new Promise<void>((r) => (releaseNew = r));
+    act(() => ws.setLast({ type: "git-change" }));
+
+    await act(async () => releaseNew());
+    await waitFor(() => expect(result.current.local).toEqual(["new"]));
+    await act(async () => releaseOld());
+    expect(result.current.local).toEqual(["new"]);
+    expect(result.current.current).toBe("new");
   });
 });

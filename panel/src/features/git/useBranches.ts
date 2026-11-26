@@ -40,6 +40,9 @@ export function useBranches(root: string | null) {
   const seq = useRef(0);
 
   const list = useCallback(async (r: string) => {
+    // A request for a left root must not bump seq, or it drops the current
+    // root's in-flight listing.
+    if (r !== rootRef.current) return;
     const mine = ++seq.current;
     try {
       const res = await fetch(`/api/git/branches?repo=${encodeURIComponent(r)}`);
@@ -78,9 +81,11 @@ export function useBranches(root: string | null) {
         if (!res.ok) throw new Error(data?.error || "Fetch failed");
         lastFetch.set(r, Date.now());
         await list(r);
-        setFetchState({ root: r, fetching: false, error: "" });
+        // Only end this root's fetch; another root's in-flight one stays.
+        setFetchState((s) => (s.root === r ? { root: r, fetching: false, error: "" } : s));
       } catch (e: any) {
-        setFetchState({ root: r, fetching: false, error: e?.message || "Fetch failed" });
+        const error = e?.message || "Fetch failed";
+        setFetchState((s) => (s.root === r ? { root: r, fetching: false, error } : s));
       }
     },
     [list],
