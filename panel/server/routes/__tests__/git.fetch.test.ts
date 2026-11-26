@@ -140,7 +140,7 @@ describe("POST /api/git/fetch", () => {
 
   it("a fetch that outlives its timeout answers 504 and does not broadcast", async () => {
     const { clone } = originAndClone();
-    git(clone, `config remote.origin.uploadpack "${script("hang.sh", "exec sleep 5 </dev/null >/dev/null 2>&1")}"`);
+    git(clone, `config remote.origin.uploadpack "${script("hang.sh", "exec sleep 1 </dev/null >/dev/null 2>&1")}"`);
     _setFetchTimeoutForTests(300);
     const res = await fetchRepo(clone);
     expect(res.status).toBe(504);
@@ -157,6 +157,33 @@ describe("POST /api/git/fetch", () => {
     expect(b.status).toBe(200);
     expect(a.body.fetchedAt).toBe(b.body.fetchedAt);
     expect(readFileSync(log, "utf-8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("fetch runs ssh non-interactively", async () => {
+    const saved = { GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND, GIT_SSH: process.env.GIT_SSH, PATH: process.env.PATH };
+    delete process.env.GIT_SSH_COMMAND;
+    delete process.env.GIT_SSH;
+    try {
+      const repo = join(tmp, "batch");
+      const log = join(tmp, "ssh.log");
+      const bin = join(tmp, "bin");
+      execSync(`mkdir -p "${bin}"`);
+      initRepo(repo);
+      git(repo, "remote add origin ssh://git@example.invalid/x.git");
+      // The stub ssh, first on PATH, records what git hands it and fails.
+      script("bin/ssh", `echo "argv: $*" > "${log}"; echo "prompt: $GIT_TERMINAL_PROMPT" >> "${log}"; exit 1`);
+      process.env.PATH = `${bin}:${saved.PATH}`;
+      const res = await fetchRepo(repo);
+      expect(res.status).toBe(502);
+      const recorded = readFileSync(log, "utf-8");
+      expect(recorded).toMatch(/^argv: .*-o BatchMode=yes/m);
+      expect(recorded).toContain("prompt: 0");
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 
   it("a repo's own core.sshCommand is used, not overridden", async () => {

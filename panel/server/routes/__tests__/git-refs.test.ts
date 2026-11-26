@@ -629,6 +629,16 @@ describe("GET /branches", () => {
     expect(res.body.branches).toContain("origin");
   });
 
+  it("branches current is the plain name when a tag shares it", async () => {
+    sh("tag main");
+    expect(sh("rev-parse --abbrev-ref HEAD").trim()).toBe("heads/main");
+    const res = await get("branches", {});
+    expect(res.status).toBe(200);
+    expect(res.body.current).toBe("main");
+    sh("checkout -q --detach");
+    expect((await get("branches", {})).body.current).toBe("HEAD");
+  });
+
   it("branches dedupes a remote branch whose local twin shares a name with a tag", async () => {
     withOrigin();
     // A tag and a branch both named v1 make `%(refname:short)` answer `heads/v1`.

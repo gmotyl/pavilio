@@ -1000,11 +1000,33 @@ async function checkoutArgs(branch: string, track: boolean, cwd: string): Promis
   // Trailing `--` pins the argument to a branch, never a pathspec.
   if (!track) return ["checkout", branch, "--"];
   const slash = branch.indexOf("/");
-  if (slash < 0 || !(await refExists(`refs/remotes/${branch}`, cwd))) return null;
+  const ref = `refs/remotes/${branch}`;
+  if (slash < 0 || !(await refExists(ref, cwd)) || (await isSymref(ref, cwd))) return null;
   const name = branch.slice(slash + 1);
   if (await refExists(`refs/heads/${name}`, cwd)) return ["checkout", name, "--"];
-  // The leading-dash guard keeps `branch` from parsing as an option.
-  return ["switch", "--track", branch];
+  // The full ref, so a local branch or tag literally named `origin/feat/b` cannot win;
+  // git still derives the local name (`feat/b`) from it.
+  return ["switch", "--track", ref];
+}
+
+/** Whether `ref` is symbolic (`origin/HEAD`), which names no branch of its own to track. */
+async function isSymref(ref: string, cwd: string): Promise<boolean> {
+  try {
+    await gitArgv(["symbolic-ref", "-q", ref], cwd);
+    return true;
+  } catch (e: any) {
+    if (gitExitedNonZero(e)) return false;
+    throw e;
+  }
+}
+
+/**
+ * The checked-out branch's plain name, or `HEAD` when detached. Not `--abbrev-ref`:
+ * that answers `heads/v1` when a tag shares the branch's name.
+ */
+async function currentBranch(cwd: string): Promise<string> {
+  const full = (await gitArgv(["rev-parse", "--symbolic-full-name", "HEAD"], cwd)).toString("utf-8").trim();
+  return full.startsWith("refs/heads/") ? full.slice("refs/heads/".length) : full;
 }
 
 router.post("/checkout", async (req, res) => {
@@ -1026,7 +1048,7 @@ router.post("/checkout", async (req, res) => {
     const args = await checkoutArgs(branch, track === true, cwd);
     if (!args) return res.status(400).json({ error: "unknown remote branch" });
     const output = (await gitArgv(args, cwd, WRITE_TIMEOUT_MS)).toString("utf-8");
-    const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
+    const current = await currentBranch(cwd);
     broadcast({ type: "git-change" });
     res.json({ ok: true, branch: current, output: output.trim() });
   } catch (e: any) {
@@ -1107,8 +1129,9 @@ router.get("/branches", async (req, res) => {
       .split("\n")
       .filter(Boolean)
       .map((b) => b.trim());
-    const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
-    const { local, remote } = await listLocalAndRemote(getRepoRoot(repo));
+    const cwd = getRepoRoot(repo);
+    const current = await currentBranch(cwd);
+    const { local, remote } = await listLocalAndRemote(cwd);
     res.json({ current, branches, local, remote });
   } catch (e: any) {
     sendGitError(res, e);

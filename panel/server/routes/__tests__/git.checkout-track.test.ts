@@ -103,6 +103,49 @@ describe("POST /checkout with track", () => {
     expect(broadcast).not.toHaveBeenCalled();
   });
 
+  it("track checkout rejects a symbolic remote ref", async () => {
+    sh("remote set-head origin main");
+    const res = await checkout({ branch: "origin/HEAD", track: true });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "unknown remote branch" });
+    expect(head()).toBe("main");
+    expect(sh("branch --list HEAD")).toBe("");
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it("track checkout is unambiguous when a local ref shares the remote branch's short name", async () => {
+    // A local branch literally named origin/feat/b makes the bare `origin/feat/b` ambiguous.
+    sh("branch -q origin/feat/b main");
+    const res = await checkout({ branch: "origin/feat/b", track: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, branch: "feat/b" });
+    expect(sh("symbolic-ref HEAD")).toBe("refs/heads/feat/b");
+    expect(sh("rev-parse --symbolic-full-name @{u}")).toBe("refs/remotes/origin/feat/b");
+    expect(sh("rev-parse HEAD")).toBe(sh("rev-parse refs/remotes/origin/feat/b"));
+  });
+
+  it("checkout reports the plain branch name when a tag shares it", async () => {
+    sh("branch -q v1 main");
+    sh("tag v1 main");
+    for (const body of [{ branch: "v1" }, { branch: "origin/feat/b", track: true }]) {
+      const res = await checkout(body);
+      expect(res.status).toBe(200);
+      expect(res.body.branch).toBe(body.track ? "feat/b" : "v1");
+    }
+    sh("tag feat/b main");
+    sh("checkout -q main");
+    const res = await checkout({ branch: "origin/feat/b", track: true });
+    expect(res.status).toBe(200);
+    expect(res.body.branch).toBe("feat/b");
+  });
+
+  it("checkout reports HEAD when it detaches", async () => {
+    sh("tag t1 main");
+    const res = await checkout({ branch: "t1" });
+    expect(res.status).toBe(200);
+    expect(res.body.branch).toBe("HEAD");
+  });
+
   it("track checkout keeps the leading-dash guard", async () => {
     for (const track of [true, undefined]) {
       const res = await checkout({ branch: "--orphan=x", track });
