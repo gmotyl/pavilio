@@ -977,8 +977,31 @@ router.get("/worktrees", (req, res) => {
   }
 });
 
+/** A remote-tracking branch: `ref` = `origin/feat/b`, `remote` = `origin`, `name` = `feat/b`. */
+interface RemoteBranch {
+  ref: string;
+  remote: string;
+  name: string;
+}
+
+/** Local heads, and remote branches without a local twin (symbolic refs such as origin/HEAD dropped). */
+async function listLocalAndRemote(cwd: string): Promise<{ local: string[]; remote: RemoteBranch[] }> {
+  const lines = async (args: string[]) => (await gitArgv(args, cwd)).toString("utf-8").split("\n").filter(Boolean);
+  const local = await lines(["for-each-ref", "refs/heads", "--format=%(refname:short)"]);
+  const localSet = new Set(local);
+  const remote: RemoteBranch[] = [];
+  for (const line of await lines(["for-each-ref", "refs/remotes", "--format=%(refname:short)%00%(symref)"])) {
+    const [ref, symref] = line.split("\0");
+    const slash = ref.indexOf("/");
+    if (symref || slash < 0) continue;
+    const name = ref.slice(slash + 1);
+    if (!localSet.has(name)) remote.push({ ref, remote: ref.slice(0, slash), name });
+  }
+  return { local, remote };
+}
+
 // List branches
-router.get("/branches", (req, res) => {
+router.get("/branches", async (req, res) => {
   try {
     const repo = req.query.repo as string | undefined;
     const raw = git("branch -a --format='%(refname:short)'", repo);
@@ -988,7 +1011,8 @@ router.get("/branches", (req, res) => {
       .filter(Boolean)
       .map((b) => b.trim());
     const current = git("rev-parse --abbrev-ref HEAD", repo).trim();
-    res.json({ current, branches });
+    const { local, remote } = await listLocalAndRemote(getRepoRoot(repo));
+    res.json({ current, branches, local, remote });
   } catch (e: any) {
     sendGitError(res, e);
   }

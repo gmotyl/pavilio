@@ -584,3 +584,48 @@ describe("ref-based git reads: path and status edge cases", () => {
     expect(first.body.diff).toContain("+new");
   });
 });
+
+describe("GET /branches", () => {
+  /** Local main + feat/a; bare origin with main, feat/b and origin/HEAD -> origin/main. */
+  function withOrigin() {
+    const origin = join(tmp, "origin.git");
+    execSync(`git init -q --bare ${origin}`, { stdio: "pipe", env: gitSafeEnv() });
+    sh(`remote add origin ${origin}`);
+    sh("branch -q feat/b");
+    sh("push -q origin main feat/b");
+    sh("branch -q -D feat/b");
+    sh("branch -q feat/a");
+    sh("fetch -q origin");
+    sh("remote set-head origin main");
+  }
+
+  it("branches lists local heads and remote branches separately", async () => {
+    withOrigin();
+    const res = await get("branches", {});
+    expect(res.status).toBe(200);
+    // git's for-each-ref order (refname-sorted)
+    expect(res.body.local).toEqual(["feat/a", "main"]);
+    expect(res.body.remote).toEqual([{ ref: "origin/feat/b", remote: "origin", name: "feat/b" }]);
+  });
+
+  it("branches drops origin/HEAD and remote branches with a local twin", async () => {
+    withOrigin();
+    const res = await get("branches", {});
+    const refs = res.body.remote.map((r: { ref: string }) => r.ref);
+    expect(refs).not.toContain("origin/HEAD");
+    expect(refs).not.toContain("origin");
+    expect(refs).not.toContain("origin/main");
+  });
+
+  it("branches keeps the legacy branches field unchanged", async () => {
+    const bare = await get("branches", {});
+    expect(bare.body).toEqual({ current: "main", branches: ["main"], local: ["main"], remote: [] });
+
+    withOrigin();
+    const res = await get("branches", {});
+    const legacy = sh("branch -a --format='%(refname:short)'").trim().split("\n").filter(Boolean);
+    expect(res.body.current).toBe("main");
+    expect(res.body.branches).toEqual(legacy);
+    expect(res.body.branches).toContain("origin");
+  });
+});
