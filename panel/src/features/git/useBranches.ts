@@ -38,7 +38,7 @@ export function useBranches(root: string | null) {
   // Newest answer wins: a slow answer for a left root, or one older than an
   // answer already applied for this root, is dropped. A failed request does
   // not advance `applied`, so it never discards an earlier success; a
-  // successful fetch raises it past every listing issued before it.
+  // successful fetch raises it past every listing issued before the fetch began.
   const seq = useRef(0);
   const applied = useRef(0);
 
@@ -75,6 +75,10 @@ export function useBranches(root: string | null) {
       const last = lastFetch.get(r);
       if (opts?.ifStaleMs !== undefined && last !== undefined && Date.now() - last < opts.ifStaleMs) return;
       setFetchState({ root: r, fetching: true, error: "" });
+      // Listings issued from here on may already see post-fetch refs (the
+      // server broadcasts `git-change` before this POST answers); only older
+      // ones are dropped.
+      const cutoff = seq.current;
       try {
         const res = await fetch("/api/git/fetch", {
           method: "POST",
@@ -86,7 +90,7 @@ export function useBranches(root: string | null) {
         lastFetch.set(r, Date.now());
         // Listings issued before the fetch read pre-fetch refs: drop them even if
         // the re-list below fails. Unrelated failures still keep last-good data.
-        if (rootRef.current === r) applied.current = Math.max(applied.current, seq.current);
+        if (rootRef.current === r) applied.current = Math.max(applied.current, cutoff);
         await list(r);
         // Only end this root's fetch; another root's in-flight one stays.
         setFetchState((s) => (s.root === r ? { root: r, fetching: false, error: "" } : s));

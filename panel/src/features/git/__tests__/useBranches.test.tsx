@@ -367,4 +367,35 @@ describe("useBranches", () => {
     expect(result.current.local).toEqual(["main"]);
     expect(result.current.current).toBe("main");
   });
+  it("a listing started during the fetch still lands when the post-fetch re-list fails", async () => {
+    const { state } = stubServer({ "/r/mid": listing("main", ["main"]) });
+    const { result } = renderHook(() => useBranches("/r/mid"));
+    await waitFor(() => expect(result.current.local).toEqual(["main"]));
+
+    // The fetch goes out and stalls.
+    let releaseFetch!: () => void;
+    state.fetchGates["/r/mid"] = new Promise<void>((r) => (releaseFetch = r));
+    let fetching!: Promise<void>;
+    act(() => {
+      fetching = result.current.fetch();
+    });
+
+    // The server's post-fetch git-change starts a listing of fresh refs.
+    let releaseMid!: () => void;
+    state.lists["/r/mid"] = listing("fresh", ["fresh"]);
+    state.gates["/r/mid"] = new Promise<void>((r) => (releaseMid = r));
+    act(() => ws.setLast({ type: "git-change" }));
+
+    // The fetch answers, but its own re-list fails.
+    delete state.lists["/r/mid"];
+    state.gates["/r/mid"] = undefined;
+    await act(async () => {
+      releaseFetch();
+      await fetching;
+    });
+
+    await act(async () => releaseMid());
+    await waitFor(() => expect(result.current.local).toEqual(["fresh"]));
+    expect(result.current.current).toBe("fresh");
+  });
 });
