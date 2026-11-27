@@ -174,7 +174,7 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
       const raw = id === "pocket" || id === "pocket-pl" ? (body.baseUrl ?? body.apiKey) : body.baseUrl;
       const baseUrl = typeof raw === "string" ? raw.trim() : "";
       if (!baseUrl || /[\r\n]/.test(baseUrl) || !isHttpUrl(baseUrl)) {
-        const example = id === "kokoro" ? "http://127.0.0.1:8880" : id === "pocket-pl" ? "http://127.0.0.1:8891" : "http://127.0.0.1:8890";
+        const example = id === "kokoro" ? "http://127.0.0.1:8880" : id === "pocket-pl" ? "http://127.0.0.1:8896" : id === "pocket" ? "http://127.0.0.1:8895" : "http://127.0.0.1:8890";
         res.status(400).json({ error: `baseUrl must be an http(s) URL without credentials, e.g. ${example}` });
         return;
       }

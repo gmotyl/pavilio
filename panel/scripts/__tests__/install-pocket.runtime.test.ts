@@ -111,12 +111,12 @@ describe.skipIf(process.platform === "win32")("generated pocketctl at runtime", 
 
     const lines = readFileSync(argvLog, "utf8").trim().split("\n");
     expect(lines).toHaveLength(3);
-    expect(lines).toContain("pocket-tts serve --host 127.0.0.1 --port 8890 HF_TOKEN=hf_secret");
+    expect(lines).toContain("pocket-tts serve --host 127.0.0.1 --port 8895 HF_TOKEN=hf_secret");
     expect(lines).toContain(
-      `pocket-tts serve --host 127.0.0.1 --port 8891 --config ${POCKET_PL_CONFIG} --default-voice hf://shefowl/pocket-tts-polish-6l/reference.wav@${POCKET_PL_REVISION} HF_TOKEN=`,
+      `pocket-tts serve --host 127.0.0.1 --port 8896 --config ${POCKET_PL_CONFIG} --default-voice hf://shefowl/pocket-tts-polish-6l/reference.wav@${POCKET_PL_REVISION} HF_TOKEN=`,
     );
     expect(lines).toContain(
-      `python -m http.server 8892 --bind 127.0.0.1 -d ${join(workspace, ".pavilio", "voices")} HF_TOKEN=`,
+      `python -m http.server 8897 --bind 127.0.0.1 -d ${join(workspace, ".pavilio", "voices")} HF_TOKEN=`,
     );
     expect(runCtl("status").status).toBe(0);
     // One server down is a partial install, not a running one.

@@ -119,7 +119,9 @@ describe("install:pocket", () => {
     expect(await main(both(), deps)).toEqual({ ok: true });
 
     expect(POCKET_TTS_VERSION).toBe("4.0.1");
-    expect(POCKET_PORTS).toEqual({ pocket: 8890, "pocket-pl": 8891, voiceFiles: 8892 });
+    expect(POCKET_PORTS).toEqual({ pocket: 8895, "pocket-pl": 8896, voiceFiles: 8897 });
+    // The OmniVoice stack (server, relay, narrate) listens on 8890-8892; sharing one makes the install stop.
+    for (const port of Object.values(POCKET_PORTS)) expect([8890, 8891, 8892]).not.toContain(port);
     const runs = calls.run.join("\n");
     expect(runs).toContain("--python 3.12");
     expect(runs).toContain("pocket-tts==4.0.1");
@@ -128,12 +130,12 @@ describe("install:pocket", () => {
     expect(statSync(ctlPath).mode & 0o111).not.toBe(0);
     expect(existsSync(join(installDir, "pocket.conf"))).toBe(true);
     const text = secrets();
-    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890\n");
-    expect(text).toContain("POCKET_PL_TTS_BASE_URL=http://127.0.0.1:8891\n");
-    expect(text).toContain("POCKET_VOICE_FILES_URL=http://127.0.0.1:8892\n");
+    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8895\n");
+    expect(text).toContain("POCKET_PL_TTS_BASE_URL=http://127.0.0.1:8896\n");
+    expect(text).toContain("POCKET_VOICE_FILES_URL=http://127.0.0.1:8897\n");
     expect(text).toContain("POCKET_TTS_CLONING=1\n");
     expect(text).toContain(`PANEL_TTS_SERVER_CTL=${ctlPath}\n`);
-    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/", "http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/"]);
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8895/health", "http://127.0.0.1:8896/health", "http://127.0.0.1:8897/", "http://127.0.0.1:8895/health", "http://127.0.0.1:8896/health", "http://127.0.0.1:8897/"]);
     expect(calls.ctl).toEqual(["status", "start", "stop"]);
   });
 
@@ -142,14 +144,14 @@ describe("install:pocket", () => {
     await main(both(), deps);
 
     const script = readFileSync(ctlPath, "utf8");
-    expect(script).toContain("--host 127.0.0.1 --port 8890");
-    expect(script).toContain("--host 127.0.0.1 --port 8891");
+    expect(script).toContain("--host 127.0.0.1 --port 8895");
+    expect(script).toContain("--host 127.0.0.1 --port 8896");
     expect(script).toContain(`--config ${POCKET_PL_CONFIG}`);
     expect(POCKET_PL_CONFIG).toBe(
       `hf://shefowl/pocket-tts-polish-6l/config.yaml@${POCKET_PL_REVISION}`,
     );
     expect(script).toContain(`--default-voice hf://shefowl/pocket-tts-polish-6l/reference.wav@${POCKET_PL_REVISION}`);
-    expect(script).toContain("http.server 8892 --bind 127.0.0.1 -d");
+    expect(script).toContain("http.server 8897 --bind 127.0.0.1 -d");
     expect(script).toContain(".cache/huggingface/token");
     expect(script).toContain("HF_TOKEN");
     const conf = readFileSync(join(installDir, "pocket.conf"), "utf8");
@@ -203,7 +205,7 @@ describe("install:pocket", () => {
     expect(calls.ctl.at(-1)).toBe("stop");
     expect(output()).toContain(join(installDir, "pocket.log"));
     expect(existsSync(ctlPath)).toBe(true);
-    expect(secrets()).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890");
+    expect(secrets()).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8895");
   });
 
   it("another service already answering on a port stops the install before anything is started", async () => {
@@ -218,11 +220,11 @@ describe("install:pocket", () => {
   it("the voice-file server is probed too, and a dead one fails the install", async () => {
     const { deps, calls, output } = fakes();
     const base = deps.fetch;
-    deps.fetch = async (url: string) => (url.endsWith(":8892/") && calls.ctl.includes("start") ? { ok: false } : base(url));
+    deps.fetch = async (url: string) => (url.endsWith(":8897/") && calls.ctl.includes("start") ? { ok: false } : base(url));
 
     expect(await main(both(), deps)).toEqual({ ok: false });
 
-    expect(output()).toContain("voices did not answer at http://127.0.0.1:8892/");
+    expect(output()).toContain("voices did not answer at http://127.0.0.1:8897/");
     expect(calls.ctl.at(-1)).toBe("stop");
   });
 
@@ -230,7 +232,7 @@ describe("install:pocket", () => {
     const { deps, calls } = fakes();
     // Per-server state: pocket and the file server run (pids 100, 300); pocket-pl is down.
     const pids: Record<string, number> = { pocket: 100, "pocket-pl": 0, voices: 300 };
-    const ports: Record<string, string> = { "8890": "pocket", "8891": "pocket-pl", "8892": "voices" };
+    const ports: Record<string, string> = { "8895": "pocket", "8896": "pocket-pl", "8897": "voices" };
     let nextPid = 1000;
     deps.ctl = (_path: string, verb: string) => {
       calls.ctl.push(verb);
@@ -287,7 +289,7 @@ describe("install:pocket", () => {
     });
     let text = secrets();
     expect(text).not.toContain("POCKET_PL_TTS_BASE_URL");
-    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890");
+    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8895");
     expect(text).toContain("POCKET_VOICE_FILES_URL");
     expect(text).toContain(ctlPath);
     expect(readFileSync(join(installDir, "pocket.conf"), "utf8")).not.toContain("pocket-pl");
@@ -326,7 +328,7 @@ describe("install:pocket", () => {
     expect(await main(both(), deps)).toEqual({ ok: true });
 
     expect(calls.ctl).toEqual(["status"]);
-    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/"]);
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8895/health", "http://127.0.0.1:8896/health", "http://127.0.0.1:8897/"]);
   });
 
   it("selecting one server on a later run keeps the already-installed other", async () => {
@@ -337,9 +339,9 @@ describe("install:pocket", () => {
 
     expect(readFileSync(join(installDir, "pocket.conf"), "utf8")).toContain("POCKET_SERVERS='pocket pocket-pl'");
     const text = secrets();
-    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890\n");
-    expect(text).toContain("POCKET_PL_TTS_BASE_URL=http://127.0.0.1:8891\n");
-    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/", "http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/"]);
+    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8895\n");
+    expect(text).toContain("POCKET_PL_TTS_BASE_URL=http://127.0.0.1:8896\n");
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8895/health", "http://127.0.0.1:8896/health", "http://127.0.0.1:8897/", "http://127.0.0.1:8895/health", "http://127.0.0.1:8896/health", "http://127.0.0.1:8897/"]);
   });
 
   it("an empty Hugging Face token file counts as no login", async () => {

@@ -657,8 +657,8 @@ describe("EngineSettings", () => {
     ]);
 
     for (const [id, label, placeholder] of [
-      ["pocket", "Pocket TTS (English)", "http://127.0.0.1:8890"],
-      ["pocket-pl", "Pocket TTS (Polish)", "http://127.0.0.1:8891"],
+      ["pocket", "Pocket TTS (English)", "http://127.0.0.1:8895"],
+      ["pocket-pl", "Pocket TTS (Polish)", "http://127.0.0.1:8896"],
     ] as const) {
       const scope = within(row(id));
       expect(scope.getByText(label)).toBeInTheDocument();

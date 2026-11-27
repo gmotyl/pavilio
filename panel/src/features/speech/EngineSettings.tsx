@@ -41,8 +41,8 @@ const LIMIT_NOTES: Readonly<Record<string, string>> = {
 const ADDRESS_PLACEHOLDERS: Readonly<Record<string, string>> = {
   openai: "http://127.0.0.1:8890",
   kokoro: "http://127.0.0.1:8880",
-  pocket: "http://127.0.0.1:8890",
-  "pocket-pl": "http://127.0.0.1:8891",
+  pocket: "http://127.0.0.1:8895",
+  "pocket-pl": "http://127.0.0.1:8896",
 };
 
 const CHIP_COLORS: Readonly<Record<ChipTone, string>> = {

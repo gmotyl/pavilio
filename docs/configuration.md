@@ -71,8 +71,8 @@ Kokoro has a fixed catalog of 54 preset voices (default `af_heart`) and uses one
 **Pocket.** Pocket TTS is installed by the `pocket` and `pocket-pl` entries of the menu (or `--engines=pocket,pocket-pl`):
 
 - creates a venv with a pinned `pocket-tts` in `~/.local/share/pavilio/pocket-tts` (or `$PAVILIO_POCKET_DIR`) and writes `pocketctl` (`start|stop|restart|status|log`) there;
-- English listens on `http://127.0.0.1:8890` (`POCKET_TTS_BASE_URL`), Polish on `http://127.0.0.1:8891` (`POCKET_PL_TTS_BASE_URL`); each server uses about 1.1 GB of RAM;
-- a small file server on `http://127.0.0.1:8892` (`POCKET_VOICE_FILES_URL`) serves your workspace voices (`.pavilio/voices`), so Pocket can clone them; `POCKET_TTS_CLONING` is `1` when English cloning is on;
+- English listens on `http://127.0.0.1:8895` (`POCKET_TTS_BASE_URL`), Polish on `http://127.0.0.1:8896` (`POCKET_PL_TTS_BASE_URL`); each server uses about 1.1 GB of RAM;
+- a small file server on `http://127.0.0.1:8897` (`POCKET_VOICE_FILES_URL`) serves your workspace voices (`.pavilio/voices`), so Pocket can clone them; `POCKET_TTS_CLONING` is `1` when English cloning is on;
 - appends `pocketctl` to `PANEL_TTS_SERVER_CTL` like Kokoro does; restart the panel afterwards.
 
 Both servers clone any clip in `.pavilio/voices`; the Polish one clones only (it refuses preset voices), and a Polish clip can speak English, so pick the engine per project. English cloning needs the gated weights, which need a Hugging Face login. Without one the installer prints that cloning is off, and English then has the preset voices only. To turn it on:

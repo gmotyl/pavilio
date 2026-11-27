@@ -6,11 +6,11 @@
  * `PAVILIO_POCKET_DIR ?? ~/.local/share/pavilio/pocket-tts`, writes `pocketctl`
  * (start|stop|restart|status|log) and `pocket.conf` (the selected servers and the
  * workspace voices dir) beside it, and points the panel secrets file at them:
- * POCKET_TTS_BASE_URL (English, :8890), POCKET_PL_TTS_BASE_URL (Polish, :8891),
- * POCKET_VOICE_FILES_URL (a read-only file server for <workspace>/.pavilio/voices, :8892),
+ * POCKET_TTS_BASE_URL (English, :8895), POCKET_PL_TTS_BASE_URL (Polish, :8896),
+ * POCKET_VOICE_FILES_URL (a read-only file server for <workspace>/.pavilio/voices, :8897),
  * POCKET_TTS_CLONING (1 when a Hugging Face token file exists) and pocketctl in the
  * `:`-separated PANEL_TTS_SERVER_CTL list. It then starts the servers once, probes
- * `GET /health` on each (and the file server on :8892) and stops them again (servers already
+ * `GET /health` on each (and the file server on :8897) and stops them again (servers already
  * running are only probed). A port that answers while pocketctl is stopped belongs to another
  * service: the install stops there. `pocketctl status` exits 0 (all up), 3 (none) or 4 (some).
  *
@@ -44,7 +44,7 @@ import {
 } from "./install-kokoro.mjs";
 
 export const POCKET_TTS_VERSION = "4.0.1";
-export const POCKET_PORTS = { pocket: 8890, "pocket-pl": 8891, voiceFiles: 8892 };
+export const POCKET_PORTS = { pocket: 8895, "pocket-pl": 8896, voiceFiles: 8897 };
 export const POCKET_PL_REVISION = "a8630f2a39055d3e5a91acb7922e31bd0c506cfe";
 const POCKET_PL_REPO = "hf://shefowl/pocket-tts-polish-6l";
 export const POCKET_PL_CONFIG = `${POCKET_PL_REPO}/config.yaml@${POCKET_PL_REVISION}`;
