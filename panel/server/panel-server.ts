@@ -8,6 +8,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from "htt
 import { createServer as createHttpsServer } from "https";
 import { createServer as createNetServer } from "net";
 import { readFileSync } from "fs";
+import { resolve } from "node:path";
 import { loadConfig, getConfig, isPortExplicit } from "./config.js";
 import { adoptProjectIdentity, loadPreferences } from "./lib/preferences-store.js";
 import { preferenceSeedsFor } from "./lib/preferencesPath.js";
@@ -48,6 +49,7 @@ import { createTtsHolder, isHttpUrl } from "./lib/speech/ttsHolder.js";
 import { createOpenaiCatalog } from "./lib/speech/openaiCatalog.js";
 import { resolveKey } from "./lib/speech/secrets.js";
 import { createSpeechEnginesRouter } from "./routes/speechEngines.js";
+import { listWorkspaceVoiceInfo } from "./lib/speech/workspaceVoices.js";
 import { createSpeechVoicesRouter } from "./routes/speechVoices.js";
 import { createSpeechUsageRouter } from "./routes/speechUsage.js";
 import { createUsageStore } from "./lib/speech/usage-store.js";
@@ -232,7 +234,8 @@ export async function startPanel(
     baseUrl: openaiBaseUrl,
     onChange: () => ttsHolder.rebuild(),
   });
-  const ttsHolder = createTtsHolder({ catalog: openaiCatalog });
+  const workspaceRoot = resolve(getConfig().projectsDir, "..");
+  const ttsHolder = createTtsHolder({ catalog: openaiCatalog, workspaceVoices: () => listWorkspaceVoiceInfo(workspaceRoot) });
   // Async: the first build has no OmniVoice voices, so `openai` sits out until
   // this lands and its onChange rebuilds the holder. It never rejects.
   void openaiCatalog.refresh();
@@ -287,7 +290,7 @@ export async function startPanel(
   app.use("/api/speech", speechRouter);
   app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder, catalog: openaiCatalog }));
   // The OmniVoice server's voices (list, clone, delete, sample) and the workspace voice copy.
-  app.use("/api/speech", createSpeechVoicesRouter({ catalog: openaiCatalog, baseUrl: openaiBaseUrl }));
+  app.use("/api/speech", createSpeechVoicesRouter({ catalog: openaiCatalog, baseUrl: openaiBaseUrl, workspaceRoot, holder: ttsHolder }));
   app.use("/api/speech", createSpeechUsageRouter({ store: usageStore }));
   // Page audio cache under ~/.pavilio/speech-cache; parses its own raw PUT bodies.
   app.use("/api/speech/page-cache", createPageCacheRouter());

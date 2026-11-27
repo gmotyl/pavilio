@@ -5,8 +5,11 @@ import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { getConfig } from "../config.js";
 import type { OpenaiCatalog } from "../lib/speech/openaiCatalog.js";
+import { resolveKey as resolveSecret } from "../lib/speech/secrets.js";
+import type { TtsHolder } from "../lib/speech/ttsHolder.js";
 import {
   isSafeVoiceName,
+  listWorkspaceVoiceInfo,
   listWorkspaceVoices,
   removeWorkspaceVoice,
   writeWorkspaceVoice,
@@ -19,6 +22,8 @@ import {
  *   POST   /api/speech/openai/voices              multipart (25 MB) → the server's status + body
  *   DELETE /api/speech/openai/voices/:name        → the server's status
  *   GET    /api/speech/openai/voices/:name/sample → the voice's reference wav, streamed
+ *
+ *   GET    /api/speech/pocket/voices              → 200 {voices, cloning}, from disk, no network
  *
  * With no address set every route answers `409 {error:"no-address"}`; a server that refuses the
  * connection or times out is `502 {error:"unreachable"}`; a 4xx from the server comes back with
@@ -47,6 +52,10 @@ export interface SpeechVoicesOptions {
   workspaceRoot?: string;
   /** Default: the global `fetch`. */
   fetch?: typeof fetch;
+  /** Rebuilt after a workspace voice copy is written or removed, so the Pocket engines see it. */
+  holder?: Pick<TtsHolder, "rebuild">;
+  /** Where `POCKET_TTS_CLONING` comes from. Default: the secrets store. */
+  resolveKey?: typeof resolveSecret;
 }
 
 // One byte over the limit: multer rejects at `fileSize` itself, so a file of exactly
@@ -91,7 +100,7 @@ async function passError(res: Response, upstream: globalThis.Response): Promise<
 }
 
 export function createSpeechVoicesRouter(options: SpeechVoicesOptions): Router {
-  const { catalog, baseUrl, fetch: fetchImpl = fetch } = options;
+  const { catalog, baseUrl, fetch: fetchImpl = fetch, holder, resolveKey = resolveSecret } = options;
   const workspaceRoot = options.workspaceRoot ?? resolve(getConfig().projectsDir, "..");
   const router = Router();
 
@@ -147,6 +156,14 @@ export function createSpeechVoicesRouter(options: SpeechVoicesOptions): Router {
     }),
   );
 
+  // The workspace voice copies for the Pocket engines: read from disk, so no OmniVoice address.
+  router.get("/pocket/voices", (_req, res) => {
+    res.json({
+      voices: listWorkspaceVoiceInfo(workspaceRoot),
+      cloning: resolveKey("POCKET_TTS_CLONING").value !== "0",
+    });
+  });
+
   router.post(
     "/openai/voices",
     // The address is checked before the upload is read, so nothing is buffered for nothing.
@@ -186,6 +203,7 @@ export function createSpeechVoicesRouter(options: SpeechVoicesOptions): Router {
         // The voice is on the server either way; only the workspace copy is missing.
         console.error(`[speech] could not save the workspace copy of voice ${name}:`, error instanceof Error ? error.message : error);
       }
+      holder?.rebuild();
       await catalog.refresh();
       res.status(upstream.status).json(record);
     }),
@@ -206,6 +224,7 @@ export function createSpeechVoicesRouter(options: SpeechVoicesOptions): Router {
         return;
       }
       await removeWorkspaceVoice(workspaceRoot, name);
+      holder?.rebuild();
       await catalog.refresh();
       res.status(204).end();
     }),
