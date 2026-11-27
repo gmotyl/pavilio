@@ -18,6 +18,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { preferences } from "../../preferences/declarations";
+import { subscribePreference } from "../../preferences/store";
+import { projectOfSession } from "../terminal/sessionProject";
+import { projectOfDocKey } from "./docKey";
+import { rateFor } from "./rate";
 import { toSpeechBlob } from "./synth";
 import { unitAudio } from "./unitAudio";
 import type { SpeechUnit } from "./types";
@@ -277,6 +282,16 @@ function teardownRun(run: PlaybackRun): void {
   run.urls.clear();
 }
 
+/**
+ * Puts the key's project rate on the element, pitch preserved. A key with no
+ * project (a page outside projects, a session the tab cannot place) plays at
+ * 1.0. Assigning `src` resets `playbackRate`, so this runs after every swap.
+ */
+function applyRate(element: HTMLAudioElement, key: string): void {
+  element.playbackRate = rateFor(projectOfDocKey(key) ?? projectOfSession(key));
+  element.preservesPitch = true;
+}
+
 function resetElement(element: HTMLAudioElement): void {
   element.pause();
   element.removeAttribute("src");
@@ -421,6 +436,7 @@ function playUnit(
     run.abandonUnit = () => settle(resolve);
 
     element.src = url;
+    applyRate(element, run.sessionId);
     // Assigning `src` rewinds the element, so a seek that landed part-way into
     // this unit has to be re-applied after it — and before `play()`, or the
     // first fraction of a second of the wrong part of the unit is audible.
@@ -490,6 +506,17 @@ export function useSpeechPlayer(options: SpeechPlayerOptions): SpeechPlayer {
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
   const onErrorRef = useRef<SpeechPlayerOptions["onError"]>(undefined);
+
+  // A rate change reaches the unit already playing: `playbackRate` only, with
+  // no restart and no synthesis call.
+  useEffect(
+    () =>
+      subscribePreference(preferences.speechRateByProject, undefined, () => {
+        const run = runRef.current;
+        if (run && elementRef.current) applyRate(elementRef.current, run.sessionId);
+      }),
+    [],
+  );
 
   useEffect(() => {
     onErrorRef.current = options.onError;

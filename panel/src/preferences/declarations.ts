@@ -181,6 +181,28 @@ const projectEngineVoices: PreferenceCodec<Record<string, EngineVoices>> = {
   },
 };
 
+/**
+ * A playback rate coerced into the supported range: 0.5–2.0, rounded to 0.1;
+ * anything that is not a finite number reads as 1.0. Pure and dependency-free
+ * so the codec below and `features/speech/rate.ts` share one rule.
+ */
+export function clampRate(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.round(Math.min(2, Math.max(0.5, value)) * 10) / 10;
+}
+
+/** Project → playback rate; every entry clamped and rounded, a non-number reads as 1.0. */
+const projectRates: PreferenceCodec<Record<string, number>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a record: ${raw}`);
+    return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, clampRate(v)]));
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
 /** Project → engine id; a record whose non-string entries are dropped. */
 const projectEngines: PreferenceCodec<Record<string, string>> = {
   parse(raw) {
@@ -1029,6 +1051,19 @@ export const preferences = {
     scope: "global",
     default: {},
     codec: projectEngines,
+    portable: true,
+  }),
+  /**
+   * A project's playback speed — `project → rate` (0.5–2.0, step 0.1), absent
+   * for a project at 1.0. Portable like `speech.voiceByProject`. The codec
+   * clamps and rounds; speed is the audio element's `playbackRate` only and is
+   * never sent to synthesis.
+   */
+  speechRateByProject: definePreference<Record<string, number>>({
+    key: "speech.rateByProject", // was: nothing — every project played at 1.0
+    scope: "global",
+    default: {},
+    codec: projectRates,
     portable: true,
   }),
   /**

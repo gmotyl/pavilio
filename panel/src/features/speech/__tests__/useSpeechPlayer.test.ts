@@ -214,6 +214,7 @@ import { voiceForSession } from "../../terminal/sessionVoice";
 import type { SpeechUnit } from "../types";
 import { refreshSessions } from "../../terminal/sessionStore";
 import { DEFAULT_SPEECH_VOICE, setEngineVoice, setProjectVoice } from "../voices";
+import { setProjectRate } from "../rate";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length, source: text }));
@@ -1704,5 +1705,70 @@ describe("useSpeechPlayer", () => {
     expect(revokedUrls).toHaveLength(createdUrls.length);
     expect(inOrder(revokedUrls)).toEqual(inOrder(createdUrls));
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSpeechPlayer playback rate", () => {
+  async function placeCell(id: string, project: string): Promise<void> {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id, name: id, project, cwd: `/srv/git/${project}`, pid: 1, createdAt: "" },
+        ],
+      })),
+    );
+    try {
+      await refreshSessions();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  const voiceFor = () => DEFAULT_SPEECH_VOICE;
+
+  it("a unit plays at its project's rate with pitch preserved", async () => {
+    setProjectRate("p", 1.5);
+    await placeCell("cell-rp", "p");
+    const { result } = renderHook(() => useSpeechPlayer({ voiceFor }));
+
+    await startPlay(result.current, "cell-rp", manyUnits(2));
+
+    const element = elements[elements.length - 1];
+    expect(element.playbackRate).toBe(1.5);
+    expect(element.preservesPitch).toBe(true);
+    setProjectRate("p", 1.0);
+  });
+
+  it("changing the rate while playing applies without resynthesis", async () => {
+    await placeCell("cell-rc", "p");
+    const { result } = renderHook(() => useSpeechPlayer({ voiceFor }));
+    await startPlay(result.current, "cell-rc", manyUnits(2));
+    const element = elements[elements.length - 1];
+    expect(element.playbackRate).toBe(1);
+    const requestsBefore = synth.requests.length;
+    const playsBefore = played.length;
+
+    await act(async () => {
+      setProjectRate("p", 2.0);
+      await drain();
+    });
+
+    expect(element.playbackRate).toBe(2);
+    expect(played).toHaveLength(playsBefore);
+    expect(synth.requests).toHaveLength(requestsBefore);
+    setProjectRate("p", 1.0);
+  });
+
+  it("keys without a project play at 1.0", async () => {
+    setProjectRate("p", 1.5);
+    const { result } = renderHook(() => useSpeechPlayer({ voiceFor }));
+
+    await startPlay(result.current, "doc:loose.md", manyUnits(1));
+
+    expect(elements[elements.length - 1].playbackRate).toBe(1);
+    setProjectRate("p", 1.0);
   });
 });
