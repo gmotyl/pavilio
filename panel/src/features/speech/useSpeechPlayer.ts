@@ -18,6 +18,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { preferences } from "../../preferences/declarations";
+import { subscribePreference } from "../../preferences/store";
+import { projectOfDocKey } from "./docKey";
+import { rateFor } from "./rate";
 import { toSpeechBlob } from "./synth";
 import { unitAudio } from "./unitAudio";
 import type { SpeechUnit } from "./types";
@@ -128,6 +132,13 @@ export interface SpeechPlayerOptions {
    * one, because the synthesis cache keys on voice + text.
    */
   voiceFor: (sessionId: string) => string;
+  /**
+   * The project a non-page key (a terminal session) belongs to, or null. Page
+   * keys resolve through `docKey` here; a session needs the terminal's list,
+   * which speech must not import, so the host hands the lookup in. Absent or
+   * null means no project, so 1.0.
+   */
+  projectFor?: (sessionId: string) => string | null | undefined;
 }
 
 export interface SpeechPlayer {
@@ -217,6 +228,8 @@ export interface SpeechPlayer {
  */
 interface PlaybackRun {
   readonly sessionId: string;
+  /** The host's session-to-project lookup, as of the run's start. */
+  readonly projectFor: SpeechPlayerOptions["projectFor"];
   active: boolean;
   /**
    * Whether the user is holding this run. Distinct from `active`: a paused run
@@ -275,6 +288,20 @@ function teardownRun(run: PlaybackRun): void {
   run.abandonUnit?.();
   for (const url of run.urls) URL.revokeObjectURL(url);
   run.urls.clear();
+}
+
+/**
+ * Puts the key's project rate on the element, pitch preserved. A key with no
+ * project (a page outside projects, a session the tab cannot place) plays at
+ * 1.0. Assigning `src` resets `playbackRate`, so this runs after every swap.
+ */
+function applyRate(
+  element: HTMLAudioElement,
+  key: string,
+  projectFor: SpeechPlayerOptions["projectFor"],
+): void {
+  element.playbackRate = rateFor(projectOfDocKey(key) ?? projectFor?.(key) ?? null);
+  element.preservesPitch = true;
 }
 
 function resetElement(element: HTMLAudioElement): void {
@@ -421,6 +448,7 @@ function playUnit(
     run.abandonUnit = () => settle(resolve);
 
     element.src = url;
+    applyRate(element, run.sessionId, run.projectFor);
     // Assigning `src` rewinds the element, so a seek that landed part-way into
     // this unit has to be re-applied after it — and before `play()`, or the
     // first fraction of a second of the wrong part of the unit is audible.
@@ -490,6 +518,22 @@ export function useSpeechPlayer(options: SpeechPlayerOptions): SpeechPlayer {
   const elementRef = useRef<HTMLAudioElement | null>(null);
   const runRef = useRef<PlaybackRun | null>(null);
   const onErrorRef = useRef<SpeechPlayerOptions["onError"]>(undefined);
+
+  const projectForRef = useRef(options.projectFor);
+  useEffect(() => {
+    projectForRef.current = options.projectFor;
+  }, [options.projectFor]);
+
+  // A rate change reaches the unit already playing: `playbackRate` only, with
+  // no restart and no synthesis call.
+  useEffect(
+    () =>
+      subscribePreference(preferences.speechRateByProject, undefined, () => {
+        const run = runRef.current;
+        if (run && elementRef.current) applyRate(elementRef.current, run.sessionId, run.projectFor);
+      }),
+    [],
+  );
 
   useEffect(() => {
     onErrorRef.current = options.onError;
@@ -682,6 +726,7 @@ export function useSpeechPlayer(options: SpeechPlayerOptions): SpeechPlayer {
       const voice = voiceForRef.current(sessionId);
       const run: PlaybackRun = {
         sessionId,
+        projectFor: projectForRef.current,
         active: true,
         paused: false,
         urls: new Set<string>(),

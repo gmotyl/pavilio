@@ -465,7 +465,9 @@ function runWithRetiredRegistration(...args: string[]) {
   mkdirSync(stagedDir, { recursive: true });
   const staged = join(stagedDir, "install-speech-hook.mjs");
   // The installer imports its seeding step from a sibling file.
-  copyFileSync(join(TEST_DIR, "..", "seed-omnivoice-voices.mjs"), join(stagedDir, "seed-omnivoice-voices.mjs"));
+  for (const sibling of ["seed-omnivoice-voices.mjs", "install-kokoro.mjs", "install-pocket.mjs"]) {
+    copyFileSync(join(TEST_DIR, "..", sibling), join(stagedDir, sibling));
+  }
   writeFileSync(
     staged,
     source.replace(
@@ -1351,5 +1353,197 @@ command = "npx"
     expect(afterUninstall.hooks).not.toHaveProperty(RETIRED_EVENT);
     expect(JSON.stringify(afterUninstall)).not.toContain("speak-retired");
     expect(allStopCommands(afterUninstall)).toEqual(["echo other-stop-hook"]);
+  });
+});
+
+/*
+ * The engine step. Driven in-process through main()'s injected effects: no
+ * network, no installs, and no real agent config (targets is empty).
+ */
+describe("install:speech engine step", () => {
+  type Pocket = { servers?: string[]; uninstall?: boolean };
+  async function drive(argv: string[], over: Record<string, unknown> = {}) {
+    const mod = await import(pathToFileURL(SCRIPT).href);
+    const calls = {
+      select: [] as unknown[],
+      ask: 0,
+      secrets: [] as [string, string][],
+      seed: [] as unknown[],
+      kokoro: [] as string[][],
+      pocket: [] as Pocket[],
+      out: [] as string[],
+      err: [] as string[],
+    };
+    const code = await mod.main(argv, {
+      targets: [],
+      isTTY: false,
+      installed: () => [],
+      select: async (items: unknown[]) => {
+        calls.select.push(items);
+        return [];
+      },
+      ask: async (_q: string, fallback: string) => {
+        calls.ask += 1;
+        return fallback;
+      },
+      reachable: async () => true,
+      setSecret: (n: string, v: string) => calls.secrets.push([n, v]),
+      seed: async (o: unknown) => calls.seed.push(o),
+      kokoro: async (a: string[]) => (calls.kokoro.push(a), 0),
+      pocket: async (o: Pocket) => (calls.pocket.push(o), { ok: true }),
+      log: (m: string) => calls.out.push(m),
+      error: (m: string) => calls.err.push(m),
+      ...over,
+    });
+    return { code, ...calls };
+  }
+
+  it("--engines=none is hooks only: no engine step and no voice seeding", async () => {
+    const r = await drive(["--engines=none"]);
+    expect(r.code).toBe(0);
+    expect(r.seed).toEqual([]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.pocket).toEqual([]);
+  });
+
+  it("a plain run without --engines still seeds from the environment", async () => {
+    const r = await drive([]);
+    expect(r.seed).toEqual([{ workspaceRoot: expect.any(String) }]);
+  });
+
+  it("a TTY shows the engine menu after the hooks", async () => {
+    const order: string[] = [];
+    const r = await drive([], {
+      isTTY: true,
+      targets: [{ name: "fake", root: TEST_DIR, install: () => (order.push("hook"), "ok"), uninstall: () => "" }],
+      installed: () => ["kokoro"],
+      select: async (items: { id: string; ticked: boolean; hint: string }[]) => {
+        order.push("menu");
+        expect(items.map((i) => i.id)).toEqual(["omnivoice", "kokoro", "pocket", "pocket-pl"]);
+        expect(items.filter((i) => i.ticked).map((i) => i.id)).toEqual(["kokoro"]);
+        expect(items[0].hint).toBe("https://github.com/gmotyl/omnivoice-server");
+        return ["pocket", "pocket-pl"];
+      },
+    });
+    expect(order).toEqual(["hook", "menu"]);
+    expect(r.code).toBe(0);
+    expect(r.pocket).toEqual([expect.objectContaining({ servers: ["pocket", "pocket-pl"] })]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.ask).toBe(0);
+  });
+
+  it("--engines skips the menu", async () => {
+    const r = await drive(["--engines=pocket,pocket-pl"], {
+      isTTY: true,
+      select: async () => {
+        throw new Error("menu must not open");
+      },
+    });
+    expect(r.code).toBe(0);
+    expect(r.pocket).toHaveLength(1);
+    expect(r.pocket[0].servers).toEqual(["pocket", "pocket-pl"]);
+    expect(r.pocket[0].uninstall).toBeFalsy();
+    expect(r.kokoro).toEqual([]);
+    expect(r.secrets).toEqual([]);
+  });
+
+  it("no TTY installs hooks only", async () => {
+    const r = await drive([]);
+    expect(r.code).toBe(0);
+    expect(r.select).toEqual([]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.pocket).toEqual([]);
+    expect(r.secrets).toEqual([]);
+    expect(r.out.filter((l) => l.includes("--engines"))).toHaveLength(1);
+  });
+
+  it("unknown engine ids exit 1", async () => {
+    const order: string[] = [];
+    const r = await drive(["--engines=piper"], {
+      isTTY: true,
+      targets: [{ name: "fake", root: TEST_DIR, install: () => (order.push("hook"), "ok"), uninstall: () => "" }],
+    });
+    expect(order).toEqual(["hook"]);
+    expect(r.code).toBe(1);
+    const text = r.err.join("\n");
+    for (const id of ["omnivoice", "kokoro", "pocket", "pocket-pl"]) expect(text).toContain(id);
+    expect(text).toContain("piper");
+    expect(r.select).toEqual([]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.pocket).toEqual([]);
+  });
+
+  it("OmniVoice connect writes the address and seeds", async () => {
+    const r = await drive(["--engines=omnivoice"]);
+    expect(r.code).toBe(0);
+    expect(r.secrets).toEqual([["OPENAI_TTS_BASE_URL", "http://127.0.0.1:8000"]]);
+    expect(r.seed).toEqual([expect.objectContaining({ baseUrl: "http://127.0.0.1:8000" })]);
+  });
+
+  it("OmniVoice probes GET /v1/voices on the entered address", async () => {
+    const urls: string[] = [];
+    const mod = await import(pathToFileURL(SCRIPT).href);
+    const fetchStub = async (url: string) => (urls.push(url), { ok: true });
+    const r = await drive(["--engines=omnivoice"], {
+      reachable: (a: string) => mod.probeOmniVoice(a, fetchStub),
+    });
+    expect(urls).toEqual(["http://127.0.0.1:8000/v1/voices"]);
+    expect(r.secrets).toHaveLength(1);
+    const dead = await mod.probeOmniVoice("http://127.0.0.1:8000", async () => ({ ok: false }));
+    const down = await mod.probeOmniVoice("http://127.0.0.1:8000", async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect([dead, down]).toEqual([false, false]);
+  });
+
+  it("an unreachable OmniVoice prints the link and continues", async () => {
+    const r = await drive(["--engines=omnivoice,kokoro,pocket"], { reachable: async () => false });
+    expect(r.code).toBe(0);
+    expect(r.secrets).toEqual([]);
+    // Seeding must not run against an address that was just rejected.
+    expect(r.seed.filter((o) => (o as { baseUrl?: string }).baseUrl)).toEqual([]);
+    expect(r.out.join("\n")).toContain("https://github.com/gmotyl/omnivoice-server");
+    expect(r.kokoro).toEqual([[]]);
+    expect(r.pocket).toEqual([expect.objectContaining({ servers: ["pocket"] })]);
+  });
+
+  it("Kokoro dispatches to the kokoro installer", async () => {
+    const r = await drive(["--engines=kokoro"]);
+    expect(r.kokoro).toEqual([[]]);
+    expect(r.pocket).toEqual([]);
+    expect(r.secrets).toEqual([]);
+    expect(r.code).toBe(0);
+    const failing = await drive(["--engines=kokoro"], { kokoro: async () => 1 });
+    expect(failing.code).toBe(1);
+  });
+
+  it("a failing pocket install makes the exit code 1", async () => {
+    const r = await drive(["--engines=pocket"], { pocket: async () => ({ ok: false }) });
+    expect(r.code).toBe(1);
+  });
+
+  it("--uninstall --engines removes only those engines", async () => {
+    const hooks: string[] = [];
+    const r = await drive(["--uninstall", "--engines=pocket-pl"], {
+      isTTY: true,
+      targets: [{ name: "fake", root: TEST_DIR, install: () => "", uninstall: () => (hooks.push("removed"), "ok") }],
+    });
+    expect(hooks).toEqual(["removed"]);
+    expect(r.code).toBe(0);
+    expect(r.pocket).toEqual([expect.objectContaining({ servers: ["pocket-pl"], uninstall: true })]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.secrets).toEqual([]);
+    expect(r.seed).toEqual([]);
+    expect(r.select).toEqual([]);
+  });
+
+  it("--uninstall alone touches hooks only and never seeds or prompts", async () => {
+    const r = await drive(["--uninstall"], { isTTY: true });
+    expect(r.code).toBe(0);
+    expect(r.pocket).toEqual([]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.seed).toEqual([]);
+    expect(r.select).toEqual([]);
+    expect(r.secrets).toEqual([]);
   });
 });

@@ -238,6 +238,8 @@ export interface SpeechHostOptions {
    * so a warm in any other voice is a synthesis the click never finds.
    */
   voiceFor: (sessionId: string) => string;
+  /** The project a session belongs to, for its playback rate; see `SpeechPlayerOptions.projectFor`. */
+  projectFor?: (sessionId: string) => string | null | undefined;
   /**
    * The voice language of a session or page key: the language its text is
    * prepared in (placeholders and every unit's `lang`). Read at preparation
@@ -358,6 +360,7 @@ export function useSpeechHost({
   isSessionOpen = ALWAYS_OPEN,
   onRunChange,
   voiceFor,
+  projectFor,
   languageFor,
   answerWaiting,
   lookedAtSessionId = null,
@@ -603,7 +606,7 @@ export function useSpeechHost({
     alerts.error(speechFailureAlert(error));
   }, []);
 
-  const player = useSpeechPlayer({ onError, voiceFor });
+  const player = useSpeechPlayer({ onError, voiceFor, projectFor });
   /**
    * Destructured on purpose, and depended on **as methods** everywhere below —
    * never as `player`.

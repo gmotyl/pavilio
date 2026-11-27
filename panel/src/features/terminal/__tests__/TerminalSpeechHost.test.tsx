@@ -55,6 +55,7 @@ afterEach(() => {
   __resetOpenaiVoicesForTests();
   clearPreference(preferences.speechEngine);
   clearPreference(preferences.speechVoiceByProject);
+  clearPreference(preferences.speechEngineByProject);
   vi.unstubAllGlobals();
 });
 
@@ -107,6 +108,13 @@ describe("TerminalSpeechHost", () => {
     });
   });
 
+  it("hands the provider the session-to-project lookup the player's rate needs", () => {
+    render(<TerminalSpeechHost>{null}</TerminalSpeechHost>);
+    state.sessions = [{ id: "s1", project: "alpha", name: "one" }];
+    expect(state.props!.projectFor!("s1")).toBe("alpha");
+    expect(state.props!.projectFor!("unknown") ?? null).toBeNull();
+  });
+
   it("primes the OmniVoice list, so a saved openai voice resolves after a reload", async () => {
     writePreference(preferences.speechEngine, "openai");
     writePreference(preferences.speechVoice, { openai: PL_FEMALE.id });
@@ -135,6 +143,16 @@ describe("TerminalSpeechHost", () => {
     render(<TerminalSpeechHost>child</TerminalSpeechHost>);
     await waitFor(() => expect(listed()).toHaveLength(1));
   });
+  it("primes the list when a project runs openai under another global engine", async () => {
+    const fetchMock = stubFetch({ [OPENAI_VOICES_URL]: () => jsonResponse(voicesBody(LIVE_VOICES)) });
+    const listed = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith(OPENAI_VOICES_URL));
+
+    writePreference(preferences.speechEngine, "edge");
+    writePreference(preferences.speechEngineByProject, { p: "openai" });
+    render(<TerminalSpeechHost>child</TerminalSpeechHost>);
+    await waitFor(() => expect(listed()).toHaveLength(1));
+  });
+
   it("a failed OmniVoice load settles the language; a later successful load is a new port", async () => {
     writePreference(preferences.speechEngine, "openai");
     writePreference(preferences.speechVoiceByProject, { p: { openai: PL_FEMALE.id } });

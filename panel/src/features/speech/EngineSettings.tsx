@@ -5,6 +5,7 @@ import { preferences, type CascadeEntry } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { groupVoices } from "./voiceGroups";
 import { useOpenaiVoices } from "./useOpenaiVoices";
+import { usePocketVoicesSnapshot } from "./usePocketVoices";
 import { voicesOf } from "./voicesOf";
 import { VoicesSection } from "./VoicesSection";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
@@ -40,6 +41,8 @@ const LIMIT_NOTES: Readonly<Record<string, string>> = {
 const ADDRESS_PLACEHOLDERS: Readonly<Record<string, string>> = {
   openai: "http://127.0.0.1:8890",
   kokoro: "http://127.0.0.1:8880",
+  pocket: "http://127.0.0.1:8895",
+  "pocket-pl": "http://127.0.0.1:8896",
 };
 
 const CHIP_COLORS: Readonly<Record<ChipTone, string>> = {
@@ -233,13 +236,15 @@ function EngineRow(props: EngineRowProps) {
   const chip = info ? statusChip(info.status) : null;
   // The address engine's "key" is a server address: say so on its skip chip.
   if (chip && address && info?.status.state === "no-key") chip.text = "no address · skipped";
+  // `voicesOf` reads the pocket store outside React: subscribing makes the groups follow a (re)load.
+  const pocket = usePocketVoicesSnapshot();
   const groups = useMemo(
     () =>
       groupVoices(
         voicesOf(id, props.openaiVoices),
         typeof navigator === "undefined" ? "" : navigator.language,
       ),
-    [id, props.openaiVoices],
+    [id, props.openaiVoices, pocket],
   );
   const voiceId = `speech-voice-${id}`;
 
@@ -363,6 +368,14 @@ function EngineRow(props: EngineRowProps) {
           <code style={{ color: "var(--text-primary)" }}>pnpm install:kokoro</code> (or{" "}
           <code style={{ color: "var(--text-primary)" }}>bash scripts/install:kokoro</code> in a synced
           workspace), then save its address here.
+        </p>
+      )}
+      {(id === "pocket" || id === "pocket-pl") && info?.keySource === "none" && (
+        <p data-testid="engine-install-hint" className="text-xs mt-2" style={MUTED}>
+          No {id === "pocket" ? "English" : "Polish"} Pocket TTS server yet: run{" "}
+          <code style={{ color: "var(--text-primary)" }}>pnpm install:speech</code>, then save its address here.
+          {id === "pocket-pl" &&
+            " It starts out of the cascade: check each Polish voice with a test sample before switching it on."}
         </p>
       )}
       {id === "openai" && (

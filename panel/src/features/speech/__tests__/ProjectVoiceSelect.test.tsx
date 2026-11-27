@@ -3,11 +3,12 @@
  * option labelled with the voice it resolves to, and an override shows a tag.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ProjectVoiceSelect } from "../ProjectVoiceSelect";
-import { listVoices } from "anytts";
+import { RateButton } from "../RateButton";
+import { listEngines, listVoices } from "anytts";
 
 import { groupVoices } from "../voiceGroups";
 import {
@@ -16,11 +17,17 @@ import {
   setStoredEngine,
   setProjectVoice,
   setEngineVoice,
+  engineFor,
+  setProjectEngine,
 } from "../voices";
+import { readPreference } from "../../../preferences/store";
 import { preferences } from "../../../preferences/declarations";
 import { storageKey } from "../../../preferences/types";
 import { stubFetch } from "../../../test-utils";
 import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { __resetPocketVoicesForTests } from "../usePocketVoices";
+import { speechEngines } from "../engines";
+import { jsonResponse } from "../../../test-utils";
 import { EN_MALE, LIVE_VOICES, MY_VOICE, OPENAI_VOICES_URL, voicesBody } from "./openaiVoiceFixtures";
 
 const ANDREW = "en-US-AndrewMultilingualNeural";
@@ -41,6 +48,103 @@ describe("ProjectVoiceSelect", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     __resetOpenaiVoicesForTests();
+    __resetPocketVoicesForTests();
+  });
+
+  describe("engine select", () => {
+    const engineSelect = () => screen.getByRole("combobox", { name: "Engine" }) as HTMLSelectElement;
+    const labelOfEngine = (id: string) => listEngines().find((e) => e.id === id)!.label;
+    const POCKET_VOICES_URL = "/api/speech/pocket/voices";
+
+    it("the engine select comes first with Default, Cascade and every engine", () => {
+      render(<ProjectVoiceSelect project="p" />);
+
+      expect(screen.getAllByRole("combobox")[0]).toBe(engineSelect());
+      const options = within(engineSelect()).getAllByRole("option") as HTMLOptionElement[];
+      expect(options.map((o) => o.textContent)).toEqual([
+        `Default (${labelOfEngine("edge")})`,
+        "Cascade",
+        ...listEngines()
+          .filter((e) => e.id !== "cascade" && speechEngines().includes(e.id))
+          .map((e) => e.label),
+      ]);
+      expect(options.map((o) => o.value).slice(0, 2)).toEqual(["", "cascade"]);
+      expect(engineSelect().value).toBe("");
+    });
+
+    it("the Default option follows the global engine", () => {
+      render(<ProjectVoiceSelect project="p" />);
+
+      act(() => {
+        setStoredEngine("kokoro");
+      });
+
+      expect(engineSelect().selectedOptions[0]!.textContent).toBe(`Default (${labelOfEngine("kokoro")})`);
+    });
+
+    it("picking an engine stores it and switches the voice list", async () => {
+      stubFetch({
+        [POCKET_VOICES_URL]: () =>
+          jsonResponse({ voices: [{ id: "piotr", label: "Piotr", version: 1 }], cloning: true }),
+      });
+      const user = userEvent.setup();
+      render(<ProjectVoiceSelect project="p" />);
+
+      await user.selectOptions(engineSelect(), "pocket-pl");
+
+      expect(engineFor("p")).toBe("pocket-pl");
+      expect(engineFor("q")).toBe("edge");
+      await waitFor(() =>
+        expect(within(select()).getAllByRole("option").map((o) => (o as HTMLOptionElement).value)).toEqual([
+          "",
+          "shefowl",
+          "piotr",
+        ]),
+      );
+    });
+
+    it("picking Cascade shows the member voice rows", async () => {
+      stubFetch({ "/api/speech/engines": [] }, null);
+      const user = userEvent.setup();
+      render(<ProjectVoiceSelect project="p" />);
+
+      await user.selectOptions(engineSelect(), "cascade");
+
+      expect(engineFor("p")).toBe("cascade");
+      expect(screen.getByTestId("project-cascade-voices")).toBeTruthy();
+      expect(screen.queryByTestId("project-voice-select")).toBeNull();
+    });
+
+    it("Default removes the project engine", async () => {
+      setProjectEngine("p", "pocket-pl");
+      stubFetch({ [POCKET_VOICES_URL]: () => jsonResponse({ voices: [], cloning: true }) });
+      const user = userEvent.setup();
+      render(<ProjectVoiceSelect project="p" />);
+      expect(engineSelect().value).toBe("pocket-pl");
+
+      await user.selectOptions(engineSelect(), "");
+
+      expect(readPreference(preferences.speechEngineByProject)).toEqual({});
+      expect(engineFor("p")).toBe("edge");
+      expect(engineSelect().value).toBe("");
+    });
+  });
+
+  it("the picker slider and every row button share the project speed", () => {
+    render(
+      <>
+        <ProjectVoiceSelect project="p" />
+        <RateButton project="p" />
+      </>,
+    );
+    const slider = screen.getByTestId("project-rate-slider") as HTMLInputElement;
+    expect([slider.min, slider.max, slider.step]).toEqual(["0.5", "2", "0.1"]);
+
+    fireEvent.change(slider, { target: { value: "1.3" } });
+
+    expect(readPreference(preferences.speechRateByProject)).toEqual({ p: 1.3 });
+    expect(screen.getByTestId("project-rate-button")).toHaveTextContent("1.3×");
+    expect(screen.getByTestId("speech-bar-rate-p")).toHaveTextContent("1.3×");
   });
 
   it("with no override the select shows the default voice by name", () => {

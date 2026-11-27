@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -84,4 +85,44 @@ export async function listWorkspaceVoices(workspaceRoot: string): Promise<string
     }
   }
   return names.sort();
+}
+
+/** One voice copy as the Pocket engines offer it. `version` is the sample's mtime in ms (cache buster). */
+export interface WorkspaceVoiceInfo {
+  id: string;
+  label: string;
+  gender?: "female" | "male";
+  version: number;
+}
+
+/**
+ * The voice copies as `{id,label,gender,version}`, read from disk and sorted by id. Synchronous:
+ * the Tts holder reads it once per build. `label` and `gender` come from `voice.json` (the id and
+ * no gender when it lacks them); a copy without a readable sample is skipped.
+ */
+export function listWorkspaceVoiceInfo(workspaceRoot: string): WorkspaceVoiceInfo[] {
+  const dir = workspaceVoicesDir(workspaceRoot);
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const voices: WorkspaceVoiceInfo[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isSafeVoiceName(entry.name)) continue;
+    try {
+      const version = Math.floor(statSync(join(dir, entry.name, SAMPLE_FILE)).mtimeMs);
+      const record = JSON.parse(readFileSync(join(dir, entry.name, RECORD_FILE), "utf8")) as {
+        label?: unknown;
+        gender?: unknown;
+      } | null;
+      const gender = record?.gender === "male" || record?.gender === "female" ? record.gender : undefined;
+      const label = typeof record?.label === "string" && record.label ? record.label : entry.name;
+      voices.push({ id: entry.name, label, ...(gender ? { gender } : {}), version });
+    } catch {
+      // Not a complete voice copy.
+    }
+  }
+  return voices.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }

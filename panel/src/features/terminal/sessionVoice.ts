@@ -1,13 +1,14 @@
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
-import { CASCADE } from "../speech/engines";
+import { CASCADE, engineVoiceOf } from "../speech/engines";
 import { isDocSpeechKey } from "../speech/docKey";
+import { usePocketVoicesSnapshot } from "../speech/usePocketVoices";
 import { useOpenaiVoicesSnapshot } from "../speech/useOpenaiVoices";
 import { voiceLanguageFor, type VoiceLanguage } from "../speech/voiceLanguage";
 import {
   firstCascadeVoice,
   getCascadeOrder,
-  getStoredEngine,
+  engineFor,
   isVoiceAwaitingCatalog,
   projectOfDocVoice,
   voiceFor,
@@ -74,7 +75,7 @@ export function languageForSession(sessionId: string): VoiceLanguage | undefined
     return undefined;
   }
   const project = projectOfSpeechKey(sessionId);
-  const engine = getStoredEngine();
+  const engine = engineFor(project);
   // A page keeps its own rule — it always has an answer, and re-prepares on
   // the next Play once its language moves — so only a cell waits for a catalog.
   const awaiting = (member: string): boolean =>
@@ -91,7 +92,9 @@ export function languageForSession(sessionId: string): VoiceLanguage | undefined
     return first ? voiceLanguageFor(first.engine, first.voice) : "en";
   }
   if (awaiting(engine)) return undefined;
-  return voiceLanguageFor(engine, voiceForProject(project));
+  // The key of a project on another engine wraps the voice that decides.
+  const voice = voiceForProject(project);
+  return voiceLanguageFor(engine, engineVoiceOf(voice)?.voice ?? voice);
 }
 
 /**
@@ -105,6 +108,8 @@ export function useVoiceForSession(sessionId: string): string {
   usePreference(preferences.speechEngine);
   usePreference(preferences.speechVoice);
   usePreference(preferences.speechVoiceByProject);
+  usePreference(preferences.speechEngineByProject);
   useOpenaiVoicesSnapshot();
+  usePocketVoicesSnapshot();
   return voiceForSession(sessionId);
 }

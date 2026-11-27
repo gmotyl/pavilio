@@ -30,6 +30,14 @@ describe("openai relay timeout", () => {
   });
 });
 
+describe("pocket relay clients", () => {
+  it("pocket and pocket-pl are relay engines", () => {
+    for (const id of ["pocket", "pocket-pl"]) {
+      expect(SPEECH_ENGINES[id]).toMatchObject({ relayUrl: "/api/tts" });
+    }
+  });
+});
+
 describe("kokoro relay client", () => {
   it("kokoro is a relay client that outlasts the server wait", () => {
     expect(SPEECH_ENGINES.kokoro).toMatchObject({

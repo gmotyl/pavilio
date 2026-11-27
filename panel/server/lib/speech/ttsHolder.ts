@@ -1,5 +1,5 @@
 import type { EdgeEngineOptions, EngineStatus, Tts, TtsConfig, VoiceInfo } from "anytts";
-import { createTts as createServerTts } from "anytts/server";
+import { createTts as createServerTts, type PocketVoice } from "anytts/server";
 import {
   OPENAI_FIRST_BYTE_TIMEOUT_MS,
   OPENAI_VOICE_MAP,
@@ -31,10 +31,10 @@ export type KeyedEngineId = keyof typeof KEYED_ENGINES;
 /**
  * The cascade's default member order; the browser sends its own order per request anyway.
  * The local engines lead: `openai` and `kokoro` are configured only when their address
- * (`OPENAI_TTS_BASE_URL`, `KOKORO_TTS_BASE_URL`) is set, so the order handed to `createTts` is
+ * (`OPENAI_TTS_BASE_URL`, `KOKORO_TTS_BASE_URL`, `POCKET_TTS_BASE_URL`, `POCKET_PL_TTS_BASE_URL`) is set, so the order handed to `createTts` is
  * narrowed to the engines actually configured.
  */
-export const CASCADE_ORDER = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+export const CASCADE_ORDER = ["openai", "pocket", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge", "pocket-pl"] as const;
 
 /** The Azure engine's own region check: with a key, anything else makes `createTts` throw. */
 const AZURE_REGION = /^[a-z0-9]+$/;
@@ -63,6 +63,8 @@ export interface TtsHolderOptions {
    * none, so `openai` stays out until the server wires its catalog in.
    */
   catalog?: { current(): readonly VoiceInfo[] };
+  /** The workspace voice copies the Pocket engines offer as `customVoices`, read once per build. */
+  workspaceVoices?: () => readonly PocketVoice[];
 }
 
 export interface TtsHolder {
@@ -78,6 +80,7 @@ function configFrom(
   resolveKey: typeof resolveSecret,
   transport: EdgeEngineOptions["transport"] | undefined,
   catalog: readonly VoiceInfo[],
+  workspaceVoices: readonly PocketVoice[],
 ): TtsConfig {
   const key = (name: KeyVar): string | undefined => resolveKey(name).value;
   const keyed = (name: KeyVar) => {
@@ -119,6 +122,27 @@ function configFrom(
         `(e.g. "http://127.0.0.1:8880"): the kokoro engine stays off until it is fixed.`,
     );
   }
+  // The Pocket engines likewise have no keyless form: each is left out without a usable address.
+  const pocketAddress = (name: KeyVar): string | undefined => {
+    const value = key(name);
+    if (!value) return undefined;
+    if (isHttpUrl(value)) return value;
+    // Names the variable only: the value is not logged.
+    console.warn(
+      `[speech] ${name} is set but is not an http(s) URL without credentials ` +
+        `(e.g. "http://127.0.0.1:8890"): the engine stays off until it is fixed.`,
+    );
+    return undefined;
+  };
+  const pocketUrl = pocketAddress("POCKET_TTS_BASE_URL");
+  const pocketPlUrl = pocketAddress("POCKET_PL_TTS_BASE_URL");
+  const voiceFilesUrl = pocketAddress("POCKET_VOICE_FILES_URL");
+  // English cloning needs gated weights; `POCKET_TTS_CLONING=0` says they are not installed.
+  const cloning = key("POCKET_TTS_CLONING") !== "0";
+  const pocketMember = (baseUrl: string, voices: readonly PocketVoice[]) => ({
+    baseUrl,
+    ...(voiceFilesUrl && voices.length > 0 ? { voiceFilesUrl, customVoices: [...voices] } : {}),
+  });
   const members: TtsConfig["engines"] = {
     elevenlabs: keyed(KEYED_ENGINES.elevenlabs),
     cartesia: keyed(KEYED_ENGINES.cartesia),
@@ -152,6 +176,9 @@ function configFrom(
     };
   }
 
+  if (pocketUrl) members.pocket = pocketMember(pocketUrl, cloning ? workspaceVoices : []);
+  if (pocketPlUrl) members["pocket-pl"] = pocketMember(pocketPlUrl, workspaceVoices);
+
   return {
     engines: {
       ...members,
@@ -165,8 +192,8 @@ function configFrom(
 }
 
 export function createTtsHolder(options: TtsHolderOptions = {}): TtsHolder {
-  const { createTts = createServerTts, resolveKey = resolveSecret, transport, catalog } = options;
-  const build = (): Tts => createTts(configFrom(resolveKey, transport, catalog?.current() ?? []));
+  const { createTts = createServerTts, resolveKey = resolveSecret, transport, catalog, workspaceVoices } = options;
+  const build = (): Tts => createTts(configFrom(resolveKey, transport, catalog?.current() ?? [], workspaceVoices?.() ?? []));
   let instance = build();
   return {
     current: () => instance,

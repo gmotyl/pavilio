@@ -16,9 +16,11 @@ import {
   setCascadeOrder,
   setEngineVoice,
   setProjectEngineVoice,
+  setProjectEngine,
   setProjectVoice,
   setStoredEngine,
 } from "../../speech/voices";
+import { __resetPocketVoicesForTests, reloadPocketVoices } from "../../speech/usePocketVoices";
 import {
   EN_MALE,
   LIVE_VOICES,
@@ -26,6 +28,7 @@ import {
   PL_FEMALE,
   voicesBody,
 } from "../../speech/__tests__/openaiVoiceFixtures";
+import { engineVoiceKey } from "../../speech/engines";
 import { refreshSessions } from "../sessionStore";
 import { languageForSession, useVoiceForSession, voiceForSession } from "../sessionVoice";
 import type { SessionMeta } from "../useTerminalSessions";
@@ -74,6 +77,7 @@ async function seedSessions(sessions: SessionMeta[]): Promise<void> {
 afterEach(() => {
   vi.unstubAllGlobals();
   __resetOpenaiVoicesForTests();
+  __resetPocketVoicesForTests();
 });
 
 describe("session voice", () => {
@@ -128,6 +132,31 @@ describe("session voice", () => {
 });
 
 describe("voice language of a session", () => {
+  it("languageForSession follows the project engine", async () => {
+    setStoredEngine("edge");
+    setProjectEngine("p", "pocket-pl");
+    await seedSessions([session("sess-p", "p"), session("sess-q", "q")]);
+
+    // The project's Polish engine decides, before its workspace voices have loaded...
+    expect(languageForSession("sess-p")).toBe("pl");
+    expect(languageForSession("sess-q")).toBe("en");
+    // ...and after, with a saved workspace voice (`piotr`) in the list.
+    stubFetch({
+      "/api/speech/pocket/voices": () =>
+        jsonResponse({ voices: [{ id: "piotr", label: "Piotr", version: 1 }], cloning: true }),
+    });
+    await reloadPocketVoices();
+    setProjectVoice("p", "piotr");
+    expect(languageForSession("sess-p")).toBe("pl");
+
+    // An English Pocket project reads English.
+    setProjectEngine("p", "pocket");
+    expect(languageForSession("sess-p")).toBe("en");
+    // The project's engine voice key is what the host speaks with.
+    setProjectEngine("p", "pocket-pl");
+    expect(voiceForSession("sess-p")).toBe(engineVoiceKey("pocket-pl", "piotr"));
+  });
+
   it("single engine: the project's voice decides", async () => {
     await loadLiveVoices();
     setStoredEngine("openai");
@@ -200,6 +229,18 @@ describe("voice language of a session", () => {
     await seedSessions([session("sess-p", "p")]);
 
     // Listed, but the voice that decides cannot be looked up yet.
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    await loadLiveVoices();
+    expect(languageForSession("sess-p")).toBe("pl");
+  });
+
+  it("a project on openai under another global engine waits for the live list too", async () => {
+    setStoredEngine("edge");
+    writePreference(preferences.speechEngineByProject, { p: "openai" });
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-pl" } });
+    await seedSessions([session("sess-p", "p")]);
+
     expect(languageForSession("sess-p")).toBeUndefined();
 
     await loadLiveVoices();

@@ -2,21 +2,27 @@ import { useMemo, useRef, type CSSProperties } from "react";
 import { listEngines, type VoiceInfo } from "anytts";
 
 import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
-import { CASCADE } from "./engines";
+import { RateButton } from "./RateButton";
+import { rateFor, setProjectRate } from "./rate";
+import { CASCADE, speechEngines } from "./engines";
 import { isAddressEngine, isKeyless, useEngineInfo, type EngineInfo } from "./useEngineInfo";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import { groupVoices } from "./voiceGroups";
 import { useOpenaiVoices } from "./useOpenaiVoices";
+import { usePocketVoicesSnapshot, usePrimePocketVoices } from "./usePocketVoices";
 import { voicesOf } from "./voicesOf";
 import {
   catalogDefaultVoice,
   getCascadeOrder,
   getProjectVoice,
+  engineFor,
   getProjectVoices,
   getStoredEngine,
   getStoredVoices,
   resolveStoredVoice,
+  setProjectEngine,
   setProjectEngineVoice,
   setProjectVoice,
 } from "./voices";
@@ -36,9 +42,11 @@ function browserLanguage(): string {
 /**
  * One project's voice picker, for the project's Overview.
  *
- * The engine is global — Settings picks it, the project card never does — so
- * this control follows it: a single engine gets one voice select, the Cascade
- * one select per member engine ({@link CascadeProjectVoices}).
+ * An Engine select comes first: "Default" follows the engine Settings picks,
+ * anything else is this project's own (`speech.engineByProject`). The voice
+ * control follows the engine in effect for the project — a single engine gets
+ * one voice select, the Cascade one select per member engine
+ * ({@link CascadeProjectVoices}).
  *
  * The preferences are read through `usePreference` only to subscribe: a change
  * from anywhere — the Settings picker, another tab — re-renders this control.
@@ -47,10 +55,93 @@ function browserLanguage(): string {
  */
 export function ProjectVoiceSelect({ project }: { project: string }) {
   usePreference(preferences.speechEngine);
-  return getStoredEngine() === CASCADE ? (
-    <CascadeProjectVoices project={project} />
-  ) : (
-    <SingleEngineVoiceSelect project={project} />
+  usePreference(preferences.speechEngineByProject);
+  const engine = engineFor(project);
+  // The workspace voices of a pocket engine arrive from the panel server.
+  usePocketVoicesSnapshot();
+  usePrimePocketVoices(engine === "pocket" || engine === "pocket-pl");
+  return (
+    <div>
+      <EngineSelect project={project} />
+      {engine === CASCADE ? (
+        <CascadeProjectVoices project={project} />
+      ) : (
+        <SingleEngineVoiceSelect project={project} engine={engine} />
+      )}
+      <ProjectRate project={project} />
+    </div>
+  );
+}
+
+/**
+ * The project's playback speed: a 0.5–2.0 slider in 0.1 steps beside the same
+ * button the speech rows carry. Both read `speech.rateByProject`, so a slide
+ * moves every button for the project.
+ */
+function ProjectRate({ project }: { project: string }) {
+  usePreference(preferences.speechRateByProject);
+  const rate = rateFor(project);
+  const inputId = `project-rate-${project}`;
+  return (
+    <div className="mt-3">
+      <label htmlFor={inputId} className="block text-xs mb-1" style={MUTED}>
+        Playback speed
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id={inputId}
+          type="range"
+          data-testid="project-rate-slider"
+          min={0.5}
+          max={2}
+          step={0.1}
+          value={rate}
+          onChange={(e) => setProjectRate(project, Number(e.target.value))}
+        />
+        <RateButton project={project} testId="project-rate-button" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The project's Engine select: "Default (<global engine>)" removes the
+ * project's entry, "Cascade" and every engine the panel configures set it.
+ */
+function EngineSelect({ project }: { project: string }) {
+  const labels = useMemo(() => new Map(listEngines().map((engine) => [engine.id, engine.label])), []);
+  const own = readPreference(preferences.speechEngineByProject);
+  const stored = own !== null && typeof own === "object" && Object.hasOwn(own, project) ? own[project] : undefined;
+  // Read back through `engineFor`: a stale id shows as Default, as it speaks.
+  const value = typeof stored === "string" && engineFor(project) === stored ? stored : "";
+  const globalEngine = getStoredEngine();
+  const globalLabel = globalEngine === CASCADE ? "Cascade" : (labels.get(globalEngine) ?? globalEngine);
+  const selectId = `project-engine-${project}`;
+
+  return (
+    <div className="mb-3">
+      <label htmlFor={selectId} className="block text-xs mb-1" style={MUTED}>
+        Engine
+      </label>
+      <select
+        id={selectId}
+        data-testid="project-engine-select"
+        value={value}
+        onChange={(e) => setProjectEngine(project, e.target.value === "" ? null : e.target.value)}
+        className={SELECT_CLASS}
+        style={SELECT_STYLE}
+      >
+        <option value="">{`Default (${globalLabel})`}</option>
+        <option value={CASCADE}>Cascade</option>
+        {speechEngines()
+          .filter((id) => id !== CASCADE)
+          .map((id) => (
+            <option key={id} value={id}>
+              {labels.get(id) ?? id}
+            </option>
+          ))}
+      </select>
+    </div>
   );
 }
 
@@ -65,17 +156,18 @@ export function ProjectVoiceSelect({ project }: { project: string }) {
  * The default is resolved read-only here; writing a fallen-back default back
  * is the Settings picker's job, not a render side effect of this one.
  */
-function SingleEngineVoiceSelect({ project }: { project: string }) {
+function SingleEngineVoiceSelect({ project, engine }: { project: string; engine: string }) {
   const [storedDefault] = usePreference(preferences.speechVoice);
   // Subscription only: the record is re-read on each render.
   usePreference(preferences.speechVoiceByProject);
 
-  const engine = getStoredEngine();
   const { voices: openaiVoices } = useOpenaiVoices(engine === "openai");
 
-  const catalog = useMemo(() => voicesOf(engine, openaiVoices), [engine, openaiVoices]);
+  // The pocket list lands after mount: the snapshot re-renders and re-keys the catalog.
+  const pocket = usePocketVoicesSnapshot();
+  const catalog = useMemo(() => voicesOf(engine, openaiVoices), [engine, openaiVoices, pocket]);
   const groups = useMemo(() => groupVoices(catalog, browserLanguage()), [catalog]);
-  const defaultVoice = resolveStoredVoice(storedDefault).voice;
+  const defaultVoice = resolveStoredVoice(storedDefault, engine).voice;
   const defaultLabel = catalog.find((voice) => voice.id === defaultVoice)?.label ?? defaultVoice;
   const override = getProjectVoice(project);
 
@@ -205,7 +297,8 @@ interface MemberVoiceRowProps {
 function MemberVoiceRow(props: MemberVoiceRowProps) {
   const { project, engine, label, narrow, override } = props;
   const skipped = isKeyless(props.info);
-  const catalog = useMemo(() => voicesOf(engine, props.openaiVoices), [engine, props.openaiVoices]);
+  const pocket = usePocketVoicesSnapshot();
+  const catalog = useMemo(() => voicesOf(engine, props.openaiVoices), [engine, props.openaiVoices, pocket]);
   const groups = useMemo(() => groupVoices(catalog, browserLanguage()), [catalog]);
   const defaultLabel =
     catalog.find((voice) => voice.id === props.defaultVoice)?.label ?? props.defaultVoice ?? "";

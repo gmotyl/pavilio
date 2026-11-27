@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Deferred, per-text control over the vendored synthesis client. The player
@@ -214,6 +214,8 @@ import { voiceForSession } from "../../terminal/sessionVoice";
 import type { SpeechUnit } from "../types";
 import { refreshSessions } from "../../terminal/sessionStore";
 import { DEFAULT_SPEECH_VOICE, setEngineVoice, setProjectVoice } from "../voices";
+import { setProjectRate } from "../rate";
+import { projectOfSession } from "../../terminal/sessionProject";
 
 function units(...texts: string[]): SpeechUnit[] {
   return texts.map((text) => ({ text, chars: text.length, source: text }));
@@ -274,6 +276,8 @@ Object.defineProperty(HTMLMediaElement.prototype, "src", {
     // A fresh source has no duration until it loads, exactly as in a browser —
     // so a unit's recorded length can only ever come from its own metadata.
     unitLengths.delete(this);
+    // Loading a new source resets the rate to the default, as a browser does.
+    this.playbackRate = 1;
     nativeSrc.set!.call(this, value);
   },
 });
@@ -1704,5 +1708,93 @@ describe("useSpeechPlayer", () => {
     expect(revokedUrls).toHaveLength(createdUrls.length);
     expect(inOrder(revokedUrls)).toEqual(inOrder(createdUrls));
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSpeechPlayer playback rate", () => {
+  async function placeCell(id: string, project: string): Promise<void> {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id, name: id, project, cwd: `/srv/git/${project}`, pid: 1, createdAt: "" },
+        ],
+      })),
+    );
+    try {
+      await refreshSessions();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  const voiceFor = () => DEFAULT_SPEECH_VOICE;
+  const options = { voiceFor, projectFor: projectOfSession };
+
+  afterEach(() => {
+    setProjectRate("p", 1.0);
+  });
+
+  it("a unit plays at its project's rate with pitch preserved", async () => {
+    setProjectRate("p", 1.5);
+    await placeCell("cell-rp", "p");
+    const { result } = renderHook(() => useSpeechPlayer(options));
+
+    await startPlay(result.current, "cell-rp", manyUnits(2));
+
+    const element = elements[elements.length - 1];
+    expect(element.playbackRate).toBe(1.5);
+    expect(element.preservesPitch).toBe(true);
+  });
+
+  it("changing the rate while playing applies without resynthesis", async () => {
+    await placeCell("cell-rc", "p");
+    const { result } = renderHook(() => useSpeechPlayer(options));
+    await startPlay(result.current, "cell-rc", manyUnits(2));
+    const element = elements[elements.length - 1];
+    expect(element.playbackRate).toBe(1);
+    const requestsBefore = synth.requests.length;
+    const playsBefore = played.length;
+
+    await act(async () => {
+      setProjectRate("p", 2.0);
+      await drain();
+    });
+
+    expect(element.playbackRate).toBe(2);
+    expect(element.preservesPitch).toBe(true);
+    expect(played).toHaveLength(playsBefore);
+    expect(synth.requests).toHaveLength(requestsBefore);
+  });
+
+  it("keys without a project play at 1.0", async () => {
+    setProjectRate("p", 1.5);
+    const { result } = renderHook(() => useSpeechPlayer(options));
+
+    await startPlay(result.current, "doc:loose.md", manyUnits(1));
+
+    expect(elements[elements.length - 1].playbackRate).toBe(1);
+  });
+
+  it("a page key plays at the rate of the project its path lives in", async () => {
+    setProjectRate("p", 1.5);
+    const { result } = renderHook(() => useSpeechPlayer(options));
+
+    await startPlay(result.current, "doc:p/wiki/x.md", manyUnits(1));
+
+    const element = elements[elements.length - 1];
+    expect(element.playbackRate).toBe(1.5);
+    expect(element.preservesPitch).toBe(true);
+  });
+
+  it("an archived project's page plays at that project's rate", async () => {
+    setProjectRate("p", 1.2);
+    const { result } = renderHook(() => useSpeechPlayer(options));
+
+    await startPlay(result.current, "doc:archived/p/wiki/x.md", manyUnits(1));
+
+    expect(elements[elements.length - 1].playbackRate).toBe(1.2);
   });
 });

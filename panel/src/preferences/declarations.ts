@@ -181,6 +181,40 @@ const projectEngineVoices: PreferenceCodec<Record<string, EngineVoices>> = {
   },
 };
 
+/**
+ * A playback rate coerced into the supported range: 0.5–2.0, rounded to 0.1;
+ * anything that is not a finite number reads as 1.0. Pure and dependency-free
+ * so the codec below and `features/speech/rate.ts` share one rule.
+ */
+export function clampRate(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.round(Math.min(2, Math.max(0.5, value)) * 10) / 10;
+}
+
+/** Project → playback rate; every entry clamped and rounded, a non-number reads as 1.0. */
+const projectRates: PreferenceCodec<Record<string, number>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a record: ${raw}`);
+    return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, clampRate(v)]));
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
+/** Project → engine id; a record whose non-string entries are dropped. */
+const projectEngines: PreferenceCodec<Record<string, string>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a record: ${raw}`);
+    return stringEntries(parsed);
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
 /** A stored cascade entry, or `null`: a non-blank engine id and a boolean `on`. */
 function toCascadeEntry(value: unknown): CascadeEntry | null {
   if (!isRecord(value) || !isFilled(value.id) || typeof value.on !== "boolean") return null;
@@ -377,13 +411,22 @@ export interface CascadeEntry {
  */
 export const DEFAULT_CASCADE_ORDER: readonly string[] = [
   "openai",
+  "pocket",
   "kokoro",
   "elevenlabs",
   "cartesia",
   "speechify",
   "azure",
   "edge",
+  "pocket-pl",
 ];
+
+/**
+ * Cascade members that start *off*: the Polish pocket voices are checked one by one
+ * with a test sample before they are trusted to speak. Applies to a fresh workspace and
+ * to a saved order that does not name the engine yet.
+ */
+export const DEFAULT_CASCADE_OFF: readonly string[] = ["pocket-pl"];
 
 /**
  * The answer pane's height when nothing has been dragged: taller than any
@@ -997,15 +1040,42 @@ export const preferences = {
     portable: true,
   }),
   /**
+   * A project's own engine — `project → engine id`, absent for a project that
+   * follows `speech.engine`. Portable for the reason `speech.voiceByProject`
+   * is: project and engine names mean the same on every machine. The codec
+   * checks only the shape; `voices.ts` (`engineFor`) drops an id the seam does
+   * not configure.
+   */
+  speechEngineByProject: definePreference<Record<string, string>>({
+    key: "speech.engineByProject", // was: nothing — a project used the global engine
+    scope: "global",
+    default: {},
+    codec: projectEngines,
+    portable: true,
+  }),
+  /**
+   * A project's playback speed — `project → rate` (0.5–2.0, step 0.1), absent
+   * for a project at 1.0. Portable like `speech.voiceByProject`. The codec
+   * clamps and rounds; speed is the audio element's `playbackRate` only and is
+   * never sent to synthesis.
+   */
+  speechRateByProject: definePreference<Record<string, number>>({
+    key: "speech.rateByProject", // was: nothing — every project played at 1.0
+    scope: "global",
+    default: {},
+    codec: projectRates,
+    portable: true,
+  }),
+  /**
    * The cascade's member engines in the order they are tried, each *In
-   * cascade* or not. The default is every engine, on, in the server's order.
+   * cascade* or not. The default is every engine in the server's order, on except `DEFAULT_CASCADE_OFF`.
    * Unknown ids and missing engines are `voices.ts`' to repair, against the
    * engine list it owns. Treat the default as frozen, like the launchers'.
    */
   speechCascadeOrder: definePreference<CascadeEntry[]>({
     key: "speech.cascadeOrder", // was: nothing — the cascade is new
     scope: "global",
-    default: DEFAULT_CASCADE_ORDER.map((id) => ({ id, on: true })),
+    default: DEFAULT_CASCADE_ORDER.map((id) => ({ id, on: !DEFAULT_CASCADE_OFF.includes(id) })),
     codec: listOf(toCascadeEntry),
     portable: true,
   }),

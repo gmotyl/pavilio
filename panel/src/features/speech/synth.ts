@@ -30,6 +30,7 @@ import {
   CASCADE,
   SPEECH_ENGINES,
   cascadeVoicesOf,
+  engineVoiceOf,
   getCascadeOrder,
   isCascadeVoiceKey,
   openaiEngineConfig,
@@ -38,6 +39,7 @@ import {
 import type { OmniVoiceInfo } from "./openaiVoices";
 import { SPEECH_ROUTE_MODES, toSpeechRoute, type SpeechRoute } from "./route";
 import { currentOpenaiVoices } from "./useOpenaiVoices";
+import { currentPocketCustomVoices, type PocketWorkspaceVoice } from "./usePocketVoices";
 
 export interface SpeechSynthesisOptions {
   /** One engine's voice id, or under the cascade the session's member voices as one key. */
@@ -87,9 +89,14 @@ function configFor(
   route: SpeechRoute,
   pronunciation: Readonly<Record<string, boolean>>,
   openaiVoices: readonly OmniVoiceInfo[],
+  pocketVoices: PocketVoiceLists,
 ): TtsConfig {
   const engines: TtsConfig["engines"] = { ...TTS_CONFIG.engines };
   if (openaiVoices.length > 0) engines.openai = openaiEngineConfig(openaiVoices);
+  // The workspace voices join each pocket engine's catalog, or anytts refuses a saved one as unknown.
+  for (const id of ["pocket", "pocket-pl"] as const) {
+    if (pocketVoices[id].length > 0) engines[id] = { ...engines[id], customVoices: pocketVoices[id] };
+  }
   for (const id of Object.keys(engines)) {
     if (id !== CASCADE && Object.hasOwn(pronunciation, id)) {
       engines[id] = { ...engines[id], pronunciation: pronunciation[id] };
@@ -99,16 +106,24 @@ function configFor(
   return { ...TTS_CONFIG, engines };
 }
 
+/** The workspace voices each pocket engine is configured with. */
+type PocketVoiceLists = Readonly<Record<"pocket" | "pocket-pl", readonly PocketWorkspaceVoice[]>>;
+
+function currentPocketLists(): PocketVoiceLists {
+  return { pocket: currentPocketCustomVoices("pocket"), "pocket-pl": currentPocketCustomVoices("pocket-pl") };
+}
+
 /** What the instance is built from, as one comparable string. */
 function instanceKey(
   route: SpeechRoute,
   pronunciation: Readonly<Record<string, boolean>>,
   openaiVoices: readonly OmniVoiceInfo[],
+  pocketVoices: PocketVoiceLists,
 ): string {
   const switches = Object.keys(pronunciation)
     .sort()
     .map((id) => [id, pronunciation[id]]);
-  return JSON.stringify([route, switches, openaiVoices]);
+  return JSON.stringify([route, switches, openaiVoices, pocketVoices]);
 }
 
 const cacheListeners = new Set<() => void>();
@@ -128,10 +143,11 @@ function tts(): Tts {
   const route = toSpeechRoute(readPreference(preferences.speechRoute));
   const pronunciation = readPreference(preferences.speechPronunciationByEngine);
   const openaiVoices = currentOpenaiVoices();
-  const key = instanceKey(route, pronunciation, openaiVoices);
+  const pocketVoices = currentPocketLists();
+  const key = instanceKey(route, pronunciation, openaiVoices, pocketVoices);
   if (instance && instanceBuiltFrom === key) return instance;
   const swapped = instance !== undefined;
-  instance = createTts(configFor(route, pronunciation, openaiVoices));
+  instance = createTts(configFor(route, pronunciation, openaiVoices, pocketVoices));
   instanceBuiltFrom = key;
   if (swapped && libraryUnsubscribe) {
     libraryUnsubscribe();
@@ -185,7 +201,13 @@ function engine(): string {
  * `openai` alone, which names none, and the panel server picks its default.
  */
 function request(text: string, options: SpeechSynthesisOptions): SynthesisRequest {
-  const id = engine();
+  // The voice key names its engine: a cascade key the cascade, an engine key
+  // that engine; a plain voice speaks on the global engine.
+  const keyed = engineVoiceOf(options.voice);
+  const keyedKnown = keyed !== undefined && speechEngines().includes(keyed.engine) && keyed.engine !== CASCADE;
+  const id = isCascadeVoiceKey(options.voice) ? CASCADE : keyedKnown ? keyed.engine : engine();
+  // An engine key of an engine this instance does not configure carries nothing usable.
+  const picked = keyed ? (keyedKnown ? keyed.voice : undefined) : options.voice;
   const lang = options.lang || undefined;
   const openaiVoices = id === "openai" ? currentOpenaiVoices() : undefined;
   if (openaiVoices?.length === 0) {
@@ -198,7 +220,7 @@ function request(text: string, options: SpeechSynthesisOptions): SynthesisReques
     };
   }
   if (id === CASCADE) {
-    const voices = cascadeVoicesOf(options.voice);
+    const voices = cascadeVoicesOf(picked);
     // The same rule as a single openai request: never a voice a loaded list lacks.
     const listed = currentOpenaiVoices();
     if (voices?.openai !== undefined && listed.length > 0 && !listed.some((v) => v.id === voices.openai)) {
@@ -215,7 +237,7 @@ function request(text: string, options: SpeechSynthesisOptions): SynthesisReques
       pronunciation: { ...readPreference(preferences.speechPronunciationByEngine) },
     };
   }
-  let voice = options.voice && !isCascadeVoiceKey(options.voice) ? options.voice : undefined;
+  let voice = picked && !isCascadeVoiceKey(picked) ? picked : undefined;
   if (openaiVoices && !openaiVoices.some((listed) => listed.id === voice)) voice = undefined;
   return { text, voice, engine: id, ...(lang ? { lang } : {}) };
 }

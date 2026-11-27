@@ -420,6 +420,34 @@ describe("VoicesSection", () => {
     await waitFor(() => expect(screen.queryByTestId("voice-row-my-voice")).toBeNull());
   });
 
+  it("deleting a voice refreshes the pocket voice lists", async () => {
+    const user = userEvent.setup();
+    let list = voicesBody(ALL);
+    const fetchMock = stubFetch(
+      {
+        "/api/speech/pocket/voices": { voices: [], cloning: true },
+        [OPENAI_VOICES_URL]: (_url: string, init?: RequestInit) => {
+          if (init?.method === "DELETE") {
+            list = voicesBody(BUNDLED);
+            return new Response(null, { status: 204 });
+          }
+          return jsonResponse(list);
+        },
+      },
+      null,
+    );
+    render(<VoicesSection address={ADDRESS} />);
+    await screen.findByTestId("voice-row-my-voice");
+    const pocketCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/speech/pocket/voices"));
+    expect(pocketCalls()).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Delete My voice" }));
+    await user.click(within(voiceRow("my-voice")).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(pocketCalls()).toHaveLength(1));
+  });
+
   it("deleting the voice whose sample is playing stops it", async () => {
     const user = userEvent.setup();
     let list = voicesBody(ALL);

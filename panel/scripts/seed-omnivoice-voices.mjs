@@ -193,8 +193,8 @@ export async function seedVoices({
 }
 
 /** Seeding with the address from the environment / secrets file — what install:speech runs. */
-export function seedFromEnvironment({ workspaceRoot, log = console.log } = {}) {
-  return seedVoices({ workspaceRoot, baseUrl: resolveBaseUrl(), log });
+export function seedFromEnvironment({ workspaceRoot, baseUrl = resolveBaseUrl(), log = console.log } = {}) {
+  return seedVoices({ workspaceRoot, baseUrl, log });
 }
 
 // CLI entry: the workspace root is the repo root this script lives in.

@@ -101,23 +101,23 @@ interface Loaded {
 }
 
 /** The router over a real catalog, both pointed at `address` (the fake server unless given; null: none set). */
-function loadApp(address: string | null = fake.url): Loaded {
+function loadApp(address: string | null = fake.url, extra: Partial<Parameters<typeof createSpeechVoicesRouter>[0]> = {}): Loaded {
   const onChange = vi.fn();
   const baseUrl = () => address ?? undefined;
   // No recovery retries: a test asks explicitly, and no timer may outlive it.
   const catalog = createOpenaiCatalog({ baseUrl, onChange, timeoutMs: 1000, retryDelaysMs: [] });
   const app = express();
   app.use(express.json());
-  app.use("/api/speech", createSpeechVoicesRouter({ catalog, baseUrl, workspaceRoot: root }));
+  app.use("/api/speech", createSpeechVoicesRouter({ catalog, baseUrl, workspaceRoot: root, ...extra }));
   return { app, onChange };
 }
 
 const copyDir = (name: string) => join(root, ".pavilio", "voices", name);
 
 /** A workspace copy written the way the route writes one. */
-function seedCopy(name: string) {
+function seedCopy(name: string, extra: Record<string, unknown> = {}) {
   mkdirSync(copyDir(name), { recursive: true });
-  writeFileSync(join(copyDir(name), "voice.json"), JSON.stringify({ id: name, source: "custom" }));
+  writeFileSync(join(copyDir(name), "voice.json"), JSON.stringify({ id: name, source: "custom", ...extra }));
   writeFileSync(join(copyDir(name), "sample.wav"), SAMPLE);
 }
 
@@ -314,11 +314,70 @@ describe("/api/speech/openai/voices", () => {
     const source = readFileSync(resolve(here, "../../panel-server.ts"), "utf8");
     const gate = /app\s*\.\s*use\s*\(\s*authMiddleware\s*\)/.exec(source);
     const mount =
-      /app\s*\.\s*use\s*\(\s*["']\/api\/speech["']\s*,\s*createSpeechVoicesRouter\s*\(\s*\{\s*catalog\s*:\s*openaiCatalog\s*,\s*baseUrl\s*:\s*openaiBaseUrl\s*\}\s*\)\s*\)/.exec(
+      /app\s*\.\s*use\s*\(\s*["']\/api\/speech["']\s*,\s*createSpeechVoicesRouter\s*\(\s*\{\s*catalog\s*:\s*openaiCatalog\s*,\s*baseUrl\s*:\s*openaiBaseUrl\s*,[^}]*\}\s*\)\s*\)/.exec(
         source,
       );
     expect(gate).not.toBeNull();
     expect(mount, "the speech voices router mount").not.toBeNull();
     expect(mount!.index).toBeGreaterThan(gate!.index);
+  });
+});
+
+describe("/api/speech/pocket/voices", () => {
+  const noKeys = () => ({ value: undefined, source: "none" as const });
+  const withFiles = (name: string) => ({
+    value: name === "POCKET_VOICE_FILES_URL" ? "http://127.0.0.1:8892" : undefined,
+    source: name === "POCKET_VOICE_FILES_URL" ? ("env" as const) : ("none" as const),
+  });
+
+  it("lists workspace voices for pocket from disk", async () => {
+    seedCopy("piotr", { label: "Piotr", gender: "male" });
+    seedCopy("alice", { label: "Alice", gender: "female" });
+    const fetchSpy = vi.fn();
+    const { app } = loadApp(null, { resolveKey: withFiles, fetch: fetchSpy as unknown as typeof fetch });
+    const res = await request(app).get("/api/speech/pocket/voices");
+    expect(res.status).toBe(200);
+    expect(res.body.cloning).toBe(true);
+    expect(res.body.voices).toHaveLength(2);
+    expect(res.body.voices.map((v: { id: string }) => v.id)).toEqual(["alice", "piotr"]);
+    for (const v of res.body.voices) {
+      expect(v).toEqual({ id: expect.any(String), label: expect.any(String), gender: expect.stringMatching(/^(male|female)$/), version: expect.any(Number) });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports cloning off", async () => {
+    const { app } = loadApp(null, { resolveKey: (name) => ({ value: name === "POCKET_TTS_CLONING" ? "0" : undefined, source: "env" as const }) });
+    const res = await request(app).get("/api/speech/pocket/voices");
+    expect(res.body).toEqual({ voices: [], cloning: false });
+  });
+
+  it("pocket voices do not need the OmniVoice address", async () => {
+    seedCopy("piotr");
+    const { app } = loadApp(null, { resolveKey: withFiles });
+    const res = await request(app).get("/api/speech/pocket/voices");
+    expect(res.status).toBe(200);
+    expect(res.body.voices).toHaveLength(1);
+  });
+
+  it("offers no voices while POCKET_VOICE_FILES_URL is absent or unusable (the engine could not synthesize them)", async () => {
+    seedCopy("piotr");
+    const absent = loadApp(null, { resolveKey: noKeys });
+    expect((await request(absent.app).get("/api/speech/pocket/voices")).body.voices).toEqual([]);
+    const bad = loadApp(null, { resolveKey: (n) => ({ value: n === "POCKET_VOICE_FILES_URL" ? "not a url" : undefined, source: "env" as const }) });
+    expect((await request(bad.app).get("/api/speech/pocket/voices")).body.voices).toEqual([]);
+  });
+});
+
+describe("holder rebuilds", () => {
+  it("adding or deleting a voice rebuilds the holder", async () => {
+    const holder = { rebuild: vi.fn() };
+    const { app } = loadApp(fake.url, { holder: holder as never });
+    await postVoice(app, "my-voice").expect(201);
+    expect(holder.rebuild).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(copyDir("my-voice"), "sample.wav"))).toBe(true);
+    await request(app).delete("/api/speech/openai/voices/my-voice").expect(204);
+    expect(holder.rebuild).toHaveBeenCalledTimes(2);
+    expect(existsSync(copyDir("my-voice"))).toBe(false);
   });
 });

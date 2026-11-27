@@ -150,6 +150,8 @@ const SAMPLES: Record<string, readonly unknown[]> = {
     { pavilio: { edge: "en-US-EmmaMultilingualNeural" } },
     { "240": { edge: "true" }, empty: {} },
   ],
+  "speech.engineByProject": [{}, { pavilio: "pocket-pl" }, { "240": "true" }],
+  "speech.rateByProject": [{}, { pavilio: 1.5 }, { "240": 2 }],
   "speech.cascadeOrder": [[], [{ id: "edge", on: false }], [{ id: "true", on: true }]],
   "speech.pronunciationByEngine": [{}, { edge: false, elevenlabs: true }],
   "nav.lastPath": [null, "", "/notes/today.md", "true", "240", "null"],
@@ -158,7 +160,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 68;
+const DECLARATION_COUNT = 70;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

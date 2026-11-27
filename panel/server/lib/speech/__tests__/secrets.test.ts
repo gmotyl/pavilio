@@ -165,4 +165,23 @@ describe("secrets store", () => {
     );
     expect(resolveKey("SPEECHIFY_API_KEY")).toEqual({ source: "none" });
   });
+
+  it("secrets accepts the four pocket variables", async () => {
+    const { resolveKey, writeKeys } = await import("../secrets");
+    const vars = [
+      "POCKET_TTS_BASE_URL",
+      "POCKET_PL_TTS_BASE_URL",
+      "POCKET_VOICE_FILES_URL",
+      "POCKET_TTS_CLONING",
+    ] as const;
+    for (const name of vars) vi.stubEnv(name, undefined);
+    await writeKeys({
+      POCKET_TTS_BASE_URL: "http://127.0.0.1:8890",
+      POCKET_PL_TTS_BASE_URL: "http://127.0.0.1:8891",
+      POCKET_VOICE_FILES_URL: "http://127.0.0.1:8892",
+      POCKET_TTS_CLONING: "0",
+    });
+    for (const name of vars) expect(resolveKey(name).source).toBe("file");
+    expect(resolveKey("POCKET_TTS_CLONING").value).toBe("0");
+  });
 });

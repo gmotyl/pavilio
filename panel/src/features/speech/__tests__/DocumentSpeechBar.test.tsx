@@ -4,10 +4,11 @@ import type { ReactNode } from "react";
 import { makeSpeech, resetSpeechHarness, selectSynth, synth, synthMock } from "./speech.harness";
 import type { AnswerWaitingPort, SpeechHost } from "../useSpeechHost";
 import type { SpeechUnit } from "../types";
-import { DEFAULT_SPEECH_VOICE, setProjectVoice } from "../voices";
+import { DEFAULT_SPEECH_VOICE, setProjectVoice, voiceForDocKey } from "../voices";
+import { engineVoiceKey } from "../engines";
 import { __resetAlertsForTests, getAlertsSnapshot } from "../../alerts/store";
 import { preferences } from "../../../preferences/declarations";
-import { clearPreference, readPreference } from "../../../preferences/store";
+import { clearPreference, readPreference, writePreference } from "../../../preferences/store";
 
 /**
  * The host is stubbed, NOT `usePanelSpeech`: the bar is required to read the
@@ -56,7 +57,11 @@ vi.mock("../pageCache", async (importOriginal) => {
   };
 });
 
-vi.mock("../synth", () => synthMock());
+vi.mock("../synth", async (importOriginal) => ({
+  ...synthMock(),
+  // The real voice resolution: a page's default voice resolves through it.
+  resolveSpeechVoice: (await importOriginal<typeof import("../synth")>()).resolveSpeechVoice,
+}));
 vi.mock("../useSpeechHost", () => {
   const useSpeechHost = () => stub.host;
   return { useSpeechHost, default: useSpeechHost };
@@ -167,14 +172,47 @@ describe("DocumentSpeechBar", () => {
     act(() => cache.changed());
     expect(cachedLabel()!.textContent).toBe("5 of 6 cached · 1.3 MB");
 
-    // Three buttons — cache toggle, play/pause, clear icon: no mode switch,
+    // Four buttons — cache toggle, play/pause, rate button, clear icon: no mode switch,
     // previous/next, eye button, launchers or hide toggle.
-    expect(row.querySelectorAll("button")).toHaveLength(3);
+    expect(row.querySelectorAll("button")).toHaveLength(4);
     expect(screen.queryByTestId(`speech-bar-autoplay-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`document-speech-bar-previous-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`document-speech-bar-next-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`speech-bar-eye-${KEY}`)).toBeNull();
     expect(screen.queryByTestId(`speech-bar-launchers-${KEY}`)).toBeNull();
+  });
+
+  it("a project page's row places the rate button after the scrubber", () => {
+    cache.share = { cached: 4, bytes: 212 * 1024 };
+    renderBar({ stateFor: () => "ready", unitsFor: () => unitList(6) });
+
+    const row = screen.getByTestId(`document-speech-bar-${KEY}`).querySelector(".speech-bar-row")!;
+    const order = [
+      cacheToggle()!,
+      screen.getByTestId(`speech-bar-playpause-${KEY}`),
+      screen.getByTestId(`speech-bar-scrubber-${KEY}`),
+      screen.getByTestId("speech-bar-rate-pavilio"),
+      cachedLabel()!,
+      clearButton()!,
+    ];
+    for (let i = 0; i < order.length; i++) {
+      expect(row.contains(order[i])).toBe(true);
+      if (i === 0) continue;
+      expect(
+        order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it("a page outside projects has no rate button", () => {
+    stub.host = makeSpeech({ stateFor: () => "ready", unitsFor: () => unitList(2) });
+    render(
+      <Host>
+        <DocumentSpeechBar docKey="doc:loose.md" />
+      </Host>,
+    );
+    expect(screen.getByTestId("document-speech-bar-doc:loose.md")).toBeInTheDocument();
+    expect(screen.queryByTestId(/^speech-bar-rate-/)).toBeNull();
   });
 
   it("shows preparing until the first unit is ready", () => {
@@ -231,6 +269,31 @@ describe("DocumentSpeechBar", () => {
     expect(segment(0)).toBe("ready");
     // In the default voice: not what the page's units were synthesized in.
     expect(segment(1)).toBe("cold");
+  });
+
+  it("a page follows its project's engine live, without a remount", async () => {
+    writePreference(preferences.speechEngineByProject, { pavilio: "pocket-pl" });
+    const pocketVoice = engineVoiceKey("pocket-pl", "shefowl");
+    expect(voiceForDocKey(KEY)).toBe(pocketVoice);
+    selectSynth("simple", "peek");
+    const units = unitList(2);
+    await synth.synthesizeSpeech(units[0].text, { voice: pocketVoice });
+    await synth.synthesizeSpeech(units[1].text, { voice: DEFAULT_SPEECH_VOICE });
+
+    renderBar({ stateFor: () => "ready", unitsFor: () => units });
+
+    const segment = (index: number) =>
+      screen.getByTestId(`speech-bar-segment-${KEY}-${index}`).getAttribute("data-segment");
+    expect(segment(0)).toBe("ready");
+    expect(segment(1)).toBe("cold");
+
+    act(() => {
+      writePreference(preferences.speechEngineByProject, {});
+    });
+
+    expect(voiceForDocKey(KEY)).toBe(DEFAULT_SPEECH_VOICE);
+    await waitFor(() => expect(segment(0)).toBe("cold"));
+    expect(segment(1)).toBe("ready");
   });
 
   it("empty page disables play", () => {

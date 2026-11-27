@@ -7,8 +7,9 @@ import { formatBytes } from "./formatBytes";
 import { clearPage, loadPageList, pageCachedShare, subscribePageCache } from "./pageCache";
 import { SpeechRow } from "./SpeechRow";
 import { usePageSpeech, usePanelSpeech } from "./SpeechHostProvider";
+import { usePocketVoicesSnapshot } from "./usePocketVoices";
 import { useOpenaiVoicesSnapshot } from "./useOpenaiVoices";
-import { voiceForDocKey } from "./voices";
+import { projectOfDocVoice, voiceForDocKey } from "./voices";
 
 const LABEL_STYLE = {
   fontSize: 12,
@@ -69,7 +70,10 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
   // So is the live OmniVoice list, which a saved openai voice waits for.
   usePreference(preferences.speechVoice);
   usePreference(preferences.speechVoiceByProject);
+  usePreference(preferences.speechEngine);
+  usePreference(preferences.speechEngineByProject);
   useOpenaiVoicesSnapshot();
+  usePocketVoicesSnapshot();
   const voice = voiceForDocKey(docKey);
 
   // One string snapshot, so `useSyncExternalStore` sees an unchanged share as
@@ -128,6 +132,7 @@ export function DocumentSpeechBar({ docKey, hintUnit = null }: DocumentSpeechBar
       speechKey={docKey}
       speech={speech}
       voice={voice}
+      project={projectOfDocVoice(docKey)}
       testIdPrefix="document-speech-bar"
       hintUnit={hintUnit}
       lead={

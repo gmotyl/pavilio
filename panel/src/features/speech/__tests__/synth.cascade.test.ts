@@ -48,6 +48,9 @@ beforeEach(() => {
     vi.fn(async (url: string, init: RequestInit) => {
       // The browser's Edge usage report is not a relay call.
       if (url === "/api/speech/usage") return new Response(null, { status: 204 });
+      if (url === "/api/speech/pocket/voices") {
+        return Response.json({ voices: [{ id: "piotr", label: "Piotr", version: 1 }], cloning: true });
+      }
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       relayed.push({ url, body });
       // The cascade names the member that spoke: here, the first in the order.
@@ -100,6 +103,8 @@ describe("cascade requests through the speech seam", () => {
       azure: voices.catalogDefaultVoice("azure"),
       edge: ANDREW,
       kokoro: voices.catalogDefaultVoice("kokoro"),
+      pocket: voices.catalogDefaultVoice("pocket"),
+      "pocket-pl": voices.catalogDefaultVoice("pocket-pl"),
     };
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
@@ -107,7 +112,8 @@ describe("cascade requests through the speech seam", () => {
     // No openai voice: the browser lists none until it reads the OmniVoice server's catalog,
     // so the server speaks with its own default.
     // `openai` and `kokoro` lead the default order; the server drops each when it has no address.
-    const order = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    // `pocket-pl` is off by default, so it stays out of the order.
+    const order = ["openai", "pocket", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
     expect(request).toEqual({
@@ -168,6 +174,8 @@ describe("cascade requests through the speech seam", () => {
       { id: "azure", on: false },
       { id: "openai", on: false },
       { id: "kokoro", on: false },
+      { id: "pocket", on: false },
+      { id: "pocket-pl", on: false },
     ]);
 
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });
@@ -230,4 +238,58 @@ describe("cascade requests through the speech seam", () => {
       expect(lastConfig().engines[id]).not.toHaveProperty("mode");
     }
   });
+
+  it("request takes the engine from an engine voice key", async () => {
+    const { synth, voices, engines } = await loadWithEngines();
+    voices.setStoredEngine("cascade");
+    // The workspace voice joins the instance's pocket-pl catalog, so anytts accepts it.
+    await (await import("../usePocketVoices")).reloadPocketVoices();
+
+    await synth.synthesizeSpeech("Zrobiłem deploy.", {
+      voice: engines.engineVoiceKey("pocket-pl", "piotr"),
+      lang: "pl",
+    });
+
+    expect(lastRequest()).toMatchObject({
+      text: "Zrobiłem deploy.",
+      engine: "pocket-pl",
+      voice: "piotr",
+      lang: "pl",
+    });
+    expect(relayed.at(-1)).toMatchObject({ url: "/api/tts", body: { engine: "pocket-pl", voice: "piotr" } });
+    // No other engine was tried: one relay call.
+    expect(relayed).toHaveLength(1);
+  });
+
+  it("request sends a cascade for a cascade key under a single global engine", async () => {
+    const { synth, voices, engines } = await loadWithEngines();
+    voices.setStoredEngine("edge");
+    voices.setCascadeOrder([
+      { id: "edge", on: true },
+      { id: "speechify", on: false },
+      { id: "elevenlabs", on: true },
+      { id: "cartesia", on: false },
+      { id: "azure", on: false },
+      { id: "openai", on: false },
+      { id: "kokoro", on: false },
+      { id: "pocket", on: false },
+      { id: "pocket-pl", on: false },
+    ]);
+
+    await synth.synthesizeSpeech("hello", {
+      voice: engines.cascadeVoiceKey({ edge: ANDREW, elevenlabs: GEORGE! }),
+      lang: "en",
+    });
+
+    expect(lastRequest()).toMatchObject({
+      engine: "cascade",
+      voices: { edge: ANDREW, elevenlabs: GEORGE },
+      order: ["edge", "elevenlabs"],
+    });
+    expect(lastRequest().voice).toBeUndefined();
+  });
 });
+
+async function loadWithEngines() {
+  return { ...(await load()), engines: await import("../engines") };
+}

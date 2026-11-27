@@ -25,7 +25,7 @@ import {
 } from "../../preferences/declarations";
 import { clearPreference, readPreference, writePreference } from "../../preferences/store";
 import { projectOfDocKey } from "./docKey";
-import { CASCADE, cascadeVoiceKey, getCascadeOrder, speechEngines } from "./engines";
+import { CASCADE, cascadeVoiceKey, engineVoiceKey, getCascadeOrder, speechEngines } from "./engines";
 import { resolveSpeechVoice } from "./synth";
 import type { SpeechMode } from "./types";
 import { openaiVoicesLoaded } from "./useOpenaiVoices";
@@ -51,6 +51,35 @@ function isKnownEngine(id: string): boolean {
 export function getStoredEngine(): string {
   const stored = readPreference(preferences.speechEngine);
   return isKnownEngine(stored) ? stored : preferences.speechEngine.default;
+}
+
+/**
+ * The engine that speaks for `project`: its own in `speech.engineByProject`
+ * when that names an engine the seam configures, else the global one — a stale
+ * id (or none) follows the default.
+ */
+export function engineFor(project: string | undefined): string {
+  if (project) {
+    const stored = asRecord<unknown>(readPreference(preferences.speechEngineByProject));
+    const own = Object.hasOwn(stored, project) ? stored[project] : undefined;
+    if (typeof own === "string" && isKnownEngine(own)) return own;
+  }
+  return getStoredEngine();
+}
+
+/**
+ * Sets `project`'s engine; `null` DELETES the entry, so the project follows the
+ * global engine. An engine the seam does not configure, or a blank project, is ignored.
+ */
+export function setProjectEngine(project: string, engine: string | null): void {
+  if (project.trim() === "") return;
+  if (engine !== null && !isKnownEngine(engine)) return;
+  const stored = asRecord<string>(readPreference(preferences.speechEngineByProject));
+  const others = Object.entries(stored).filter(([key]) => key !== project);
+  writePreference(
+    preferences.speechEngineByProject,
+    Object.fromEntries(engine === null ? others : [...others, [project, engine]]),
+  );
 }
 
 /** Stores `id` and returns the engine now in effect; an engine the seam does not configure is ignored. */
@@ -178,12 +207,12 @@ export function setProjectEngineVoice(project: string, engine: string, id: strin
  * project inherits the default.
  */
 export function getProjectVoice(project: string): string | null {
-  return getProjectVoices(project)[getStoredEngine()] ?? null;
+  return getProjectVoices(project)[engineFor(project)] ?? null;
 }
 
 /** Sets the project's voice for the current engine; `null` DELETES it, so it follows the default. */
 export function setProjectVoice(project: string, id: string | null): void {
-  setProjectEngineVoice(project, getStoredEngine(), id);
+  setProjectEngineVoice(project, engineFor(project), id);
 }
 
 /**
@@ -232,7 +261,7 @@ export function isVoiceAwaitingCatalog(engine: string, project: string | undefin
  * render, through the terminal's `voiceForSession`.
  */
 export function voiceForProject(project: string | undefined): string {
-  const engine = getStoredEngine();
+  const engine = engineFor(project);
   if (engine === CASCADE) {
     const voices: Record<string, string> = {};
     for (const member of DEFAULT_CASCADE_ORDER) {
@@ -241,10 +270,11 @@ export function voiceForProject(project: string | undefined): string {
     }
     return cascadeVoiceKey(voices);
   }
-  return (
+  const voice =
     (project ? getProjectVoices(project)[engine] : undefined) ??
-    resolveStoredVoice(readPreference(preferences.speechVoice), engine).voice
-  );
+    resolveStoredVoice(readPreference(preferences.speechVoice), engine).voice;
+  // A project on a single engine other than the global one carries it in the key.
+  return engine === getStoredEngine() ? voice : engineVoiceKey(engine, voice);
 }
 
 /**
