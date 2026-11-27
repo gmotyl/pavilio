@@ -127,12 +127,24 @@ halt() {
   local name="$1"
   running "$name" || return 0
   local pid="$PID" i=0
-  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
-  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 40 ]; do
+  # POCKETCTL_KILL and POCKETCTL_TERM_STEPS are test seams (a no-op killer simulates a survivor).
+  local killer="\${POCKETCTL_KILL:-kill}" steps="\${POCKETCTL_TERM_STEPS:-40}"
+  "$killer" -TERM -- "-$pid" 2>/dev/null || "$killer" -TERM "$pid" 2>/dev/null
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt "$steps" ]; do
     sleep 0.25
     i=$((i + 1))
   done
-  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+  "$killer" -KILL -- "-$pid" 2>/dev/null || "$killer" -KILL "$pid" 2>/dev/null
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 8 ]; do
+    sleep 0.25
+    i=$((i + 1))
+  done
+  # A survivor keeps its pidfile, so the next stop (or status) still finds it.
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "pocket: $name (pid $pid) did not exit" >&2
+    return 1
+  fi
   unlink "$DIR/$name.pid" 2>/dev/null
   echo "pocket: $name stopped"
 }
@@ -161,15 +173,17 @@ start() {
 }
 
 stop() {
-  halt voices
-  halt pocket-pl
-  halt pocket
+  local rc=0
+  halt voices || rc=1
+  halt pocket-pl || rc=1
+  halt pocket || rc=1
+  return "$rc"
 }
 
 case "\${1:-}" in
   start) start ;;
   stop) stop ;;
-  restart) stop; start ;;
+  restart) stop && start ;;
   status)
     # 0 = every configured server runs, 3 = none does, 4 = only some (a start completes the rest).
     up=0

@@ -120,17 +120,64 @@ describe.skipIf(process.platform === "win32")("generated pocketctl at runtime", 
     );
     expect(runCtl("status").status).toBe(0);
     // One server down is a partial install, not a running one.
-    const plPid = Number(readFileSync(join(installDir, "pocket-pl.pid"), "utf8").split("\n")[0]);
+    const pidOf = (n: string) => Number(readFileSync(join(installDir, `${n}.pid`), "utf8").split("\n")[0]);
+    const plPid = pidOf("pocket-pl");
+    const [pocketBefore, voicesBefore] = [pidOf("pocket"), pidOf("voices")];
     process.kill(-plPid, "SIGKILL");
     await new Promise((r) => setTimeout(r, 200));
     expect(runCtl("status").status).toBe(4);
     expect(runCtl("start").status).toBe(0);
     expect(runCtl("status").status).toBe(0);
+    // The healthy servers were left alone; only the missing one got a new process.
+    expect(pidOf("pocket")).toBe(pocketBefore);
+    expect(pidOf("voices")).toBe(voicesBefore);
+    expect(pidOf("pocket-pl")).not.toBe(plPid);
     const pids = ["pocket", "pocket-pl", "voices"].map((n) => Number(readFileSync(join(installDir, `${n}.pid`), "utf8").split("\n")[0]));
 
     expect(runCtl("stop").status).toBe(0);
 
     expect(runCtl("status").status).toBe(3);
     for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  const stubServers = (body: string) => {
+    mkdirSync(join(installDir, "venv", "bin"), { recursive: true });
+    for (const name of ["pocket-tts", "python"]) {
+      writeFileSync(join(installDir, "venv", "bin", name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+    }
+  };
+  const pidOf = (n: string) => Number(readFileSync(join(installDir, `${n}.pid`), "utf8").split("\n")[0]);
+
+  it("stop escalates to KILL for a server that ignores TERM, and exits 0 once it is gone", async () => {
+    await main({ servers: ["pocket"], workspaceRoot: workspace }, installFakes());
+    stubServers("trap '' TERM\nwhile :; do sleep 1; done");
+    expect(runCtl("start").status).toBe(0);
+    const pids = [pidOf("pocket"), pidOf("voices")];
+
+    const res = spawnSync(ctlPath, ["stop"], { env: { ...ctlEnv(), POCKETCTL_TERM_STEPS: "2" }, encoding: "utf8" });
+
+    expect(res.status).toBe(0);
+    for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    expect(existsSync(join(installDir, "pocket.pid"))).toBe(false);
+  });
+
+  it("stop exits non-zero and keeps the pidfile when a process survives; restart then does not start", async () => {
+    await main({ servers: ["pocket"], workspaceRoot: workspace }, installFakes());
+    stubServers("exec sleep 60");
+    expect(runCtl("start").status).toBe(0);
+    const pid = pidOf("pocket");
+    // A no-op killer stands in for a process that survives KILL.
+    const env = { ...ctlEnv(), POCKETCTL_KILL: "true", POCKETCTL_TERM_STEPS: "1" };
+
+    const res = spawnSync(ctlPath, ["stop"], { env, encoding: "utf8" });
+
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toContain(`pocket (pid ${pid}) did not exit`);
+    expect(existsSync(join(installDir, "pocket.pid"))).toBe(true);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    const restart = spawnSync(ctlPath, ["restart"], { env, encoding: "utf8" });
+    expect(restart.status).not.toBe(0);
+    expect(restart.stdout).not.toContain("started");
+    expect(pidOf("pocket")).toBe(pid);
   });
 });
