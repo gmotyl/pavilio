@@ -649,5 +649,8 @@ describe("/api/speech pocket addresses", () => {
 
     vi.stubEnv("POCKET_PL_TTS_BASE_URL", "http://10.0.0.5:8891");
     expect((await put(app, { apiKey: ADDRESS })).status).toBe(409);
+    vi.stubEnv("POCKET_TTS_BASE_URL", "http://10.0.0.5:8890");
+    const english = await request(app).put("/api/speech/keys/pocket").set("Cookie", COOKIE).send({ apiKey: "http://127.0.0.1:8890" });
+    expect(english.status).toBe(409);
   });
 });
