@@ -27,7 +27,9 @@ import type { OpenaiCatalog } from "../lib/speech/openaiCatalog.js";
  * catalog before answering, so the next GET sees the server's voices.
  *
  * `kokoro` (a Kokoro-FastAPI server) is handled the same way through
- * `KOKORO_TTS_BASE_URL`, except its catalog ships with anytts: nothing is fetched.
+ * `KOKORO_TTS_BASE_URL`, except its catalog ships with anytts: nothing is fetched. `pocket` and
+ * `pocket-pl` (Pocket TTS servers) likewise, through `POCKET_TTS_BASE_URL` and `POCKET_PL_TTS_BASE_URL`;
+ * their address may arrive as `baseUrl` or `apiKey`.
  */
 
 export interface SpeechEngineInfo {
@@ -38,7 +40,7 @@ export interface SpeechEngineInfo {
   keyLast4?: string;
   /** Azure only; the region is not a secret. */
   region?: string;
-  /** `openai` and `kokoro` only: the server address, in full (not a secret). */
+  /** The address engines only (`openai`, `kokoro`, `pocket`, `pocket-pl`): the server address, in full (not a secret). */
   baseUrl?: string;
   status: EngineStatus;
 }
@@ -60,6 +62,8 @@ const isKeyed = (id: string): id is KeyedEngineId => Object.hasOwn(KEYED_ENGINES
 const ADDRESS_ENGINES = {
   openai: "OPENAI_TTS_BASE_URL",
   kokoro: "KOKORO_TTS_BASE_URL",
+  pocket: "POCKET_TTS_BASE_URL",
+  "pocket-pl": "POCKET_PL_TTS_BASE_URL",
 } as const satisfies Record<string, KeyVar>;
 type AddressEngineId = keyof typeof ADDRESS_ENGINES;
 
@@ -158,10 +162,12 @@ export function createSpeechEnginesRouter(options: SpeechEnginesOptions): Router
   for (const id of Object.keys(ADDRESS_ENGINES) as AddressEngineId[]) {
     const name = ADDRESS_ENGINES[id];
     router.put(`/keys/${id}`, async (req, res) => {
-      const body = (req.body ?? {}) as { baseUrl?: unknown };
-      const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+      // The Pocket rows save their address through the generic key field, as `apiKey`.
+      const body = (req.body ?? {}) as { baseUrl?: unknown; apiKey?: unknown };
+      const raw = id === "pocket" || id === "pocket-pl" ? (body.baseUrl ?? body.apiKey) : body.baseUrl;
+      const baseUrl = typeof raw === "string" ? raw.trim() : "";
       if (!baseUrl || /[\r\n]/.test(baseUrl) || !isHttpUrl(baseUrl)) {
-        const example = id === "kokoro" ? "http://127.0.0.1:8880" : "http://127.0.0.1:8890";
+        const example = id === "kokoro" ? "http://127.0.0.1:8880" : id === "pocket-pl" ? "http://127.0.0.1:8891" : "http://127.0.0.1:8890";
         res.status(400).json({ error: `baseUrl must be an http(s) URL without credentials, e.g. ${example}` });
         return;
       }

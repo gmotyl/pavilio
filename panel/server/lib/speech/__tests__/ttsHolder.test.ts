@@ -302,4 +302,78 @@ describe("server Tts holder", () => {
       order: ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
     });
   });
+
+  describe("pocket engines", () => {
+    type Voice = { id: string; label: string; gender?: "female" | "male"; version: number };
+    const build = (table: Partial<Record<KeyVar, string>>, workspaceVoices?: () => Voice[]) => {
+      const configs: TtsConfig[] = [];
+      const holder = createTtsHolder({
+        createTts: (config) => {
+          configs.push(config);
+          return createTts(config);
+        },
+        resolveKey: keys(table),
+        workspaceVoices,
+      });
+      return { configs, holder };
+    };
+    const VOICES: Voice[] = [{ id: "piotr", label: "Piotr", gender: "male", version: 1700000000000 }];
+
+    it("pocket members are built from their addresses", () => {
+      const { configs, holder } = build({ POCKET_TTS_BASE_URL: "http://127.0.0.1:8890" });
+      expect(configs[0]!.engines.pocket).toMatchObject({ baseUrl: "http://127.0.0.1:8890" });
+      expect(configs[0]!.engines["pocket-pl"]).toBeUndefined();
+      expect(configs[0]!.engines.cascade).toEqual({
+        order: ["pocket", "elevenlabs", "cartesia", "speechify", "azure", "edge"],
+      });
+      expect(holder.engineStatus("pocket")).toEqual({ state: "ready" });
+      expect(() => holder.engineStatus("pocket-pl")).toThrow(RangeError);
+    });
+
+    it("an invalid pocket address leaves the engine off with a warning", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const { configs } = build({ POCKET_TTS_BASE_URL: "localhost8890" });
+        expect(configs[0]!.engines.pocket).toBeUndefined();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]![0]).toContain("POCKET_TTS_BASE_URL");
+        expect(warn.mock.calls[0]![0]).not.toContain("localhost8890");
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("workspace voices reach both pocket members", () => {
+      const { configs } = build(
+        {
+          POCKET_TTS_BASE_URL: "http://127.0.0.1:8890",
+          POCKET_PL_TTS_BASE_URL: "http://127.0.0.1:8891",
+          POCKET_VOICE_FILES_URL: "http://127.0.0.1:8892",
+        },
+        () => VOICES,
+      );
+      expect(configs[0]!.engines.pocket).toMatchObject({ voiceFilesUrl: "http://127.0.0.1:8892", customVoices: VOICES });
+      expect(configs[0]!.engines["pocket-pl"]).toMatchObject({
+        voiceFilesUrl: "http://127.0.0.1:8892",
+        customVoices: VOICES,
+      });
+      expect(configs[0]!.engines.cascade).toEqual({
+        order: ["pocket", "elevenlabs", "cartesia", "speechify", "azure", "edge", "pocket-pl"],
+      });
+    });
+
+    it("cloning off withholds workspace voices from pocket only", () => {
+      const { configs } = build(
+        {
+          POCKET_TTS_BASE_URL: "http://127.0.0.1:8890",
+          POCKET_PL_TTS_BASE_URL: "http://127.0.0.1:8891",
+          POCKET_VOICE_FILES_URL: "http://127.0.0.1:8892",
+          POCKET_TTS_CLONING: "0",
+        },
+        () => VOICES,
+      );
+      expect((configs[0]!.engines.pocket as { customVoices?: unknown[] }).customVoices ?? []).toEqual([]);
+      expect(configs[0]!.engines["pocket-pl"]).toMatchObject({ customVoices: VOICES });
+    });
+  });
 });

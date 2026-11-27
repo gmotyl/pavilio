@@ -33,6 +33,8 @@ const KEY_VARS = [
   "AZURE_SPEECH_REGION",
   "OPENAI_TTS_BASE_URL",
   "KOKORO_TTS_BASE_URL",
+  "POCKET_TTS_BASE_URL",
+  "POCKET_PL_TTS_BASE_URL",
 ] as const;
 
 const COOKIE = `panel_token=${TOKEN}`;
@@ -71,7 +73,7 @@ function fakeTts(config: TtsConfig, windows: Record<string, EngineStatus>): Tts 
       const engine = engines[id];
       if (!engine) throw new RangeError(`unknown engine ${id}`);
       if (id === "edge" || id === "cascade") return { state: "ready" };
-      if (id === "openai" || id === "kokoro") return windows[id] ?? { state: engine.baseUrl ? "ready" : "no-key" };
+      if (id === "openai" || id === "kokoro" || id === "pocket" || id === "pocket-pl") return windows[id] ?? { state: engine.baseUrl ? "ready" : "no-key" };
       if (!engine.apiKey) return { state: "no-key" };
       return windows[id] ?? { state: "ready" };
     },
@@ -155,7 +157,7 @@ describe("/api/speech engines and keys", () => {
     expect(configs[1]!.engines.elevenlabs).toEqual({ apiKey: KEY });
 
     const list = await engines(app);
-    expect(list.map((e) => e.id)).toEqual(["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"]);
+    expect(list.map((e) => e.id)).toEqual(["openai", "pocket", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge", "pocket-pl"]);
     expect(engine(list, "elevenlabs")).toEqual({
       id: "elevenlabs",
       label: "ElevenLabs",
@@ -623,5 +625,29 @@ describe("/api/speech kokoro address", () => {
       status: { state: "ready" },
     });
     expect(row.keyLast4).toBeUndefined();
+  });
+});
+
+describe("/api/speech pocket addresses", () => {
+  const ADDRESS = "http://127.0.0.1:8891";
+  const put = (app: Express, body: object) =>
+    request(app).put("/api/speech/keys/pocket-pl").set("Cookie", COOKIE).send(body);
+
+  it("pocket addresses are saved from Settings like kokoro's", async () => {
+    const { app, configs } = loadApp();
+    expect(configs[0]!.engines["pocket-pl"]).toBeUndefined();
+    expect(engine(await engines(app), "pocket-pl")).toMatchObject({ id: "pocket-pl", keyed: true, status: { state: "no-key" } });
+
+    expect((await put(app, { apiKey: "not a url" })).status).toBe(400);
+    expect((await put(app, { apiKey: `  ${ADDRESS}  ` })).status).toBe(204);
+    expect(secrets()).toBe(`POCKET_PL_TTS_BASE_URL=${ADDRESS}\n`);
+    expect(configs.at(-1)!.engines["pocket-pl"]).toMatchObject({ baseUrl: ADDRESS });
+    expect(engine(await engines(app), "pocket-pl")).toMatchObject({ baseUrl: ADDRESS, keySource: "file" });
+
+    expect((await request(app).delete("/api/speech/keys/pocket-pl").set("Cookie", COOKIE)).status).toBe(204);
+    expect(configs.at(-1)!.engines["pocket-pl"]).toBeUndefined();
+
+    vi.stubEnv("POCKET_PL_TTS_BASE_URL", "http://10.0.0.5:8891");
+    expect((await put(app, { apiKey: ADDRESS })).status).toBe(409);
   });
 });

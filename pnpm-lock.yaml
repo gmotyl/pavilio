@@ -35,8 +35,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       anytts:
-        specifier: 0.7.0
-        version: 0.7.0
+        specifier: 0.8.0
+        version: 0.8.0
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -218,6 +218,9 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
+
+  '@breezystack/lamejs@1.2.7':
+    resolution: {integrity: sha512-6wc7ck65ctA75Hq7FYHTtTvGnYs6msgdxiSUICQ+A01nVOWg6rqouZB8IdyteRlfpYYiFovkf67dIeOgWIUzTA==}
 
   '@chevrotain/cst-dts-gen@12.0.0':
     resolution: {integrity: sha512-fSL4KXjTl7cDgf0B5Rip9Q05BOrYvkJV/RrBTE/bKDN096E4hN/ySpcBK5B24T76dlQ2i32Zc3PAE27jFnFrKg==}
@@ -1258,8 +1261,8 @@ packages:
     resolution: {integrity: sha512-Cxwpt2SfTzTtXcfOlzGEee8O+c+MmUgGrNiBcXnuWxuFJHe6a5Hz7qwhwe5OgaSYI0IJvkLqWX1ASG+cJOkEiA==}
     engines: {node: '>=10'}
 
-  anytts@0.7.0:
-    resolution: {integrity: sha512-BfvWaqdB/I0762UjIfLkLe3CgBp6kOxoXJ+R4+lyiiKDR4hC2EJ1H9WbsfIAYdVIkQTZ4y5nWh/9I/uNRI9VMQ==}
+  anytts@0.8.0:
+    resolution: {integrity: sha512-2qUakY8MkF1a1kvbTMlHvhQ6j5/66kRjUYPJcLLeexJlm4x0OfDj+fJD+YHXbtJG5YiI0gWBq5mlCm0+swzJdw==}
     engines: {node: '>=22'}
 
   append-field@1.0.0:
@@ -3159,6 +3162,8 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
+  '@breezystack/lamejs@1.2.7': {}
+
   '@chevrotain/cst-dts-gen@12.0.0':
     dependencies:
       '@chevrotain/gast': 12.0.0
@@ -4022,7 +4027,9 @@ snapshots:
 
   ansi-styles@5.2.0: {}
 
-  anytts@0.7.0: {}
+  anytts@0.8.0:
+    dependencies:
+      '@breezystack/lamejs': 1.2.7
 
   append-field@1.0.0: {}
 
