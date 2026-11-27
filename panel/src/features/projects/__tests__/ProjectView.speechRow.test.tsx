@@ -156,6 +156,10 @@ describe("ProjectView page speech row", () => {
 
     // The row is in the host, not in the tab's header toolbar it unfolded from.
     expect(host.contains(row)).toBe(true);
+    // The row carries the project's rate button, right after the scrubber.
+    expect(screen.getByTestId(`speech-bar-scrubber-${KEY}`).nextElementSibling).toBe(
+      screen.getByTestId("speech-bar-rate-pavilio"),
+    );
     expect(screen.getByTestId("plans-tab-header").contains(row)).toBe(false);
 
     // The host shares the sticky wrapper with the tab row, right after it.

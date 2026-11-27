@@ -3,10 +3,11 @@
  * option labelled with the voice it resolves to, and an override shows a tag.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ProjectVoiceSelect } from "../ProjectVoiceSelect";
+import { RateButton } from "../RateButton";
 import { listEngines, listVoices } from "anytts";
 
 import { groupVoices } from "../voiceGroups";
@@ -127,6 +128,23 @@ describe("ProjectVoiceSelect", () => {
       expect(engineFor("p")).toBe("edge");
       expect(engineSelect().value).toBe("");
     });
+  });
+
+  it("the picker slider and every row button share the project speed", () => {
+    render(
+      <>
+        <ProjectVoiceSelect project="p" />
+        <RateButton project="p" />
+      </>,
+    );
+    const slider = screen.getByTestId("project-rate-slider") as HTMLInputElement;
+    expect([slider.min, slider.max, slider.step]).toEqual(["0.5", "2", "0.1"]);
+
+    fireEvent.change(slider, { target: { value: "1.3" } });
+
+    expect(readPreference(preferences.speechRateByProject)).toEqual({ p: 1.3 });
+    expect(screen.getByTestId("project-rate-button")).toHaveTextContent("1.3×");
+    expect(screen.getByTestId("speech-bar-rate-p")).toHaveTextContent("1.3×");
   });
 
   it("with no override the select shows the default voice by name", () => {

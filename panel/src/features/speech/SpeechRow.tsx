@@ -1,5 +1,6 @@
 import { SkipBack, SkipForward } from "lucide-react";
 import { useSyncExternalStore, type ReactNode } from "react";
+import { RateButton } from "./RateButton";
 import { SpeechTransport } from "./SpeechTransport";
 import type { GridSpeech } from "./types";
 
@@ -29,6 +30,12 @@ export interface SpeechRowProps {
   lead: ReactNode;
   /** The row's last control(s): the cell's eye (+ queue pill), the page's clear-cache icon. */
   trail: ReactNode;
+  /**
+   * The project whose playback speed the row's rate button shows, right after
+   * the scrubber. Resolved by the adapter (a cell's comes from terminal-side
+   * state); absent — a page outside any project — means no button.
+   */
+  project?: string;
   /** Between the scrubber and the trail: the cell's launchers, the page's cached share. */
   middleExtra?: ReactNode;
   /** Transport extras: the cell passes previous/next; a page passes none. */
@@ -60,7 +67,7 @@ export interface SpeechRowProps {
  * and the transport + scrubber read from the host by `speechKey`.
  *
  * Order inside the row: lead, separator, [previous], play/pause, [next,
- * separator], scrubber, middleExtra, trail. The surfaces are slot-filling
+ * separator], scrubber, [rate button], middleExtra, trail. The surfaces are slot-filling
  * adapters — `SpeechControlBar` on a cell, `DocumentSpeechBar` on a page.
  */
 export function SpeechRow({
@@ -70,6 +77,7 @@ export function SpeechRow({
   lead,
   trail,
   middleExtra,
+  project,
   stepControls,
   hintUnit = null,
   testIdPrefix,
@@ -164,6 +172,8 @@ export function SpeechRow({
             ) : undefined
           }
         />
+
+        {project ? <RateButton project={project} /> : null}
 
         {middleExtra}
 

@@ -18,6 +18,7 @@ import { useReadyPulseWindow } from "../speech/useReadyPulseWindow";
 import { newestUtteranceId, utteranceUnderCursor } from "../speech/utteranceQueue";
 import { stepsOffTheWave, stepsOntoTheWave } from "../speech/waveStep";
 import type { GridSpeech, SpeechMode } from "../speech/types";
+import { projectOfSession } from "./sessionProject";
 import { useVoiceForSession } from "./sessionVoice";
 
 export interface SpeechControlBarProps {
@@ -360,6 +361,7 @@ export function SpeechControlBar({
       speechKey={sessionId}
       speech={speech}
       voice={voice}
+      project={projectOfSession(sessionId) ?? undefined}
       testIdPrefix="speech-bar"
       // The pane's state, on the row, because the SEAM between them is the
       // row's to draw. `.speech-bar` carries a hairline against the terminal;

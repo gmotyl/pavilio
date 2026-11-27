@@ -4,6 +4,8 @@ import { listEngines, type VoiceInfo } from "anytts";
 import { preferences } from "../../preferences/declarations";
 import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
+import { RateButton } from "./RateButton";
+import { rateFor, setProjectRate } from "./rate";
 import { CASCADE, speechEngines } from "./engines";
 import { isAddressEngine, isKeyless, useEngineInfo, type EngineInfo } from "./useEngineInfo";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
@@ -66,6 +68,38 @@ export function ProjectVoiceSelect({ project }: { project: string }) {
       ) : (
         <SingleEngineVoiceSelect project={project} engine={engine} />
       )}
+      <ProjectRate project={project} />
+    </div>
+  );
+}
+
+/**
+ * The project's playback speed: a 0.5–2.0 slider in 0.1 steps beside the same
+ * button the speech rows carry. Both read `speech.rateByProject`, so a slide
+ * moves every button for the project.
+ */
+function ProjectRate({ project }: { project: string }) {
+  usePreference(preferences.speechRateByProject);
+  const rate = rateFor(project);
+  const inputId = `project-rate-${project}`;
+  return (
+    <div className="mt-3">
+      <label htmlFor={inputId} className="block text-xs mb-1" style={MUTED}>
+        Playback speed
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id={inputId}
+          type="range"
+          data-testid="project-rate-slider"
+          min={0.5}
+          max={2}
+          step={0.1}
+          value={rate}
+          onChange={(e) => setProjectRate(project, Number(e.target.value))}
+        />
+        <RateButton project={project} testId="project-rate-button" />
+      </div>
     </div>
   );
 }

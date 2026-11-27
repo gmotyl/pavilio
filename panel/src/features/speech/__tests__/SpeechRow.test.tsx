@@ -34,6 +34,7 @@ vi.mock("../synth", async (importOriginal) => ({
 // Imported after the mocks so they pick them up.
 const { SpeechRow } = await import("../SpeechRow");
 const { SpeechControlBar } = await import("../../terminal/SpeechControlBar");
+const { refreshSessions } = await import("../../terminal/sessionStore");
 
 const KEY = "cell-a";
 
@@ -99,6 +100,47 @@ describe("SpeechRow", () => {
     expect(onDragStart).not.toHaveBeenCalled();
     expect(drag.defaultPrevented).toBe(true);
     expect(screen.getByTestId(`speech-bar-${KEY}`).getAttribute("draggable")).toBe("false");
+  });
+
+  it("a cell's row places the rate button after the scrubber", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: KEY, name: KEY, project: "p", cwd: "/srv/git/p", pid: 1, createdAt: "" },
+        ],
+      })),
+    );
+    try {
+      await refreshSessions();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    render(
+      <SpeechControlBar
+        sessionId={KEY}
+        speech={makeSpeech({ stateFor: () => "empty" })}
+        answerOpen={false}
+        onToggleAnswer={() => {}}
+        send={() => true}
+      />,
+    );
+
+    const row = screen.getByTestId(`speech-bar-${KEY}`).querySelector(".speech-bar-row")!;
+    const els = [
+      `speech-bar-autoplay-${KEY}`,
+      `speech-bar-playpause-${KEY}`,
+      `speech-bar-scrubber-${KEY}`,
+      "speech-bar-rate-p",
+      `speech-bar-launchers-${KEY}`,
+      `speech-bar-eye-${KEY}`,
+    ].map((id) => screen.getByTestId(id));
+    for (const el of els) expect(row.contains(el)).toBe(true);
+    for (let i = 1; i < els.length; i += 1) {
+      expect(els[i - 1].compareDocumentPosition(els[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
   });
 
   it("cell row keeps its controls through the shared row", () => {
