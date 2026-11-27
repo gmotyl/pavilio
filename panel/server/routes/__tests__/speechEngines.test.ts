@@ -312,7 +312,7 @@ describe("/api/speech engines and keys", () => {
     const catalog = /const\s+openaiCatalog\s*=\s*createOpenaiCatalog\s*\(\s*\{([\s\S]*?)\}\s*\)\s*;/.exec(source);
     expect(catalog, "the openaiCatalog construction").not.toBeNull();
     expect(catalog![1]).toMatch(/onChange\s*:\s*\(\s*\)\s*=>\s*ttsHolder\s*\.\s*rebuild\s*\(\s*\)/);
-    const holder = /const\s+ttsHolder\s*=\s*createTtsHolder\s*\(\s*\{\s*catalog\s*:\s*openaiCatalog\s*\}\s*\)/.exec(source);
+    const holder = /const\s+ttsHolder\s*=\s*createTtsHolder\s*\(\s*\{[^}]*?\bcatalog\s*:\s*openaiCatalog\b/.exec(source);
     expect(holder, "the holder built from the catalog").not.toBeNull();
     const boot = /^\s*void\s+openaiCatalog\s*\.\s*refresh\s*\(\s*\)\s*;/m.exec(source);
     expect(boot, "the boot refresh").not.toBeNull();
