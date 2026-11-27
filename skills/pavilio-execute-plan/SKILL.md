@@ -37,6 +37,47 @@ If no path is given, locate the **active change** — an un-archived directory u
 6. **Record what is already dirty.** `git status --short` before dispatching anything, and note any uncommitted work the user had in flight. A file an agent reverts rather than commits leaves no trace in `git log`, so this snapshot is the only way to notice later that it went missing.
 
 ### Step 2 — Per task: implement → review → loop (dispatch sub-agents)
+
+#### Report progress as a board
+
+Every status message to the user during Step 2 starts with the progress board, not a bare sentence. Send it at the end of Step 1 (all ⬜, 0%), after each dispatch, after each review verdict, after each task completes, and when blocked. When the last task completes, send one final board at 100%. Step 3 messages are plain prose, with no board. Below the board, add one line naming what is running now or what just finished.
+
+```
+Executing <change-id>
+[██████████░░░░░░░░░░░░░░]  3/7 tasks · 43%
+
+✅ T1 <task title>
+✅ T2 <task title>
+✅ T3 <task title>
+🔄 T4 <task title>: reviewer running (round 1)
+⬜ T5 <task title>
+⬜ T6 <task title>
+⬜ T7 <task title>
+
+Reviewer for T4 is probing in its worktree; I'll continue when it reports back.
+```
+
+- **The bar** is 24 cells wide (filled = floor(24 × done / total)), followed by `n/N tasks · %` (rounded). It counts only tasks marked complete after a **clean** review (step 4 below). A task that is implementing, under review or in a fix round stays 🔄 and does not count, so the bar never runs ahead of a verified review.
+- **One row per task**, titled as in `tasks.md`: ✅ done · 🔄 in progress, with its current step (`implementer`, `reviewer round N`, `fix round N`) · ⬜ pending · ⛔ blocked, with the blocker in a few words (the bar does not move). Parallel tasks show several 🔄 rows at once.
+- **More than 8 tasks** → collapse the rows into one `Tasks:` line under the bar, then show a window of the previous, current and next rows between `...` lines:
+
+  ```
+  Executing <change-id>
+  [██████░░░░░░░░░░░░░░░░░░]  3/12 tasks · 25%
+
+  Tasks: ✅ T1  ✅ T2  ✅ T3  🔄 T4  ⬜ T5  ⬜ T6 … ⬜ T12
+  ...
+  ✅ T3 <task title>
+  🔄 T4 <task title>: reviewer running (round 1)
+  ⬜ T5 <task title>
+  ...
+  ```
+
+  With several 🔄 tasks, the window runs from the last ✅ before the first current task to the first ⬜ after the last one. A ⛔ task counts as current. At the start or end of the plan, leave out the missing neighbour and its `...` line.
+- The board reports only state the orchestrator has already verified. It never adds a claim the evidence does not support.
+
+#### Per task
+
 For each task, in order:
 
 1. **Mark it in-progress** (main thread).
@@ -114,6 +155,7 @@ Return to Step 1 (review) when the user updates the plan based on your feedback,
 
 - **Main thread orchestrates; sub-agents implement and review. Never implement inline in the main session.**
 - Review the plan critically first; follow its steps exactly; never skip verifications.
+- **Open every Step 2 status message with the progress board** — the bar counts only tasks that passed a clean review.
 - **Plans in implementation are FIXED** — new work becomes a new ticket/plan, not an amendment to the running plan.
 - Prefer an isolated workspace (a dedicated branch or git worktree) over building on `main`/`master`.
 - **Any agent that mutates files to probe gets `isolation: "worktree"`** — reviewers running mutation checks above all. Probing is the behaviour worth encouraging; doing it in the shared tree is what breaks.
