@@ -325,12 +325,16 @@ describe("/api/speech/openai/voices", () => {
 
 describe("/api/speech/pocket/voices", () => {
   const noKeys = () => ({ value: undefined, source: "none" as const });
+  const withFiles = (name: string) => ({
+    value: name === "POCKET_VOICE_FILES_URL" ? "http://127.0.0.1:8892" : undefined,
+    source: name === "POCKET_VOICE_FILES_URL" ? ("env" as const) : ("none" as const),
+  });
 
   it("lists workspace voices for pocket from disk", async () => {
     seedCopy("piotr", { label: "Piotr", gender: "male" });
     seedCopy("alice", { label: "Alice", gender: "female" });
     const fetchSpy = vi.fn();
-    const { app } = loadApp(null, { resolveKey: noKeys, fetch: fetchSpy as unknown as typeof fetch });
+    const { app } = loadApp(null, { resolveKey: withFiles, fetch: fetchSpy as unknown as typeof fetch });
     const res = await request(app).get("/api/speech/pocket/voices");
     expect(res.status).toBe(200);
     expect(res.body.cloning).toBe(true);
@@ -350,10 +354,18 @@ describe("/api/speech/pocket/voices", () => {
 
   it("pocket voices do not need the OmniVoice address", async () => {
     seedCopy("piotr");
-    const { app } = loadApp(null, { resolveKey: noKeys });
+    const { app } = loadApp(null, { resolveKey: withFiles });
     const res = await request(app).get("/api/speech/pocket/voices");
     expect(res.status).toBe(200);
     expect(res.body.voices).toHaveLength(1);
+  });
+
+  it("offers no voices while POCKET_VOICE_FILES_URL is absent or unusable (the engine could not synthesize them)", async () => {
+    seedCopy("piotr");
+    const absent = loadApp(null, { resolveKey: noKeys });
+    expect((await request(absent.app).get("/api/speech/pocket/voices")).body.voices).toEqual([]);
+    const bad = loadApp(null, { resolveKey: (n) => ({ value: n === "POCKET_VOICE_FILES_URL" ? "not a url" : undefined, source: "env" as const }) });
+    expect((await request(bad.app).get("/api/speech/pocket/voices")).body.voices).toEqual([]);
   });
 });
 

@@ -6,7 +6,7 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { getConfig } from "../config.js";
 import type { OpenaiCatalog } from "../lib/speech/openaiCatalog.js";
 import { resolveKey as resolveSecret } from "../lib/speech/secrets.js";
-import type { TtsHolder } from "../lib/speech/ttsHolder.js";
+import { isHttpUrl, type TtsHolder } from "../lib/speech/ttsHolder.js";
 import {
   isSafeVoiceName,
   listWorkspaceVoiceInfo,
@@ -23,7 +23,7 @@ import {
  *   DELETE /api/speech/openai/voices/:name        → the server's status
  *   GET    /api/speech/openai/voices/:name/sample → the voice's reference wav, streamed
  *
- *   GET    /api/speech/pocket/voices              → 200 {voices, cloning}, from disk, no network
+ *   GET    /api/speech/pocket/voices              → 200 {voices, cloning}, from disk, no network; voices is [] without a usable POCKET_VOICE_FILES_URL
  *
  * With no address set every route answers `409 {error:"no-address"}`; a server that refuses the
  * connection or times out is `502 {error:"unreachable"}`; a 4xx from the server comes back with
@@ -157,9 +157,11 @@ export function createSpeechVoicesRouter(options: SpeechVoicesOptions): Router {
   );
 
   // The workspace voice copies for the Pocket engines: read from disk, so no OmniVoice address.
+  // Without a usable POCKET_VOICE_FILES_URL the holder gives the engines no customVoices, so none are offered.
   router.get("/pocket/voices", (_req, res) => {
+    const filesUrl = resolveKey("POCKET_VOICE_FILES_URL").value;
     res.json({
-      voices: listWorkspaceVoiceInfo(workspaceRoot),
+      voices: filesUrl && isHttpUrl(filesUrl) ? listWorkspaceVoiceInfo(workspaceRoot) : [],
       cloning: resolveKey("POCKET_TTS_CLONING").value !== "0",
     });
   });
