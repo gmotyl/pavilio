@@ -1398,6 +1398,19 @@ describe("install:speech engine step", () => {
     return { code, ...calls };
   }
 
+  it("--engines=none is hooks only: no engine step and no voice seeding", async () => {
+    const r = await drive(["--engines=none"]);
+    expect(r.code).toBe(0);
+    expect(r.seed).toEqual([]);
+    expect(r.kokoro).toEqual([]);
+    expect(r.pocket).toEqual([]);
+  });
+
+  it("a plain run without --engines still seeds from the environment", async () => {
+    const r = await drive([]);
+    expect(r.seed).toEqual([{ workspaceRoot: expect.any(String) }]);
+  });
+
   it("a TTY shows the engine menu after the hooks", async () => {
     const order: string[] = [];
     const r = await drive([], {

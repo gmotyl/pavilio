@@ -842,7 +842,9 @@ export async function main(
 
   // Clone the workspace's custom OmniVoice voices onto the configured server.
   // Uninstalling removes hooks only; it never touches the server's voices.
-  if (!uninstalling && !seeded) {
+  // `--engines=none` is hooks only: it never reaches for a configured server either.
+  const hooksOnly = flag !== undefined && flag !== null && !flag.invalid && flag.ids.length === 0;
+  if (!uninstalling && !seeded && !hooksOnly) {
     try {
       await seed({ workspaceRoot });
     } catch (err) {
