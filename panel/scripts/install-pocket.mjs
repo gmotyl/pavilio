@@ -21,7 +21,7 @@
  * Driven by `pnpm install:speech`, which passes the selected servers and the workspace root.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -339,7 +339,8 @@ export async function main(
   writeIfChanged(ctlPath, pocketctlScript(), 0o755);
   writeIfChanged(confPath, confText(all, voicesDir), 0o644);
 
-  const hasToken = existsSync(tokenFile);
+  // Same test as pocketctl's `[ -s token ]`: an empty token file is no login.
+  const hasToken = existsSync(tokenFile) && statSync(tokenFile).size > 0;
   const lines = readSecretLines(secretsFile);
   const fileCtls = ctlEntries(fileValue(lines, CTL_VAR));
   const entries = {

@@ -7,8 +7,10 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -226,5 +228,108 @@ describe("install:pocket", () => {
     writeSecrets(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
     await main(both(), fakes().deps);
     expect(secrets()).toContain(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}:${ctlPath}\n`);
+  });
+
+  it("a re-run leaves pocketctl, pocket.conf and the secrets file untouched", async () => {
+    writeToken();
+    await main(both(), fakes().deps);
+    const files = [ctlPath, join(installDir, "pocket.conf"), secretsFile];
+    const old = new Date("2020-01-01T00:00:00Z");
+    for (const file of files) utimesSync(file, old, old);
+    const before = files.map((file) => [readFileSync(file, "utf8"), statSync(file).mtimeMs]);
+
+    await main(both(), fakes().deps);
+
+    expect(files.map((file) => [readFileSync(file, "utf8"), statSync(file).mtimeMs])).toEqual(before);
+    expect(statSync(ctlPath).mtimeMs).toBe(old.getTime());
+  });
+
+  it("a server already running is only probed, never started or stopped", async () => {
+    const { deps, calls, server } = fakes();
+    server.running = true;
+
+    expect(await main(both(), deps)).toEqual({ ok: true });
+
+    expect(calls.ctl).toEqual(["status"]);
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health"]);
+  });
+
+  it("selecting one server on a later run keeps the already-installed other", async () => {
+    await main({ servers: ["pocket"], workspaceRoot: workspace }, fakes().deps);
+
+    const { deps, calls } = fakes();
+    await main({ servers: ["pocket-pl"], workspaceRoot: workspace }, deps);
+
+    expect(readFileSync(join(installDir, "pocket.conf"), "utf8")).toContain("POCKET_SERVERS='pocket pocket-pl'");
+    const text = secrets();
+    expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890\n");
+    expect(text).toContain("POCKET_PL_TTS_BASE_URL=http://127.0.0.1:8891\n");
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health"]);
+  });
+
+  it("an empty Hugging Face token file counts as no login", async () => {
+    mkdirSync(join(home, ".cache", "huggingface"), { recursive: true });
+    writeFileSync(join(home, ".cache", "huggingface", "token"), "");
+    const { deps } = fakes();
+
+    await main({ servers: ["pocket"], workspaceRoot: workspace }, deps);
+
+    expect(secrets()).toContain("POCKET_TTS_CLONING=0\n");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("generated pocketctl at runtime", () => {
+  const ctlEnv = () => ({ ...process.env, HOME: home });
+  const runCtl = (verb: string) => spawnSync(ctlPath, [verb], { env: ctlEnv(), encoding: "utf8" });
+
+  afterEach(() => {
+    // Nothing may outlive the test, even when an assertion failed before `stop`.
+    try {
+      runCtl("stop");
+    } catch {
+      // The install dir may not exist if the test failed early.
+    }
+    for (const name of ["pocket", "pocket-pl", "voices"]) {
+      try {
+        const pid = Number(readFileSync(join(installDir, `${name}.pid`), "utf8").split("\n")[0]);
+        if (pid > 1) process.kill(-pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+
+  it("start launches the three servers with the right args and token; stop kills them", async () => {
+    mkdirSync(join(home, ".cache", "huggingface"), { recursive: true });
+    writeFileSync(join(home, ".cache", "huggingface", "token"), "hf_secret\n");
+    await main(both(), fakes().deps);
+    const argvLog = join(root, "argv.log");
+    const stub = `#!/bin/bash\necho "$(basename "$0") $* HF_TOKEN=\${HF_TOKEN:-}" >>${JSON.stringify(argvLog)}\nexec sleep 60\n`;
+    mkdirSync(join(installDir, "venv", "bin"), { recursive: true });
+    for (const name of ["pocket-tts", "python"]) {
+      writeFileSync(join(installDir, "venv", "bin", name), stub, { mode: 0o755 });
+    }
+
+    expect(runCtl("start").status).toBe(0);
+    for (let i = 0; i < 50 && !(existsSync(argvLog) && readFileSync(argvLog, "utf8").split("\n").length > 3); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const lines = readFileSync(argvLog, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines).toContain("pocket-tts serve --host 127.0.0.1 --port 8890 HF_TOKEN=hf_secret");
+    expect(lines).toContain(
+      `pocket-tts serve --host 127.0.0.1 --port 8891 --config ${POCKET_PL_CONFIG} --default-voice hf://shefowl/pocket-tts-polish-6l/reference.wav@${POCKET_PL_REVISION} HF_TOKEN=`,
+    );
+    expect(lines).toContain(
+      `python -m http.server 8892 --bind 127.0.0.1 -d ${join(workspace, ".pavilio", "voices")} HF_TOKEN=`,
+    );
+    expect(runCtl("status").status).toBe(0);
+    const pids = ["pocket", "pocket-pl", "voices"].map((n) => Number(readFileSync(join(installDir, `${n}.pid`), "utf8").split("\n")[0]));
+
+    expect(runCtl("stop").status).toBe(0);
+
+    expect(runCtl("status").status).toBe(3);
+    for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
   });
 });
