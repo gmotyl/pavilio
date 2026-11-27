@@ -561,6 +561,14 @@ describe("/api/speech kokoro address", () => {
     }
   });
 
+  it("engines masks secret-like query values in an address", async () => {
+    vi.stubEnv("KOKORO_TTS_BASE_URL", "http://tts.local:8880/?token=hunter2&voice=a&api_key=hunter3#x");
+    const { app } = loadApp();
+    const res = await request(app).get("/api/speech/engines").set("Cookie", COOKIE);
+    expect(res.text).not.toContain("hunter");
+    expect(engine(res.body, "kokoro")).toMatchObject({ baseUrl: "http://tts.local:8880/?token=***&voice=a&api_key=***#x" });
+  });
+
   it("engines masks credentials the URL parser accepts but the mask pattern misses", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

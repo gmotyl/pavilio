@@ -79,8 +79,15 @@ function last4(value: string | undefined): string | undefined {
   return value && value.length > 8 ? value.slice(-4) : undefined;
 }
 
-/** A hand-edited address may carry `user:pass@`; the row shows it masked, never verbatim. */
+/** Query values whose name reads as a secret (`?token=`, `&api_key=`), which an address may carry. */
+const SECRET_QUERY = /([?&;][^=&#;]*(?:token|key|secret|pass|auth|sig|cred)[^=&#;]*=)[^&#;]*/gi;
+
+/** A hand-edited address may carry `user:pass@` or a secret query value; the row shows it masked, never verbatim. */
 function maskCredentials(address: string): string {
+  return maskUserinfo(address).replace(SECRET_QUERY, "$1***");
+}
+
+function maskUserinfo(address: string): string {
   const masked = address.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)?[^/?#]*@/i, "$1***@");
   // The URL parser forgives what the pattern does not (leading whitespace, `http:/`, tabs),
   // so anything it still reads as credentials, or any stray `@` it cannot parse, is redacted whole.
