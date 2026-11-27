@@ -46,16 +46,16 @@ export const KOKORO_PORT = 8880;
 export const KOKORO_ADDRESS = `http://${KOKORO_HOST}:${KOKORO_PORT}`;
 // The first start downloads the model, which is what this budget is for.
 export const PROBE_TIMEOUT_MS = 300_000;
-const PROBE_INTERVAL_MS = 2_000;
-const PROBE_REQUEST_MS = 5_000;
+export const PROBE_INTERVAL_MS = 2_000;
+export const PROBE_REQUEST_MS = 5_000;
 
 const URL_VAR = "KOKORO_TTS_BASE_URL";
-const CTL_VAR = "PANEL_TTS_SERVER_CTL";
+export const CTL_VAR = "PANEL_TTS_SERVER_CTL";
 const PREREQUISITES = ["git", "uv", "espeak-ng"];
 const CLONE_NAME = "Kokoro-FastAPI";
 // Everything the installer or kokoroctl puts in the install dir; uninstall removes only these.
 const OWN_ENTRIES = [CLONE_NAME, "kokoroctl", "kokoro.pid", "kokoro.log"];
-const LINE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
+export const LINE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
 
 /** The upstream start script for this platform; both honour HOST/PORT. */
 function startScript(platform) {
@@ -164,7 +164,7 @@ esac
 
 /* ─────────────────────────── default side effects ─────────────────────────── */
 
-function defaultWhich(cmd) {
+export function defaultWhich(cmd) {
   return spawnSync("sh", ["-c", 'command -v "$1" >/dev/null', "sh", cmd]).status === 0;
 }
 
@@ -173,14 +173,14 @@ function defaultGit(args) {
   return { status: res.status ?? 1, stdout: res.stdout ?? "" };
 }
 
-function defaultCtl(ctlPath, verb) {
+export function defaultCtl(ctlPath, verb) {
   const res = spawnSync(ctlPath, [verb], { stdio: ["ignore", "inherit", "inherit"] });
   return { status: res.status ?? 1 };
 }
 
 /* ───────────────────────────────── helpers ───────────────────────────────── */
 
-function installHint(platform, missing) {
+export function installHint(platform, missing) {
   if (platform === "darwin") return [`brew install ${missing.join(" ")}`];
   if (platform === "linux") {
     const hints = [];
@@ -193,13 +193,13 @@ function installHint(platform, missing) {
 }
 
 /** Optional surrounding quotes and a CR are stripped, as scripts/panel does. */
-function unquote(value) {
+export function unquote(value) {
   const v = value.replace(/\r$/, "");
   if (v.length >= 2 && (v[0] === '"' || v[0] === "'") && v.at(-1) === v[0]) return v.slice(1, -1);
   return v;
 }
 
-function readSecretLines(file) {
+export function readSecretLines(file) {
   if (!existsSync(file)) return [];
   const lines = readFileSync(file, "utf8").split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
@@ -207,7 +207,7 @@ function readSecretLines(file) {
 }
 
 /** The last `name=` line's value, as scripts/panel reads PANEL_TTS_SERVER_CTL. */
-function fileValue(lines, name) {
+export function fileValue(lines, name) {
   let value;
   for (const line of lines) {
     const match = LINE.exec(line);
@@ -220,7 +220,7 @@ function fileValue(lines, name) {
  * Write `lines` over the secrets file in place (keeps its mode and inode), backing
  * up the old content first. Nothing at all happens when the content is unchanged.
  */
-function writeSecretLines(file, lines, now) {
+export function writeSecretLines(file, lines, now) {
   const text = lines.length ? `${lines.join("\n")}\n` : "";
   const existed = existsSync(file);
   if (existed && readFileSync(file, "utf8") === text) return false;
@@ -237,7 +237,7 @@ function writeSecretLines(file, lines, now) {
 }
 
 /** Set each entry on its first line (dropping repeats), appending the ones that are absent. */
-function withValues(lines, entries) {
+export function withValues(lines, entries) {
   const placed = new Set();
   const out = [];
   for (const line of lines) {
@@ -256,7 +256,7 @@ function withValues(lines, entries) {
 }
 
 /** A `:`-separated ctl list's entries, empty ones dropped, as scripts/panel reads it. */
-function ctlEntries(value) {
+export function ctlEntries(value) {
   return (value ?? "").split(":").filter(Boolean);
 }
 
