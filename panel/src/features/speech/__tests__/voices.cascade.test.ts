@@ -173,6 +173,16 @@ describe("per-engine voices and cascade preferences", () => {
     ]);
   });
 
+  it("a saved pocket-pl entry that is on stays on", () => {
+    setCascadeOrder([
+      { id: "pocket-pl", on: true },
+      { id: "edge", on: true },
+    ]);
+    const order = getCascadeOrder();
+    expect(order[0]).toEqual({ id: "pocket-pl", on: true });
+    expect(order.filter((entry) => entry.id === "pocket-pl")).toHaveLength(1);
+  });
+
   it("openai leads the default cascade order", () => {
     const expected = ["openai", "pocket", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge", "pocket-pl"];
     expect(DEFAULT_CASCADE_ORDER).toEqual(expected);
