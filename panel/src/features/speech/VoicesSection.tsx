@@ -6,6 +6,7 @@ import { AddVoiceForm } from "./AddVoiceForm";
 import { VoiceRow } from "./VoiceRow";
 import { OPENAI_VOICE_MAP, resolveVoiceMap, type OmniVoiceInfo } from "./openaiVoices";
 import { useOpenaiVoices } from "./useOpenaiVoices";
+import { reloadPocketVoices } from "./usePocketVoices";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
 import { BUTTON_CLASS, BUTTON_STYLE, PANEL_DOWN, RED, VOICES_URL, failureOf } from "./voicesSectionUi";
 
@@ -143,7 +144,8 @@ export function VoicesSection({ address }: { address: string }) {
     setConfirming(null);
     // The player as it is now: another sample may have started while the DELETE was pending.
     player.stopIf(id);
-    await reload();
+    // The pocket engines list the same workspace voices: their lists follow the change.
+    await Promise.all([reload(), reloadPocketVoices()]);
   };
 
   return (
@@ -278,7 +280,7 @@ export function VoicesSection({ address }: { address: string }) {
             setError(null);
           }}
           onAdded={async () => {
-            await reload();
+            await Promise.all([reload(), reloadPocketVoices()]);
             setAdding(false);
           }}
         />

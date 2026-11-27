@@ -4,7 +4,12 @@ import { listVoices } from "anytts";
 
 import { jsonResponse, stubFetch } from "../../../test-utils";
 import { voiceLanguageFor } from "../voiceLanguage";
-import { __resetPocketVoicesForTests, reloadPocketVoices, usePocketVoices } from "../usePocketVoices";
+import {
+  __resetPocketVoicesForTests,
+  currentPocketCustomVoices,
+  reloadPocketVoices,
+  usePocketVoices,
+} from "../usePocketVoices";
 import { voicesOf } from "../voicesOf";
 
 const POCKET_VOICES_URL = "/api/speech/pocket/voices";
@@ -41,6 +46,13 @@ describe("pocket voice lists", () => {
     await reloadPocketVoices();
     expect(voicesOf("pocket")).toEqual(listVoices("pocket"));
     expect(voicesOf("pocket-pl").map((voice) => voice.id)).toEqual(["shefowl", "piotr"]);
+  });
+
+  it("with cloning off the pocket instance gets no custom voices, pocket-pl still does", async () => {
+    stubFetch({ [POCKET_VOICES_URL]: () => jsonResponse({ voices: [PIOTR], cloning: false }) });
+    await reloadPocketVoices();
+    expect(currentPocketCustomVoices("pocket")).toEqual([]);
+    expect(currentPocketCustomVoices("pocket-pl").map((voice) => voice.id)).toEqual(["piotr"]);
   });
 
   it("a failed list falls back to presets", async () => {

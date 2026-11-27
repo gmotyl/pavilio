@@ -3,8 +3,8 @@
  * member engine, in Settings' order, each this project's voice for that engine.
  * The project-card check items of the mockup
  * (`projects/pavilio/mockups/2026-10-27-cascade-engine-settings.html`, design.md
- * § Mockups) are asserted one by one; the mockup's *Engine* select is an agreed
- * deviation — the engine stays global, so the card has none.
+ * § Mockups) are asserted one by one; the mockup's *Engine* select is the project's own
+ * (`speech.engineByProject`), covered in `ProjectVoiceSelect.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -235,7 +235,8 @@ describe("ProjectVoiceSelect under the cascade", () => {
     const fetchMock = stubFetch({}, null);
     render(<ProjectVoiceSelect project="p" />);
 
-    expect(screen.getAllByRole("combobox")).toHaveLength(1);
+    // The Engine select, then the one voice select.
+    expect(screen.getAllByRole("combobox")).toHaveLength(2);
     const select = screen.getByTestId("project-voice-select") as HTMLSelectElement;
     expect(within(select).getAllByRole("option")).toHaveLength(listVoices("edge").length + 1);
     expect(screen.queryByTestId("project-cascade-voices")).toBeNull();
@@ -243,19 +244,14 @@ describe("ProjectVoiceSelect under the cascade", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("no engine select on the card", async () => {
+  it("the card has the engine select, with the voice control under it", async () => {
     for (const engine of ["cascade", "edge"]) {
       setStoredEngine(engine);
       stubFetch({ "/api/speech/engines": engineList() }, null);
       const card = render(<ProjectSettingsCard project="p" />);
 
-      expect(screen.queryByLabelText(/^engine$/i)).toBeNull();
-      // No select anywhere on the card offers an engine to pick.
-      const engineLabels = new Set(listEngines().map((e) => e.label));
-      for (const select of screen.queryAllByRole("combobox")) {
-        const options = within(select).queryAllByRole("option") as HTMLOptionElement[];
-        expect(options.some((o) => o.value === "cascade" || engineLabels.has(o.textContent ?? ""))).toBe(false);
-      }
+      const engineSelect = screen.getByRole("combobox", { name: "Engine" });
+      expect(screen.getAllByRole("combobox")[0]).toBe(engineSelect);
       card.unmount();
       vi.unstubAllGlobals();
     }

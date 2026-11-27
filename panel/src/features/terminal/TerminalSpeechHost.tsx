@@ -10,6 +10,7 @@
  */
 import { useCallback, useSyncExternalStore, type ReactNode } from "react";
 import { preferences } from "../../preferences/declarations";
+import { readPreference } from "../../preferences/store";
 import { usePreference } from "../../preferences/usePreference";
 import { CASCADE } from "../speech/engines";
 import {
@@ -120,13 +121,18 @@ const focusedCell: FocusedCellPort = {
 
 /**
  * Whether speech may synthesize with the OpenAI-compatible engine: it is the
- * engine, or a cascade member that is on. Then the OmniVoice list is loaded
- * at app level, so a saved openai voice is known after a page reload.
+ * engine, a project's engine, or a cascade member that is on. Then the
+ * OmniVoice list is loaded at app level, so a saved openai voice is known
+ * after a page reload.
  */
 function speaksWithOpenai(): boolean {
-  const engine = getStoredEngine();
-  if (engine === "openai") return true;
-  return engine === CASCADE && getCascadeOrder().some((entry) => entry.id === "openai" && entry.on);
+  const stored: unknown = readPreference(preferences.speechEngineByProject);
+  const engines = [
+    getStoredEngine(),
+    ...(stored !== null && typeof stored === "object" ? Object.values(stored) : []),
+  ];
+  if (engines.includes("openai")) return true;
+  return engines.includes(CASCADE) && getCascadeOrder().some((entry) => entry.id === "openai" && entry.on);
 }
 
 export function TerminalSpeechHost({ children }: { children: ReactNode }) {

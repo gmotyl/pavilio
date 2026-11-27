@@ -235,6 +235,18 @@ describe("voice language of a session", () => {
     expect(languageForSession("sess-p")).toBe("pl");
   });
 
+  it("a project on openai under another global engine waits for the live list too", async () => {
+    setStoredEngine("edge");
+    writePreference(preferences.speechEngineByProject, { p: "openai" });
+    writePreference(preferences.speechVoiceByProject, { p: { openai: "bill-pl" } });
+    await seedSessions([session("sess-p", "p")]);
+
+    expect(languageForSession("sess-p")).toBeUndefined();
+
+    await loadLiveVoices();
+    expect(languageForSession("sess-p")).toBe("pl");
+  });
+
   it("cascade: a first member's saved OmniVoice voice has no language until the list loads", async () => {
     setStoredEngine("cascade");
     setCascadeOrder([
