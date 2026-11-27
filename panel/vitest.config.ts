@@ -29,7 +29,7 @@ const SLOW_SUITES = [
   "server/__tests__/{setup-sh,update-sh,pull-sh,machine-id-sh,consumer-push-guard,pm,panel-ctl,launcher-toolchain,setup-codex,setup-shortcut}.test.ts",
   "server/lib/__tests__/{syncRepo,syncRole,trackedFiles,terminal-manager.close.integration}.test.ts",
   "server/lib/wiki/__tests__/cli-script.test.ts",
-  "scripts/__tests__/install-speech-hook.test.ts",
+  "scripts/__tests__/{install-speech-hook,install-pocket.runtime}.test.ts",
   "hooks/__tests__/*.test.ts",
 ];
 
