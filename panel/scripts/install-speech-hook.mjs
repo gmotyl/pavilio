@@ -26,6 +26,10 @@
  * After the hooks, an install also seeds missing custom OmniVoice voices (see
  * seed-omnivoice-voices.mjs); `--uninstall` skips that.
  *
+ * Then the engine step: `--engines=omnivoice,kokoro,pocket,pocket-pl,none` picks the local
+ * speech engines to install (with `--uninstall`, to remove); without the flag a terminal gets a
+ * multi-select menu and anything else gets hooks only plus a line naming the flag.
+ *
  * Run from the repo root as `pnpm install:speech` (add `--uninstall` to remove).
  */
 import {
@@ -45,6 +49,9 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createInterface } from "node:readline/promises";
+import { main as installKokoro, readSecretLines, withValues, writeSecretLines, fileValue } from "./install-kokoro.mjs";
+import { main as installPocket } from "./install-pocket.mjs";
 import { seedFromEnvironment } from "./seed-omnivoice-voices.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -659,16 +666,116 @@ const opencodeTarget = {
 
 const TARGETS = [claudeTarget, codexTarget, opencodeTarget];
 
+export const OMNIVOICE_LINK = "https://github.com/gmotyl/omnivoice-server";
+export const OMNIVOICE_DEFAULT_ADDRESS = "http://127.0.0.1:8000";
+export const ENGINES = [
+  { id: "omnivoice", label: "OmniVoice (connect an existing server)", hint: OMNIVOICE_LINK },
+  { id: "kokoro", label: "Kokoro", hint: "" },
+  { id: "pocket", label: "Pocket EN", hint: "" },
+  { id: "pocket-pl", label: "Pocket PL", hint: "" },
+];
+const ENGINE_IDS = ENGINES.map((e) => e.id);
+const ENGINE_FLAG = "--engines=";
+
 /**
- * The walk, then voice seeding (install only). Returns the exit code instead of
- * exiting, so a test can import this file and drive it with injected targets
- * and an injected seed step, without touching any real agent config.
- *
- * Only `--uninstall` changes the mode; any other argument still installs.
- * Seeding never affects the exit code: it reports its own problems in one line.
+ * The `--engines=` list: `{ ids }` (possibly empty for `none`), `{ invalid }` naming the
+ * unknown entries, or `null` when the flag is absent.
  */
-export async function main(argv, { targets = TARGETS, seed = seedFromEnvironment } = {}) {
+export function parseEngines(argv) {
+  const arg = argv.findLast((a) => a.startsWith(ENGINE_FLAG));
+  if (arg === undefined) return null;
+  const items = arg.slice(ENGINE_FLAG.length).split(",").map((x) => x.trim()).filter(Boolean);
+  const unknown = items.filter((x) => x !== "none" && !ENGINE_IDS.includes(x));
+  if (unknown.length || !items.length) return { invalid: unknown.length ? unknown : ["(empty)"] };
+  return { ids: ENGINE_IDS.filter((id) => items.includes(id)) };
+}
+
+function secretsPath(env = process.env) {
+  return join(resolve(scriptDir, "..", env.PANEL_AUTH_STATE_DIR || join(home, ".panel")), "secrets.env");
+}
+
+/** Engines that already have an address configured, for the menu's ticks. */
+function defaultInstalled() {
+  const lines = readSecretLines(secretsPath());
+  const has = (name) => Boolean(fileValue(lines, name) || process.env[name]);
+  return ENGINE_IDS.filter(
+    (id) =>
+      ({
+        omnivoice: has("OPENAI_TTS_BASE_URL"),
+        kokoro: has("KOKORO_TTS_BASE_URL"),
+        pocket: has("POCKET_TTS_BASE_URL"),
+        "pocket-pl": has("POCKET_PL_TTS_BASE_URL"),
+      })[id],
+  );
+}
+
+function defaultSetSecret(name, value) {
+  const file = secretsPath();
+  writeSecretLines(file, withValues(readSecretLines(file), { [name]: value }), Date.now);
+}
+
+/** Numbered list on stdout, answer like `1,3` on stdin; an empty answer keeps the ticks. */
+async function defaultSelect(items) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log("Speech engines to install:");
+    items.forEach((item, i) => {
+      console.log(`  ${i + 1}. [${item.ticked ? "x" : " "}] ${item.label}${item.hint ? ` — ${item.hint}` : ""}`);
+    });
+    const answer = (await rl.question("Numbers to install, comma-separated (Enter keeps the ticks, 0 for none): ")).trim();
+    if (answer === "") return items.filter((i) => i.ticked).map((i) => i.id);
+    const picked = answer.split(",").map((n) => Number(n.trim()));
+    return items.filter((_, i) => picked.includes(i + 1)).map((i) => i.id);
+  } finally {
+    rl.close();
+  }
+}
+
+async function defaultAsk(question, fallback) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(`${question} [${fallback}]: `)).trim() || fallback;
+  } finally {
+    rl.close();
+  }
+}
+
+export async function probeOmniVoice(address, fetchImpl = globalThis.fetch) {
+  try {
+    const res = await fetchImpl(`${address.replace(/\/+$/, "")}/v1/voices`, { signal: AbortSignal.timeout(5000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The walk, the engine step, then voice seeding (install only). Returns the exit code instead
+ * of exiting, so a test can import this file and drive it with injected targets and effects,
+ * without touching any real agent config, server or network.
+ *
+ * Only `--uninstall` changes the mode; any other argument still installs. `--engines=` is
+ * resolved after the hooks. Seeding never affects the exit code: it reports its own problems.
+ */
+export async function main(
+  argv,
+  {
+    targets = TARGETS,
+    seed = seedFromEnvironment,
+    isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    select = defaultSelect,
+    ask = defaultAsk,
+    installed = defaultInstalled,
+    reachable = probeOmniVoice,
+    setSecret = defaultSetSecret,
+    kokoro = installKokoro,
+    pocket = installPocket,
+    log = console.log,
+    error = console.error,
+  } = {},
+) {
   const uninstalling = argv.includes("--uninstall");
+  const workspaceRoot = resolve(scriptDir, "..", "..");
 
   let anyFailed = false;
 
@@ -676,24 +783,70 @@ export async function main(argv, { targets = TARGETS, seed = seedFromEnvironment
     // The root is what proves the agent exists on this machine. Absent root ⇒
     // skipped and said so, never an error: not having codex installed is normal.
     if (!existsSync(target.root)) {
-      console.log(`${target.name}: skipped — ${target.root} does not exist`);
+      log(`${target.name}: skipped — ${target.root} does not exist`);
       continue;
     }
     try {
-      console.log(`${target.name}: ${uninstalling ? target.uninstall() : target.install()}`);
+      log(`${target.name}: ${uninstalling ? target.uninstall() : target.install()}`);
     } catch (err) {
       anyFailed = true;
-      console.error(`install-speech-hook: ${target.name}: ${err.message}`);
+      error(`install-speech-hook: ${target.name}: ${err.message}`);
     }
+  }
+
+  // Engine resolution: the flag, else a menu on a terminal, else nothing. A bare
+  // `--uninstall` never prompts and never touches engines.
+  const flag = parseEngines(argv);
+  let engines = [];
+  let seeded = false;
+  if (flag?.invalid) {
+    error(`install-speech-hook: unknown engine id(s): ${flag.invalid.join(", ")}`);
+    error(`valid engine ids: ${ENGINE_IDS.join(", ")}, none`);
+    anyFailed = true;
+  } else if (flag) {
+    engines = flag.ids;
+  } else if (!uninstalling) {
+    if (isTTY) {
+      const ticked = new Set(installed());
+      engines = await select(ENGINES.map((e) => ({ ...e, ticked: ticked.has(e.id) })));
+    } else {
+      log("engines: not installed — pass --engines=omnivoice,kokoro,pocket,pocket-pl to install speech engines");
+    }
+  }
+
+  if (uninstalling) {
+    if (engines.includes("omnivoice")) log("omnivoice: nothing to remove — that server is not installed by this script");
+    if (engines.includes("kokoro")) anyFailed = (await kokoro(["--uninstall"])) !== 0 || anyFailed;
+    const servers = engines.filter((id) => id === "pocket" || id === "pocket-pl");
+    if (servers.length) anyFailed = !(await pocket({ servers, uninstall: true, workspaceRoot })).ok || anyFailed;
+  } else {
+    if (engines.includes("omnivoice")) {
+      const address = await ask("OmniVoice server address", OMNIVOICE_DEFAULT_ADDRESS);
+      if (await reachable(address)) {
+        setSecret("OPENAI_TTS_BASE_URL", address);
+        log(`omnivoice: connected to ${address}`);
+        try {
+          await seed({ workspaceRoot, baseUrl: address });
+        } catch (err) {
+          log(`voices: skipped — ${err.message}`);
+        }
+        seeded = true;
+      } else {
+        log(`omnivoice: ${address} did not answer GET /v1/voices; nothing written. Set up a server: ${OMNIVOICE_LINK}`);
+      }
+    }
+    if (engines.includes("kokoro")) anyFailed = (await kokoro([])) !== 0 || anyFailed;
+    const servers = engines.filter((id) => id === "pocket" || id === "pocket-pl");
+    if (servers.length) anyFailed = !(await pocket({ servers, workspaceRoot })).ok || anyFailed;
   }
 
   // Clone the workspace's custom OmniVoice voices onto the configured server.
   // Uninstalling removes hooks only; it never touches the server's voices.
-  if (!uninstalling) {
+  if (!uninstalling && !seeded) {
     try {
-      await seed({ workspaceRoot: resolve(scriptDir, "..", "..") });
+      await seed({ workspaceRoot });
     } catch (err) {
-      console.log(`voices: skipped — ${err.message}`);
+      log(`voices: skipped — ${err.message}`);
     }
   }
 
