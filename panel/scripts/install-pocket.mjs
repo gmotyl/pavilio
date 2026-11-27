@@ -10,7 +10,9 @@
  * POCKET_VOICE_FILES_URL (a read-only file server for <workspace>/.pavilio/voices, :8892),
  * POCKET_TTS_CLONING (1 when a Hugging Face token file exists) and pocketctl in the
  * `:`-separated PANEL_TTS_SERVER_CTL list. It then starts the servers once, probes
- * `GET /health` on each and stops them again (servers already running are only probed).
+ * `GET /health` on each (and the file server on :8892) and stops them again (servers already
+ * running are only probed). A port that answers while pocketctl is stopped belongs to another
+ * service: the install stops there. `pocketctl status` exits 0 (all up), 3 (none) or 4 (some).
  *
  * Re-running the same selection changes nothing. Uninstalling one server drops its address
  * and its conf entry; the last one takes the venv, pocketctl and the shared lines too.
@@ -110,6 +112,14 @@ launch() {
   local pid=$!
   set +m
   printf '%s\\n%s\\n' "$pid" "$(started_at "$pid")" >"$DIR/$name.pid"
+  # A server that cannot bind its port (or crashes at once) exits right away: do not report it started.
+  sleep 0.5
+  if ! kill -0 "$pid" 2>/dev/null; then
+    unlink "$DIR/$name.pid" 2>/dev/null
+    echo "pocket: $name exited at once (port in use?); see $LOG" >&2
+    FAILED=1
+    return 1
+  fi
   echo "pocket: $name started (pid $pid, log $LOG)"
 }
 
@@ -127,7 +137,10 @@ halt() {
   echo "pocket: $name stopped"
 }
 
+FAILED=0
+
 start() {
+  FAILED=0
   if has_server pocket; then
     # English cloning needs the gated weights, which need the Hugging Face login.
     if [ -s "$HOME/.cache/huggingface/token" ]; then
@@ -144,6 +157,7 @@ start() {
   fi
   mkdir -p "$POCKET_VOICES_DIR"
   launch voices "$DIR/venv/bin/python" -m http.server ${POCKET_PORTS.voiceFiles} --bind ${HOST} -d "$POCKET_VOICES_DIR"
+  return "$FAILED"
 }
 
 stop() {
@@ -157,15 +171,19 @@ case "\${1:-}" in
   stop) stop ;;
   restart) stop; start ;;
   status)
-    code=3
-    for name in pocket pocket-pl voices; do
-      if running "$name"; then
-        echo "pocket: $name running (pid $PID)"
-        code=0
-      fi
+    # 0 = every configured server runs, 3 = none does, 4 = only some (a start completes the rest).
+    up=0
+    want=1
+    running voices && { echo "pocket: voices running (pid $PID)"; up=$((up + 1)); }
+    for name in pocket pocket-pl; do
+      has_server "$name" || continue
+      want=$((want + 1))
+      running "$name" && { echo "pocket: $name running (pid $PID)"; up=$((up + 1)); }
     done
-    [ "$code" -ne 0 ] && echo "pocket: stopped"
-    exit "$code"
+    if [ "$up" -eq "$want" ]; then exit 0; fi
+    if [ "$up" -eq 0 ]; then echo "pocket: stopped"; exit 3; fi
+    echo "pocket: partly running"
+    exit 4
     ;;
   log)
     echo "$LOG"
@@ -199,6 +217,15 @@ function writeIfChanged(path, text, mode) {
 function defaultRun(cmd, args) {
   const res = spawnSync(cmd, args, { stdio: ["ignore", "inherit", "inherit"] });
   return { status: res.status ?? 1 };
+}
+
+/** One quick GET: does anything answer there at all? */
+async function answers(url, { fetch }) {
+  try {
+    return (await fetch(url, { signal: AbortSignal.timeout(PROBE_REQUEST_MS) })).ok === true;
+  } catch {
+    return false;
+  }
 }
 
 async function probe(url, { fetch, now, sleep }) {
@@ -251,8 +278,13 @@ export async function main(
     const remaining = readConfServers(confPath).filter((id) => !selected.includes(id));
     const last = remaining.length === 0;
     if (existsSync(ctlPath)) {
-      if (last) ctl(ctlPath, "stop");
-      else if (ctl(ctlPath, "status").status === 0) {
+      if (last) {
+        // Removing the pid files and the script of a server that is still up would leave it unmanaged.
+        if (ctl(ctlPath, "stop").status !== 0) {
+          error(`pocket: could not stop the servers with ${ctlPath}; nothing was removed. Stop them, then re-run`);
+          return { ok: false };
+        }
+      } else if ([0, 4].includes(ctl(ctlPath, "status").status)) {
         writeIfChanged(confPath, confText(remaining, voicesDir), 0o644);
         ctl(ctlPath, "restart");
       }
@@ -351,6 +383,11 @@ export async function main(
   };
   const changed = writeSecretLines(secretsFile, withValues(lines, entries), now);
   log(`pocket: ${secretsFile} ${changed ? "updated" : "already up to date"}`);
+  // scripts/panel prefers a non-empty environment value over the secrets file; that one is the user's to edit.
+  const envOverridesCtl = Boolean(env[CTL_VAR]) && !ctlEntries(env[CTL_VAR]).includes(ctlPath);
+  if (envOverridesCtl) {
+    error(`pocket: warning: ${CTL_VAR}=${env[CTL_VAR]} in the environment overrides the secrets file`);
+  }
   if (all.includes("pocket") && !hasToken) {
     log("pocket: English voice cloning is off (no Hugging Face login). To turn it on:");
     log("  1. accept the terms at https://huggingface.co/kyutai/pocket-tts");
@@ -358,26 +395,48 @@ export async function main(
     log("  3. re-run this installer");
   }
 
-  const wasRunning = ctl(ctlPath, "status").status === 0;
+  // 0: all up; 4: only some (the missing ones are started, the others left alone); else none.
+  const before = ctl(ctlPath, "status").status;
+  const wasRunning = before === 0;
+  const stopAfter = before !== 0 && before !== 4;
   let launched = { status: 0 };
+  if (stopAfter) {
+    // Nothing of ours runs, so anything answering on these ports is another service.
+    for (const url of [...all.map((id) => `${address(id)}/health`), `${FILES_URL}/`]) {
+      if (await answers(url, { fetch })) {
+        error(`pocket: ${url} already answers but pocketctl is not running: another service holds that port; free it and re-run`);
+        return { ok: false };
+      }
+    }
+  }
   if (wasRunning) {
     log("pocket: servers already running; checking they answer");
+  } else if (before === 4) {
+    log("pocket: some servers are already running; starting the rest and checking they answer");
+    launched = ctl(ctlPath, "start");
   } else {
     log(`pocket: starting the servers to check they answer (the first start downloads the weights; up to ${PROBE_TIMEOUT_MS / 1000} s each)`);
     launched = ctl(ctlPath, "start");
   }
   let answered = launched.status === 0;
-  for (const id of all) {
+  if (!answered) error("pocket: a server exited right after it started (port in use?)");
+  // The file server serves <workspace>/.pavilio/voices; its directory listing answers 200.
+  const targets = [...all.map((id) => [id, `${address(id)}/health`]), ["voices", `${FILES_URL}/`]];
+  for (const [id, url] of targets) {
     if (!answered) break;
-    answered = await probe(`${address(id)}/health`, { fetch, now, sleep });
-    if (!answered) error(`pocket: ${id} did not answer at ${address(id)}/health`);
+    answered = await probe(url, { fetch, now, sleep });
+    if (!answered) error(`pocket: ${id} did not answer at ${url}`);
   }
-  if (!wasRunning) ctl(ctlPath, "stop");
+  if (stopAfter) ctl(ctlPath, "stop");
   if (!answered) {
     error(`pocket: the install is kept; see ${logPath}`);
     return { ok: false };
   }
-  log(`pocket: installed ${all.join(", ")}${wasRunning ? "" : "; servers stopped"}`);
-  log("pocket: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Pocket itself)");
+  log(`pocket: installed ${all.join(", ")}${stopAfter ? "; servers stopped" : ""}`);
+  log(
+    envOverridesCtl
+      ? `pocket: restart the panel to use it: \`pnpm stop && pnpm start\` (${CTL_VAR} in the environment must list ${ctlPath} too, or the panel will not start and stop Pocket)`
+      : "pocket: restart the panel to use it: `pnpm stop && pnpm start` (it then starts and stops Pocket itself)",
+  );
   return { ok: true };
 }

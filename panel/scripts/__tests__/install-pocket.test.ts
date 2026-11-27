@@ -89,11 +89,14 @@ function fakes(overrides: Record<string, unknown> = {}) {
       expect(path).toBe(ctlPath);
       calls.ctl.push(verb);
       if (verb === "status") return { status: server.running ? 0 : 3 };
+      if (verb === "start") server.running = true;
+      if (verb === "stop") server.running = false;
       return { status: 0 };
     },
     fetch: async (url: string) => {
       calls.fetch.push(url);
-      return { ok: true };
+      // Ports answer only while the servers run, as on a machine nothing else listens on.
+      return { ok: server.running };
     },
     now: () => clock.now,
     sleep: async (ms: number) => {
@@ -130,7 +133,7 @@ describe("install:pocket", () => {
     expect(text).toContain("POCKET_VOICE_FILES_URL=http://127.0.0.1:8892\n");
     expect(text).toContain("POCKET_TTS_CLONING=1\n");
     expect(text).toContain(`PANEL_TTS_SERVER_CTL=${ctlPath}\n`);
-    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health"]);
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/", "http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/"]);
     expect(calls.ctl).toEqual(["status", "start", "stop"]);
   });
 
@@ -203,6 +206,71 @@ describe("install:pocket", () => {
     expect(secrets()).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890");
   });
 
+  it("another service already answering on a port stops the install before anything is started", async () => {
+    const { deps, calls, output } = fakes({ fetch: async () => ({ ok: true }) });
+
+    expect(await main(both(), deps)).toEqual({ ok: false });
+
+    expect(calls.ctl).toEqual(["status"]);
+    expect(output()).toContain("another service holds that port");
+  });
+
+  it("the voice-file server is probed too, and a dead one fails the install", async () => {
+    const { deps, calls, output } = fakes();
+    const base = deps.fetch;
+    deps.fetch = async (url: string) => (url.endsWith(":8892/") && calls.ctl.includes("start") ? { ok: false } : base(url));
+
+    expect(await main(both(), deps)).toEqual({ ok: false });
+
+    expect(output()).toContain("voices did not answer at http://127.0.0.1:8892/");
+    expect(calls.ctl.at(-1)).toBe("stop");
+  });
+
+  it("a partly running install starts the rest and leaves what ran running", async () => {
+    const { deps, calls } = fakes();
+    deps.ctl = (path: string, verb: string) => {
+      calls.ctl.push(verb);
+      if (verb === "status") return { status: 4 };
+      if (verb === "start") calls.fetch.length = 0;
+      return { status: 0 };
+    };
+    deps.fetch = async (url: string) => (calls.fetch.push(url), { ok: true });
+
+    expect(await main(both(), deps)).toEqual({ ok: true });
+
+    expect(calls.ctl).toEqual(["status", "start"]);
+  });
+
+  it("a failed start (a server exited at once) fails the install", async () => {
+    const { deps, output } = fakes();
+    const ctl = deps.ctl;
+    deps.ctl = (path: string, verb: string) => (verb === "start" ? (ctl(path, verb), { status: 1 }) : ctl(path, verb));
+
+    expect(await main(both(), deps)).toEqual({ ok: false });
+
+    expect(output()).toContain("exited right after it started");
+  });
+
+  it("an environment PANEL_TTS_SERVER_CTL that omits pocketctl is warned about", async () => {
+    const { deps, output } = fakes();
+    deps.env.PANEL_TTS_SERVER_CTL = "/x/kokoroctl";
+
+    await main(both(), deps);
+
+    expect(output()).toContain("PANEL_TTS_SERVER_CTL=/x/kokoroctl in the environment overrides the secrets file");
+  });
+
+  it("uninstall that cannot stop the servers removes nothing", async () => {
+    await main(both(), fakes().deps);
+    const { deps, output } = fakes();
+    deps.ctl = () => ({ status: 1 });
+
+    expect(await main({ servers: ["pocket", "pocket-pl"], uninstall: true, workspaceRoot: workspace }, deps)).toEqual({ ok: false });
+
+    expect(existsSync(ctlPath)).toBe(true);
+    expect(output()).toContain("nothing was removed");
+  });
+
   it("uninstalling one server keeps the other; the last removes everything", async () => {
     writeSecrets(`PANEL_TTS_SERVER_CTL=${FOREIGN_CTL}\n`);
     await main(both(), fakes().deps);
@@ -251,7 +319,7 @@ describe("install:pocket", () => {
     expect(await main(both(), deps)).toEqual({ ok: true });
 
     expect(calls.ctl).toEqual(["status"]);
-    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health"]);
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/"]);
   });
 
   it("selecting one server on a later run keeps the already-installed other", async () => {
@@ -264,7 +332,7 @@ describe("install:pocket", () => {
     const text = secrets();
     expect(text).toContain("POCKET_TTS_BASE_URL=http://127.0.0.1:8890\n");
     expect(text).toContain("POCKET_PL_TTS_BASE_URL=http://127.0.0.1:8891\n");
-    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health"]);
+    expect(calls.fetch).toEqual(["http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/", "http://127.0.0.1:8890/health", "http://127.0.0.1:8891/health", "http://127.0.0.1:8892/"]);
   });
 
   it("an empty Hugging Face token file counts as no login", async () => {
@@ -279,6 +347,21 @@ describe("install:pocket", () => {
 });
 
 describe.skipIf(process.platform === "win32")("generated pocketctl at runtime", () => {
+  it("start fails when a server exits at once", async () => {
+    await main({ servers: ["pocket"], workspaceRoot: workspace }, fakes().deps);
+    mkdirSync(join(installDir, "venv", "bin"), { recursive: true });
+    writeFileSync(join(installDir, "venv", "bin", "pocket-tts"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(installDir, "venv", "bin", "python"), "#!/bin/bash\nexec sleep 60\n", { mode: 0o755 });
+    try {
+      const res = spawnSync(ctlPath, ["start"], { env: { ...process.env, HOME: home }, encoding: "utf8" });
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain("pocket exited at once");
+      expect(existsSync(join(installDir, "pocket.pid"))).toBe(false);
+    } finally {
+      spawnSync(ctlPath, ["stop"], { env: { ...process.env, HOME: home } });
+    }
+  });
+
   const ctlEnv = () => ({ ...process.env, HOME: home });
   const runCtl = (verb: string) => spawnSync(ctlPath, [verb], { env: ctlEnv(), encoding: "utf8" });
 
@@ -325,11 +408,18 @@ describe.skipIf(process.platform === "win32")("generated pocketctl at runtime", 
       `python -m http.server 8892 --bind 127.0.0.1 -d ${join(workspace, ".pavilio", "voices")} HF_TOKEN=`,
     );
     expect(runCtl("status").status).toBe(0);
+    // One server down is a partial install, not a running one.
+    const plPid = Number(readFileSync(join(installDir, "pocket-pl.pid"), "utf8").split("\n")[0]);
+    process.kill(-plPid, "SIGKILL");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runCtl("status").status).toBe(4);
+    expect(runCtl("start").status).toBe(0);
+    expect(runCtl("status").status).toBe(0);
     const pids = ["pocket", "pocket-pl", "voices"].map((n) => Number(readFileSync(join(installDir, `${n}.pid`), "utf8").split("\n")[0]));
 
     expect(runCtl("stop").status).toBe(0);
 
     expect(runCtl("status").status).toBe(3);
     for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
-  });
+  }, 20_000);
 });
