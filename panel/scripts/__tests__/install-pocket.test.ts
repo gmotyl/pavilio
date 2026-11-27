@@ -226,19 +226,26 @@ describe("install:pocket", () => {
     expect(calls.ctl.at(-1)).toBe("stop");
   });
 
-  it("a partly running install starts the rest and leaves what ran running", async () => {
+  it("a partly running install starts only the missing server and leaves the running ones alone", async () => {
     const { deps, calls } = fakes();
-    deps.ctl = (path: string, verb: string) => {
+    // Per-server state: pocket and the file server run (pids 100, 300); pocket-pl is down.
+    const pids: Record<string, number> = { pocket: 100, "pocket-pl": 0, voices: 300 };
+    const ports: Record<string, string> = { "8890": "pocket", "8891": "pocket-pl", "8892": "voices" };
+    let nextPid = 1000;
+    deps.ctl = (_path: string, verb: string) => {
       calls.ctl.push(verb);
-      if (verb === "status") return { status: 4 };
-      if (verb === "start") calls.fetch.length = 0;
+      const up = Object.values(pids).filter(Boolean).length;
+      if (verb === "status") return { status: up === 3 ? 0 : up === 0 ? 3 : 4 };
+      if (verb === "start") for (const name of Object.keys(pids)) pids[name] ||= nextPid++;
+      if (verb === "stop" || verb === "restart") for (const name of Object.keys(pids)) pids[name] = verb === "stop" ? 0 : nextPid++;
       return { status: 0 };
     };
-    deps.fetch = async (url: string) => (calls.fetch.push(url), { ok: true });
+    deps.fetch = async (url: string) => (calls.fetch.push(url), { ok: Boolean(pids[ports[new URL(url).port]]) });
 
     expect(await main(both(), deps)).toEqual({ ok: true });
 
     expect(calls.ctl).toEqual(["status", "start"]);
+    expect(pids).toEqual({ pocket: 100, "pocket-pl": 1000, voices: 300 });
   });
 
   it("a failed start (a server exited at once) fails the install", async () => {
