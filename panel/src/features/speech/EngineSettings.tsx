@@ -5,6 +5,7 @@ import { preferences, type CascadeEntry } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 import { groupVoices } from "./voiceGroups";
 import { useOpenaiVoices } from "./useOpenaiVoices";
+import { usePocketVoicesSnapshot } from "./usePocketVoices";
 import { voicesOf } from "./voicesOf";
 import { VoicesSection } from "./VoicesSection";
 import { SPEECH_ROWS_NARROW_BELOW, usePaneWidth } from "./usePaneWidth";
@@ -235,13 +236,15 @@ function EngineRow(props: EngineRowProps) {
   const chip = info ? statusChip(info.status) : null;
   // The address engine's "key" is a server address: say so on its skip chip.
   if (chip && address && info?.status.state === "no-key") chip.text = "no address · skipped";
+  // `voicesOf` reads the pocket store outside React: subscribing makes the groups follow a (re)load.
+  const pocket = usePocketVoicesSnapshot();
   const groups = useMemo(
     () =>
       groupVoices(
         voicesOf(id, props.openaiVoices),
         typeof navigator === "undefined" ? "" : navigator.language,
       ),
-    [id, props.openaiVoices],
+    [id, props.openaiVoices, pocket],
   );
   const voiceId = `speech-voice-${id}`;
 

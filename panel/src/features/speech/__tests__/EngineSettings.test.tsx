@@ -18,6 +18,7 @@ import { preferences } from "../../../preferences/declarations";
 import { readPreference } from "../../../preferences/store";
 import { jsonResponse, stubFetch } from "../../../test-utils";
 import { __resetOpenaiVoicesForTests } from "../useOpenaiVoices";
+import { __resetPocketVoicesForTests, reloadPocketVoices } from "../usePocketVoices";
 import { LIVE_VOICES, OPENAI_VOICES_URL, PL_FEMALE, voicesBody } from "./openaiVoiceFixtures";
 
 type EngineInfo = {
@@ -124,9 +125,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   __resetOpenaiVoicesForTests();
+  __resetPocketVoicesForTests();
 });
 
 describe("EngineSettings", () => {
+  it("pocket rows pick up workspace voices that load while Settings is open", async () => {
+    const engines: EngineInfo[] = [
+      ...mockupEngines(),
+      { id: "pocket", label: "Pocket TTS (English)", keyed: false, keySource: "none", status: { state: "ready" } },
+    ];
+    const fetchMock = await renderLoaded(engines, { "/api/speech/pocket/voices": { voices: [{ id: "piotr", label: "Piotr", version: 1 }], cloning: true } });
+    expect(fetchMock).toBeDefined();
+    const select = () => within(row("pocket")).getByRole("combobox", { name: "Voice" }) as HTMLSelectElement;
+    expect(Array.from(select().options).map((o) => o.value)).not.toContain("piotr");
+    await reloadPocketVoices();
+    await waitFor(() => expect(Array.from(select().options).map((o) => o.value)).toContain("piotr"));
+  });
+
   it("engine select offers cascade and every engine", async () => {
     stubFetch({ "/api/speech/engines": mockupEngines() }, []);
     render(<AgentSettings />);
