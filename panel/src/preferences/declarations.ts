@@ -181,6 +181,18 @@ const projectEngineVoices: PreferenceCodec<Record<string, EngineVoices>> = {
   },
 };
 
+/** Project → engine id; a record whose non-string entries are dropped. */
+const projectEngines: PreferenceCodec<Record<string, string>> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not a record: ${raw}`);
+    return stringEntries(parsed);
+  },
+  serialize(value) {
+    return JSON.stringify(value);
+  },
+};
+
 /** A stored cascade entry, or `null`: a non-blank engine id and a boolean `on`. */
 function toCascadeEntry(value: unknown): CascadeEntry | null {
   if (!isRecord(value) || !isFilled(value.id) || typeof value.on !== "boolean") return null;
@@ -1003,6 +1015,20 @@ export const preferences = {
     scope: "global",
     default: {},
     codec: projectEngineVoices,
+    portable: true,
+  }),
+  /**
+   * A project's own engine — `project → engine id`, absent for a project that
+   * follows `speech.engine`. Portable for the reason `speech.voiceByProject`
+   * is: project and engine names mean the same on every machine. The codec
+   * checks only the shape; `voices.ts` (`engineFor`) drops an id the seam does
+   * not configure.
+   */
+  speechEngineByProject: definePreference<Record<string, string>>({
+    key: "speech.engineByProject", // was: nothing — a project used the global engine
+    scope: "global",
+    default: {},
+    codec: projectEngines,
     portable: true,
   }),
   /**

@@ -17,6 +17,9 @@ export function languageOfLocale(locale: string | undefined): VoiceLanguage {
  * `openai` the last loaded OmniVoice list. A voice the catalog lacks (or none) is English.
  */
 export function voiceLanguageFor(engine: string, voice: string | undefined): VoiceLanguage {
+  // Every voice of the Polish Pocket engine is Polish, workspace voices too: one not listed yet
+  // (the list loads after a page reload) still reads Polish.
+  if (engine === "pocket-pl") return "pl";
   if (voice === undefined) return "en";
   return languageOfLocale(voicesOf(engine).find((info) => info.id === voice)?.locale);
 }

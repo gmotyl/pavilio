@@ -182,3 +182,32 @@ export function cascadeVoicesOf(voice: string | undefined): Record<string, strin
     return undefined;
   }
 }
+
+const ENGINE_VOICE_PREFIX = "engine:";
+
+/**
+ * A project's voice on a single engine that is not the global one, as one
+ * string the seam opens: `engine:["<engine>","<voice>"]`. Distinct from the
+ * plain voice id, so the player and its caches never serve one engine's audio
+ * for another's.
+ */
+export function engineVoiceKey(engine: string, voice: string): string {
+  return ENGINE_VOICE_PREFIX + JSON.stringify([engine, voice]);
+}
+
+/** The engine and voice an {@link engineVoiceKey} holds; `undefined` for anything else. */
+export function engineVoiceOf(key: string | undefined): { engine: string; voice: string } | undefined {
+  if (key === undefined || !key.startsWith(ENGINE_VOICE_PREFIX)) return undefined;
+  try {
+    const pair: unknown = JSON.parse(key.slice(ENGINE_VOICE_PREFIX.length));
+    if (!Array.isArray(pair) || pair.length !== 2) return undefined;
+    const [engine, voice] = pair as unknown[];
+    return typeof engine === "string" && typeof voice === "string" ? { engine, voice } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function isEngineVoiceKey(voice: string | undefined): voice is string {
+  return engineVoiceOf(voice) !== undefined;
+}

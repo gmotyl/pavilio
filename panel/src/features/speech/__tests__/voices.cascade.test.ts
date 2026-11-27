@@ -13,7 +13,11 @@ import { storageKey } from "../../../preferences/types";
 import {
   DEFAULT_SPEECH_VOICE,
   catalogDefaultVoice,
+  engineFor,
   getCascadeOrder,
+  getProjectVoice,
+  setProjectEngine,
+  setProjectVoice,
   getPronunciationByEngine,
   getProjectVoices,
   getStoredVoices,
@@ -26,7 +30,7 @@ import {
   voiceForDocKey,
   voiceForProject,
 } from "../voices";
-import { cascadeVoicesOf } from "../engines";
+import { cascadeVoicesOf, engineVoiceKey, engineVoiceOf } from "../engines";
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;
@@ -267,5 +271,84 @@ describe("per-engine voices and cascade preferences", () => {
     ]);
     expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });
     expect(voiceForDocKey("doc:p/notes.md")).toBe(voiceForProject("p"));
+  });
+
+  describe("project engine", () => {
+    const ENGINE_KEY = storageKey(preferences.speechEngineByProject);
+    const [PIOTR] = listVoices("pocket-pl").map((voice) => voice.id);
+
+    it("engineFor prefers a known project engine", () => {
+      setStoredEngine("edge");
+      expect(engineFor("p")).toBe("edge");
+      expect(engineFor(undefined)).toBe("edge");
+
+      setProjectEngine("p", "pocket-pl");
+      expect(globals.__PAVILIO_PREFS__![ENGINE_KEY]).toEqual({ p: "pocket-pl" });
+      expect(engineFor("p")).toBe("pocket-pl");
+      expect(engineFor("q")).toBe("edge");
+
+      setProjectEngine("p", "cascade");
+      expect(engineFor("p")).toBe("cascade");
+
+      setProjectEngine("p", null);
+      expect(globals.__PAVILIO_PREFS__![ENGINE_KEY]).toEqual({});
+      expect(engineFor("p")).toBe("edge");
+    });
+
+    it("a stale project engine falls back to the global one", () => {
+      setStoredEngine("elevenlabs");
+      globals.__PAVILIO_PREFS__![ENGINE_KEY] = { p: "piper", q: 7 };
+      expect(engineFor("p")).toBe("elevenlabs");
+      expect(engineFor("q")).toBe("elevenlabs");
+      // `setProjectEngine` ignores an engine the seam does not configure.
+      setProjectEngine("r", "piper");
+      expect(engineFor("r")).toBe("elevenlabs");
+      expect(preferences.speechEngineByProject).toMatchObject({
+        key: "speech.engineByProject",
+        portable: true,
+        scope: "global",
+        default: {},
+      });
+    });
+
+    it("voiceForProject qualifies a project engine that differs from the global one", () => {
+      setStoredEngine("cascade");
+      setProjectEngine("p", "pocket-pl");
+      setProjectVoice("p", PIOTR!);
+
+      expect(getProjectVoice("p")).toBe(PIOTR);
+      expect(voiceForProject("p")).toBe(engineVoiceKey("pocket-pl", PIOTR!));
+      expect(engineVoiceOf(voiceForProject("p"))).toEqual({ engine: "pocket-pl", voice: PIOTR });
+      expect(voiceForDocKey("doc:p/wiki/index.md")).toBe(engineVoiceKey("pocket-pl", PIOTR!));
+
+      // A project on the cascade, with a single global engine, gets the cascade key.
+      setStoredEngine("edge");
+      setProjectEngine("c", "cascade");
+      expect(cascadeVoicesOf(voiceForProject("c"))).toMatchObject({ edge: DEFAULT_SPEECH_VOICE });
+      expect(voiceForProject("c").startsWith("engine:")).toBe(false);
+
+      // With no voice picked, the project engine's default is still qualified.
+      setProjectEngine("d", "elevenlabs");
+      expect(engineVoiceOf(voiceForProject("d"))).toEqual({
+        engine: "elevenlabs",
+        voice: catalogDefaultVoice("elevenlabs"),
+      });
+    });
+
+    it("unchanged projects keep their plain voice key", () => {
+      setStoredEngine("elevenlabs");
+      setEngineVoice("elevenlabs", GEORGE!);
+      setProjectEngineVoice("p", "elevenlabs", SARAH!);
+      setProjectEngine("same", "elevenlabs");
+
+      expect(voiceForProject("p")).toBe(SARAH);
+      expect(voiceForProject("q")).toBe(GEORGE);
+      expect(voiceForProject(undefined)).toBe(GEORGE);
+      expect(voiceForProject("same")).toBe(GEORGE);
+      expect(engineVoiceOf(GEORGE)).toBeUndefined();
+      expect(engineVoiceOf(undefined)).toBeUndefined();
+      expect(engineVoiceOf('engine:["a"]')).toBeUndefined();
+      expect(engineVoiceOf("engine:not json")).toBeUndefined();
+    });
   });
 });

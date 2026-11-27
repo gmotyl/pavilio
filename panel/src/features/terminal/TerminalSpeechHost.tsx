@@ -17,6 +17,7 @@ import {
   useOpenaiVoicesSnapshot,
   usePrimeOpenaiVoices,
 } from "../speech/useOpenaiVoices";
+import { usePocketVoicesSnapshot, usePrimePocketVoices } from "../speech/usePocketVoices";
 import { getCascadeOrder, getStoredEngine } from "../speech/voices";
 import {
   SpeechHostProvider,
@@ -133,7 +134,11 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   // Subscriptions only: `speaksWithOpenai` reads both through `voices.ts`.
   usePreference(preferences.speechEngine);
   usePreference(preferences.speechCascadeOrder);
+  usePreference(preferences.speechEngineByProject);
   usePrimeOpenaiVoices(speaksWithOpenai());
+  // Any project may name a pocket engine, whatever the global one is: the workspace voice list
+  // loads at app level so a saved voice (`piotr`) resolves after a page reload.
+  usePrimePocketVoices(true);
   // A new language port each time a session becomes placed, and when the
   // OmniVoice list first lands: `languageForSession` answers `undefined` for a
   // session the list does not hold yet, and for a saved openai voice the list
@@ -147,7 +152,7 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
   // A later load that succeeds is a new port again, so the answers after it
   // are warmed in the voice it names; those already prepared keep their units.
   const placement = useSyncExternalStore(subscribeSessionList, placementSignature);
-  const portKey = `${placement}|${catalogState(useOpenaiVoicesSnapshot())}`;
+  const portKey = `${placement}|${catalogState(useOpenaiVoicesSnapshot())}|${usePocketVoicesSnapshot().loaded}`;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the point: a new placement, a new port
   const languageFor = useCallback((sessionId: string) => languageForSession(sessionId), [portKey]);
   return (

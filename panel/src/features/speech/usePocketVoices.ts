@@ -101,6 +101,15 @@ export function currentPocketWorkspaceVoices(engine: "pocket" | "pocket-pl"): re
   );
 }
 
+/**
+ * The workspace voices the instance's pocket engines are configured with, as the route listed them:
+ * anytts checks a voice against its catalog, so a saved voice the instance was not given would be
+ * refused. `pocket` gets none while cloning is off.
+ */
+export function currentPocketCustomVoices(engine: "pocket" | "pocket-pl"): readonly PocketWorkspaceVoice[] {
+  return engine === "pocket" && !state.cloning ? [] : state.voices;
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
