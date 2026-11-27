@@ -15,7 +15,7 @@ Read `projects/.processed_transcripts.json` (missing → treat as `{ "processed"
 
 ### 2. Scout (single subagent — keeps transcripts out of the main context)
 
-Spawn ONE general-purpose subagent with these instructions (include the exclusion set inline):
+Spawn ONE general-purpose subagent on the **mid tier** (see **Model tiers**) with these instructions (include the exclusion set inline):
 
 1. For **each available notetaker** (detect by tool keyword `quill` / `wispr`; a connector exposing only `authenticate` counts as unavailable — note it in `unavailable_sources`), list the last 10 meetings. Tag each with its `source` (`quill` | `wispr`). Drop any whose `(source, id)` is in the exclusion set. Merge all sources, newest first. If the same meeting appears in both (start within ±5 min, similar title), keep one row with `source: "wispr"` and the Quill id in `also_ids: [{source, id}]` — Wispr's ready summary means no transcript analysis.
 2. **Disk verification (the registry can be stale — notes are also created outside batch mode and sessions sometimes skip the registry write).** For each remaining meeting, convert its start time to Europe/Warsaw and search all projects' note dirs for an existing note with a matching date+time filename prefix:
@@ -75,6 +75,22 @@ Each subagent prompt:
 > Read and follow the instructions in the `pavilio-note` skill (`skills/pavilio-note/SKILL.md`) exactly, with this input: projectname=`<project>` `-yolo` `--source <source>` `--meeting-id <meeting_id>` `--transcript-file projects/.tmp_transcripts/<meeting_id>.txt`. Your final message must be ONLY the Batch Mode JSON output defined in that skill.
 
 For `source: wispr` meetings the subagent takes pavilio-note's **Ready-Summary Path** (summary + transcript copied 1:1, no analysis); per that path's batch rule it fetches only the summary with `get_meeting` (no `view_transcript`) and takes the transcript from `--transcript-file` — the scout's fetch stays the only one. Pass the merged Quill id as `--also-ids quill:<id>` when present.
+
+Pick each subagent's model per **Model tiers**: `wispr` meetings → **cheap tier**, `quill` meetings → **mid tier**.
+
+#### Model tiers
+
+Unless a subagent is told otherwise, it inherits the parent session's model, which is often the most expensive one. None of this skill's subagents needs that, so always set the model explicitly:
+
+| Subagent | Work | Tier | Claude Code |
+|---|---|---|---|
+| Scout (step 2) | list, filter, disk check, write transcripts verbatim, keyword count | mid | `model: "sonnet"` |
+| Note — `wispr` (Ready-Summary Path) | copy summary + transcript 1:1, small STATUS/_index updates | cheap | `model: "haiku"` |
+| Note — `quill` (full analysis) | analyse transcript into a structured Polish note, decisions, todos | mid | `model: "sonnet"` |
+
+Other agents (opencode, codex, kilo) use their own equivalent of these tiers. The parent session keeps its own model: it only aggregates and asks. Wiki ingest (step 10) already picks its own cheap writers.
+
+The scout writes every transcript out through the Write tool, so transcript length becomes output tokens. That is why it should never run on the top tier.
 
 Parse each subagent's JSON result. A subagent that errors or returns `status: error` does not stop the others.
 
