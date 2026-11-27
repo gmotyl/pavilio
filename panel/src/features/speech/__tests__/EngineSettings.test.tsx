@@ -135,9 +135,9 @@ describe("EngineSettings", () => {
     const select = within(section).getByRole("combobox", { name: "Default engine" }) as HTMLSelectElement;
     const values = Array.from(select.options).map((option) => option.value);
     expect(values).toEqual(
-      expect.arrayContaining(["cascade", "openai", "kokoro", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
+      expect.arrayContaining(["cascade", "openai", "kokoro", "pocket", "pocket-pl", "edge", "elevenlabs", "cartesia", "speechify", "azure"]),
     );
-    expect(values).toHaveLength(8);
+    expect(values).toHaveLength(10);
     expect(Array.from(select.options).find((o) => o.value === "cascade")!.textContent).toBe(
       LABELS.get("cascade"),
     );
@@ -145,8 +145,8 @@ describe("EngineSettings", () => {
     // engine: the old single "Default voice" select is gone.
     expect(within(section).getByRole("heading", { name: "Engines and cascade order" })).toBeInTheDocument();
     expect(within(section).queryByRole("combobox", { name: "Default voice" })).toBeNull();
-    // One row per cascade member, `openai` and `kokoro` included.
-    expect(within(section).getAllByRole("combobox", { name: "Voice" })).toHaveLength(7);
+    // One row per cascade member, `openai`, `kokoro` and both Pocket rows included.
+    expect(within(section).getAllByRole("combobox", { name: "Voice" })).toHaveLength(9);
   });
 
   it("rows follow cascade order with move buttons", async () => {
@@ -161,15 +161,15 @@ describe("EngineSettings", () => {
     ]);
     await renderLoaded();
 
-    expect(rowIds()).toEqual(["edge", "azure", "openai", "kokoro", "elevenlabs", "cartesia", "speechify"]);
+    expect(rowIds()).toEqual(["edge", "azure", "openai", "kokoro", "elevenlabs", "cartesia", "speechify", "pocket", "pocket-pl"]);
     rowIds().forEach((id, index) => {
       expect(within(row(id)).getByTestId("engine-position")).toHaveTextContent(String(index + 1));
     });
     expect(within(row("edge")).queryByRole("button", { name: `Move ${LABELS.get("edge")} up` })).toBeNull();
     expect(within(row("edge")).getByRole("button", { name: `Move ${LABELS.get("edge")} down` })).toBeInTheDocument();
-    expect(within(row("speechify")).getByRole("button", { name: `Move ${LABELS.get("speechify")} up` })).toBeInTheDocument();
-    expect(within(row("speechify")).queryByRole("button", { name: `Move ${LABELS.get("speechify")} down` })).toBeNull();
-    for (const id of ["azure", "openai", "kokoro", "elevenlabs", "cartesia"]) {
+    expect(within(row("pocket-pl")).getByRole("button", { name: `Move ${LABELS.get("pocket-pl")} up` })).toBeInTheDocument();
+    expect(within(row("pocket-pl")).queryByRole("button", { name: `Move ${LABELS.get("pocket-pl")} down` })).toBeNull();
+    for (const id of ["azure", "openai", "kokoro", "elevenlabs", "cartesia", "speechify", "pocket"]) {
       expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} up` })).toBeInTheDocument();
       expect(within(row(id)).getByRole("button", { name: `Move ${LABELS.get(id)} down` })).toBeInTheDocument();
     }
@@ -188,11 +188,11 @@ describe("EngineSettings", () => {
       { id: "kokoro", on: true },
     ]);
     await renderLoaded();
-    expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge", "openai", "kokoro"]);
+    expect(rowIds()).toEqual(["elevenlabs", "cartesia", "speechify", "azure", "edge", "openai", "kokoro", "pocket", "pocket-pl"]);
 
     await user.click(within(row("elevenlabs")).getByRole("button", { name: `Move ${LABELS.get("elevenlabs")} down` }));
 
-    expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge", "openai", "kokoro"]);
+    expect(rowIds()).toEqual(["cartesia", "elevenlabs", "speechify", "azure", "edge", "openai", "kokoro", "pocket", "pocket-pl"]);
     expect(readPreference(preferences.speechCascadeOrder).map((entry) => entry.id)).toEqual([
       "cartesia",
       "elevenlabs",
@@ -201,6 +201,8 @@ describe("EngineSettings", () => {
       "edge",
       "openai",
       "kokoro",
+      "pocket",
+      "pocket-pl",
     ]);
     // The first row now has no ↑, and the moved one does.
     expect(within(row("cartesia")).queryByRole("button", { name: `Move ${LABELS.get("cartesia")} up` })).toBeNull();
@@ -221,6 +223,8 @@ describe("EngineSettings", () => {
       { ...mockupEngines()[4]!, status: { state: "ready" } },
       { id: "openai", label: "OpenAI-compatible", keyed: false, keySource: "none", status: { state: "ready" } },
       { id: "kokoro", label: "Kokoro", keyed: false, keySource: "none", status: { state: "ready" } },
+      { id: "pocket", label: "Pocket TTS (English)", keyed: false, keySource: "none", status: { state: "ready" } },
+      { id: "pocket-pl", label: "Pocket TTS (Polish)", keyed: false, keySource: "none", status: { state: "ready" } },
     ]);
 
     const chips = Object.fromEntries(
@@ -234,16 +238,21 @@ describe("EngineSettings", () => {
       edge: "ready",
       openai: "ready",
       kokoro: "ready",
+      pocket: "ready",
+      "pocket-pl": "ready",
     });
 
     for (const id of rowIds()) {
       const scope = within(row(id));
       expect(scope.getByText(LABELS.get(id)!)).toBeInTheDocument();
-      // A self-hosted server (openai, kokoro) has no plan limit to note.
-      if (id !== "openai" && id !== "kokoro") expect(scope.getByTestId("engine-limit").textContent).not.toBe("");
+      // A self-hosted server (openai, kokoro, pocket) has no plan limit to note.
+      if (!["openai", "kokoro", "pocket", "pocket-pl"].includes(id)) expect(scope.getByTestId("engine-limit").textContent).not.toBe("");
       expect(scope.getByRole("combobox", { name: "Voice" })).toBeInTheDocument();
       expect(scope.getByRole("checkbox", { name: "Pronunciation map" })).toBeInTheDocument();
-      expect(scope.getByRole("checkbox", { name: "In cascade" })).toBeChecked();
+      // `pocket-pl` starts out of the cascade.
+      const inCascade = scope.getByRole("checkbox", { name: "In cascade" });
+      if (id === "pocket-pl") expect(inCascade).not.toBeChecked();
+      else expect(inCascade).toBeChecked();
     }
     // Pronunciation follows anytts' defaults until switched: Edge on, the others off.
     expect(within(row("edge")).getByRole("checkbox", { name: "Pronunciation map" })).toBeChecked();
@@ -273,6 +282,8 @@ describe("EngineSettings", () => {
       { id: "edge", on: true },
       { id: "openai", on: false },
       { id: "kokoro", on: false },
+      { id: "pocket", on: false },
+      { id: "pocket-pl", on: false },
     ]);
     await renderLoaded();
 
@@ -614,6 +625,37 @@ describe("EngineSettings", () => {
     // The OmniVoice control script is not Kokoro's.
     expect(scope.queryByTestId("engine-server-hint")).toBeNull();
     expect(scope.queryByTestId("engine-overage-hint")).toBeNull();
+  });
+
+  it("Settings lists both Pocket rows with address fields", async () => {
+    const unset = (id: string, label: string): EngineInfo => ({
+      id,
+      label,
+      keyed: true,
+      keySource: "none",
+      status: { state: "no-key" },
+    });
+    await renderLoaded([
+      ...mockupEngines(),
+      unset("pocket", "Pocket TTS (English)"),
+      unset("pocket-pl", "Pocket TTS (Polish)"),
+    ]);
+
+    for (const [id, label, placeholder] of [
+      ["pocket", "Pocket TTS (English)", "http://127.0.0.1:8890"],
+      ["pocket-pl", "Pocket TTS (Polish)", "http://127.0.0.1:8891"],
+    ] as const) {
+      const scope = within(row(id));
+      expect(scope.getByText(label)).toBeInTheDocument();
+      const input = scope.getByLabelText("Server address");
+      expect(input).toHaveAttribute("placeholder", placeholder);
+      expect(scope.queryByLabelText("API key")).toBeNull();
+      expect(scope.getByTestId("engine-install-hint")).toHaveTextContent("pnpm install:speech");
+    }
+    expect(within(row("pocket-pl")).getByTestId("engine-install-hint")).toHaveTextContent(/test sample/);
+    // Off by default: the Polish row is not in the cascade.
+    expect(within(row("pocket")).getByRole("checkbox", { name: "In cascade" })).toBeChecked();
+    expect(within(row("pocket-pl")).getByRole("checkbox", { name: "In cascade" })).not.toBeChecked();
   });
 
   it("saving the kokoro address puts baseUrl", async () => {

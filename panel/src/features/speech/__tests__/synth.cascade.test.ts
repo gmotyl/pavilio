@@ -100,6 +100,8 @@ describe("cascade requests through the speech seam", () => {
       azure: voices.catalogDefaultVoice("azure"),
       edge: ANDREW,
       kokoro: voices.catalogDefaultVoice("kokoro"),
+      pocket: voices.catalogDefaultVoice("pocket"),
+      "pocket-pl": voices.catalogDefaultVoice("pocket-pl"),
     };
     // `toEqual` treats an undefined property as absent: a member whose default
     // went missing would pass silently without this guard.
@@ -107,7 +109,8 @@ describe("cascade requests through the speech seam", () => {
     // No openai voice: the browser lists none until it reads the OmniVoice server's catalog,
     // so the server speaks with its own default.
     // `openai` and `kokoro` lead the default order; the server drops each when it has no address.
-    const order = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    // `pocket-pl` is off by default, so it stays out of the order.
+    const order = ["openai", "pocket", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
     const pronunciation = { elevenlabs: true, edge: false };
     const request = lastRequest();
     expect(request).toEqual({
@@ -168,6 +171,8 @@ describe("cascade requests through the speech seam", () => {
       { id: "azure", on: false },
       { id: "openai", on: false },
       { id: "kokoro", on: false },
+      { id: "pocket", on: false },
+      { id: "pocket-pl", on: false },
     ]);
 
     await synth.synthesizeSpeech("hello", { voice: voices.voiceForProject(undefined), lang: "en" });

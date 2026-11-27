@@ -37,6 +37,8 @@ export const ENGINE_KEY_VARS: Readonly<Record<string, string>> = {
   azure: "AZURE_SPEECH_KEY",
   openai: "OPENAI_TTS_BASE_URL",
   kokoro: "KOKORO_TTS_BASE_URL",
+  pocket: "POCKET_TTS_BASE_URL",
+  "pocket-pl": "POCKET_PL_TTS_BASE_URL",
 };
 
 /** Whether `id` is an engine that needs a key or an address to run (every member but Edge). */
@@ -50,7 +52,7 @@ export function isKeyedEngine(id: string): boolean {
  * (`KOKORO_TTS_BASE_URL`). Its value is shown in full and edited in a plain URL field.
  */
 export function isAddressEngine(id: string): boolean {
-  return id === "openai" || id === "kokoro";
+  return id === "openai" || id === "kokoro" || id === "pocket" || id === "pocket-pl";
 }
 
 /**

@@ -40,6 +40,8 @@ const LIMIT_NOTES: Readonly<Record<string, string>> = {
 const ADDRESS_PLACEHOLDERS: Readonly<Record<string, string>> = {
   openai: "http://127.0.0.1:8890",
   kokoro: "http://127.0.0.1:8880",
+  pocket: "http://127.0.0.1:8890",
+  "pocket-pl": "http://127.0.0.1:8891",
 };
 
 const CHIP_COLORS: Readonly<Record<ChipTone, string>> = {
@@ -363,6 +365,14 @@ function EngineRow(props: EngineRowProps) {
           <code style={{ color: "var(--text-primary)" }}>pnpm install:kokoro</code> (or{" "}
           <code style={{ color: "var(--text-primary)" }}>bash scripts/install:kokoro</code> in a synced
           workspace), then save its address here.
+        </p>
+      )}
+      {(id === "pocket" || id === "pocket-pl") && info?.keySource === "none" && (
+        <p data-testid="engine-install-hint" className="text-xs mt-2" style={MUTED}>
+          No {id === "pocket" ? "English" : "Polish"} Pocket TTS server yet: run{" "}
+          <code style={{ color: "var(--text-primary)" }}>pnpm install:speech</code>, then save its address here.
+          {id === "pocket-pl" &&
+            " It starts out of the cascade: check each Polish voice with a test sample before switching it on."}
         </p>
       )}
       {id === "openai" && (

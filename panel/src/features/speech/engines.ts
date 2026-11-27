@@ -12,6 +12,7 @@
  */
 import type { TtsConfig, VoiceInfo } from "anytts";
 import {
+  DEFAULT_CASCADE_OFF,
   DEFAULT_CASCADE_ORDER,
   DEFAULT_SPEECH_VOICE,
   preferences,
@@ -117,6 +118,9 @@ export const SPEECH_ENGINES: TtsConfig["engines"] = {
   // A local Kokoro-FastAPI server, same relay. Its catalog ships with anytts, so no live list.
   // Outlasts the panel server's wait on Kokoro (a cold model load), so the server's verdict lands.
   kokoro: { ...KEYED_RELAY, firstByteMs: KOKORO_FIRST_BYTE_TIMEOUT_MS + 15000 },
+  // User-run pocket-tts servers, one language each, same relay. Their preset catalogs ship with anytts.
+  pocket: KEYED_RELAY,
+  "pocket-pl": KEYED_RELAY,
 };
 
 /** The configured engine ids. */
@@ -127,7 +131,7 @@ export function speechEngines(): string[] {
 /**
  * The cascade order in effect: the stored entries for engines the cascade can
  * hold, in their stored order (an unknown id or a repeat dropped), then any
- * member engine the record does not name, on — so an engine added to the list
+ * member engine the record does not name, on unless it is in `DEFAULT_CASCADE_OFF` — so an engine added to the list
  * later joins the cascade instead of vanishing from it.
  */
 export function getCascadeOrder(): CascadeEntry[] {
@@ -138,7 +142,7 @@ export function getCascadeOrder(): CascadeEntry[] {
     seen.add(entry.id);
     order.push({ id: entry.id, on: entry.on });
   }
-  for (const id of DEFAULT_CASCADE_ORDER) if (!seen.has(id)) order.push({ id, on: true });
+  for (const id of DEFAULT_CASCADE_ORDER) if (!seen.has(id)) order.push({ id, on: !DEFAULT_CASCADE_OFF.includes(id) });
   return order;
 }
 

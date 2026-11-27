@@ -377,13 +377,22 @@ export interface CascadeEntry {
  */
 export const DEFAULT_CASCADE_ORDER: readonly string[] = [
   "openai",
+  "pocket",
   "kokoro",
   "elevenlabs",
   "cartesia",
   "speechify",
   "azure",
   "edge",
+  "pocket-pl",
 ];
+
+/**
+ * Cascade members that start *off*: the Polish pocket voices are checked one by one
+ * with a test sample before they are trusted to speak. Applies to a fresh workspace and
+ * to a saved order that does not name the engine yet.
+ */
+export const DEFAULT_CASCADE_OFF: readonly string[] = ["pocket-pl"];
 
 /**
  * The answer pane's height when nothing has been dragged: taller than any
@@ -998,14 +1007,14 @@ export const preferences = {
   }),
   /**
    * The cascade's member engines in the order they are tried, each *In
-   * cascade* or not. The default is every engine, on, in the server's order.
+   * cascade* or not. The default is every engine in the server's order, on except `DEFAULT_CASCADE_OFF`.
    * Unknown ids and missing engines are `voices.ts`' to repair, against the
    * engine list it owns. Treat the default as frozen, like the launchers'.
    */
   speechCascadeOrder: definePreference<CascadeEntry[]>({
     key: "speech.cascadeOrder", // was: nothing — the cascade is new
     scope: "global",
-    default: DEFAULT_CASCADE_ORDER.map((id) => ({ id, on: true })),
+    default: DEFAULT_CASCADE_ORDER.map((id) => ({ id, on: !DEFAULT_CASCADE_OFF.includes(id) })),
     codec: listOf(toCascadeEntry),
     portable: true,
   }),

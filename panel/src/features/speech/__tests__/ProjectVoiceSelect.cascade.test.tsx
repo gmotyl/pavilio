@@ -101,6 +101,8 @@ describe("ProjectVoiceSelect under the cascade", () => {
       { id: "azure", on: true },
       { id: "openai", on: false },
       { id: "kokoro", on: false },
+      { id: "pocket", on: false },
+      { id: "pocket-pl", on: false },
     ]);
     await renderCascade();
 

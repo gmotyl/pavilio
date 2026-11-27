@@ -108,15 +108,17 @@ describe("per-engine voices and cascade preferences", () => {
     expect(voiceFor("cascade")).toBeUndefined();
   });
 
-  it("cascade order defaults to all engines on", () => {
+  it("default cascade order includes pocket after openai and pocket-pl off", () => {
     expect(getCascadeOrder()).toEqual([
       { id: "openai", on: true },
+      { id: "pocket", on: true },
       { id: "kokoro", on: true },
       { id: "elevenlabs", on: true },
       { id: "cartesia", on: true },
       { id: "speechify", on: true },
       { id: "azure", on: true },
       { id: "edge", on: true },
+      { id: "pocket-pl", on: false },
     ]);
     // The server's default order, which the client cannot import: kept equal by hand.
     const server = /CASCADE_ORDER\s*=\s*(\[[^\]]*\])/.exec(ttsHolderSource);
@@ -142,8 +144,37 @@ describe("per-engine voices and cascade preferences", () => {
     expect(preferences.speechPronunciationByEngine.key).toBe("speech.pronunciationByEngine");
   });
 
+  it("client and server cascade orders match", () => {
+    const server = /CASCADE_ORDER\s*=\s*(\[[^\]]*\])/.exec(ttsHolderSource);
+    expect(server, "CASCADE_ORDER in ttsHolder.ts").not.toBeNull();
+    expect([...DEFAULT_CASCADE_ORDER]).toEqual(JSON.parse(server![1]!));
+  });
+
+  it("a saved order gets pocket on and pocket-pl off appended", () => {
+    setCascadeOrder([
+      { id: "edge", on: false },
+      { id: "openai", on: true },
+      { id: "kokoro", on: false },
+      { id: "elevenlabs", on: true },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: true },
+    ]);
+    expect(getCascadeOrder()).toEqual([
+      { id: "edge", on: false },
+      { id: "openai", on: true },
+      { id: "kokoro", on: false },
+      { id: "elevenlabs", on: true },
+      { id: "cartesia", on: true },
+      { id: "speechify", on: true },
+      { id: "azure", on: true },
+      { id: "pocket", on: true },
+      { id: "pocket-pl", on: false },
+    ]);
+  });
+
   it("openai leads the default cascade order", () => {
-    const expected = ["openai", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge"];
+    const expected = ["openai", "pocket", "kokoro", "elevenlabs", "cartesia", "speechify", "azure", "edge", "pocket-pl"];
     expect(DEFAULT_CASCADE_ORDER).toEqual(expected);
     // The drift guard: the server's copy is the same list.
     const server = /CASCADE_ORDER\s*=\s*(\[[^\]]*\])/.exec(ttsHolderSource);
@@ -168,7 +199,9 @@ describe("per-engine voices and cascade preferences", () => {
       { id: "speechify", on: true },
       { id: "azure", on: false },
       { id: "openai", on: true },
+      { id: "pocket", on: true },
       { id: "kokoro", on: true },
+      { id: "pocket-pl", on: false },
     ]);
   });
 
@@ -189,7 +222,9 @@ describe("per-engine voices and cascade preferences", () => {
       { id: "cartesia", on: true },
       { id: "speechify", on: true },
       { id: "azure", on: true },
+      { id: "pocket", on: true },
       { id: "kokoro", on: true },
+      { id: "pocket-pl", on: false },
     ]);
   });
 
@@ -216,6 +251,8 @@ describe("per-engine voices and cascade preferences", () => {
       "edge",
       "elevenlabs",
       "kokoro",
+      "pocket",
+      "pocket-pl",
       "speechify",
     ]);
     expect(cascadeVoicesOf(voiceForProject(undefined))).toMatchObject({ elevenlabs: GEORGE });

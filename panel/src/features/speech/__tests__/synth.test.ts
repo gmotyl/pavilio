@@ -124,6 +124,8 @@ describe("the anytts seam", () => {
         },
         // Outlasts the server's KOKORO_FIRST_BYTE_TIMEOUT_MS wait on a cold model load.
         kokoro: { ...keyed, firstByteMs: 45_000 },
+        pocket: keyed,
+        "pocket-pl": keyed,
       },
       defaultEngine: "edge",
       scheduler: {
