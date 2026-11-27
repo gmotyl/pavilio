@@ -11,6 +11,7 @@
 # `setup:*` already goes through scripts/ for the same reason; this one had not.
 #
 # Run as `bash scripts/install:speech` (or `pnpm install:speech` in this repo).
+# Usage: install:speech [--uninstall] [--engines=omnivoice,kokoro,pocket,pocket-pl|none]
 
 set -e
 
