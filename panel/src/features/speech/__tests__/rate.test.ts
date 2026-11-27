@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { preferences } from "../../../preferences/declarations";
-import { clampRate, nextRatePreset, rateFor, setProjectRate } from "../rate";
+import { clampRate, preferences } from "../../../preferences/declarations";
+import { nextRatePreset, rateFor, setProjectRate } from "../rate";
 
 describe("per-project playback rate", () => {
   it("nextRatePreset cycles the presets and wraps", () => {

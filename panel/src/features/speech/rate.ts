@@ -7,8 +7,6 @@
 import { clampRate, preferences } from "../../preferences/declarations";
 import { readPreference, writePreference } from "../../preferences/store";
 
-export { clampRate };
-
 export const RATE_PRESETS = [0.8, 1.0, 1.2, 1.5, 2.0] as const;
 
 /** The first preset above `rate`, wrapping to the slowest. */

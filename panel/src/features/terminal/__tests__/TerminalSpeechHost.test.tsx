@@ -108,6 +108,13 @@ describe("TerminalSpeechHost", () => {
     });
   });
 
+  it("hands the provider the session-to-project lookup the player's rate needs", () => {
+    render(<TerminalSpeechHost>{null}</TerminalSpeechHost>);
+    state.sessions = [{ id: "s1", project: "alpha", name: "one" }];
+    expect(state.props!.projectFor!("s1")).toBe("alpha");
+    expect(state.props!.projectFor!("unknown") ?? null).toBeNull();
+  });
+
   it("primes the OmniVoice list, so a saved openai voice resolves after a reload", async () => {
     writePreference(preferences.speechEngine, "openai");
     writePreference(preferences.speechVoice, { openai: PL_FEMALE.id });

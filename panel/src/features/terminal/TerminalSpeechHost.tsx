@@ -34,6 +34,7 @@ import {
 } from "./answerWaiting";
 import { dismissAttentionOnArrival } from "./attentionArrival";
 import { getSessions, subscribeSessions } from "./sessionStore";
+import { projectOfSession } from "./sessionProject";
 import { languageForSession, voiceForSession } from "./sessionVoice";
 import {
   readStandaloneTerminalFocus,
@@ -170,6 +171,7 @@ export function TerminalSpeechHost({ children }: { children: ReactNode }) {
       onArrival={dismissAttentionOnArrival}
       answerWaiting={answerWaiting}
       voiceFor={voiceForSession}
+      projectFor={projectOfSession}
       languageFor={languageFor}
     >
       {children}

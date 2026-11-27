@@ -104,6 +104,8 @@ interface Props {
   onArrival: TransportArrival;
   answerWaiting: AnswerWaitingPort;
   voiceFor: (sessionId: string) => string;
+  /** The project a session belongs to, for its playback rate. */
+  projectFor?: (sessionId: string) => string | null | undefined;
   /**
    * The voice language of a session or page key, or `undefined` while a
    * session cannot be placed yet; see `SpeechHostOptions.languageFor`.
@@ -150,6 +152,7 @@ export function SpeechHostProvider({
   onArrival,
   answerWaiting,
   voiceFor,
+  projectFor,
   languageFor,
 }: Props) {
   // The answer alert (see `answerAlert.ts`): raised for a live arrival, read at
@@ -254,6 +257,7 @@ export function SpeechHostProvider({
     isSessionOpen: isKeyOpen,
     onRunChange: speakingAlert.onRunChange,
     voiceFor,
+    projectFor,
     languageFor,
     answerWaiting,
     lookedAtSessionId,
