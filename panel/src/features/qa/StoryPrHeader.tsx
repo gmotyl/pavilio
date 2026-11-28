@@ -12,7 +12,7 @@ const PROBLEM: Record<StoryPrProblem, (host: string | null) => string> = {
   "gh-unauthenticated": () => "gh is not authenticated",
   "glab-missing": () => "glab is not installed",
   "glab-unauthenticated": (host) => (host ? `Run glab auth login --hostname ${host}` : "Run glab auth login"),
-  "unknown-forge": (host) => (host ? `Unknown forge for ${host}` : "Unknown forge"),
+  "unknown-forge": (host) => (host ? `Unknown forge for ${host}` : "No usable origin remote"),
   failed: () => "Could not load PR status",
   unlinked: () => "Repo not linked",
   "project-missing": () => "Project not found",

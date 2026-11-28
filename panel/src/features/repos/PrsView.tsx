@@ -25,9 +25,9 @@ const RESTING: Record<Exclude<Unavailable, "failed">, (host: string | undefined)
         <code>forge</code> in repos.json
       </>
     ) : (
-      // No origin URL at all: there is no host to log in to.
+      // No usable origin URL: resolution stops before the forge override, so only the remote fixes it.
       <>
-        Unknown forge — set <code>forge</code> in repos.json
+        No usable <code>origin</code> remote — add or fix it
       </>
     ),
   "gh-missing": () => (

@@ -138,7 +138,7 @@ describe("StoryPrHeader", () => {
       ],
       [{ unavailable: "glab-unauthenticated" }, "Run glab auth login"],
       [{ unavailable: "unknown-forge", host: "git.example.org" }, "Unknown forge for git.example.org"],
-      [{ unavailable: "unknown-forge" }, "Unknown forge"],
+      [{ unavailable: "unknown-forge" }, "No usable origin remote"],
     ] as const;
     for (const [body, reason] of cases) {
       stubFetch({ "/api/prs/one": () => jsonResponse(body, { status: 502 }) });
@@ -276,7 +276,7 @@ describe("StoryPrHeader", () => {
 
     stubFetch({ "/api/prs/one": () => jsonResponse({ unavailable: "unknown-forge" }, { status: 502 }) });
     const second = renderHeader();
-    await within(header()).findByText("Unknown forge");
+    await within(header()).findByText("No usable origin remote");
     second.unmount();
 
     stubFetch({ "/api/prs/one": () => Promise.reject(new TypeError("network down")) });

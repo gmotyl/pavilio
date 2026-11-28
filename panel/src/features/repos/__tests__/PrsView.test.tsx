@@ -316,6 +316,14 @@ describe("PrsView", () => {
       expect(line).not.toHaveTextContent("No GitHub remote");
     });
 
+    it("a host-less unknown forge resting line asks to fix the origin remote", async () => {
+      // No usable origin: the resolver gives up before the forge override, so the fix is the remote.
+      const line = await restingLine({ repo: "scratch", reason: "unknown-forge" });
+      expect(line).toHaveTextContent("scratchNo usable origin remote — add or fix it");
+      expect(line.querySelector("code")).toHaveTextContent(/^origin$/);
+      expect(line).not.toHaveTextContent("repos.json");
+    });
+
     it("glab unauthenticated resting line names the host", async () => {
       const line = await restingLine({ repo: "monorepo", reason: "glab-unauthenticated", host: "git.cps.metro-markets.org" });
       expect(line).toHaveTextContent("monorepoRun glab auth login --hostname git.cps.metro-markets.org");
