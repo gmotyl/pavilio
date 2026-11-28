@@ -30,7 +30,6 @@ export function __resetGhFieldSupportForTests(): void {
 const GH_AUTH_EXIT = 4;
 const AUTH_ERROR = /gh auth login|not logged in|authentication required|HTTP 401|bad credentials/i;
 
-
 interface RawCheck {
   __typename?: string;
   status?: string;

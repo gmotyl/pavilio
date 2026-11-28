@@ -359,6 +359,17 @@ describe("GitHubGhProvider", () => {
     expect(fetch.args.some((a) => a.endsWith("refs/heads/release:refs/pavilio/pr-base/231"))).toBe(true);
     expect(fetch.args).toEqual(expect.arrayContaining(["--no-write-fetch-head", "--recurse-submodules=no", "--refmap="]));
     expect(fetch.args.some((a) => a.includes("refs/remotes/"))).toBe(false);
+    // Pinned whole: the fetchPrRefs extraction must keep GitHub's argv byte for byte.
+    expect(fetch.args).toEqual([
+      "fetch",
+      "--no-tags",
+      "--no-write-fetch-head",
+      "--recurse-submodules=no",
+      "--refmap=",
+      "origin",
+      "+pull/231/head:refs/pavilio/pr/231",
+      "+refs/heads/release:refs/pavilio/pr-base/231",
+    ]);
     // A credential prompt must never hang the request.
     expect(fetch.env?.GIT_TERMINAL_PROMPT).toBe("0");
     expect(calls.filter((c) => c.cmd === "git").every((c) => c.env?.GIT_TERMINAL_PROMPT === "0")).toBe(true);
