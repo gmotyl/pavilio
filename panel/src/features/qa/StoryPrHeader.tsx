@@ -1,19 +1,21 @@
 import { Link, useNavigate } from "react-router-dom";
 import PrRow, { PrIcon, prKey } from "../repos/PrRow";
+import { forgeCopy } from "../repos/forgeCopy";
 import { knownLogin } from "../repos/usePrs";
 import { useStoryPr, type StoryPr, type StoryPrData, type StoryPrProblem } from "./useStoryPr";
 import "../repos/Prs.css";
 import "./StoryPrHeader.css";
 
-const PROBLEM: Record<StoryPrProblem, string> = {
-  "gh-missing": "gh is not installed",
-  "gh-unauthenticated": "gh is not authenticated",
-  "glab-missing": "glab is not installed",
-  "glab-unauthenticated": "glab is not authenticated",
-  "unknown-forge": "No GitHub remote",
-  failed: "Could not load PR status",
-  unlinked: "Repo not linked",
-  "project-missing": "Project not found",
+/** The reduced row's short reason; `host` is the origin host the 502 named, when it named one. */
+const PROBLEM: Record<StoryPrProblem, (host: string | null) => string> = {
+  "gh-missing": () => "gh is not installed",
+  "gh-unauthenticated": () => "gh is not authenticated",
+  "glab-missing": () => "glab is not installed",
+  "glab-unauthenticated": (host) => (host ? `Run glab auth login --hostname ${host}` : "glab is not authenticated"),
+  "unknown-forge": (host) => (host ? `Unknown forge for ${host}` : "Unknown forge"),
+  failed: () => "Could not load PR status",
+  unlinked: () => "Repo not linked",
+  "project-missing": () => "Project not found",
 };
 
 const HEX_SHA = /^[0-9a-f]{7,40}$/i;
@@ -36,13 +38,14 @@ const RefreshIcon = () => (
 interface ActionsProps {
   /** The Review route; null when the repo is not linked or the project is missing (the Review view could not open it). */
   review: string | null;
-  /** GitHub's page for the PR; only a successful fetch knows it. */
-  url: string | null;
+  /** The PR's page on its forge, and which forge that is; only a successful fetch knows them. */
+  link: Pick<StoryPrData, "url" | "forge"> | null;
   loading: boolean;
   onRefresh: () => void;
 }
 
-function Actions({ review, url, loading, onRefresh }: ActionsProps) {
+function Actions({ review, link, loading, onRefresh }: ActionsProps) {
+  const forge = link && forgeCopy(link.forge).name;
   return (
     <>
       {review && (
@@ -50,9 +53,9 @@ function Actions({ review, url, loading, onRefresh }: ActionsProps) {
           Review
         </Link>
       )}
-      {url && (
-        <a className="pr-act" href={url} target="_blank" rel="noreferrer" title="Open on GitHub">
-          GitHub ↗
+      {link && (
+        <a className="pr-act" href={link.url} target="_blank" rel="noreferrer" title={`Open on ${forge}`}>
+          {forge} ↗
         </a>
       )}
       <button
@@ -97,12 +100,12 @@ function badges(story: StoryPr, pr: StoryPrData) {
 
 /**
  * The story PR header: the story's PR as the PRs list draws it, live from
- * `/api/prs/one`, with Review, GitHub ↗ and ↻. While loading, or when the PR
- * cannot be had, a reduced row from the frontmatter stands in for it; the
- * story below renders either way.
+ * `/api/prs/one`, with Review, a link to its forge (GitHub ↗ / GitLab ↗) and ↻.
+ * While loading, or when the PR cannot be had, a reduced row from the
+ * frontmatter stands in for it; the story below renders either way.
  */
 export default function StoryPrHeader({ story }: { story: StoryPr }) {
-  const { pr, problem, loading, refresh } = useStoryPr(story.project, story.repo, story.number);
+  const { pr, problem, host, loading, refresh } = useStoryPr(story.project, story.repo, story.number);
   const navigate = useNavigate();
   // Neither an unlinked repo nor a missing project can open in the Review view.
   const review = problem === "unlinked" || problem === "project-missing" ? null : reviewRoute(story);
@@ -116,7 +119,7 @@ export default function StoryPrHeader({ story }: { story: StoryPr }) {
           state={pr.state}
           standalone
           onOpen={() => navigate(reviewRoute(story))}
-          actions={<Actions review={review} url={pr.url} loading={loading} onRefresh={refresh} />}
+          actions={<Actions review={review} link={pr} loading={loading} onRefresh={refresh} />}
           extraBadges={badges(story, pr)}
         />
       </div>
@@ -132,16 +135,17 @@ export default function StoryPrHeader({ story }: { story: StoryPr }) {
         <span className="pr-tt">{story.title ?? `${story.repo}#${story.number}`}</span>
         <span className="pr-right">
           <span className="pr-actions">
-            <Actions review={review} url={null} loading={loading} onRefresh={refresh} />
+            <Actions review={review} link={null} loading={loading} onRefresh={refresh} />
           </span>
         </span>
         <span className="pr-meta">
           <span className="pr-repo">{story.repo}</span>
+          {/* The frontmatter's `repo#n` key: no live PR, so no forge to write `!n` for. */}
           <span>#{story.number}</span>
           <LangTag lang={story.lang} />
           {/* One live region for the row's life: only its text changes, so the change is announced. */}
           <span className="story-pr-problem" role="status">
-            {loading ? "Loading PR status…" : problem ? PROBLEM[problem] : ""}
+            {loading ? "Loading PR status…" : problem ? PROBLEM[problem](host) : ""}
           </span>
         </span>
       </div>
