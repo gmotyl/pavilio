@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { forgeCopy } from "../forgeCopy";
-import { fileBlobUrl, fileRawUrl } from "../ReviewMarkdownFile";
 
 describe("forgeCopy", () => {
   it("forgeCopy numbers and urls per forge", () => {
@@ -23,19 +22,23 @@ describe("forgeCopy", () => {
     expect(gl.blobUrl("https://github.com/o/r/pull/7", "abc", "a.md")).toBe("about:blank");
     expect(gh.blobUrl(mr, "abc", "a.md")).toBe("about:blank");
 
-    // GitHub output is exactly today's.
-    const cases: [string, string, string][] = [
-      ["https://github.com/o/r/pull/7", "abc", "docs/a b#.md"],
-      ["https://github.com/o/r/pull/7/", "feat/x", "img/a.png"],
-      ["https://example.com/whatever", "abc", "a.md"],
+    // GitHub output is exactly what the review always produced.
+    const cases: [string, string, string, string, string][] = [
+      ["https://github.com/o/r/pull/7", "abc", "docs/a b#.md", "https://github.com/o/r/blob/abc/docs/a%20b%23.md", "https://github.com/o/r/raw/abc/docs/a%20b%23.md"],
+      ["https://github.com/o/r/pull/7/", "feat/x", "img/a.png", "https://github.com/o/r/blob/feat%2Fx/img/a.png", "https://github.com/o/r/raw/feat%2Fx/img/a.png"],
+      ["https://example.com/whatever", "abc", "a.md", "about:blank", "about:blank"],
     ];
-    for (const [url, head, path] of cases) {
-      expect(gh.blobUrl(url, head, path)).toBe(fileBlobUrl(url, head, path));
-      expect(gh.rawUrl(url, head, path)).toBe(fileRawUrl(url, head, path));
+    for (const [url, head, path, blob, raw] of cases) {
+      expect(gh.blobUrl(url, head, path)).toBe(blob);
+      expect(gh.rawUrl(url, head, path)).toBe(raw);
     }
-    expect(gh.blobUrl("https://github.com/o/r/pull/7", "abc", "docs/a b#.md")).toBe(
-      "https://github.com/o/r/blob/abc/docs/a%20b%23.md",
+    // Relative images resolve against the raw file.
+    expect(new URL("img/x.png", gh.rawUrl("https://github.com/o/r/pull/7", "abc", "docs/a.md")).href).toBe(
+      "https://github.com/o/r/raw/abc/docs/img/x.png",
     );
-    expect(gh.rawUrl("https://github.com/o/r/pull/7", "abc", "img/a.png")).toBe("https://github.com/o/r/raw/abc/img/a.png");
+    // The fallback is a base no relative link resolves against; absolute ones still work.
+    const blank = gh.blobUrl("https://example.com/whatever", "abc", "a.md");
+    expect(() => new URL("setup.md", blank)).toThrow();
+    expect(new URL("https://x.dev/", blank).href).toBe("https://x.dev/");
   });
 });

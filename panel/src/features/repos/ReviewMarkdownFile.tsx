@@ -18,25 +18,6 @@ export function markdownFileSource(content: string): string {
   return prDescriptionSource(stripFrontmatter(content));
 }
 
-/**
- * The page a file's relative links resolve against: the file on GitHub at the
- * reviewed head. A PR URL of another shape gives `about:blank`, which no
- * relative URL resolves against — those links drop, absolute ones still work.
- */
-export function fileBlobUrl(prUrl: string, head: string, path: string): string {
-  return fileUrl(prUrl, "blob", head, path);
-}
-
-/** The file's raw bytes at the head: what its relative images resolve against (a blob page is HTML). */
-export function fileRawUrl(prUrl: string, head: string, path: string): string {
-  return fileUrl(prUrl, "raw", head, path);
-}
-
-function fileUrl(prUrl: string, kind: "blob" | "raw", head: string, path: string): string {
-  const repo = /^(https?:\/\/[^?#]+)\/pull\/\d+\/?$/.exec(prUrl)?.[1];
-  return repo ? `${repo}/${kind}/${encodeURIComponent(head)}/${path.split("/").map(encodeURIComponent).join("/")}` : "about:blank";
-}
-
 interface Props {
   /** The file's speech key: `${prSpeechKey}/f/${path}`. */
   speechKey: string;

@@ -4,7 +4,8 @@ import type { ChecksState, ReviewComment } from "../../../server/lib/prs/provide
 import FileTree, { type TreeFile } from "./FileTree";
 import PrDescription, { prSpeechKey } from "./PrDescription";
 import PrSwitcher from "./PrSwitcher";
-import ReviewMarkdownFile, { fileBlobUrl, fileRawUrl, isMarkdownPath } from "./ReviewMarkdownFile";
+import ReviewMarkdownFile, { isMarkdownPath } from "./ReviewMarkdownFile";
+import { forgeCopy } from "./forgeCopy";
 import { prKey } from "./PrRow";
 import type { ParamsPatch, ReposViewProps } from "./types";
 import { commentCount, groupThreads, type ReviewThread } from "./reviewThreads";
@@ -74,10 +75,11 @@ const CHECKS: Partial<Record<ChecksState, [string, string]>> = {
 
 function PrHeader({ pr, me }: { pr: PullRequest; me: string | null }) {
   const chk = CHECKS[pr.checks];
+  const forge = forgeCopy(pr.forge);
   return (
     <header className="rv-head" data-testid="review-header">
       <h2>
-        {pr.title} <span className="rv-num">#{pr.number}</span>
+        {pr.title} <span className="rv-num">{forge.number(pr.number)}</span>
       </h2>
       <div className="rv-head-row">
         <span className={`rv-state${pr.isDraft ? " rv-state-draft" : ""}`}>{pr.isDraft ? "Draft" : "Open"}</span>
@@ -91,7 +93,7 @@ function PrHeader({ pr, me }: { pr: PullRequest; me: string | null }) {
           </span>
         )}
         <a className="rv-ext" href={pr.url} target="_blank" rel="noopener noreferrer">
-          Open on GitHub ↗
+          Open on {forge.name} ↗
         </a>
       </div>
     </header>
@@ -159,7 +161,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
     };
   }, [pr.repoPath, pr.number, attempt]);
 
-  // Independent of the branch fetch: comments come from GitHub, not the clone.
+  // Independent of the branch fetch: comments come from the forge, not the clone.
   useEffect(() => {
     let cancelled = false;
     setComments(null);
@@ -343,6 +345,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
           comments={threads?.get(current.path) ?? NO_THREADS}
           commentSpeechKey={prSpeechKey(project, pr)}
           me={me}
+          forge={pr.forge}
           rendered={
             // A deleted file has nothing at head to render.
             isMarkdownPath(current.path) && change?.status !== "D" ? (
@@ -351,8 +354,8 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
                 content={current.content}
                 // A codeNote is already shown above the viewer.
                 note={current.codeNote ? undefined : "File content is not loaded."}
-                linkBase={fileBlobUrl(pr.url, current.head, current.path)}
-                imageBase={fileRawUrl(pr.url, current.head, current.path)}
+                linkBase={forgeCopy(pr.forge).blobUrl(pr.url, current.head, current.path)}
+                imageBase={forgeCopy(pr.forge).rawUrl(pr.url, current.head, current.path)}
               />
             ) : undefined
           }
@@ -394,7 +397,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
             </span>
             Description
             <span className="rv-descentry-num" aria-hidden="true">
-              PR #{pr.number}
+              PR {forgeCopy(pr.forge).number(pr.number)}
             </span>
           </button>
           <hr className="rv-sep" />

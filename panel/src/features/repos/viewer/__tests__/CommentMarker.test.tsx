@@ -202,6 +202,34 @@ describe("CommentMarker", () => {
     expect(within(pop).getAllByText("Read-only")).toHaveLength(1);
   });
 
+  it("GitLab thread popover links Reply on GitLab with unchanged layout", () => {
+    const MR = "https://gitlab.example.com/grp/pavilio/-/merge_requests/7";
+    const OTHER = comment({ id: 995, author: "ajanik", body: "Unrelated nit.", createdAt: "2026-11-23T10:30:00Z" });
+    const comments = [ROOT, OTHER, REPLY].map((c) => ({ ...c, url: `${MR}#note_${c.id}` }));
+
+    const { unmount } = render(<CommentMarker thread={thread(comments)} speechKey={KEY} me="gmotyl" />);
+    fireEvent.focus(marker());
+    const github = dialog().innerHTML;
+    unmount();
+
+    render(<CommentMarker thread={thread(comments)} speechKey={KEY} me="gmotyl" forge="gitlab" />);
+    fireEvent.focus(marker());
+    const pop = dialog();
+    expect(pop.querySelector("header")).toHaveTextContent("Line 14 · 3 comments");
+    // A Play (▷) per comment.
+    const msgs = pop.querySelectorAll(".fv-cmmsg");
+    expect(msgs).toHaveLength(3);
+    for (const m of msgs) expect(within(m as HTMLElement).getByRole("button", { name: /^Play comment by / })).toBeInTheDocument();
+    expect(pop.querySelector("footer")).toHaveTextContent(/^Read-only$/);
+    expect(within(pop).getAllByText("Read-only")).toHaveLength(1);
+    // One reply link per root, to its GitLab discussion.
+    const links = within(pop).getAllByRole("link", { name: "Reply on GitLab ↗" });
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([`${MR}#note_990`, `${MR}#note_995`]);
+    expect(within(pop).queryByRole("link", { name: "Reply on GitHub ↗" })).toBeNull();
+    // Everything else is the GitHub popover's markup, word for word.
+    expect(pop.innerHTML.replaceAll("Reply on GitLab", "Reply on GitHub")).toBe(github);
+  });
+
   it("CommentMarker Play speaks the author on a line of its own, so a leading fence still strips", () => {
     const SUGGEST = comment({ body: "```suggestion\nconst prod = true;\n```\nPlease rename this flag." });
     render(<CommentMarker thread={thread([SUGGEST, REPLY])} speechKey={KEY} />);

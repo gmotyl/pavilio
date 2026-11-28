@@ -22,6 +22,7 @@ import {
 import { detectLang, escapeHtml, highlightLines } from "../../markdown/highlight";
 import { ROW_PAGE } from "./rowPage";
 import { CopyIconButton } from "../../shell/CopyIconButton";
+import type { Forge } from "../../../../server/lib/prs/provider";
 import type { ReviewThread } from "../reviewThreads";
 import CommentMarker from "./CommentMarker";
 import { CommentSpeechScope, type TrackCommentSpeech } from "./commentSpeech";
@@ -48,6 +49,8 @@ export interface FileViewerProps {
   commentSpeechKey?: string;
   /** The signed-in login: their comments read as "you". */
   me?: string | null;
+  /** The PR's forge: what the threads' reply links name. */
+  forge?: Forge;
   /**
    * A Markdown file's rendered view. When given, Code mode offers Rendered (the default, this node)
    * and Source (the line table); absent, Code mode is the table alone.
@@ -300,6 +303,7 @@ export default function FileViewer({
   comments,
   commentSpeechKey,
   me,
+  forge,
   rendered,
 }: FileViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -497,7 +501,7 @@ export default function FileViewer({
       <td className="fv-cm">
         {keys.map((k) => {
           const thread = comments.get(k);
-          return thread && <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />;
+          return thread && <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} forge={forge} />;
         })}
       </td>
     );
@@ -562,7 +566,7 @@ export default function FileViewer({
       <p className="fv-unplaced" role="note" data-testid="file-viewer-unplaced">
         On lines not in this diff:
         {unplaced.map(([k, thread]) => (
-          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
+          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} forge={forge} />
         ))}
       </p>
     );
@@ -570,7 +574,7 @@ export default function FileViewer({
       <p className="fv-unplaced" role="note" data-testid="file-viewer-beyond">
         On lines further down:
         {beyond.map(([k, thread]) => (
-          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} />
+          <CommentMarker key={k} thread={thread} speechKey={commentSpeechKey} me={me} forge={forge} />
         ))}
       </p>
     );

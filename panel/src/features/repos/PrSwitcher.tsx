@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PrFilter as PrFilterValue } from "../../preferences/declarations";
 import type { PreferenceSetter } from "../../preferences/usePreference";
+import { forgeCopy } from "./forgeCopy";
 import PrFilter from "./PrFilter";
 import PrRow, { moveListFocus, prKey } from "./PrRow";
 import { PrsNotices } from "./PrsView";
@@ -119,7 +120,7 @@ export default function PrSwitcher({ project, prs, filter, setFilter, current, c
           <>
             <span className="pr-repo">{current.repo}</span>
             <span className="rv-sw-tt">
-              #{current.number} {current.title}
+              {forgeCopy(current.forge).number(current.number)} {current.title}
             </span>
           </>
         ) : (
