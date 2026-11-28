@@ -86,6 +86,14 @@ describe("GitHubGhProvider", () => {
     expect(ghCall.args[ghCall.args.indexOf("--json") + 1].split(",")).toContain("headRefOid");
   });
 
+  it("github rows carry forge github", async () => {
+    const origin = originIs("git@github.com:o/r.git");
+    const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-mixed.json")));
+    const prs = await createGitHubGhProvider({ run }).listOpen(REPO);
+    expect(prs.length).toBeGreaterThan(0);
+    expect(prs.every((p) => p.forge === "github")).toBe(true);
+  });
+
   describe("getPr", () => {
     const view = (state: string) =>
       JSON.stringify({ ...(JSON.parse(fixture("gh-pr-list-mixed.json")) as object[])[0], state });

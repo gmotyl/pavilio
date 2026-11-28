@@ -8,14 +8,12 @@ import {
   type PullRequest,
   type ReviewComment,
 } from "./provider.js";
-import { defaultRunner, GIT_ENV, type RunResult, type Runner } from "./run.js";
+import { fetchPrRefs, runGit } from "./fetchPrRefs.js";
+import { defaultRunner, type RunResult, type Runner } from "./run.js";
 
 // Re-exported: the runner moved to run.ts; existing imports keep working.
 export { defaultRunner, type RunResult, type Runner };
 
-// Shallow clones: up to DEEPEN_ROUNDS × DEEPEN_BY extra commits per side before giving up.
-const DEEPEN_ROUNDS = 5;
-const DEEPEN_BY = 200;
 const PR_FIELDS =
   "number,title,author,isDraft,reviewRequests,reviewDecision,statusCheckRollup,headRefName,headRefOid,baseRefName,updatedAt,url";
 // Older gh (e.g. 2.7) rejects the whole --json list over this one field.
@@ -199,29 +197,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     return { out: await gh(args(PR_FIELDS_NO_HEAD_OID, false), cwd), hasHeadOid: false };
   }
 
-  async function git(args: string[], cwd: string): Promise<string> {
-    let r: RunResult;
-    try {
-      r = await run("git", args, { cwd, env: GIT_ENV });
-    } catch (err) {
-      throw new PrUnavailableError("failed", (err as Error).message);
-    }
-    if (r.code !== 0) throw new PrUnavailableError("failed", r.stderr.trim() || `git ${args[0]} exited ${r.code}`);
-    return r.stdout;
-  }
-
-  /** merge-base exits 1 when the two commits share no ancestor in this clone. */
-  async function hasMergeBase(a: string, b: string, cwd: string): Promise<boolean> {
-    let r: RunResult;
-    try {
-      r = await run("git", ["merge-base", a, b], { cwd, env: GIT_ENV });
-    } catch (err) {
-      throw new PrUnavailableError("failed", (err as Error).message);
-    }
-    if (r.code === 0) return true;
-    if (r.code === 1) return false;
-    throw new PrUnavailableError("failed", r.stderr.trim() || `git merge-base exited ${r.code}`);
-  }
+  const git = (args: string[], cwd: string) => runGit(run, args, cwd);
 
   /**
    * Returns `github.com/owner/repo` of origin for gh's --repo: in a fork clone gh defaults
@@ -311,34 +287,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
       };
       const base = (view.baseRefName ?? "").trim();
       if (!base) throw new PrUnavailableError("failed", `PR #${n} has no base branch`);
-      const headRef = `refs/pavilio/pr/${n}`;
-      const baseRef = `refs/pavilio/pr-base/${n}`;
-      // Touch only refs/pavilio/: --refmap= skips the opportunistic origin/* update,
-      // no FETCH_HEAD, no submodule fetches. `+`: PR heads are force-pushed routinely.
-      const fetch = (extra: string[]) =>
-        git(
-          [
-            "fetch",
-            ...extra,
-            "--no-tags",
-            "--no-write-fetch-head",
-            "--recurse-submodules=no",
-            "--refmap=",
-            "origin",
-            `+pull/${n}/head:${headRef}`,
-            `+refs/heads/${base}:${baseRef}`,
-          ],
-          repoPath,
-        );
-      await fetch([]);
-      const head = (await git(["rev-parse", "--verify", `${headRef}^{commit}`], repoPath)).trim();
-      const baseSha = (await git(["rev-parse", "--verify", `${baseRef}^{commit}`], repoPath)).trim();
-      // A shallow clone may lack the shared ancestor the review diffs against: deepen, bounded.
-      if ((await git(["rev-parse", "--is-shallow-repository"], repoPath)).trim() === "true") {
-        for (let round = 0; round < DEEPEN_ROUNDS && !(await hasMergeBase(baseSha, head, repoPath)); round++) {
-          await fetch([`--deepen=${DEEPEN_BY}`]);
-        }
-      }
+      const { head, base: baseSha } = await fetchPrRefs(run, repoPath, { n, headRefspecSource: `pull/${n}/head`, base });
       return { head, base: baseSha, body: view.body ?? "" };
     },
 
