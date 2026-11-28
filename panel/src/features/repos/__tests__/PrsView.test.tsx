@@ -392,6 +392,13 @@ describe("PrsView", () => {
       expect(within(r).queryByRole("button", { name: /Rebuild/ })).toBeNull();
     });
 
+    it("GitLab row names its rebuild with the MR's !n", async () => {
+      renderPrs(one({ number: 7, forge: "gitlab", url: "https://gitlab.example.com/grp/pavilio/-/merge_requests/7" }), "pavilio", "?view=prs", [STORY]);
+      const r = await row();
+      expect(await within(r).findByRole("button", { name: "Rebuild story for !7" })).toBeEnabled();
+      expect(within(r).queryByRole("button", { name: "Rebuild story for #7" })).toBeNull();
+    });
+
     it("row shows Story and rebuild when the story exists", async () => {
       renderPrs(one(), "pavilio", "?view=prs", [STORY, "pavilio/qa/stories/pavilio-pr-8.md"]);
       const r = await row();

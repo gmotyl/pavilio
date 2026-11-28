@@ -28,7 +28,7 @@ import CommentMarker from "./CommentMarker";
 import { CommentSpeechScope, type TrackCommentSpeech } from "./commentSpeech";
 import "./FileViewer.css";
 
-export interface FileViewerProps {
+interface FileViewerBaseProps {
   path: string;
   diff?: string;
   content?: string;
@@ -43,20 +43,28 @@ export interface FileViewerProps {
   scrollSide?: "old" | "new";
   /** Changes on every request so asking for the same line again re-scrolls and re-flashes. */
   scrollKey?: number | string;
-  /** Review threads keyed `"new:N"` / `"old:N"`. When given, every table gets a comment lane; absent, the markup is unchanged. */
-  comments?: Map<string, ReviewThread>;
   /** The base speech key for the threads (`prSpeechKey`). */
   commentSpeechKey?: string;
   /** The signed-in login: their comments read as "you". */
   me?: string | null;
-  /** The PR's forge: what the threads' reply links name. */
-  forge?: Forge;
   /**
    * A Markdown file's rendered view. When given, Code mode offers Rendered (the default, this node)
    * and Source (the line table); absent, Code mode is the table alone.
    */
   rendered?: ReactNode;
 }
+
+/** Threads come with their forge: a reply link must never guess which forge it names. */
+type FileViewerCommentProps =
+  | { comments?: undefined; forge?: Forge }
+  | {
+      /** Review threads keyed `"new:N"` / `"old:N"`. When given, every table gets a comment lane; absent, the markup is unchanged. */
+      comments: Map<string, ReviewThread>;
+      /** The PR's forge: what the threads' reply links name. */
+      forge: Forge;
+    };
+
+export type FileViewerProps = FileViewerBaseProps & FileViewerCommentProps;
 
 const SPLIT_MIN_WIDTH = 720;
 const FLASH_MS = 1300;
@@ -562,7 +570,8 @@ export default function FileViewer({
     );
   } else {
     totalRows = pairs ? pairs.length : visible.length;
-    unplacedNote = unplaced.length > 0 && (
+    // `comments` narrows `forge`: both are empty when the memo found no threads.
+    unplacedNote = comments && unplaced.length > 0 && (
       <p className="fv-unplaced" role="note" data-testid="file-viewer-unplaced">
         On lines not in this diff:
         {unplaced.map(([k, thread]) => (
@@ -570,7 +579,7 @@ export default function FileViewer({
         ))}
       </p>
     );
-    beyondNote = beyond.length > 0 && (
+    beyondNote = comments && beyond.length > 0 && (
       <p className="fv-unplaced" role="note" data-testid="file-viewer-beyond">
         On lines further down:
         {beyond.map(([k, thread]) => (

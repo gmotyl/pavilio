@@ -25,7 +25,7 @@ interface Props {
   /** The signed-in login: their comments read as "you". */
   me?: string | null;
   /** The PR's forge: where "Reply on …" sends you. */
-  forge?: Forge;
+  forge: Forge;
 }
 
 type Position = { top: number; left: number };
@@ -117,7 +117,7 @@ const ChatIcon = () => (
  * A review thread's marker in the file viewer's comment lane. Hover or focus opens the thread
  * (read-only) in a portal popover; it closes 150 ms after the pointer leaves both, or on Escape.
  */
-export default function CommentMarker({ thread, speechKey, me, forge = "github" }: Props) {
+export default function CommentMarker({ thread, speechKey, me, forge }: Props) {
   const speech = usePageSpeech();
   const host = usePanelSpeech();
   const [open, setOpen] = useState(false);

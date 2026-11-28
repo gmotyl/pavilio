@@ -7,6 +7,7 @@ import { useFileIndexState } from "../explorer/useFileIndex";
 import { explainable, explainRunLine } from "../projects/runPrompt";
 import { useLaunchRun } from "../projects/useLaunchRun";
 import { launcherBlockedReason, useProjectLauncher } from "../projects/useProjectLauncher";
+import { forgeCopy } from "./forgeCopy";
 import PrFilter from "./PrFilter";
 import { settleExplaining, startExplaining, useExplaining, type Explaining } from "./explainingStore";
 import PrRow, { moveListFocus, prKey } from "./PrRow";
@@ -277,7 +278,7 @@ function StoryActions({
         className="pr-act-icon"
         data-testid={`pr-rebuild-${prKey(pr)}`}
         tabIndex={tabIndex}
-        aria-label={`Rebuild story for #${pr.number}`}
+        aria-label={`Rebuild story for ${forgeCopy(pr.forge).number(pr.number)}`}
         {...inert}
         title={line ? "Rebuild story" : launchTitle}
         onClick={launch}

@@ -117,6 +117,22 @@ describe("PrDescription", () => {
     expect(view().querySelector("[data-play-from-here]")).not.toBeNull();
   });
 
+  it("Description card names the PR the forge's way", () => {
+    const { unmount } = render(
+      <Host>
+        <PrDescription project="pavilio" pr={pr({ number: 7 })} body="Body." />
+      </Host>,
+    );
+    expect(view().querySelector(".rv-desc-num")).toHaveTextContent(/^PR #7$/);
+    unmount();
+    render(
+      <Host>
+        <PrDescription project="pavilio" pr={pr({ number: 7, forge: "gitlab", url: "https://gitlab.example.com/grp/pavilio/-/merge_requests/7" })} body="Body." />
+      </Host>,
+    );
+    expect(view().querySelector(".rv-desc-num")).toHaveTextContent(/^PR !7$/);
+  });
+
   it("shows a loading line until the body arrives", () => {
     render(
       <Host>

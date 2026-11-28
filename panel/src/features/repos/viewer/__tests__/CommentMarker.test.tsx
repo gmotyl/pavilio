@@ -65,7 +65,7 @@ const Inline = () => (
     <button type="button" data-testid="before">
       before
     </button>
-    <CommentMarker thread={TWO} speechKey={KEY} />
+    <CommentMarker thread={TWO} speechKey={KEY} forge="github" />
     <button type="button" data-testid="after">
       after
     </button>
@@ -96,19 +96,19 @@ afterEach(() => {
 
 describe("CommentMarker", () => {
   it("CommentMarker shows a count badge only for 2+ comments", () => {
-    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" forge="github" />);
     expect(marker()).toHaveAccessibleName("2 comments on line 14");
     expect(marker().querySelector("svg")).not.toBeNull();
     expect(marker().querySelector(".fv-cmk")).toHaveTextContent("2");
     unmount();
 
-    render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} forge="github" />);
     expect(marker()).toHaveAccessibleName("1 comment on line 14");
     expect(marker().querySelector(".fv-cmk")).toBeNull();
   });
 
   it("CommentMarker opens the thread on hover and on focus", () => {
-    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" forge="github" />);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(marker()).toHaveAttribute("aria-haspopup", "dialog");
     expect(marker()).toHaveAttribute("aria-expanded", "false");
@@ -130,13 +130,13 @@ describe("CommentMarker", () => {
     expect(msgs[1]).not.toHaveTextContent("gmotyl");
     unmount();
 
-    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" forge="github" />);
     act(() => marker().focus());
     expect(dialog()).toBeInTheDocument();
   });
 
   it("CommentMarker closes on pointer leave and Escape", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
     fireEvent.pointerLeave(marker(), { pointerType: "mouse" });
     // Moving onto the popover within the grace period keeps it open.
@@ -158,7 +158,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker renders comment bodies untrusted", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     const bodies = within(dialog()).getAllByTestId("md");
     expect(bodies).toHaveLength(2);
@@ -170,7 +170,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker shows the read-only note once and a reply link to GitHub", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     const footer = dialog().querySelector("footer")!;
     expect(footer).toHaveTextContent(/^Read-only$/);
@@ -189,7 +189,7 @@ describe("CommentMarker", () => {
       url: "https://github.com/gmotyl/pavilio/pull/7#discussion_r995",
     });
     // groupThreads sorts by time: the roots' comments interleave.
-    render(<CommentMarker thread={thread([ROOT, OTHER, REPLY])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([ROOT, OTHER, REPLY])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     const pop = dialog();
     const links = within(pop).getAllByRole("link", { name: "Reply on GitHub ↗" });
@@ -207,7 +207,7 @@ describe("CommentMarker", () => {
     const OTHER = comment({ id: 995, author: "ajanik", body: "Unrelated nit.", createdAt: "2026-11-23T10:30:00Z" });
     const comments = [ROOT, OTHER, REPLY].map((c) => ({ ...c, url: `${MR}#note_${c.id}` }));
 
-    const { unmount } = render(<CommentMarker thread={thread(comments)} speechKey={KEY} me="gmotyl" />);
+    const { unmount } = render(<CommentMarker thread={thread(comments)} speechKey={KEY} me="gmotyl" forge="github" />);
     fireEvent.focus(marker());
     const github = dialog().innerHTML;
     unmount();
@@ -230,9 +230,17 @@ describe("CommentMarker", () => {
     expect(pop.innerHTML.replaceAll("Reply on GitLab", "Reply on GitHub")).toBe(github);
   });
 
+  it("GitLab comment without a web URL reads Reply on GitLab, unlinked", () => {
+    render(<CommentMarker thread={thread([{ ...ROOT, url: "" }])} speechKey={KEY} forge="gitlab" />);
+    fireEvent.focus(marker());
+    const pop = dialog();
+    expect(within(pop).queryByRole("link")).toBeNull();
+    expect(pop.querySelector(".fv-cmreply")).toHaveTextContent(/^Reply on GitLab$/);
+  });
+
   it("CommentMarker Play speaks the author on a line of its own, so a leading fence still strips", () => {
     const SUGGEST = comment({ body: "```suggestion\nconst prod = true;\n```\nPlease rename this flag." });
-    render(<CommentMarker thread={thread([SUGGEST, REPLY])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([SUGGEST, REPLY])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     const spoken = stripToSpeakableText(speech.speakDocument.mock.calls[0][0].text);
@@ -246,7 +254,7 @@ describe("CommentMarker", () => {
 
   it("CommentMarker Play all keeps the replies after a comment whose code fence never closes", () => {
     const OPEN = comment({ body: "```suggestion\nconst prod = true;" });
-    render(<CommentMarker thread={thread([OPEN, REPLY])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([OPEN, REPLY])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     const spoken = stripToSpeakableText(speech.speakDocument.mock.calls[0][0].text);
@@ -275,7 +283,7 @@ describe("CommentMarker", () => {
         "Fixed in 78476b3. Speech text is now `author:` + blank line + body, in Play and Play all, so `strip.ts`'s line-anchored fence matcher sees a leading fence. " +
         "The test runs a comment that starts with a ```suggestion block through the real `stripToSpeakableText` and asserts the trailing prose and the reply survive.",
     });
-    render(<CommentMarker thread={thread([KILO, FIXED])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([KILO, FIXED])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     const units = preparePage(speech.speakDocument.mock.calls[0][0].text, "en").units.map((u) => u.text);
@@ -290,7 +298,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker stops the speech it started when it unmounts", () => {
-    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     fireEvent.click(within(dialog()).getAllByRole("button", { name: /^Play comment by / })[1]);
@@ -302,13 +310,13 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker unmounting without playing stops nothing", () => {
-    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     unmount();
     expect(speech.stopDocument).not.toHaveBeenCalled();
   });
 
   it("CommentMarker Play speaks one comment under its key", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" forge="github" />);
     fireEvent.focus(marker());
     const [first, second] = within(dialog()).getAllByRole("button", { name: /^Play comment by / });
     fireEvent.click(first);
@@ -318,7 +326,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker Play all speaks the thread in order", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     expect(speech.speakDocument).toHaveBeenCalledTimes(1);
@@ -332,7 +340,7 @@ describe("CommentMarker", () => {
     const OTHER = comment({ id: 995, author: "ajanik", body: "Unrelated nit.", createdAt: "2026-11-23T10:30:00Z" });
     const OTHER_REPLY = comment({ id: 996, replyTo: 995, author: "mnowak", body: "Fixed.", createdAt: "2026-11-23T11:30:00Z" });
     // groupThreads sorts by time: the two conversations interleave.
-    render(<CommentMarker thread={thread([ROOT, OTHER, REPLY, OTHER_REPLY])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([ROOT, OTHER, REPLY, OTHER_REPLY])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(within(dialog()).getByRole("button", { name: "Play all comments on line 14" }));
     expect(speech.speakDocument).toHaveBeenCalledTimes(1);
@@ -343,7 +351,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker one-comment thread has a single Play, speaking the thread", () => {
-    render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([ROOT])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     const pop = dialog();
     // Its name is the one comment it reads, and holds the visible "Play" (WCAG 2.5.3).
@@ -357,7 +365,7 @@ describe("CommentMarker", () => {
 
   it("CommentMarker Play names hold their visible text and tell the comments apart", () => {
     host.states.set(`${KEY}/t/990`, "paused");
-    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} me="gmotyl" forge="github" />);
     fireEvent.focus(marker());
     const all = screen.getByTestId("comment-play-thread");
     expect(all).toHaveTextContent("Resume");
@@ -378,7 +386,7 @@ describe("CommentMarker", () => {
     ["paused", "Resume comment by gmotyl", "resume", "paused"],
   ])("CommentMarker comment Play while its key is %s reads %s", (state, label, icon, lit) => {
     host.states.set(`${KEY}/c/991`, state);
-    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     const button = screen.getByTestId("comment-play-991");
     expect(button).toHaveAccessibleName(label);
@@ -393,23 +401,23 @@ describe("CommentMarker", () => {
 
   it("CommentMarker shows the red pause while the run waits on synthesis, then the pause once audio plays", () => {
     const key = `${KEY}/t/990`;
-    const { rerender } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    const { rerender } = render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(screen.getByTestId("comment-play-thread"));
     expect(speech.speakDocument).toHaveBeenCalledTimes(1);
     // The host's run starts before unit 0 is in hand: `stalled`, the speech row's red.
     host.states.set(key, "stalled");
-    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     const play = screen.getByTestId("comment-play-thread");
     expect(play).toHaveAttribute("data-speech", "stalled");
     expect(play).toHaveAttribute("data-icon", "pause");
     expect(play).toHaveTextContent("Pause");
     host.states.set(key, "speaking");
-    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     expect(play).toHaveAttribute("data-speech", "speaking");
     expect(play).toHaveAccessibleName("Pause all comments on line 14");
     host.states.set(key, "heard");
-    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     expect(play).not.toHaveAttribute("data-speech");
     expect(play).toHaveAccessibleName("Play all comments on line 14");
     expect(play).toHaveTextContent("Play all");
@@ -418,7 +426,7 @@ describe("CommentMarker", () => {
   it("CommentMarker Pause pauses its key's run and Resume resumes it, starting nothing new", () => {
     host.states.set(`${KEY}/c/990`, "speaking");
     host.states.set(`${KEY}/t/990`, "paused");
-    const { rerender } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    const { rerender } = render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     fireEvent.click(screen.getByTestId("comment-play-990"));
     expect(host.onPause).toHaveBeenCalledWith(`${KEY}/c/990`);
@@ -427,13 +435,13 @@ describe("CommentMarker", () => {
     expect(speech.speakDocument).not.toHaveBeenCalled();
     // Waiting on synthesis is a run in hand too: its press pauses.
     host.states.set(`${KEY}/c/991`, "stalled");
-    rerender(<CommentMarker thread={TWO} speechKey={KEY} />);
+    rerender(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.click(screen.getByTestId("comment-play-991"));
     expect(host.onPause).toHaveBeenLastCalledWith(`${KEY}/c/991`);
   });
 
   it("CommentMarker closing the popover keeps its comment playing and reopening shows the run", () => {
-    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    const { unmount } = render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
     fireEvent.click(screen.getByTestId("comment-play-990"));
     host.states.set(`${KEY}/c/990`, "speaking");
@@ -447,13 +455,13 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker without a speech key renders no Play buttons", () => {
-    render(<CommentMarker thread={TWO} />);
+    render(<CommentMarker thread={TWO} forge="github" />);
     fireEvent.focus(marker());
     expect(within(dialog()).queryByRole("button", { name: /Play/ })).toBeNull();
   });
 
   it("CommentMarker keeps a keyboard-opened popover open when the pointer leaves", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     act(() => marker().focus());
     fireEvent.pointerEnter(marker(), { pointerType: "mouse" });
     fireEvent.pointerLeave(marker(), { pointerType: "mouse" });
@@ -500,7 +508,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker Tab off the last control with nothing after leaves focus on the closed marker", () => {
-    render(<CommentMarker thread={TWO} speechKey={KEY} />);
+    render(<CommentMarker thread={TWO} speechKey={KEY} forge="github" />);
     act(() => marker().focus());
     const link = within(dialog()).getByRole("link", { name: "Reply on GitHub ↗" });
     act(() => link.focus());
@@ -521,7 +529,7 @@ describe("CommentMarker", () => {
   it("CommentMarker Tab off the last control skips hidden controls after the marker", () => {
     render(
       <div>
-        <CommentMarker thread={TWO} speechKey={KEY} />
+        <CommentMarker thread={TWO} speechKey={KEY} forge="github" />
         <button type="button" hidden data-testid="hidden-attr">
           hidden
         </button>
@@ -555,7 +563,7 @@ describe("CommentMarker", () => {
   it("CommentMarker Tab off the last control with only hidden controls after lands on the closed marker", () => {
     render(
       <div>
-        <CommentMarker thread={TWO} speechKey={KEY} />
+        <CommentMarker thread={TWO} speechKey={KEY} forge="github" />
         <button type="button" hidden>
           hidden
         </button>
@@ -584,7 +592,7 @@ describe("CommentMarker", () => {
   });
 
   it("CommentMarker reply links only to http(s) urls", () => {
-    render(<CommentMarker thread={thread([comment({ url: "javascript:alert(1)" })])} speechKey={KEY} />);
+    render(<CommentMarker thread={thread([comment({ url: "javascript:alert(1)" })])} speechKey={KEY} forge="github" />);
     fireEvent.focus(marker());
     const pop = dialog();
     expect(pop).toHaveTextContent("Reply on GitHub");

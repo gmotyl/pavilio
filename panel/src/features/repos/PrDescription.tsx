@@ -3,6 +3,7 @@ import MarkdownRenderer from "../markdown/MarkdownRenderer";
 import { SpeakingToolbar } from "../projects/ViewerActions";
 import { docSpeechKey } from "../speech/docKey";
 import { PagePlayFromHere } from "../speech/PagePlayFromHere";
+import { forgeCopy } from "./forgeCopy";
 import type { PullRequest } from "./usePrs";
 import "./Review.css";
 
@@ -94,7 +95,7 @@ export default function PrDescription({ project, pr, body }: Props) {
         {(play) => (
           <>
             <h4 className="rv-desc-title">Description</h4>
-            <span className="rv-desc-num">PR #{pr.number}</span>
+            <span className="rv-desc-num">PR {forgeCopy(pr.forge).number(pr.number)}</span>
             {play}
           </>
         )}

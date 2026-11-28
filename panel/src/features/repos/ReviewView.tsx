@@ -110,6 +110,7 @@ interface ReviewProps {
 
 /** One PR's review; keyed by PR so switching starts from a clean slate and drops stale responses. */
 function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
+  const forge = forgeCopy(pr.forge);
   const [attempt, setAttempt] = useState(0);
   const [opened, setOpened] = useState<Opened>({ status: "loading" });
   const [description, setDescription] = useState<Description>(null);
@@ -354,8 +355,8 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
                 content={current.content}
                 // A codeNote is already shown above the viewer.
                 note={current.codeNote ? undefined : "File content is not loaded."}
-                linkBase={forgeCopy(pr.forge).blobUrl(pr.url, current.head, current.path)}
-                imageBase={forgeCopy(pr.forge).rawUrl(pr.url, current.head, current.path)}
+                linkBase={forge.blobUrl(pr.url, current.head, current.path)}
+                imageBase={forge.rawUrl(pr.url, current.head, current.path)}
               />
             ) : undefined
           }
@@ -397,7 +398,7 @@ function PrReview({ project, pr, me, params, setParams }: ReviewProps) {
             </span>
             Description
             <span className="rv-descentry-num" aria-hidden="true">
-              PR {forgeCopy(pr.forge).number(pr.number)}
+              PR {forge.number(pr.number)}
             </span>
           </button>
           <hr className="rv-sep" />
