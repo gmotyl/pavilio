@@ -31,6 +31,15 @@ function linkedEntry(repoPath: string, listRepos: () => RepoEntry[] = linkedRepo
   return matches.find((r) => r.forge !== undefined) ?? matches[0];
 }
 
+/**
+ * The forge override for a project's own entry: the path-wide `linkedEntry` rule first, so
+ * a repo path has one forge on every route and the path-keyed caches never mix forges.
+ */
+function targetOf(entry: RepoEntry): { repoPath: string; forge?: Forge } {
+  const repoPath = repoRoot(entry);
+  return { repoPath, forge: linkedEntry(repoPath)?.forge ?? entry.forge };
+}
+
 /** The present linked repo at `repo`, else null: the path comes from the client. */
 function linkedTarget(repo: string): { repoPath: string; forge?: Forge } | null {
   const target = resolve(expandHome(repo));
@@ -119,7 +128,7 @@ export function createPrsRouter(
     const [me, results] = await Promise.all([
       // One identity for every forge, always from gh.
       providers.github.whoami().catch(() => ""),
-      Promise.allSettled(repos.map((r) => listOpen({ repoPath: repoRoot(r), forge: r.forge }))),
+      Promise.allSettled(repos.map((r) => listOpen(targetOf(r)))),
     ]);
 
     const prs: PullRequest[] = [];
@@ -149,7 +158,7 @@ export function createPrsRouter(
     if (!entry) return res.status(404).json({ error: "Repo not found" });
 
     try {
-      const pr = await getPr({ repoPath: repoRoot(entry), forge: entry.forge }, Number(raw), req.query.fresh === "1");
+      const pr = await getPr(targetOf(entry), Number(raw), req.query.fresh === "1");
       // Label by the repos.json name, as the list does.
       res.json({ ...pr, repo: entry.name });
     } catch (e) {

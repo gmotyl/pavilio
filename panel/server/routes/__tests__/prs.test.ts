@@ -431,6 +431,49 @@ describe("/api/prs", () => {
       expect(gitlab.reviewComments).toHaveBeenCalledWith(shared, 2);
     });
 
+    it("one forge per repo path: every route from any linking project reaches the forced forge", async () => {
+      const shared = join(projects.root(), "one-forge-repo");
+      mkdirSync(shared);
+      // "aa-other" lists first and sets no forge; "zz-forcer" forces gitlab on the same path.
+      for (const [name, entry] of [
+        ["aa-other", { name: "other", path: shared }],
+        ["zz-forcer", { name: "forcer", path: shared, forge: "gitlab" }],
+      ] as const) {
+        const dir = join(projects.dir(), name);
+        mkdirSync(dir);
+        writeFileSync(join(dir, "PROJECT.md"), `# ${name}\n`);
+        writeFileSync(join(dir, "repos.json"), JSON.stringify([entry]));
+      }
+      const github = fakeProvider("github", (p) => [pr(p, 9, "2026-11-20T00:00:00Z")]);
+      const gitlab = fakeProvider("gitlab", (p) => [{ ...pr(p, 2, "2026-11-21T00:00:00Z"), forge: "gitlab" as const }]);
+      // Without the override the path would resolve to GitHub.
+      const resolveForge = async (e: { repoPath: string; forge?: Forge }): Promise<ResolvedForge> =>
+        e.forge === "gitlab"
+          ? { forge: "gitlab", host: "git.example.org", projectPath: "g/shared" }
+          : { forge: "github", host: "github.com", projectPath: "o/shared" };
+      const app = makeApp(createPrsRouter({ github, gitlab }, { resolveForge }), "/api/prs");
+
+      const fromOther = await request(app).get("/api/prs?project=aa-other");
+      expect(fromOther.body.prs.map((p: PullRequest) => [p.forge, p.repo])).toEqual([["gitlab", "other"]]);
+      // The path-keyed cache serves the same forge's rows to the forcing project.
+      const fromForcer = await request(app).get("/api/prs?project=zz-forcer");
+      expect(fromForcer.body.prs.map((p: PullRequest) => [p.forge, p.repo])).toEqual([["gitlab", "forcer"]]);
+      expect(gitlab.listOpen).toHaveBeenCalledTimes(1);
+
+      const one = await request(app).get("/api/prs/one").query({ project: "aa-other", repo: "other", number: "2" });
+      expect(one.status).toBe(200);
+      expect(gitlab.getPr).toHaveBeenCalledWith(shared, 2);
+      const open = await request(app).post("/api/prs/open").send({ repo: shared, number: 2 });
+      expect(open.body.body).toBe("gitlab");
+      const comments = await request(app).get("/api/prs/comments").query({ repo: shared, number: "2" });
+      expect(comments.status).toBe(200);
+      expect(gitlab.reviewComments).toHaveBeenCalledWith(shared, 2);
+      expect(github.listOpen).not.toHaveBeenCalled();
+      expect(github.getPr).not.toHaveBeenCalled();
+      expect(github.openPr).not.toHaveBeenCalled();
+      expect(github.reviewComments).not.toHaveBeenCalled();
+    });
+
     it("one failure returns reason and host", async () => {
       const { github, gitlab, app } = setupMixed();
       gitlab.getPr.mockRejectedValueOnce(new PrUnavailableError("glab-unauthenticated", "401", "git.example.com"));
