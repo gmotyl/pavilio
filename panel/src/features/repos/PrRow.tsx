@@ -1,6 +1,7 @@
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import type { ChecksState, PrState } from "../../../server/lib/prs/provider";
 import type { PullRequest } from "./usePrs";
+import { forgeCopy } from "./forgeCopy";
 import "./Prs.css";
 
 interface Props {
@@ -141,7 +142,7 @@ export default function PrRow({
       </span>
       <span className="pr-meta">
         <span className="pr-repo">{pr.repo}</span>
-        <span>#{pr.number}</span>
+        <span>{forgeCopy(pr.forge).number(pr.number)}</span>
         <span className="pr-av" style={{ background: hue(pr.author) }} title={pr.author} aria-hidden="true">
           {pr.author.slice(0, 2).toUpperCase()}
         </span>

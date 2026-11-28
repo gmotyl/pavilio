@@ -15,26 +15,38 @@ import type { ReposViewProps } from "./types";
 import type { PrsState, PullRequest } from "./usePrs";
 import "./Prs.css";
 
-const RESTING: Record<Exclude<Unavailable, "failed">, ReactNode> = {
-  "unknown-forge": "No GitHub remote",
-  "gh-missing": (
+/** Why a repo lists no PRs and how to fix it; `host` is the origin host when the server knows it. */
+const RESTING: Record<Exclude<Unavailable, "failed">, (host: string | undefined) => ReactNode> = {
+  "unknown-forge": (host) =>
+    host ? (
+      <>
+        Unknown forge for <code>{host}</code> — run <code>glab auth login --hostname {host}</code> or set{" "}
+        <code>forge</code> in repos.json
+      </>
+    ) : (
+      // No origin URL at all: there is no host to log in to.
+      <>
+        Unknown forge — set <code>forge</code> in repos.json
+      </>
+    ),
+  "gh-missing": () => (
     <>
       <code>gh</code> is not installed
     </>
   ),
-  "gh-unauthenticated": (
+  "gh-unauthenticated": () => (
     <>
       Run <code>gh auth login</code>
     </>
   ),
-  "glab-missing": (
+  "glab-missing": () => (
     <>
       <code>glab</code> is not installed
     </>
   ),
-  "glab-unauthenticated": (
+  "glab-unauthenticated": (host) => (
     <>
-      Run <code>glab auth login</code>
+      Run <code>{host ? `glab auth login --hostname ${host}` : "glab auth login"}</code>
     </>
   ),
 };
@@ -50,7 +62,7 @@ export function PrsNotices({ prs, testIdPrefix = "prs" }: { prs: PrsState; testI
       )}
       {prs.unavailable.length > 0 && (
         <ul className="prs-unavailable" aria-label="Unavailable repositories">
-          {prs.unavailable.map(({ repo, reason }) => (
+          {prs.unavailable.map(({ repo, reason, host }) => (
             <li key={repo}>
               <span className="pr-repo">{repo}</span>
               {reason === "failed" ? (
@@ -61,7 +73,7 @@ export function PrsNotices({ prs, testIdPrefix = "prs" }: { prs: PrsState; testI
                   </button>
                 </>
               ) : (
-                <span>{RESTING[reason]}</span>
+                <span>{RESTING[reason](host)}</span>
               )}
             </li>
           ))}

@@ -7,6 +7,8 @@ export type { PullRequest };
 export interface UnavailableRepo {
   repo: string;
   reason: Unavailable;
+  /** The origin host, when the server knows it (`unknown-forge`, `glab-*`). */
+  host?: string;
 }
 
 export interface PrsResponse {
