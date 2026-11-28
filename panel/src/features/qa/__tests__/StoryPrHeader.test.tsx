@@ -136,7 +136,7 @@ describe("StoryPrHeader", () => {
         { unavailable: "glab-unauthenticated", host: "git.cps.metro-markets.org" },
         "Run glab auth login --hostname git.cps.metro-markets.org",
       ],
-      [{ unavailable: "glab-unauthenticated" }, "glab is not authenticated"],
+      [{ unavailable: "glab-unauthenticated" }, "Run glab auth login"],
       [{ unavailable: "unknown-forge", host: "git.example.org" }, "Unknown forge for git.example.org"],
       [{ unavailable: "unknown-forge" }, "Unknown forge"],
     ] as const;
