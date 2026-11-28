@@ -12,12 +12,13 @@ interface Call {
   cmd: string;
   args: string[];
   cwd: string;
+  env?: Record<string, string>;
 }
 
 function fakeRunner(respond: (cmd: string, args: string[]) => RunResult | Error): { run: Runner; calls: Call[] } {
   const calls: Call[] = [];
   const run: Runner = async (cmd, args, opts) => {
-    calls.push({ cmd, args, cwd: opts.cwd });
+    calls.push({ cmd, args, cwd: opts.cwd, env: opts.env });
     const r = respond(cmd, args);
     if (r instanceof Error) throw r;
     return r;
@@ -136,7 +137,13 @@ describe("GitLabGlabProvider", () => {
   });
 
   it("reviewers lists only unreviewed reviewers", async () => {
-    const pr = await listOne(mr({ reviewers: { nodes: [reviewer("alice", "UNREVIEWED"), reviewer("bob", "REVIEWED")] } }));
+    const nodes = [
+      reviewer("alice", "UNREVIEWED"),
+      reviewer("bob", "REVIEWED"),
+      reviewer("dave", "APPROVED"),
+      reviewer("erin", "REQUESTED_CHANGES"),
+    ];
+    const pr = await listOne(mr({ reviewers: { nodes } }));
     expect(pr.reviewers).toEqual(["alice"]);
   });
 
@@ -204,5 +211,220 @@ describe("GitLabGlabProvider", () => {
       expect((err as PrUnavailableError).reason).toBe("failed");
       expect(calls).toHaveLength(0);
     }
+  });
+
+  it("openPr fetches the merge-request head and returns the description", async () => {
+    const HEAD = "a".repeat(40);
+    const BASE = "b".repeat(40);
+    for (const [description, body] of [
+      ["Fixes checkout", "Fixes checkout"],
+      [null, ""],
+    ] as const) {
+      const { run, calls } = fakeRunner((cmd, args) => {
+        if (cmd === "glab") return oneOut(mr({ state: "opened", targetBranch: "develop", description }));
+        if (args[0] === "fetch") return ok("");
+        if (args[0] === "rev-parse" && args[1] === "--verify") return ok(args[2].includes("pr-base") ? `${BASE}\n` : `${HEAD}\n`);
+        if (args[0] === "rev-parse" && args[1] === "--is-shallow-repository") return ok("false\n");
+        return new Error(`unexpected ${cmd} ${args.join(" ")}`);
+      });
+      const out = await createGitLabGlabProvider({ run, resolve }).openPr(REPO, 244);
+      expect(out).toEqual({ head: HEAD, base: BASE, body });
+
+      const glab = calls.filter((c) => c.cmd === "glab");
+      expect(glab).toHaveLength(1);
+      expect(glab[0].args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", HOST]);
+      const query = field(glab[0].args, "-f", "query")!;
+      expect(query).toContain("targetBranch");
+      expect(query).toContain("description");
+      expect(field(glab[0].args, "-f", "iid")).toBe("244");
+
+      const fetch = calls.find((c) => c.cmd === "git" && c.args[0] === "fetch")!;
+      expect(fetch.cwd).toBe(REPO);
+      expect(fetch.env).toMatchObject({ GIT_TERMINAL_PROMPT: "0" });
+      expect(fetch.args).toEqual([
+        "fetch",
+        "--no-tags",
+        "--no-write-fetch-head",
+        "--recurse-submodules=no",
+        "--refmap=",
+        "origin",
+        "+refs/merge-requests/244/head:refs/pavilio/pr/244",
+        "+refs/heads/develop:refs/pavilio/pr-base/244",
+      ]);
+    }
+  });
+
+  const note = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    type: "DiffNote",
+    body: "Looks off",
+    author: { username: "alice" },
+    created_at: "2026-11-27T11:00:00Z",
+    position: { new_path: "src/cart.ts", new_line: 12, old_line: null, head_sha: "c".repeat(40) },
+    ...over,
+  });
+  const discussionsOut = (...pages: unknown[][]) => ok(pages.map((p) => JSON.stringify(p)).join(""));
+  const WEB = `https://${HOST}/${PROJECT}/-/merge_requests/40`;
+
+  async function comments(out: RunResult) {
+    const { run, calls } = fakeRunner(() => out);
+    return { result: await createGitLabGlabProvider({ run, resolve }).reviewComments(REPO, 40), calls };
+  }
+
+  it("reviewComments requests paginated discussions with an encoded nested path", async () => {
+    const { calls } = await comments(discussionsOut([]));
+    const api = calls;
+    expect(api).toHaveLength(1);
+    expect(api[0].cmd).toBe("glab");
+    expect(api[0].cwd).toBe(REPO);
+    expect(api[0].args).toEqual([
+      "api",
+      "--hostname",
+      HOST,
+      "--paginate",
+      `projects/${encodeURIComponent(PROJECT)}/merge_requests/40/discussions`,
+    ]);
+    expect(api[0].args[4]).toContain("group%2Fsub%2Fshop");
+  });
+
+  it("diff notes map to review comments with sides and replies", async () => {
+    const { result } = await comments(
+      discussionsOut([
+        {
+          id: "d1",
+          notes: [
+            note({ id: 101 }),
+            note({
+              id: 102,
+              body: "Agreed",
+              author: { username: "bob" },
+              created_at: "2026-11-27T12:00:00Z",
+              position: { new_path: "src/cart.ts", new_line: null, old_line: 7, head_sha: "d".repeat(40) },
+            }),
+          ],
+        },
+      ]),
+    );
+    expect(result).toEqual([
+      {
+        id: 101,
+        replyTo: null,
+        path: "src/cart.ts",
+        line: 12,
+        side: "new",
+        author: "alice",
+        body: "Looks off",
+        createdAt: "2026-11-27T11:00:00Z",
+        url: `${WEB}#note_101`,
+        commitId: "c".repeat(40),
+      },
+      {
+        id: 102,
+        replyTo: 101,
+        path: "src/cart.ts",
+        line: 7,
+        side: "old",
+        author: "bob",
+        body: "Agreed",
+        createdAt: "2026-11-27T12:00:00Z",
+        url: `${WEB}#note_102`,
+        commitId: "d".repeat(40),
+      },
+    ]);
+  });
+
+  it("non-diff and line-less notes are dropped", async () => {
+    const { result } = await comments(
+      discussionsOut([
+        { id: "d1", notes: [note({ id: 201, type: "DiscussionNote", position: undefined })] },
+        { id: "d2", notes: [note({ id: 202, type: null, position: undefined })] },
+        {
+          id: "d3",
+          notes: [note({ id: 203, position: { new_path: "a.ts", new_line: null, old_line: null, head_sha: "e".repeat(40) } })],
+        },
+        { id: "d4", notes: [note({ id: 204, position: null })] },
+        { id: "d5", notes: [note({ id: 205 })] },
+      ]),
+    );
+    expect(result.map((c) => c.id)).toEqual([205]);
+  });
+
+  it("paginated pages are all parsed", async () => {
+    const { result } = await comments(
+      discussionsOut(
+        [{ id: "d1", notes: [note({ id: 301, body: "has ][ inside" })] }],
+        [{ id: "d2", notes: [note({ id: 302 })] }],
+        [{ id: "d3", notes: [note({ id: 303 })] }],
+      ),
+    );
+    expect(result.map((c) => c.id)).toEqual([301, 302, 303]);
+    expect(result[0].body).toBe("has ][ inside");
+  });
+
+  const enoent = () => Object.assign(new Error("spawn glab ENOENT"), { code: "ENOENT" });
+  const fail = (stderr: string, code = 1): RunResult => ({ code, stdout: "", stderr });
+
+  /** Runs every entry point against one glab response; returns the errors. */
+  async function allErrors(respond: (cmd: string, args: string[]) => RunResult | Error) {
+    const { run } = fakeRunner(respond);
+    const p = createGitLabGlabProvider({ run, resolve });
+    const calls = [p.listOpen(REPO), p.getPr(REPO, 1), p.openPr(REPO, 1), p.reviewComments(REPO, 1)];
+    return (await Promise.all(calls.map((c) => c.then(() => null, (e) => e)))) as PrUnavailableError[];
+  }
+
+  it("missing glab is glab-missing", async () => {
+    for (const err of await allErrors(() => enoent())) {
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect(err.reason).toBe("glab-missing");
+    }
+  });
+
+  it("auth failure is glab-unauthenticated with host", async () => {
+    for (const stderr of [
+      "glab: 401 Unauthorized",
+      "To authenticate, run: glab auth login",
+      "error: not authenticated with gitlab.example.com",
+    ]) {
+      for (const err of await allErrors(() => fail(stderr))) {
+        expect(err, stderr).toBeInstanceOf(PrUnavailableError);
+        expect(err.reason, stderr).toBe("glab-unauthenticated");
+        expect(err.host).toBe(HOST);
+      }
+    }
+  });
+
+  it("invalid json and graphql errors are failed", async () => {
+    for (const err of await allErrors(() => ok("not json {"))) {
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect(err.reason).toBe("failed");
+    }
+    const errored = ok(JSON.stringify({ data: null, errors: [{ message: "Field 'nope' doesn't exist" }] }));
+    for (const err of await allErrors(() => errored)) {
+      expect(err).toBeInstanceOf(PrUnavailableError);
+      expect(err.reason).toBe("failed");
+    }
+    // Non-auth exit is failed too.
+    for (const err of await allErrors(() => fail("500 Internal Server Error"))) {
+      expect(err.reason).toBe("failed");
+    }
+    // An empty errors array is not a failure.
+    const { run } = fakeRunner(() =>
+      ok(JSON.stringify({ data: { project: { mergeRequests: { nodes: [mr()] } } }, errors: [] })),
+    );
+    expect(await createGitLabGlabProvider({ run, resolve }).listOpen(REPO)).toHaveLength(1);
+  });
+
+  it("credentials in errors are redacted", async () => {
+    const stderr = "fatal: could not read from https://user:token@gitlab.example.com/group/sub/shop.git";
+    for (const err of await allErrors(() => fail(stderr))) {
+      expect(err.message).not.toContain("user:token");
+      expect(err.message).toContain("https://***@gitlab.example.com");
+    }
+    // git failures in openPr too.
+    const { run } = fakeRunner((cmd) => (cmd === "glab" ? oneOut(mr({ description: "" })) : fail(stderr, 128)));
+    const err = await createGitLabGlabProvider({ run, resolve }).openPr(REPO, 244).catch((e) => e);
+    expect(err).toBeInstanceOf(PrUnavailableError);
+    expect(err.message).not.toContain("user:token");
+    expect(err.message).toContain("https://***@gitlab.example.com");
   });
 });

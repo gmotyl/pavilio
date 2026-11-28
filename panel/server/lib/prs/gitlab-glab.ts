@@ -1,6 +1,14 @@
 import { basename } from "node:path";
+import { fetchPrRefs } from "./fetchPrRefs.js";
 import type { ResolvedForge } from "./forge.js";
-import { type ChecksState, type PrProvider, type PrState, PrUnavailableError, type PullRequest } from "./provider.js";
+import {
+  type ChecksState,
+  type PrProvider,
+  type PrState,
+  PrUnavailableError,
+  type PullRequest,
+  type ReviewComment,
+} from "./provider.js";
 import { defaultRunner, type RunResult, type Runner } from "./run.js";
 
 const MR_FIELDS =
@@ -25,6 +33,52 @@ interface RawMr {
   webUrl: string;
   state?: string;
   description?: string | null;
+}
+
+interface RawNote {
+  id: number;
+  type?: string | null;
+  body?: string | null;
+  author?: { username?: string } | null;
+  created_at: string;
+  position?: { new_path?: string; new_line?: number | null; old_line?: number | null; head_sha?: string } | null;
+}
+
+interface RawDiscussion {
+  notes?: (RawNote | null)[] | null;
+}
+
+// glab exits non-zero with one of these on stderr when the host has no (valid) token.
+const AUTH_ERROR = /\b401\b|glab auth login|not authenticated/i;
+
+/**
+ * Splits `glab --paginate` output into its top-level JSON values: pages are concatenated
+ * as `[...][...]`, and `][` may also occur inside a string, so scan with string awareness.
+ */
+export function parseConcatenatedJson(text: string): unknown[] {
+  const out: unknown[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "[" || ch === "{") {
+      if (depth++ === 0) start = i;
+    } else if (ch === "]" || ch === "}") {
+      if (--depth === 0) out.push(JSON.parse(text.slice(start, i + 1)));
+      if (depth < 0) throw new SyntaxError("unbalanced JSON");
+    } else if (depth === 0 && !/\s/.test(ch)) {
+      throw new SyntaxError("unexpected text between JSON values");
+    }
+  }
+  if (depth !== 0 || inString) throw new SyntaxError("truncated JSON");
+  return out;
 }
 
 // Only these count as passed; any other (or unknown) status is not green.
@@ -95,34 +149,63 @@ export function createGitLabGlabProvider(deps: {
 }): Omit<PrProvider, "whoami"> & { whoami(): Promise<string> } {
   const run = deps.run ?? defaultRunner;
 
+  function glabFailure(r: RunResult, host: string): PrUnavailableError {
+    const msg = r.stderr.trim() || `glab exited ${r.code}`;
+    return new PrUnavailableError(AUTH_ERROR.test(r.stderr) ? "glab-unauthenticated" : "failed", msg, host);
+  }
+
   async function target(repoPath: string): Promise<{ host: string; projectPath: string }> {
     const r = await deps.resolve(repoPath);
     if (r.forge !== "gitlab") throw new PrUnavailableError("unknown-forge", `origin is not GitLab (${r.host})`, r.host);
     return { host: r.host, projectPath: r.projectPath };
   }
 
-  // Error classification (glab-missing / glab-unauthenticated) lands in Task 5; everything is `failed` for now.
-  async function graphql(repoPath: string, host: string, vars: string[]): Promise<unknown> {
+  async function runGlab(args: string[], cwd: string, host: string): Promise<string> {
     let r: RunResult;
     try {
-      // --hostname: an inherited GITLAB_HOST must not redirect the call.
-      r = await run("glab", ["api", "graphql", "--hostname", host, ...vars], { cwd: repoPath });
+      r = await run("glab", args, { cwd });
     } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") throw new PrUnavailableError("glab-missing", "glab not found", host);
       throw new PrUnavailableError("failed", (err as Error).message, host);
     }
-    if (r.code !== 0) throw new PrUnavailableError("failed", r.stderr.trim() || `glab exited ${r.code}`, host);
-    let doc: { data?: { project?: unknown } | null; errors?: unknown };
+    if (r.code !== 0) throw glabFailure(r, host);
+    return r.stdout;
+  }
+
+  async function graphql(repoPath: string, host: string, vars: string[]): Promise<unknown> {
+    // --hostname: an inherited GITLAB_HOST must not redirect the call.
+    const stdout = await runGlab(["api", "graphql", "--hostname", host, ...vars], repoPath, host);
+    let doc: { data?: { project?: unknown } | null; errors?: unknown[] };
     try {
-      doc = JSON.parse(r.stdout) as typeof doc;
+      doc = JSON.parse(stdout) as typeof doc;
     } catch {
       throw new PrUnavailableError("failed", "glab api graphql returned invalid JSON", host);
     }
-    if (!doc || typeof doc !== "object" || doc.errors) {
-      throw new PrUnavailableError("failed", "glab api graphql returned errors", host);
+    if (!doc || typeof doc !== "object") throw new PrUnavailableError("failed", "glab api graphql returned no object", host);
+    // GitLab may send `errors: []` alongside data; only a non-empty list is a failure.
+    if (Array.isArray(doc.errors) && doc.errors.length > 0) {
+      const first = (doc.errors[0] as { message?: unknown } | null)?.message;
+      throw new PrUnavailableError("failed", `glab api graphql returned errors${typeof first === "string" ? `: ${first}` : ""}`, host);
     }
     const project = doc.data?.project;
     if (!project || typeof project !== "object") throw new PrUnavailableError("failed", "GitLab project not found", host);
     return project;
+  }
+
+  async function oneMr(repoPath: string, n: number): Promise<{ m: RawMr; host: string }> {
+    const { host, projectPath } = await target(repoPath);
+    // iid is a GraphQL String: -f keeps it a string where -F would send a number.
+    const project = (await graphql(repoPath, host, [
+      "-f",
+      `query=${ONE_QUERY}`,
+      "-F",
+      `path=${projectPath}`,
+      "-f",
+      `iid=${n}`,
+    ])) as { mergeRequest?: RawMr | null };
+    const m = project.mergeRequest;
+    if (!m || typeof m !== "object") throw new PrUnavailableError("failed", `MR !${n} not found`, host);
+    return { m, host };
   }
 
   return {
@@ -143,31 +226,64 @@ export function createGitLabGlabProvider(deps: {
 
     async getPr(repoPath, n) {
       assertNumber(n);
-      const { host, projectPath } = await target(repoPath);
-      // iid is a GraphQL String: -f keeps it a string where -F would send a number.
-      const project = (await graphql(repoPath, host, [
-        "-f",
-        `query=${ONE_QUERY}`,
-        "-F",
-        `path=${projectPath}`,
-        "-f",
-        `iid=${n}`,
-      ])) as { mergeRequest?: RawMr | null };
-      const m = project.mergeRequest;
-      if (!m || typeof m !== "object") throw new PrUnavailableError("failed", `MR !${n} not found`, host);
+      const { m } = await oneMr(repoPath, n);
       return { ...mapMr(m, repoPath), state: mapState(m.state) };
     },
 
-    // Task 5: refs fetch via fetchPrRefs.
-    async openPr(_repoPath, n) {
+    async openPr(repoPath, n) {
       assertNumber(n);
-      throw new PrUnavailableError("failed", "GitLab openPr is not implemented yet");
+      const { m, host } = await oneMr(repoPath, n);
+      const base = (m.targetBranch ?? "").trim();
+      if (!base) throw new PrUnavailableError("failed", `MR !${n} has no target branch`, host);
+      const { head, base: baseSha } = await fetchPrRefs(run, repoPath, {
+        n,
+        headRefspecSource: `refs/merge-requests/${n}/head`,
+        base,
+      });
+      return { head, base: baseSha, body: m.description ?? "" };
     },
 
-    // Task 5: discussions → review comments.
-    async reviewComments(_repoPath, n) {
+    async reviewComments(repoPath, n) {
       assertNumber(n);
-      throw new PrUnavailableError("failed", "GitLab reviewComments is not implemented yet");
+      const { host, projectPath } = await target(repoPath);
+      const stdout = await runGlab(
+        ["api", "--hostname", host, "--paginate", `projects/${encodeURIComponent(projectPath)}/merge_requests/${n}/discussions`],
+        repoPath,
+        host,
+      );
+      let pages: unknown[];
+      try {
+        pages = parseConcatenatedJson(stdout);
+      } catch {
+        throw new PrUnavailableError("failed", "glab api returned invalid JSON", host);
+      }
+      if (!pages.every(Array.isArray)) throw new PrUnavailableError("failed", "glab api returned a non-array page", host);
+      // The discussions API carries no MR URL; GitLab's MR page lives at <host>/<path>/-/merge_requests/<n>.
+      const webUrl = `https://${host}/${projectPath}/-/merge_requests/${n}`;
+      const comments: ReviewComment[] = [];
+      for (const d of (pages as RawDiscussion[][]).flat()) {
+        const notes = (d?.notes ?? []).filter((x): x is RawNote => Boolean(x));
+        const firstId = notes[0]?.id ?? null;
+        for (const note of notes) {
+          const pos = note.position;
+          if (note.type !== "DiffNote" || !pos) continue;
+          const side = pos.new_line != null ? "new" : pos.old_line != null ? "old" : null;
+          if (!side) continue;
+          comments.push({
+            id: note.id,
+            replyTo: note.id === firstId ? null : firstId,
+            path: pos.new_path ?? "",
+            line: (side === "new" ? pos.new_line : pos.old_line) as number,
+            side,
+            author: note.author?.username ?? "",
+            body: note.body ?? "",
+            createdAt: note.created_at,
+            url: `${webUrl}#note_${note.id}`,
+            commitId: pos.head_sha ?? "",
+          });
+        }
+      }
+      return comments;
     },
   };
 }
