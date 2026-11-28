@@ -51,7 +51,7 @@ A GitLab merge request (MR) is told exactly like a GitHub PR; "PR" below covers 
 3. **Never edit the repository or the PR.** No checkout, switch, reset, stash, stage, commit, push,
    branch creation, `gh pr edit|comment|review`, `glab mr note|approve|update|merge`, or any
    `glab api` call that is not a GET (no `-X`/`--method` other than `GET`, no `-f`/`-F`/`--field`/
-   `--raw-field`/`--input`, which make it a POST). Allowed: `git fetch` (remote-tracking refs,
+   `--raw-field`/`--input`/`--form`, which make it a POST). Allowed: `git fetch` (remote-tracking refs,
    `pull/<n>/head` and `merge-requests/<n>/head` only) and read-only `git` / `gh` / `glab`
    commands.
 4. **Every claim rests on something read**: the diff, a commit, the PR, a review, a ticket, a spec,
@@ -98,16 +98,18 @@ Then:
   `name` matches `<repo>` gives the clone to read. No match → `PROJECT.md`, then the cwd repo when
   its folder name matches. Run every `git` command against that path (`git -C <path>`).
 - **Forge** (resolved the way the panel does, running only `git`, never a forge CLI): read
-  `git -C <path> remote get-url origin`; its **host** is the part after `https://` / `ssh://`
-  (minus any `user@`) or before the `:` of an scp-style `git@host:path`, lowercased; its
-  **project path** is the rest, nested groups kept, `.git` dropped (e.g. `group/sub/repo`). Then,
-  first match wins:
-  1. the `repos.json` entry has `"forge": "github"` or `"forge": "gitlab"` → that forge;
-  2. host `github.com` or `ssh.github.com` → **GitHub**;
-  3. host `gitlab.com`, or a host listed under `hosts:` in glab's config
+  `git -C <path> remote get-url origin`; its **host** is everything after `<scheme>://[user@]`
+  (any scheme) or, in the scp form, after `user@`, up to the first `/` or `:` (a port is dropped),
+  lowercased; its **project path** is the rest, nested groups kept, `.git` dropped (e.g.
+  `group/sub/repo`). Then, first match wins:
+  1. no origin → write no file; report "No origin remote in `<path>`", and stop. An origin whose
+     URL yields no project path → unknown (step 5);
+  2. the `repos.json` entry has `"forge": "github"` or `"forge": "gitlab"` → that forge;
+  3. host `github.com` or `ssh.github.com` → **GitHub**;
+  4. host `gitlab.com`, or a host listed under `hosts:` in glab's config
      (`$GLAB_CONFIG_DIR/config.yml` when `GLAB_CONFIG_DIR` is set, else
      `~/.config/glab-cli/config.yml`) → **GitLab**;
-  4. otherwise (or no origin) → unknown: write no file; report "Unknown forge for `<host>` — run
+  5. otherwise → unknown: write no file; report "Unknown forge for `<host>` — run
      `glab auth login --hostname <host>` or set `forge` in repos.json", and stop.
 - **Forge CLI target:** GitHub → every `gh` command runs against `gh … -R <owner/name>` (from
   `gh repo view --json nameWithOwner` run in that path). GitLab → every `glab` command runs as
@@ -126,11 +128,14 @@ Run `git -C <path> fetch origin --no-tags --quiet` first (`--no-tags`: no local 
     commit).
   - A merged PR is still told from its own head commits, not the squash/merge commit.
 - **GitLab MR:** `GITLAB_HOST=<host> glab mr view <n> -R <projectPath> --output json` for `title`,
-  `web_url`, `state`, `source_branch`, `target_branch`, `merge_commit_sha` / `squash_commit_sha`.
+  `web_url`, `state` (`opened` / `merged` / `closed`, not GitHub's `OPEN` / `MERGED` / `CLOSED`),
+  `source_branch`, `target_branch`, `merge_commit_sha` / `squash_commit_sha`, `diff_refs`.
   - `head`: `git fetch origin merge-requests/<n>/head --no-tags --quiet && git rev-parse FETCH_HEAD`
     (full SHA; works for open, merged and closed MRs).
   - `base` = `origin/<target_branch>`; the rest is as for a GitHub PR, with `merge_commit_sha`
-    (else `squash_commit_sha`) in place of `mergeCommit`.
+    (else `squash_commit_sha`) in place of `mergeCommit`. A `merged` MR with both null (a
+    fast-forward merge) has no such commit: use `diff_refs.base_sha` from the same JSON as the
+    merge-base.
 - **Non-PR ref:** a range uses its two ends; a branch uses `origin/<branch>` when it exists, with the
   default branch (`origin/HEAD`) as base; a single SHA is `<sha>^..<sha>`. Check
   `gh pr list --head <branch> --state open` (GitLab: `glab mr list --source-branch <branch>
@@ -138,11 +143,11 @@ Run `git -C <path> fetch origin --no-tags --quiet` first (`--no-tags`: no local 
 - **Empty range** (`git log --oneline <merge-base>..<head>` prints nothing) → write no file; report
   that there is nothing to tell.
 - **Fetch refused** (e.g. a read-only, root-owned clone): go on without fetching, in this order.
-  1. `refs/pavilio/pr/<n>` (written by the panel's PR review on open, with
+  1. `refs/pavilio/pr/<n>` (the same refs for GitHub PRs and GitLab MRs) (written by the panel's PR review on open, with
      `refs/pavilio/pr-base/<n>` = the base branch tip at that time):
      `git -C <path> rev-parse --verify refs/pavilio/pr/<n>^{commit}` is `head`, and
      `git merge-base refs/pavilio/pr-base/<n> <head>` the merge-base when that ref exists (else
-     `origin/<baseRefName>`). These refs are only as fresh as the panel's last open of the PR.
+     `origin/<baseRefName>`; GitLab: `origin/<target_branch>`). These refs are only as fresh as the panel's last open of the PR.
   2. Else `gh api repos/<owner>/<repo>/pulls/<n> --jq .head.sha` (GitLab: the `sha` field of the
      `glab mr view` JSON above), accepted only when
      `git -C <path> cat-file -e <sha>^{commit}` succeeds.
@@ -161,9 +166,10 @@ Keep raw output out of context: run big commands through context-mode (`ctx_batc
   snapshots: stat only.
 - **Why it changed:** `gh pr view <n> --json title,body,reviews,comments,closingIssuesReferences`,
   inline review comments (`gh api repos/<owner>/<name>/pulls/<n>/comments`); for GitLab, the MR
-  JSON's `description` plus `GITLAB_HOST=<host> glab mr view <n> -R <projectPath> --comments`
-  (all discussions, diff notes included) — read only, never `glab mr note`; linked issues, and the
-  specs / plans / ADRs the PR, commits or diff name (in the repo or under `projects/<project>/`, e.g.
+  JSON's `description` plus the discussions, read with a GET (rule 3), the way the panel does:
+  `GITLAB_HOST=<host> glab api --paginate projects/<url-encoded projectPath>/merge_requests/<n>/discussions`
+  (not `glab mr view --comments`, which pages at 20 by default and may omit file/line positions)
+  — read only, never `glab mr note`; linked issues, and the specs / plans / ADRs the PR, commits or diff name (in the repo or under `projects/<project>/`, e.g.
   an OpenSpec change dir). Commit bodies count too.
 - **Context:** the code before the change (`git show <merge-base>:<path>`) and the unchanged code
   the change leans on.
