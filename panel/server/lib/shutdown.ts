@@ -6,6 +6,7 @@
 // handler replaces it — so each handler ends by exiting with the conventional
 // 128 + signal number, the code a shell reports for a signalled process.
 
+import { stopPanelActivityLed } from "./activityLed/instance.js";
 import { flushPreferences } from "./preferences-store.js";
 // terminal-manager does not import this module, so there is no import cycle.
 import { closeAllSessions, SHUTDOWN_SCHEDULE } from "./terminal-manager.js";
@@ -26,6 +27,7 @@ const FLUSH_TIMEOUT_MS = 1000;
  * FLUSH_TIMEOUT_MS, which stays the hard cap either way.
  */
 async function flushAndCloseSessions(): Promise<void> {
+  stopPanelActivityLed();
   await Promise.allSettled([flushPreferences(), closeAllSessions(SHUTDOWN_SCHEDULE)]);
 }
 

@@ -24,6 +24,7 @@ import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { getConfig } from "../config.js";
+import { getActivityLed } from "../lib/activityLed/instance.js";
 import { machineId } from "../lib/hostname.js";
 import {
   getPreferences,
@@ -133,6 +134,8 @@ preferencesRouter.patch("/preferences", (req, res) => {
   if (keys.length === 0) return res.json({ ok: true, persisted: !isReadOnly() });
 
   patchPreferences(body as Record<string, unknown>);
+  // The reporter re-reads its settings; it holds no copy of the document.
+  if (keys.includes("activityLed")) getActivityLed()?.settingsChanged();
 
   // Every other open panel tab holds the same document in memory; this is how
   // they learn which keys to re-read.
