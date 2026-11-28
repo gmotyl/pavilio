@@ -37,6 +37,8 @@ interface RawMr {
   reviewers: { nodes: { username: string; mergeRequestInteraction: { reviewState: string } | null }[] };
   approved: boolean;
   approvalsLeft: number | null;
+  approvalsRequired: number | null;
+  approvedBy: { nodes: { username: string }[] } | null;
   headPipeline: { status: string } | null;
   sourceBranch: string;
   targetBranch: string;
@@ -56,6 +58,8 @@ function mr(over: Partial<RawMr> = {}): RawMr {
     reviewers: { nodes: [] },
     approved: false,
     approvalsLeft: 0,
+    approvalsRequired: 0,
+    approvedBy: { nodes: [] },
     headPipeline: { status: "SUCCESS" },
     sourceBranch: "feat/checkout",
     targetBranch: "main",
@@ -105,6 +109,8 @@ describe("GitLabGlabProvider", () => {
       "reviewers { nodes { username mergeRequestInteraction { reviewState } } }",
       "approved",
       "approvalsLeft",
+      "approvalsRequired",
+      "approvedBy { nodes { username } }",
       "headPipeline { status }",
       "sourceBranch",
       "targetBranch",
@@ -150,13 +156,30 @@ describe("GitLabGlabProvider", () => {
   it("reviewDecision follows changes, approved, required, null order", async () => {
     const changes = { nodes: [reviewer("alice", "UNREVIEWED"), reviewer("bob", "REQUESTED_CHANGES")] };
     expect((await listOne(mr({ reviewers: changes, approved: true }))).reviewDecision).toBe("changes");
-    expect((await listOne(mr({ approved: true, approvalsLeft: 1 }))).reviewDecision).toBe("approved");
+    const byCarol = { nodes: [{ username: "carol" }] };
+    expect((await listOne(mr({ approved: true, approvalsLeft: 0, approvedBy: byCarol }))).reviewDecision).toBe("approved");
     expect((await listOne(mr({ approvalsLeft: 2 }))).reviewDecision).toBe("required");
     const pending = { nodes: [reviewer("alice", "UNREVIEWED")] };
     expect((await listOne(mr({ reviewers: pending, approvalsLeft: 0 }))).reviewDecision).toBe("required");
     const reviewed = { nodes: [reviewer("bob", "REVIEWED")] };
     expect((await listOne(mr({ reviewers: reviewed, approvalsLeft: 0 }))).reviewDecision).toBeNull();
     expect((await listOne(mr({ approvalsLeft: null }))).reviewDecision).toBeNull();
+  });
+
+  it("approved without rules or approvals is not approved", async () => {
+    // GitLab reports approved: true on any MR that needs no approval.
+    const noRules = { approved: true, approvalsLeft: 0, approvalsRequired: 0, approvedBy: { nodes: [] } };
+    const pending = { nodes: [reviewer("alice", "UNREVIEWED")] };
+    expect((await listOne(mr({ ...noRules, reviewers: pending }))).reviewDecision).toBe("required");
+    expect((await listOne(mr(noRules))).reviewDecision).toBeNull();
+    expect((await listOne(mr({ ...noRules, approvalsRequired: null, approvedBy: null }))).reviewDecision).toBeNull();
+  });
+
+  it("approved with a real approval or satisfied required rules is approved", async () => {
+    const oneApproval = { approved: true, approvalsLeft: 0, approvalsRequired: 0, approvedBy: { nodes: [{ username: "bob" }] } };
+    expect((await listOne(mr(oneApproval))).reviewDecision).toBe("approved");
+    const rulesMet = { approved: true, approvalsLeft: 0, approvalsRequired: 2, approvedBy: { nodes: [{ username: "bob" }, { username: "dan" }] } };
+    expect((await listOne(mr(rulesMet))).reviewDecision).toBe("approved");
   });
 
   it("pipeline status maps to checks and unknown is never green", async () => {

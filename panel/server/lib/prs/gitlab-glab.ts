@@ -12,7 +12,7 @@ import {
 import { defaultRunner, type RunResult, type Runner } from "./run.js";
 
 const MR_FIELDS =
-  "iid title draft author { username } reviewers { nodes { username mergeRequestInteraction { reviewState } } } approved approvalsLeft headPipeline { status } sourceBranch targetBranch diffHeadSha updatedAt webUrl";
+  "iid title draft author { username } reviewers { nodes { username mergeRequestInteraction { reviewState } } } approved approvalsLeft approvalsRequired approvedBy { nodes { username } } headPipeline { status } sourceBranch targetBranch diffHeadSha updatedAt webUrl";
 
 const LIST_QUERY = `query($path: ID!) { project(fullPath: $path) { mergeRequests(state: opened, first: 100, sort: UPDATED_DESC) { nodes { ${MR_FIELDS} } } } }`;
 const ONE_QUERY = `query($path: ID!, $iid: String!) { project(fullPath: $path) { mergeRequest(iid: $iid) { ${MR_FIELDS} state description } } }`;
@@ -26,6 +26,8 @@ interface RawMr {
   reviewers?: { nodes?: ({ username?: string; mergeRequestInteraction?: { reviewState?: string } | null } | null)[] | null } | null;
   approved?: boolean | null;
   approvalsLeft?: number | null;
+  approvalsRequired?: number | null;
+  approvedBy?: { nodes?: ({ username?: string } | null)[] | null } | null;
   headPipeline?: { status?: string } | null;
   sourceBranch: string;
   targetBranch: string;
@@ -111,13 +113,19 @@ function mapState(s: string | undefined): PrState {
   }
 }
 
+/** GitLab sets `approved` on any MR that needs no approval; count it only with a real approval or required rules. */
+function isApproved(m: RawMr): boolean {
+  const approvals = (m.approvedBy?.nodes ?? []).filter(Boolean).length;
+  return Boolean(m.approved) && (approvals > 0 || (m.approvalsRequired ?? 0) > 0);
+}
+
 function mapMr(m: RawMr, repoPath: string): PullRequest {
   const reviewers = reviewStates(m);
   // Pending requests, like GitHub's reviewRequests.
   const pending = reviewers.filter((r) => r.state === "UNREVIEWED").map((r) => r.username);
   const reviewDecision: PullRequest["reviewDecision"] = reviewers.some((r) => r.state === "REQUESTED_CHANGES")
     ? "changes"
-    : m.approved
+    : isApproved(m)
       ? "approved"
       : (m.approvalsLeft ?? 0) > 0 || pending.length > 0
         ? "required"
