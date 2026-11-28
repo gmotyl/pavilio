@@ -164,6 +164,7 @@ function mapPr(p: RawPr, repoPath: string): PullRequest {
     base: p.baseRefName,
     updatedAt: p.updatedAt,
     url: p.url,
+    forge: "github",
   };
 }
 
@@ -267,11 +268,11 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
       url = await git(["remote", "get-url", "origin"], repoPath);
     } catch {
       // No origin at all is just as un-GitHub as a foreign host.
-      throw new PrUnavailableError("not-github", "no origin remote");
+      throw new PrUnavailableError("unknown-forge", "no origin remote");
     }
-    if (!GITHUB_REMOTE_HOSTS.has(remoteHost(url) ?? "")) throw new PrUnavailableError("not-github", `origin is ${url.trim()}`);
+    if (!GITHUB_REMOTE_HOSTS.has(remoteHost(url) ?? "")) throw new PrUnavailableError("unknown-forge", `origin is ${url.trim()}`);
     const slug = remoteRepo(url);
-    if (!slug) throw new PrUnavailableError("not-github", `cannot parse owner/repo from ${url.trim()}`);
+    if (!slug) throw new PrUnavailableError("unknown-forge", `cannot parse owner/repo from ${url.trim()}`);
     return `${GITHUB_HOST}/${slug}`;
   }
 

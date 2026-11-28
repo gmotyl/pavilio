@@ -219,7 +219,7 @@ describe("StoryPrHeader", () => {
     expect(within(header()).queryByRole("link", { name: /GitHub/ })).toBeNull();
     unmount();
 
-    stubFetch({ "/api/prs/one": () => jsonResponse({ unavailable: "not-github" }, { status: 502 }) });
+    stubFetch({ "/api/prs/one": () => jsonResponse({ unavailable: "unknown-forge" }, { status: 502 }) });
     const second = renderHeader();
     await within(header()).findByText("No GitHub remote");
     second.unmount();

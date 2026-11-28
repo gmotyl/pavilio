@@ -67,6 +67,7 @@ describe("GitHubGhProvider", () => {
       base: "main",
       updatedAt: "2026-11-21T10:05:00Z",
       url: "https://github.com/o/r/pull/231",
+      forge: "github",
     });
     expect(prs[1]).toMatchObject({ isDraft: true, reviewers: [], reviewDecision: null, checks: "none" });
     expect(prs[2]).toMatchObject({ reviewers: ["dave"], reviewDecision: "changes", checks: "fail", base: "release" });
@@ -115,6 +116,7 @@ describe("GitHubGhProvider", () => {
           base: "main",
           updatedAt: "2026-11-21T10:05:00Z",
           url: "https://github.com/o/r/pull/231",
+          forge: "github",
           state,
         });
       }
@@ -240,7 +242,7 @@ describe("GitHubGhProvider", () => {
       const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
       const err = await createGitHubGhProvider({ run }).listOpen(REPO).catch((e) => e);
       expect(err).toBeInstanceOf(PrUnavailableError);
-      expect((err as PrUnavailableError).reason).toBe("not-github");
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
       expect(calls.some((c) => c.cmd === "gh")).toBe(false);
     }
 
@@ -468,7 +470,7 @@ describe("GitHubGhProvider", () => {
       const { run, calls } = commentsRunner("", "git@gitlab.com:o/r.git");
       const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
       expect(err).toBeInstanceOf(PrUnavailableError);
-      expect((err as PrUnavailableError).reason).toBe("not-github");
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
       expect(calls.some((c) => c.cmd === "gh")).toBe(false);
     });
   });

@@ -71,7 +71,7 @@ export interface StoryPrStatus {
   refresh: () => void;
 }
 
-const UNAVAILABLE: readonly string[] = ["gh-missing", "gh-unauthenticated", "not-github", "failed"];
+const UNAVAILABLE: readonly string[] = ["gh-missing", "gh-unauthenticated", "unknown-forge", "failed"];
 
 async function problemOf(res: Response): Promise<StoryPrProblem> {
   const body = (await res.json().catch(() => null)) as { unavailable?: unknown; error?: unknown } | null;

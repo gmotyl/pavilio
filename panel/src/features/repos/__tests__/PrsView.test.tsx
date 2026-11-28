@@ -230,7 +230,7 @@ describe("PrsView", () => {
         me: ME,
         prs: [pr({ number: 1 })],
         unavailable: [
-          { repo: "notes", reason: "not-github" },
+          { repo: "notes", reason: "unknown-forge" },
           { repo: "tools", reason: "gh-missing" },
           { repo: "site", reason: "gh-unauthenticated" },
           { repo: "api", reason: "failed" },

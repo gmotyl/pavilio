@@ -17,6 +17,7 @@ export function pr(over: Partial<PullRequest> & { number: number }): PullRequest
     base: "main",
     updatedAt: "2026-11-22T10:00:00Z",
     url: `https://github.com/gmotyl/pavilio/pull/${over.number}`,
+    forge: "github",
     ...over,
   };
 }

@@ -16,7 +16,7 @@ import type { PrsState, PullRequest } from "./usePrs";
 import "./Prs.css";
 
 const RESTING: Record<Exclude<Unavailable, "failed">, ReactNode> = {
-  "not-github": "No GitHub remote",
+  "unknown-forge": "No GitHub remote",
   "gh-missing": (
     <>
       <code>gh</code> is not installed
@@ -25,6 +25,16 @@ const RESTING: Record<Exclude<Unavailable, "failed">, ReactNode> = {
   "gh-unauthenticated": (
     <>
       Run <code>gh auth login</code>
+    </>
+  ),
+  "glab-missing": (
+    <>
+      <code>glab</code> is not installed
+    </>
+  ),
+  "glab-unauthenticated": (
+    <>
+      Run <code>glab auth login</code>
     </>
   ),
 };

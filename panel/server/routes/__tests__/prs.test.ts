@@ -31,6 +31,7 @@ function pr(repoPath: string, number: number, updatedAt: string): PullRequest {
     base: "main",
     updatedAt,
     url: `https://github.com/o/r/pull/${number}`,
+    forge: "github",
   };
 }
 
@@ -57,7 +58,7 @@ function setup() {
     whoami: vi.fn(async () => "me"),
     listOpen: vi.fn(async (p: string) => {
       if (p === gh) return [pr(gh, 1, "2026-11-20T00:00:00Z"), pr(gh, 2, "2026-11-21T00:00:00Z")];
-      throw new PrUnavailableError("not-github");
+      throw new PrUnavailableError("unknown-forge");
     }),
     openPr: vi.fn(async () => ({ head: "h", base: "b", body: "" })),
     reviewComments: vi.fn(async (): Promise<ReviewComment[]> => []),
@@ -107,7 +108,7 @@ describe("/api/prs", () => {
   it("reports unavailable repos with their reason", async () => {
     const { provider } = setup();
     const res = await request(appFor(provider)).get("/api/prs?project=proj");
-    expect(res.body.unavailable).toEqual([{ repo: "gl-repo", reason: "not-github" }]);
+    expect(res.body.unavailable).toEqual([{ repo: "gl-repo", reason: "unknown-forge" }]);
   });
 
   it("reports a non-provider failure as failed and an unknown login as empty", async () => {
@@ -327,11 +328,11 @@ describe("/api/prs", () => {
 
     it("one: 502 carries the unavailable reason", async () => {
       const { gl, provider } = setup();
-      provider.getPr.mockRejectedValueOnce(new PrUnavailableError("not-github"));
+      provider.getPr.mockRejectedValueOnce(new PrUnavailableError("unknown-forge"));
       const app = appFor(provider);
       const res = await request(app).get("/api/prs/one").query(one({ repo: "gl-repo" }));
       expect(res.status).toBe(502);
-      expect(res.body).toEqual({ unavailable: "not-github" });
+      expect(res.body).toEqual({ unavailable: "unknown-forge" });
       expect(provider.getPr).toHaveBeenCalledWith(gl, 3);
 
       provider.getPr.mockRejectedValueOnce(new Error("boom"));

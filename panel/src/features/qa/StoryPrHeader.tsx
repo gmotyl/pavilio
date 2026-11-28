@@ -8,7 +8,9 @@ import "./StoryPrHeader.css";
 const PROBLEM: Record<StoryPrProblem, string> = {
   "gh-missing": "gh is not installed",
   "gh-unauthenticated": "gh is not authenticated",
-  "not-github": "No GitHub remote",
+  "glab-missing": "glab is not installed",
+  "glab-unauthenticated": "glab is not authenticated",
+  "unknown-forge": "No GitHub remote",
   failed: "Could not load PR status",
   unlinked: "Repo not linked",
   "project-missing": "Project not found",
