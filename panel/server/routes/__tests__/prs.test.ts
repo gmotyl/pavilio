@@ -3,7 +3,9 @@ import request from "supertest";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
+import type { ResolvedForge } from "../../lib/prs/forge";
 import {
+  type Forge,
   PrUnavailableError,
   type PrProvider,
   type PullRequest,
@@ -67,8 +69,55 @@ function setup() {
   return { gh, gl, missing, provider };
 }
 
+// GitHub-only tests: every present repo resolves to GitHub; the provider itself rejects gl-repo.
+const githubOnly = async (): Promise<ResolvedForge> => ({ forge: "github", host: "github.com", projectPath: "o/r" });
+
 const appFor = (provider: PrProvider, now?: () => number) =>
-  makeApp(createPrsRouter(provider, now ? { now } : {}), "/api/prs");
+  makeApp(
+    createPrsRouter({ github: provider, gitlab: provider }, { resolveForge: githubOnly, ...(now ? { now } : {}) }),
+    "/api/prs",
+  );
+
+function fakeProvider(name: string, prs: (p: string) => PullRequest[]) {
+  return {
+    whoami: vi.fn(async () => `${name}-me`),
+    listOpen: vi.fn(async (p: string) => prs(p)),
+    openPr: vi.fn(async () => ({ head: `${name}-h`, base: `${name}-b`, body: name })),
+    reviewComments: vi.fn(async (): Promise<ReviewComment[]> => []),
+    getPr: vi.fn(async (p: string, n: number) => ({ ...pr(p, n, "2026-11-22T00:00:00Z"), state: "open" as const })),
+  } satisfies PrProvider;
+}
+
+/** A project linking a GitHub repo, a GitLab repo, an unknown-forge repo and a missing repo. */
+function setupMixed() {
+  const root = projects.root();
+  const gh = join(root, "mx-gh");
+  const gl = join(root, "mx-gl");
+  const unk = join(root, "mx-unknown");
+  const missing = join(root, "mx-missing");
+  for (const d of [gh, gl, unk]) mkdirSync(d);
+  const dir = join(projects.dir(), "mix");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "PROJECT.md"), "# mix\n");
+  writeFileSync(
+    join(dir, "repos.json"),
+    JSON.stringify([
+      { name: "hub", path: gh },
+      { name: "lab", path: gl, forge: "gitlab" },
+      { name: "odd", path: unk },
+      { name: "gone", path: missing },
+    ]),
+  );
+  const github = fakeProvider("github", (p) => [pr(p, 1, "2026-11-20T00:00:00Z"), pr(p, 3, "2026-11-23T00:00:00Z")]);
+  const gitlab = fakeProvider("gitlab", (p) => [{ ...pr(p, 2, "2026-11-21T00:00:00Z"), forge: "gitlab" as const }]);
+  const resolveForge = vi.fn(async (e: { repoPath: string; forge?: Forge }): Promise<ResolvedForge> => {
+    if (e.repoPath === gh) return { forge: "github", host: "github.com", projectPath: "o/hub" };
+    if (e.repoPath === gl) return { forge: e.forge ?? "gitlab", host: "git.example.com", projectPath: "g/lab" };
+    return { forge: "unknown", host: "code.example.org" };
+  });
+  const app = makeApp(createPrsRouter({ github, gitlab }, { resolveForge }), "/api/prs");
+  return { gh, gl, unk, missing, github, gitlab, resolveForge, app };
+}
 
 describe("/api/prs", () => {
   it("aggregates PRs across present GitHub repos", async () => {
@@ -294,6 +343,85 @@ describe("/api/prs", () => {
     const open = await request(appFor(provider)).post("/api/prs/open").send({ repo: outRepo, number: 3 });
     expect(open.status).toBe(400);
     expect((await request(appFor(provider)).post("/api/prs/open").send({ repo: gh, number: 3 })).status).toBe(200);
+  });
+
+  describe("per-forge routing", () => {
+    it("mixed project lists rows from both providers newest first", async () => {
+      const { gh, gl, missing, github, gitlab, resolveForge, app } = setupMixed();
+      const res = await request(app).get("/api/prs?project=mix");
+      expect(res.status).toBe(200);
+      expect(res.body.prs.map((p: PullRequest) => [p.repo, p.number])).toEqual([
+        ["hub", 3],
+        ["lab", 2],
+        ["hub", 1],
+      ]);
+      expect(github.listOpen.mock.calls.map((c) => c[0])).toEqual([gh]);
+      expect(gitlab.listOpen.mock.calls.map((c) => c[0])).toEqual([gl]);
+      // The repos.json override reaches the resolver; a missing repo is never resolved.
+      expect(resolveForge).toHaveBeenCalledWith({ repoPath: gl, forge: "gitlab" });
+      expect(resolveForge.mock.calls.map((c) => c[0].repoPath)).not.toContain(missing);
+    });
+
+    it("unknown forge rests with host and calls no provider", async () => {
+      const { unk, github, gitlab, app } = setupMixed();
+      const res = await request(app).get("/api/prs?project=mix");
+      expect(res.body.unavailable).toEqual([{ repo: "odd", reason: "unknown-forge", host: "code.example.org" }]);
+      for (const p of [github, gitlab]) expect(p.listOpen.mock.calls.map((c) => c[0])).not.toContain(unk);
+    });
+
+    it("glab unauthenticated carries host", async () => {
+      const { gitlab, app } = setupMixed();
+      gitlab.listOpen.mockRejectedValue(new PrUnavailableError("glab-unauthenticated", "401", "git.example.com"));
+      const res = await request(app).get("/api/prs?project=mix");
+      expect(res.body.unavailable).toContainEqual({ repo: "lab", reason: "glab-unauthenticated", host: "git.example.com" });
+      expect(res.body.prs.map((p: PullRequest) => p.repo)).toEqual(["hub", "hub"]);
+    });
+
+    it("one, open and comments dispatch to the gitlab provider", async () => {
+      const { gl, github, gitlab, app } = setupMixed();
+      const one = await request(app).get("/api/prs/one").query({ project: "mix", repo: "lab", number: "2" });
+      expect(one.status).toBe(200);
+      expect(one.body.repo).toBe("lab");
+      const open = await request(app).post("/api/prs/open").send({ repo: gl, number: 2 });
+      expect(open.body).toEqual({ head: "gitlab-h", base: "gitlab-b", body: "gitlab" });
+      const comments = await request(app).get("/api/prs/comments").query({ repo: gl, number: "2" });
+      expect(comments.status).toBe(200);
+      expect(gitlab.getPr).toHaveBeenCalledWith(gl, 2);
+      expect(gitlab.openPr).toHaveBeenCalledWith(gl, 2);
+      expect(gitlab.reviewComments).toHaveBeenCalledWith(gl, 2);
+      for (const fn of [github.getPr, github.openPr, github.reviewComments]) expect(fn).not.toHaveBeenCalled();
+
+      gitlab.openPr.mockRejectedValueOnce(new PrUnavailableError("glab-unauthenticated", "no token", "git.example.com"));
+      gitlab.reviewComments.mockRejectedValueOnce(new PrUnavailableError("glab-missing", "glab not found"));
+      const openFail = await request(app).post("/api/prs/open").send({ repo: gl, number: 2 });
+      const commentsFail = await request(app).get("/api/prs/comments").query({ repo: gl, number: "2" });
+      expect(openFail.status).toBe(502);
+      expect(openFail.body.reason).toBe("glab-unauthenticated");
+      expect(commentsFail.status).toBe(502);
+      expect(commentsFail.body.reason).toBe("glab-missing");
+    });
+
+    it("one failure returns reason and host", async () => {
+      const { github, gitlab, app } = setupMixed();
+      gitlab.getPr.mockRejectedValueOnce(new PrUnavailableError("glab-unauthenticated", "401", "git.example.com"));
+      const res = await request(app).get("/api/prs/one").query({ project: "mix", repo: "lab", number: "2" });
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ unavailable: "glab-unauthenticated", host: "git.example.com" });
+
+      const unknown = await request(app).get("/api/prs/one").query({ project: "mix", repo: "odd", number: "2" });
+      expect(unknown.status).toBe(502);
+      expect(unknown.body).toEqual({ unavailable: "unknown-forge", host: "code.example.org" });
+      expect(github.getPr).not.toHaveBeenCalled();
+      expect(gitlab.getPr).toHaveBeenCalledTimes(1);
+    });
+
+    it("identity comes from the github provider only", async () => {
+      const { github, gitlab, app } = setupMixed();
+      const res = await request(app).get("/api/prs?project=mix");
+      expect(res.body.me).toBe("github-me");
+      expect(github.whoami).toHaveBeenCalledTimes(1);
+      expect(gitlab.whoami).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /api/prs/one", () => {
