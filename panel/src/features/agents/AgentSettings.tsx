@@ -12,6 +12,7 @@ import { LauncherSettings } from "./LauncherSettings";
 import { DefaultObjectiveSettings } from "./DefaultObjectiveSettings";
 import { ShortcutSettings } from "./ShortcutSettings";
 import { CopyPreferencesSection } from "../settings/CopyPreferencesSection";
+import { ActivityLedSection } from "../settings/ActivityLedSection";
 import { preferences } from "../../preferences/declarations";
 import { usePreference } from "../../preferences/usePreference";
 
@@ -666,6 +667,9 @@ export default function AgentSettings() {
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3" style={{ color: "var(--text-primary)" }}>Preferences</h2>
         <CopyPreferencesSection />
+        <div className="mt-4">
+          <ActivityLedSection />
+        </div>
       </section>
 
       {/* Workspace actions — whatever this workspace's package.json defines */}

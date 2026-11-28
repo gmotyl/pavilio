@@ -138,6 +138,11 @@ const SAMPLES: Record<string, readonly unknown[]> = {
   // ── wiki ────────────────────────────────────────────────────────────────
   "wiki.writerModel": ["haiku", "sonnet", "claude-haiku-4-5", "true", "240"],
   "research.spikesRoot": ["~/git/prv/spikes", "", "/srv/spikes", "true", "240"],
+  // Already-normalised objects: the codec clamps, so only in-range values round-trip.
+  activityLed: [
+    { enabled: false, host: "192.168.10.156", port: 4210, colourAttention: "#00FF00", colourBusy: "#FF0000", brightness: 20, blinkMs: 150, pauseMs: 2000 },
+    { enabled: true, host: "true", port: 1, colourAttention: "#abcdef", colourBusy: "#000000", brightness: 0, blinkMs: 1000, pauseMs: 10000 },
+  ],
   "project.mark": ["", "lucide:rocket", "emoji:🚀", "emoji:🇵🇱"],
 
   // ── json whose payload can be a BARE STRING — the shape that breaks a
@@ -160,7 +165,7 @@ const SAMPLES: Record<string, readonly unknown[]> = {
 };
 
 /** How many declarations the samples above are known to cover. */
-const DECLARATION_COUNT = 70;
+const DECLARATION_COUNT = 71;
 
 type PrefGlobals = { __PAVILIO_PREFS__?: Record<string, unknown> };
 const globals = globalThis as unknown as PrefGlobals;

@@ -463,6 +463,76 @@ export const DEFAULT_CASCADE_OFF: readonly string[] = ["pocket-pl"];
  */
 export const ANSWER_PANE_FULL_HEIGHT = 4000;
 
+/** Activity LED reporting, per machine. Mirrors server/lib/activityLed/report.ts. */
+export interface ActivityLedSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  colourAttention: string; // "#RRGGBB"
+  colourBusy: string; // "#RRGGBB"
+  brightness: number;
+  blinkMs: number;
+  pauseMs: number;
+}
+
+export const ACTIVITY_LED_DEFAULTS: ActivityLedSettings = {
+  enabled: false,
+  host: "192.168.10.156",
+  port: 4210,
+  colourAttention: "#00FF00",
+  colourBusy: "#FF0000",
+  brightness: 20,
+  blinkMs: 150,
+  pauseMs: 2000,
+};
+
+/** Inclusive bounds per numeric field — the report's wire ranges. */
+export const ACTIVITY_LED_BOUNDS = {
+  port: [1, 65535],
+  brightness: [0, 100],
+  blinkMs: [50, 1000],
+  pauseMs: [500, 10000],
+} as const;
+
+const ACTIVITY_LED_COLOUR_RE = /^#[0-9a-fA-F]{6}$/;
+
+export function clampActivityLedNumber(field: keyof typeof ACTIVITY_LED_BOUNDS, value: number): number {
+  const [min, max] = ACTIVITY_LED_BOUNDS[field];
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/** Same rules as the server's `normaliseSettings`: bad fields fall back, numbers clamp. */
+export function normaliseActivityLed(raw: unknown): ActivityLedSettings {
+  const r = isRecord(raw) ? raw : {};
+  const d = ACTIVITY_LED_DEFAULTS;
+  const n = (field: keyof typeof ACTIVITY_LED_BOUNDS) => {
+    const v = r[field];
+    return typeof v === "number" && Number.isFinite(v) ? clampActivityLedNumber(field, v) : d[field];
+  };
+  const colour = (v: unknown, fallback: string) =>
+    typeof v === "string" && ACTIVITY_LED_COLOUR_RE.test(v) ? v : fallback;
+  return {
+    enabled: typeof r.enabled === "boolean" ? r.enabled : d.enabled,
+    host: isFilled(r.host) ? r.host.trim() : d.host,
+    port: n("port"),
+    colourAttention: colour(r.colourAttention, d.colourAttention),
+    colourBusy: colour(r.colourBusy, d.colourBusy),
+    brightness: n("brightness"),
+    blinkMs: n("blinkMs"),
+    pauseMs: n("pauseMs"),
+  };
+}
+
+/** Not an object → throw (default); otherwise field-by-field normalised. */
+const activityLedCodec: PreferenceCodec<ActivityLedSettings> = {
+  parse(raw) {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error(`not activity LED settings: ${raw}`);
+    return normaliseActivityLed(parsed);
+  },
+  serialize: (value) => JSON.stringify(value),
+};
+
 /**
  * Every row of design.md's portability table is now declared below.
  *
@@ -1353,6 +1423,17 @@ export const preferences = {
     scope: "global",
     default: "~/git/prv/spikes",
     codec: str,
+    portable: true,
+  }),
+  /**
+   * Activity LED reporting (Settings → Activity LED). Key matches what the
+   * server reads off the per-machine document; it re-normalises on its side.
+   */
+  activityLed: definePreference<ActivityLedSettings>({
+    key: "activityLed", // was: nothing — new with the activity LED
+    scope: "global",
+    default: ACTIVITY_LED_DEFAULTS,
+    codec: activityLedCodec,
     portable: true,
   }),
 };
