@@ -67,7 +67,9 @@ export function startActivityLed(deps: ActivityLedDeps): ActivityLed {
     transmit(buf, settings);
     clearHeartbeat();
     heartbeat = setTimeout(() => {
-      if (!stopped && settings.enabled && lastBuf) sendReport(lastBuf);
+      if (stopped || !settings.enabled || !lastBuf) return;
+      reconcile();
+      update(true);
     }, HEARTBEAT_MS);
   };
 
@@ -106,8 +108,20 @@ export function startActivityLed(deps: ActivityLedDeps): ActivityLed {
     }
   };
 
+  // Sessions can vanish without an event (pty exit), so prune ids missing from the snapshot.
+  const reconcile = () => {
+    const live = new Set(deps.getSnapshot().map((s) => s.sessionId));
+    for (const id of [...states.keys()]) {
+      if (live.has(id)) continue;
+      states.delete(id);
+      clearBusyTimer(id);
+      maturedBusy.delete(id);
+    }
+  };
+
   for (const { sessionId, state } of deps.getSnapshot()) apply(sessionId, state);
   const unsubscribe = deps.subscribe((ev) => {
+    reconcile();
     apply(ev.sessionId, ev.state);
     update();
   });

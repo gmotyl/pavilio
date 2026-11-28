@@ -13,8 +13,10 @@ function makeDeps(opts: {
   const listeners = new Set<(ev: { sessionId: string; state: string }) => void>();
   const sent: { buf: Buffer; host: string; port: number }[] = [];
   const log = vi.fn<(msg: string) => void>();
+  // Mirrors terminalActivity: emit updates the record first; remove drops it silently.
+  const snapshot = new Map<string, State>((opts.snapshot ?? []).map((s) => [s.sessionId, s.state]));
   const deps: ActivityLedDeps = {
-    getSnapshot: () => opts.snapshot ?? [],
+    getSnapshot: () => [...snapshot].map(([sessionId, state]) => ({ sessionId, state })),
     subscribe: (fn) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -34,7 +36,11 @@ function makeDeps(opts: {
     sent,
     log,
     listeners,
-    emit: (sessionId: string, state: State) => listeners.forEach((fn) => fn({ sessionId, state })),
+    emit: (sessionId: string, state: State) => {
+      snapshot.set(sessionId, state);
+      listeners.forEach((fn) => fn({ sessionId, state }));
+    },
+    remove: (sessionId: string) => snapshot.delete(sessionId),
     setSettings: (s: Partial<ActivityLedSettings>) => {
       settings = { ...settings, ...s };
     },
@@ -156,9 +162,50 @@ describe("activity LED scheduler", () => {
   it("test() sends one attention and one busy", () => {
     const h = makeDeps();
     const led = startActivityLed(h.deps);
+    h.setSettings({ host: "10.0.0.7", port: 4242 }); // test() reads current settings
     led.test();
     expect(h.sent).toHaveLength(2);
     expect(counts(h.sent[1].buf)).toEqual({ attention: 1, busy: 1 });
+    expect(h.sent[1].host).toBe("10.0.0.7");
+    expect(h.sent[1].port).toBe(4242);
+    led.stop();
+  });
+
+  it("a synchronous throw from send does not propagate", () => {
+    const send = vi.fn<ActivityLedDeps["send"]>(() => {
+      throw new Error("sync boom");
+    });
+    const h = makeDeps({ send });
+    let led: ReturnType<typeof startActivityLed> | undefined;
+    expect(() => {
+      led = startActivityLed(h.deps);
+      h.emit("a", "attention");
+      led.test();
+      vi.advanceTimersByTime(60_000);
+    }).not.toThrow();
+    expect(h.log.mock.calls[0][0]).toContain("sync boom");
+    led?.stop();
+  });
+
+  it("drops sessions that disappear from the snapshot", () => {
+    const h = makeDeps({ snapshot: [{ sessionId: "a", state: "attention" }] });
+    const led = startActivityLed(h.deps);
+    expect(counts(h.sent[0].buf)).toEqual({ attention: 1, busy: 0 });
+
+    h.remove("a"); // pty exit: record deleted, no event
+    vi.advanceTimersByTime(60_000);
+    expect(counts(h.sent.at(-1)!.buf)).toEqual({ attention: 0, busy: 0 });
+
+    // a pending busy timer for a vanished session never matures
+    h.emit("b", "busy");
+    h.remove("b");
+    h.emit("c", "attention"); // event reconciles: b dropped
+    vi.advanceTimersByTime(5_000);
+    expect(counts(h.sent.at(-1)!.buf)).toEqual({ attention: 1, busy: 0 });
+
+    // "a" is gone from state: it doesn't come back in later counts
+    h.emit("c", "idle");
+    expect(counts(h.sent.at(-1)!.buf)).toEqual({ attention: 0, busy: 0 });
     led.stop();
   });
 });
