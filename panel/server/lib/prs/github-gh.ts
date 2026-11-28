@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import { gitSafeEnv } from "../gitEnv.js";
+import { GITHUB_REMOTE_HOSTS, remoteHost } from "./forge.js";
 import {
   type ChecksState,
   type PrProvider,
@@ -168,14 +169,8 @@ function mapPr(p: RawPr, repoPath: string): PullRequest {
   };
 }
 
-/** Host of a git remote URL: https://, ssh://, git:// or scp-style `user@host:path`. */
-export function remoteHost(url: string): string | null {
-  const u = url.trim();
-  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)/i.exec(u);
-  if (scheme) return scheme[1].toLowerCase();
-  const scp = /^(?:[^@/]+@)?([^/:]+):(?!\/\/)/.exec(u);
-  return scp ? scp[1].toLowerCase() : null;
-}
+// Re-exported: remoteHost moved to forge.ts; existing imports keep working.
+export { remoteHost };
 
 /** `owner/repo` of a GitHub remote URL, `.git` suffix dropped. */
 export function remoteRepo(url: string): string | null {
@@ -188,8 +183,6 @@ export function remoteRepo(url: string): string | null {
 // A credential prompt would hang the request until the timeout; fail fast instead.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" };
 const GITHUB_HOST = "github.com";
-// GitHub's SSH-over-443 endpoint is the same github.com.
-const GITHUB_REMOTE_HOSTS = new Set([GITHUB_HOST, "ssh.github.com"]);
 // Re-read so `gh auth switch` shows up without a restart.
 const LOGIN_TTL_MS = 5 * 60_000;
 
