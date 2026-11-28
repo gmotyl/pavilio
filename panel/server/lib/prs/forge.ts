@@ -79,7 +79,8 @@ export function createForgeResolver(
     if (!url) return { forge: "unknown", host: "" };
     const host = remoteHost(url) ?? "";
     const projectPath = remotePath(url);
-    if (!projectPath) return { forge: "unknown", host };
+    // No host (e.g. a file:// origin) means no forge CLI target, override or not.
+    if (!host || !projectPath) return { forge: "unknown", host };
 
     if (forge) return { forge, host, projectPath };
     if (GITHUB_REMOTE_HOSTS.has(host)) return { forge: "github", host, projectPath };

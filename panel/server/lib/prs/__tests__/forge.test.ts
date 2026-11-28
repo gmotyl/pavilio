@@ -141,6 +141,16 @@ describe("createForgeResolver", () => {
     expect(await resolve({ repoPath: REPO })).toEqual({ forge: "unknown", host: "" });
   });
 
+  it("an override on an origin without a host resolves to unknown with empty host", async () => {
+    // e.g. a file:// or host-less ssh origin: glab --hostname "" must never run.
+    for (const url of ["ssh://:22/group/app.git", "file:///srv/repos/app.git"]) {
+      const resolve = createForgeResolver({ run: originRunner(url).run, readGlabConfig: () => GLAB_CONFIG });
+      for (const forge of ["gitlab", "github"] as const) {
+        expect(await resolve({ repoPath: REPO, forge })).toEqual({ forge: "unknown", host: "" });
+      }
+    }
+  });
+
   it("unknown host runs no forge CLI", async () => {
     const { run, calls } = originRunner("https://bitbucket.org/team/app.git");
     const resolve = createForgeResolver({ run, readGlabConfig: () => GLAB_CONFIG });

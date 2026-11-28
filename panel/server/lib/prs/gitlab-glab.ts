@@ -150,7 +150,7 @@ function mapMr(m: RawMr, repoPath: string): PullRequest {
 }
 
 const assertNumber = (n: number) => {
-  if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid MR number ${n}`);
+  if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
 };
 
 export function createGitLabGlabProvider(deps: {
@@ -204,17 +204,17 @@ export function createGitLabGlabProvider(deps: {
 
   async function oneMr(repoPath: string, n: number): Promise<{ m: RawMr; host: string }> {
     const { host, projectPath } = await target(repoPath);
-    // iid is a GraphQL String: -f keeps it a string where -F would send a number.
+    // -f sends raw strings: -F would send iid as a number and read an `@`-prefixed path from a file.
     const project = (await graphql(repoPath, host, [
       "-f",
       `query=${ONE_QUERY}`,
-      "-F",
+      "-f",
       `path=${projectPath}`,
       "-f",
       `iid=${n}`,
     ])) as { mergeRequest?: RawMr | null };
     const m = project.mergeRequest;
-    if (!m || typeof m !== "object") throw new PrUnavailableError("failed", `MR !${n} not found`, host);
+    if (!m || typeof m !== "object") throw new PrUnavailableError("failed", `PR !${n} not found`, host);
     return { m, host };
   }
 
@@ -226,7 +226,7 @@ export function createGitLabGlabProvider(deps: {
 
     async listOpen(repoPath) {
       const { host, projectPath } = await target(repoPath);
-      const project = (await graphql(repoPath, host, ["-f", `query=${LIST_QUERY}`, "-F", `path=${projectPath}`])) as {
+      const project = (await graphql(repoPath, host, ["-f", `query=${LIST_QUERY}`, "-f", `path=${projectPath}`])) as {
         mergeRequests?: { nodes?: RawMr[] | null } | null;
       };
       const nodes = project.mergeRequests?.nodes;
@@ -244,7 +244,7 @@ export function createGitLabGlabProvider(deps: {
       assertNumber(n);
       const { m, host } = await oneMr(repoPath, n);
       const base = (m.targetBranch ?? "").trim();
-      if (!base) throw new PrUnavailableError("failed", `MR !${n} has no target branch`, host);
+      if (!base) throw new PrUnavailableError("failed", `PR !${n} has no target branch`, host);
       const { head, base: baseSha } = await fetchPrRefs(run, repoPath, {
         n,
         headRefspecSource: `refs/merge-requests/${n}/head`,
@@ -258,7 +258,7 @@ export function createGitLabGlabProvider(deps: {
       const { host, projectPath } = await target(repoPath);
       // The discussions API carries no MR URL, and host + path would miss a relative URL root.
       const [project, stdout] = await Promise.all([
-        graphql(repoPath, host, ["-f", `query=${WEB_URL_QUERY}`, "-F", `path=${projectPath}`, "-f", `iid=${n}`]) as Promise<{
+        graphql(repoPath, host, ["-f", `query=${WEB_URL_QUERY}`, "-f", `path=${projectPath}`, "-f", `iid=${n}`]) as Promise<{
           mergeRequest?: { webUrl?: unknown } | null;
         }>,
         runGlab(
@@ -268,7 +268,7 @@ export function createGitLabGlabProvider(deps: {
         ),
       ]);
       const webUrl = project.mergeRequest?.webUrl;
-      if (typeof webUrl !== "string" || !webUrl) throw new PrUnavailableError("failed", `MR !${n} not found`, host);
+      if (typeof webUrl !== "string" || !webUrl) throw new PrUnavailableError("failed", `PR !${n} not found`, host);
       let pages: unknown[];
       try {
         pages = parseConcatenatedJson(stdout);

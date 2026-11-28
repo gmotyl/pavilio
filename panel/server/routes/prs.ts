@@ -22,10 +22,19 @@ const repoRoot = (r: RepoEntry): string => resolve(expandHome(r.path));
 
 const NOT_LINKED = { error: "repo is not linked to any project" };
 
+/**
+ * The present linked entry at `repoPath`, else undefined. When several entries share the
+ * path, the one setting `forge` wins — one rule for the router and the GitLab provider.
+ */
+function linkedEntry(repoPath: string, listRepos: () => RepoEntry[] = linkedRepos): RepoEntry | undefined {
+  const matches = listRepos().filter((r) => r.present && repoRoot(r) === repoPath);
+  return matches.find((r) => r.forge !== undefined) ?? matches[0];
+}
+
 /** The present linked repo at `repo`, else null: the path comes from the client. */
 function linkedTarget(repo: string): { repoPath: string; forge?: Forge } | null {
   const target = resolve(expandHome(repo));
-  const entry = linkedRepos().find((r) => r.present && repoRoot(r) === target);
+  const entry = linkedEntry(target);
   return entry ? { repoPath: target, forge: entry.forge } : null;
 }
 
@@ -187,17 +196,13 @@ export function createPrsRouter(
 /**
  * The GitLab provider's `resolve(repoPath)`: glab resolves by path alone, so look up the
  * repo's repos.json `forge` override — a forced gitlab repo on an unconfigured host still
- * resolves to GitLab. When several entries share the path, the one setting `forge` wins.
+ * resolves to GitLab. The entry is picked by `linkedEntry`, as for /open and /comments.
  */
 export function gitlabResolveFor(
   resolveForge: ResolveForge,
   listRepos: () => RepoEntry[] = linkedRepos,
 ): (repoPath: string) => Promise<ResolvedForge> {
-  return (repoPath) => {
-    const matches = listRepos().filter((r) => r.present && repoRoot(r) === repoPath);
-    const forge = (matches.find((r) => r.forge !== undefined) ?? matches[0])?.forge;
-    return resolveForge({ repoPath, forge });
-  };
+  return (repoPath) => resolveForge({ repoPath, forge: linkedEntry(repoPath, listRepos)?.forge });
 }
 
 const defaultResolveForge = createForgeResolver();

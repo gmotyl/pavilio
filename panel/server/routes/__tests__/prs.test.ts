@@ -401,6 +401,36 @@ describe("/api/prs", () => {
       expect(commentsFail.body.reason).toBe("glab-missing");
     });
 
+    it("open, comments and the list pick the same entry when several link the path", async () => {
+      const shared = join(projects.root(), "shared-repo");
+      mkdirSync(shared);
+      // "aa-plain" lists first and sets no forge; "zz-forced" forces gitlab.
+      for (const [name, entry] of [
+        ["aa-plain", { name: "plain", path: shared }],
+        ["zz-forced", { name: "forced", path: shared, forge: "gitlab" }],
+      ] as const) {
+        const dir = join(projects.dir(), name);
+        mkdirSync(dir);
+        writeFileSync(join(dir, "PROJECT.md"), `# ${name}\n`);
+        writeFileSync(join(dir, "repos.json"), JSON.stringify([entry]));
+      }
+      const github = fakeProvider("github", () => []);
+      const gitlab = fakeProvider("gitlab", (p) => [{ ...pr(p, 2, "2026-11-21T00:00:00Z"), forge: "gitlab" as const }]);
+      // Only the override makes this host GitLab.
+      const resolveForge = async (e: { repoPath: string; forge?: Forge }): Promise<ResolvedForge> =>
+        e.forge ? { forge: e.forge, host: "git.example.org", projectPath: "g/shared" } : { forge: "unknown", host: "git.example.org" };
+      const app = makeApp(createPrsRouter({ github, gitlab }, { resolveForge }), "/api/prs");
+
+      const list = await request(app).get("/api/prs?project=zz-forced");
+      expect(list.body.prs.map((p: PullRequest) => p.forge)).toEqual(["gitlab"]);
+      const open = await request(app).post("/api/prs/open").send({ repo: shared, number: 2 });
+      expect(open.status).toBe(200);
+      expect(open.body.body).toBe("gitlab");
+      const comments = await request(app).get("/api/prs/comments").query({ repo: shared, number: "2" });
+      expect(comments.status).toBe(200);
+      expect(gitlab.reviewComments).toHaveBeenCalledWith(shared, 2);
+    });
+
     it("one failure returns reason and host", async () => {
       const { github, gitlab, app } = setupMixed();
       gitlab.getPr.mockRejectedValueOnce(new PrUnavailableError("glab-unauthenticated", "401", "git.example.com"));

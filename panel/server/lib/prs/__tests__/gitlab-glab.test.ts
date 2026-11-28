@@ -97,7 +97,8 @@ describe("GitLabGlabProvider", () => {
     expect(c.cmd).toBe("glab");
     expect(c.cwd).toBe(REPO);
     expect(c.args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", HOST]);
-    expect(field(c.args, "-F", "path")).toBe(PROJECT);
+    expect(field(c.args, "-f", "path")).toBe(PROJECT);
+    expect(field(c.args, "-F", "path")).toBeUndefined();
     const query = field(c.args, "-f", "query")!;
     expect(query).toMatch(/project\(fullPath: \$path\)/);
     expect(query).toMatch(/mergeRequests\(state: opened, first: 100, sort: UPDATED_DESC\)/);
@@ -216,7 +217,8 @@ describe("GitLabGlabProvider", () => {
       expect(calls).toHaveLength(1);
       const [c] = calls;
       expect(c.args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", HOST]);
-      expect(field(c.args, "-F", "path")).toBe(PROJECT);
+      expect(field(c.args, "-f", "path")).toBe(PROJECT);
+    expect(field(c.args, "-F", "path")).toBeUndefined();
       expect(field(c.args, "-f", "iid")).toBe("244");
       const query = field(c.args, "-f", "query")!;
       expect(query).toMatch(/mergeRequest\(iid: \$iid\)/);
@@ -232,8 +234,24 @@ describe("GitLabGlabProvider", () => {
       const err = await createGitLabGlabProvider({ run, resolve }).getPr(REPO, n).catch((e) => e);
       expect(err).toBeInstanceOf(PrUnavailableError);
       expect((err as PrUnavailableError).reason).toBe("failed");
+      expect((err as PrUnavailableError).message).toMatch(/^invalid PR number/);
       expect(calls).toHaveLength(0);
     }
+  });
+
+  it("getPr of a missing merge request says PR, not MR", async () => {
+    const noMr = ok(JSON.stringify({ data: { project: { mergeRequest: null } } }));
+    const { run } = fakeRunner(() => noMr);
+    const err = await createGitLabGlabProvider({ run, resolve }).getPr(REPO, 244).catch((e) => e);
+    expect(err).toBeInstanceOf(PrUnavailableError);
+    expect(err.message).toBe("PR !244 not found");
+  });
+
+  it("openPr without a target branch says PR, not MR", async () => {
+    const { run } = fakeRunner(() => oneOut(mr({ targetBranch: " " })));
+    const err = await createGitLabGlabProvider({ run, resolve }).openPr(REPO, 244).catch((e) => e);
+    expect(err).toBeInstanceOf(PrUnavailableError);
+    expect(err.message).toBe("PR !244 has no target branch");
   });
 
   it("openPr fetches the merge-request head and returns the description", async () => {
@@ -303,7 +321,8 @@ describe("GitLabGlabProvider", () => {
     expect(gql[0].cmd).toBe("glab");
     expect(gql[0].cwd).toBe(REPO);
     expect(gql[0].args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", HOST]);
-    expect(field(gql[0].args, "-F", "path")).toBe(PROJECT);
+    expect(field(gql[0].args, "-f", "path")).toBe(PROJECT);
+    expect(field(gql[0].args, "-F", "path")).toBeUndefined();
     expect(field(gql[0].args, "-f", "iid")).toBe("40");
     expect(field(gql[0].args, "-F", "iid")).toBeUndefined();
     expect(field(gql[0].args, "-f", "query")).toMatch(/mergeRequest\(iid: \$iid\)\s*\{\s*webUrl\s*\}/);
@@ -315,6 +334,7 @@ describe("GitLabGlabProvider", () => {
     const err = await createGitLabGlabProvider({ run, resolve }).reviewComments(REPO, 40).catch((e) => e);
     expect(err).toBeInstanceOf(PrUnavailableError);
     expect(err.reason).toBe("failed");
+    expect(err.message).toBe("PR !40 not found");
   });
 
   it("reviewComments requests paginated discussions with an encoded nested path", async () => {

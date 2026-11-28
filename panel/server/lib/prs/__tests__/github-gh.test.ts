@@ -267,6 +267,23 @@ describe("GitHubGhProvider", () => {
     }
   });
 
+  it("a non-GitHub origin reports its host so the copy names it", async () => {
+    // A forge: "github" override lands here; the client then names the host instead of
+    // asking for the forge key that is already set.
+    const cases: [string, string][] = [
+      ["git@gitlab.com:o/r.git", "gitlab.com"],
+      ["https://gitlab.example.com/o/r.git", "gitlab.example.com"],
+      ["https://github.com.evil.io/o/r.git", "github.com.evil.io"],
+    ];
+    for (const [url, host] of cases) {
+      const origin = originIs(url);
+      const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
+      const err = await createGitHubGhProvider({ run }).listOpen(REPO).catch((e) => e);
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
+      expect((err as PrUnavailableError).host).toBe(host);
+    }
+  });
+
   it("classifies a missing gh, an unauthenticated gh and other failures", async () => {
     const origin = originIs("https://github.com/o/r.git");
     const reasonFor = async (gh: RunResult | Error) => {

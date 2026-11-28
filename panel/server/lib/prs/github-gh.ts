@@ -210,7 +210,9 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
       // No origin at all is just as un-GitHub as a foreign host.
       throw new PrUnavailableError("unknown-forge", "no origin remote");
     }
-    if (!GITHUB_REMOTE_HOSTS.has(remoteHost(url) ?? "")) throw new PrUnavailableError("unknown-forge", `origin is ${url.trim()}`);
+    const host = remoteHost(url) ?? "";
+    // The host lets the copy name it, e.g. when a forge: "github" override sits on another forge.
+    if (!GITHUB_REMOTE_HOSTS.has(host)) throw new PrUnavailableError("unknown-forge", `origin is ${url.trim()}`, host || undefined);
     const slug = remoteRepo(url);
     if (!slug) throw new PrUnavailableError("unknown-forge", `cannot parse owner/repo from ${url.trim()}`);
     return `${GITHUB_HOST}/${slug}`;
