@@ -208,6 +208,30 @@ describe("activity LED scheduler", () => {
     expect(counts(h.sent.at(-1)!.buf)).toEqual({ attention: 0, busy: 0 });
     led.stop();
   });
+
+  it("drops a counted-busy session removed without an event", () => {
+    const h = makeDeps();
+    const led = startActivityLed(h.deps);
+    h.emit("a", "busy");
+    vi.advanceTimersByTime(2_000);
+    expect(counts(h.sent.at(-1)!.buf)).toEqual({ attention: 0, busy: 1 });
+
+    h.remove("a");
+    vi.advanceTimersByTime(60_000);
+    expect(counts(h.sent.at(-1)!.buf)).toEqual({ attention: 0, busy: 0 });
+    led.stop();
+  });
+
+  it("a pending busy timer for a removed session does not count it", () => {
+    const h = makeDeps();
+    const led = startActivityLed(h.deps);
+    h.emit("a", "busy");
+    vi.advanceTimersByTime(1_000);
+    h.remove("a"); // no event follows
+    vi.advanceTimersByTime(1_000);
+    expect(h.sent.every((s) => counts(s.buf).busy === 0)).toBe(true);
+    led.stop();
+  });
 });
 
 describe("activity LED stop", () => {

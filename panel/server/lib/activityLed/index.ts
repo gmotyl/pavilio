@@ -97,6 +97,9 @@ export function startActivityLed(deps: ActivityLedDeps): ActivityLed {
           sessionId,
           setTimeout(() => {
             busyTimers.delete(sessionId);
+            // The session may have vanished without an event while the timer ran.
+            reconcile();
+            if (states.get(sessionId) !== "busy") return;
             maturedBusy.add(sessionId);
             update();
           }, BUSY_DEBOUNCE_MS),
