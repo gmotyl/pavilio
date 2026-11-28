@@ -193,6 +193,11 @@ const FIXTURES: Record<string, Fixture> = {
 
   // ── Research ─────────────────────────────────────────────────────────────
   "research.spikesRoot": { value: "~/code/spikes" },
+
+  // ── Activity LED ─────────────────────────────────────────────────────────
+  "activityLed": {
+    value: { enabled: true, host: "10.0.0.7", port: 4211, colourAttention: "#00FF00", colourBusy: "#FF0000", brightness: 50, blinkMs: 200, pauseMs: 3000 },
+  },
 };
 
 /**
@@ -275,8 +280,8 @@ describe("the registry this guard is driven from", () => {
 
     // A loop over an empty registry asserts nothing, and neither does one over
     // a registry that has become all one tier.
-    expect(ALL_PREFERENCES.length).toBe(70);
-    expect(portable.length).toBe(56);
+    expect(ALL_PREFERENCES.length).toBe(71);
+    expect(portable.length).toBe(57);
     expect(machineLocal.length).toBe(14);
     expect(sessionTier.length).toBe(4);
     // The portable arm of the union forbids `browserStore`; this says the

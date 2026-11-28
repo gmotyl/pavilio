@@ -1,0 +1,131 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import request from "supertest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { makeApp } from "../../test-kit";
+
+vi.mock("../../watcher", () => ({ broadcast: vi.fn() }));
+// copy-from: this machine is "spock"; no git, so on-disk machine files are offered.
+vi.mock("../../lib/hostname.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/hostname.js")>()),
+  machineId: () => "spock",
+}));
+vi.mock("../../lib/trackedFiles.js", () => ({ trackedFileNames: vi.fn(async () => undefined) }));
+
+// Records socket creation and sends; no packet ever leaves the test.
+const udp = vi.hoisted(() => ({ created: 0, sends: 0 }));
+vi.mock("node:dgram", () => {
+  const createSocket = () => {
+    udp.created++;
+    return {
+      send: (_b: Buffer, _p: number, _h: string, cb: (err: Error | null) => void) => {
+        udp.sends++;
+        cb(null);
+      },
+      on: () => {},
+      close: () => {},
+      unref: () => {},
+    };
+  };
+  return { default: { createSocket }, createSocket };
+});
+
+import preferencesRouter from "../preferences.js";
+import activityLedRouter from "../activityLed.js";
+import {
+  _setActivityLedForTests,
+  startPanelActivityLed,
+  stopPanelActivityLed,
+} from "../../lib/activityLed/instance.js";
+import { loadPreferences, patchPreferences, _resetPreferencesForTests } from "../../lib/preferences-store.js";
+
+const fakeLed = () => ({ settingsChanged: vi.fn(), test: vi.fn(async () => {}), stop: vi.fn() });
+
+let dir = "";
+beforeEach(() => {
+  udp.created = 0;
+  udp.sends = 0;
+  dir = mkdtempSync(join(tmpdir(), "pavilio-activity-led-route-"));
+  loadPreferences(join(dir, "preferences.json"));
+});
+
+afterEach(() => {
+  _setActivityLedForTests(null);
+  stopPanelActivityLed();
+  _resetPreferencesForTests();
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  dir = "";
+});
+
+describe("activity LED routes", () => {
+  it("preferences patch with activityLed notifies the module", async () => {
+    const led = fakeLed();
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(preferencesRouter))
+      .patch("/api/preferences")
+      .send({ activityLed: { enabled: true } });
+    expect(res.status).toBe(200);
+    expect(led.settingsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("preferences patch without activityLed does not notify", async () => {
+    const led = fakeLed();
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(preferencesRouter))
+      .patch("/api/preferences")
+      .send({ "panes.left": "240" });
+    expect(res.status).toBe(200);
+    expect(led.settingsChanged).not.toHaveBeenCalled();
+  });
+
+  it("preferences copy-from notifies the module", async () => {
+    const prefsDir = join(dir, "preferences");
+    mkdirSync(prefsDir);
+    writeFileSync(join(prefsDir, "spock.json"), '{"version":1}', "utf8");
+    writeFileSync(join(prefsDir, "mac.json"), '{"version":1,"activityLed":{"enabled":true}}', "utf8");
+    loadPreferences(join(prefsDir, "spock.json"));
+    const led = fakeLed();
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(preferencesRouter))
+      .post("/api/preferences/copy-from")
+      .send({ machine: "mac" });
+    expect(res.status).toBe(204);
+    expect(led.settingsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("test route triggers one test report", async () => {
+    const led = fakeLed();
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(activityLedRouter)).post("/api/activity-led/test");
+    expect(res.status).toBe(204);
+    expect(led.test).toHaveBeenCalledTimes(1);
+  });
+
+  it("test route answers 502 when the send fails", async () => {
+    const led = { ...fakeLed(), test: vi.fn(() => Promise.reject(new Error("EHOSTUNREACH"))) };
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(activityLedRouter)).post("/api/activity-led/test");
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({ error: "EHOSTUNREACH" });
+  });
+
+  it("test route answers 503 when the reporter is not running", async () => {
+    const res = await request(makeApp(activityLedRouter)).post("/api/activity-led/test");
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBeTruthy();
+  });
+
+  it("startup without an activityLed preference opens no socket and sends nothing", () => {
+    startPanelActivityLed();
+    expect(udp.created).toBe(0);
+    expect(udp.sends).toBe(0);
+  });
+
+  it("startup with activityLed enabled sends over one lazily created socket", () => {
+    patchPreferences({ activityLed: { enabled: true } });
+    startPanelActivityLed();
+    expect(udp.created).toBe(1);
+    expect(udp.sends).toBe(1);
+  });
+});

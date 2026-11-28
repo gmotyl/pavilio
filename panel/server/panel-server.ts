@@ -58,6 +58,8 @@ import { createAnswerCacheRouter, runStartupSweep } from "./routes/answerCache.j
 import { createAnswerAudioCache } from "./lib/speech/answerAudioCache.js";
 import archiveRouter from "./routes/archive.js";
 import preferencesRouter from "./routes/preferences.js";
+import activityLedRouter from "./routes/activityLed.js";
+import { startPanelActivityLed } from "./lib/activityLed/instance.js";
 import skillsRouter from "./routes/skills.js";
 import { machineId } from "./lib/hostname.js";
 import { autoSyncSettings } from "./lib/autoSyncConfig.js";
@@ -287,6 +289,7 @@ export async function startPanel(
   app.use("/api/archive", archiveRouter);
   app.use("/api/system", systemRouter);
   app.use("/api", preferencesRouter);
+  app.use("/api", activityLedRouter);
   app.use("/api/speech", speechRouter);
   app.use("/api/speech", createSpeechEnginesRouter({ holder: ttsHolder, catalog: openaiCatalog }));
   // The OmniVoice server's voices (list, clone, delete, sample) and the workspace voice copy.
@@ -352,6 +355,9 @@ export async function startPanel(
   await listenIpv6Loopback(server, port);
 
   setInterval(pruneDeadAgents, 30_000);
+
+  // Sends nothing (and opens no socket) until Settings enables it.
+  startPanelActivityLed();
 
   if (isEnabled()) {
     const s = autoSyncSettings();

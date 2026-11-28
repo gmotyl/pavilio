@@ -12,6 +12,7 @@ import {
  * comparing it against itself would assert nothing at all.
  */
 const PORTABLE = [
+  "activityLed",
   "alerts.durationSeconds",
   "composer.shortcuts",
   "fileViewer.diffLayout",
@@ -176,6 +177,12 @@ const DEFAULTS: readonly [string, unknown, "global" | "project" | "repo"][] = [
   ["shell.leftSidebar.width", 240, "global"],
   ["shell.project.expanded", false, "project"],
   ["research.spikesRoot", "~/git/prv/spikes", "global"],
+  // Reporting off; the board address and look the firmware ships with.
+  [
+    "activityLed",
+    { enabled: false, host: "192.168.10.156", port: 4210, colourAttention: "#00FF00", colourBusy: "#FF0000", brightness: 20, blinkMs: 150, pauseMs: 2000 },
+    "global",
+  ],
   // Expanded until the Research header's chevron is pressed.
   ["shell.research.collapsed", false, "global"],
   ["shell.rightSidebar.expanded", true, "global"],
