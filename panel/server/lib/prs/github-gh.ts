@@ -1,6 +1,5 @@
-import { execFile } from "node:child_process";
 import { basename } from "node:path";
-import { gitSafeEnv } from "../gitEnv.js";
+import { GITHUB_REMOTE_HOSTS, remoteHost } from "./forge.js";
 import {
   type ChecksState,
   type PrProvider,
@@ -9,24 +8,12 @@ import {
   type PullRequest,
   type ReviewComment,
 } from "./provider.js";
+import { fetchPrRefs, runGit } from "./fetchPrRefs.js";
+import { defaultRunner, type RunResult, type Runner } from "./run.js";
 
-export interface RunResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
+// Re-exported: the runner moved to run.ts; existing imports keep working.
+export { defaultRunner, type RunResult, type Runner };
 
-/** Resolves with the exit code for any exit; rejects only when the process could not start (e.g. ENOENT). */
-export type Runner = (
-  cmd: string,
-  args: string[],
-  opts: { cwd: string; env?: Record<string, string> },
-) => Promise<RunResult>;
-
-const TIMEOUT_MS = 30_000;
-// Shallow clones: up to DEEPEN_ROUNDS × DEEPEN_BY extra commits per side before giving up.
-const DEEPEN_ROUNDS = 5;
-const DEEPEN_BY = 200;
 const PR_FIELDS =
   "number,title,author,isDraft,reviewRequests,reviewDecision,statusCheckRollup,headRefName,headRefOid,baseRefName,updatedAt,url";
 // Older gh (e.g. 2.7) rejects the whole --json list over this one field.
@@ -42,21 +29,6 @@ export function __resetGhFieldSupportForTests(): void {
 // gh exits 4 when it needs `gh auth login`; older versions only say so on stderr.
 const GH_AUTH_EXIT = 4;
 const AUTH_ERROR = /gh auth login|not logged in|authentication required|HTTP 401|bad credentials/i;
-
-export const defaultRunner: Runner = (cmd, args, { cwd, env }) =>
-  new Promise((resolve, reject) => {
-    // gitSafeEnv: an inherited GIT_DIR would retarget git (and gh's git calls) away from `cwd`.
-    execFile(
-      cmd,
-      args,
-      { cwd, env: { ...gitSafeEnv(), ...env }, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: "utf-8" },
-      (err, stdout, stderr) => {
-        if (err && typeof err.code === "string") return reject(err);
-        const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
-        resolve({ code, stdout, stderr });
-      },
-    );
-  });
 
 interface RawCheck {
   __typename?: string;
@@ -164,17 +136,12 @@ function mapPr(p: RawPr, repoPath: string): PullRequest {
     base: p.baseRefName,
     updatedAt: p.updatedAt,
     url: p.url,
+    forge: "github",
   };
 }
 
-/** Host of a git remote URL: https://, ssh://, git:// or scp-style `user@host:path`. */
-export function remoteHost(url: string): string | null {
-  const u = url.trim();
-  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)/i.exec(u);
-  if (scheme) return scheme[1].toLowerCase();
-  const scp = /^(?:[^@/]+@)?([^/:]+):(?!\/\/)/.exec(u);
-  return scp ? scp[1].toLowerCase() : null;
-}
+// Re-exported: remoteHost moved to forge.ts; existing imports keep working.
+export { remoteHost };
 
 /** `owner/repo` of a GitHub remote URL, `.git` suffix dropped. */
 export function remoteRepo(url: string): string | null {
@@ -184,16 +151,16 @@ export function remoteRepo(url: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
-// A credential prompt would hang the request until the timeout; fail fast instead.
-const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" };
 const GITHUB_HOST = "github.com";
-// GitHub's SSH-over-443 endpoint is the same github.com.
-const GITHUB_REMOTE_HOSTS = new Set([GITHUB_HOST, "ssh.github.com"]);
 // Re-read so `gh auth switch` shows up without a restart.
 const LOGIN_TTL_MS = 5 * 60_000;
 
-export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number } = {}): PrProvider {
+export function createGitHubGhProvider(
+  deps: { run?: Runner; now?: () => number; forced?: (repoPath: string) => boolean } = {},
+): PrProvider {
   const run = deps.run ?? defaultRunner;
+  // A repos.json `forge: "github"` override: origin may sit on an SSH host alias.
+  const forced = deps.forced ?? (() => false);
   const now = deps.now ?? Date.now;
   let login: { at: number; value: Promise<string> } | null = null;
 
@@ -233,46 +200,33 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     return { out: await gh(args(PR_FIELDS_NO_HEAD_OID, false), cwd), hasHeadOid: false };
   }
 
-  async function git(args: string[], cwd: string): Promise<string> {
-    let r: RunResult;
-    try {
-      r = await run("git", args, { cwd, env: GIT_ENV });
-    } catch (err) {
-      throw new PrUnavailableError("failed", (err as Error).message);
-    }
-    if (r.code !== 0) throw new PrUnavailableError("failed", r.stderr.trim() || `git ${args[0]} exited ${r.code}`);
-    return r.stdout;
-  }
-
-  /** merge-base exits 1 when the two commits share no ancestor in this clone. */
-  async function hasMergeBase(a: string, b: string, cwd: string): Promise<boolean> {
-    let r: RunResult;
-    try {
-      r = await run("git", ["merge-base", a, b], { cwd, env: GIT_ENV });
-    } catch (err) {
-      throw new PrUnavailableError("failed", (err as Error).message);
-    }
-    if (r.code === 0) return true;
-    if (r.code === 1) return false;
-    throw new PrUnavailableError("failed", r.stderr.trim() || `git merge-base exited ${r.code}`);
-  }
+  const git = (args: string[], cwd: string) => runGit(run, args, cwd);
 
   /**
-   * Returns `github.com/owner/repo` of origin for gh's --repo: in a fork clone gh defaults
-   * to upstream, and an unqualified slug would resolve against GH_HOST.
+   * Returns origin's gh --repo value and its `owner/repo`: in a fork clone gh defaults to
+   * upstream, so --repo pins it. It is always qualified `github.com/owner/repo`, since an
+   * unqualified slug would resolve against an inherited GH_HOST — also for a forced override
+   * on another host (e.g. an SSH alias gh does not know), so list/view hit the same host the
+   * comments call pins with --hostname. GitHub Enterprise is unsupported.
    */
-  async function assertGitHub(repoPath: string): Promise<string> {
+  async function assertGitHub(repoPath: string): Promise<{ repoArg: string; slug: string }> {
     let url: string;
     try {
       url = await git(["remote", "get-url", "origin"], repoPath);
     } catch {
       // No origin at all is just as un-GitHub as a foreign host.
-      throw new PrUnavailableError("not-github", "no origin remote");
+      throw new PrUnavailableError("unknown-forge", "no origin remote");
     }
-    if (!GITHUB_REMOTE_HOSTS.has(remoteHost(url) ?? "")) throw new PrUnavailableError("not-github", `origin is ${url.trim()}`);
+    const host = remoteHost(url) ?? "";
+    const githubHost = GITHUB_REMOTE_HOSTS.has(host);
+    // The host lets the copy name it.
+    if (!githubHost && !forced(repoPath)) {
+      throw new PrUnavailableError("unknown-forge", `origin is ${url.trim()}`, host || undefined);
+    }
     const slug = remoteRepo(url);
-    if (!slug) throw new PrUnavailableError("not-github", `cannot parse owner/repo from ${url.trim()}`);
-    return `${GITHUB_HOST}/${slug}`;
+    if (!slug) throw new PrUnavailableError("unknown-forge", `cannot parse owner/repo from ${url.trim()}`);
+    // GitHub Enterprise stays unsupported: a forced alias host is treated as github.com.
+    return { repoArg: `${GITHUB_HOST}/${slug}`, slug };
   }
 
   return {
@@ -291,10 +245,10 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     },
 
     async listOpen(repoPath) {
-      const slug = await assertGitHub(repoPath);
+      const { repoArg } = await assertGitHub(repoPath);
       // Without headRefOid the rows carry headSha "", which the UI reads as unknown.
       const { out } = await ghPrFields(
-        (fields) => ["pr", "list", "--repo", slug, "--state", "open", "--limit", "100", "--json", fields],
+        (fields) => ["pr", "list", "--repo", repoArg, "--state", "open", "--limit", "100", "--json", fields],
         repoPath,
       );
       let raw: RawPr[];
@@ -309,7 +263,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
 
     async getPr(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      const slug = await assertGitHub(repoPath);
+      const { repoArg } = await assertGitHub(repoPath);
       // Without headRefOid, the head is the PR's last commit (`commits` lists all of them).
       const { out, hasHeadOid } = await ghPrFields(
         (fields, hasOid) => [
@@ -317,7 +271,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
           "view",
           String(n),
           "--repo",
-          slug,
+          repoArg,
           "--json",
           hasOid ? `${fields},state` : `${fields},state,commits`,
         ],
@@ -338,47 +292,20 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
 
     async openPr(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      const slug = await assertGitHub(repoPath);
-      const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName,body"], repoPath)) as {
+      const { repoArg } = await assertGitHub(repoPath);
+      const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", repoArg, "--json", "baseRefName,body"], repoPath)) as {
         baseRefName?: string;
         body?: string;
       };
       const base = (view.baseRefName ?? "").trim();
       if (!base) throw new PrUnavailableError("failed", `PR #${n} has no base branch`);
-      const headRef = `refs/pavilio/pr/${n}`;
-      const baseRef = `refs/pavilio/pr-base/${n}`;
-      // Touch only refs/pavilio/: --refmap= skips the opportunistic origin/* update,
-      // no FETCH_HEAD, no submodule fetches. `+`: PR heads are force-pushed routinely.
-      const fetch = (extra: string[]) =>
-        git(
-          [
-            "fetch",
-            ...extra,
-            "--no-tags",
-            "--no-write-fetch-head",
-            "--recurse-submodules=no",
-            "--refmap=",
-            "origin",
-            `+pull/${n}/head:${headRef}`,
-            `+refs/heads/${base}:${baseRef}`,
-          ],
-          repoPath,
-        );
-      await fetch([]);
-      const head = (await git(["rev-parse", "--verify", `${headRef}^{commit}`], repoPath)).trim();
-      const baseSha = (await git(["rev-parse", "--verify", `${baseRef}^{commit}`], repoPath)).trim();
-      // A shallow clone may lack the shared ancestor the review diffs against: deepen, bounded.
-      if ((await git(["rev-parse", "--is-shallow-repository"], repoPath)).trim() === "true") {
-        for (let round = 0; round < DEEPEN_ROUNDS && !(await hasMergeBase(baseSha, head, repoPath)); round++) {
-          await fetch([`--deepen=${DEEPEN_BY}`]);
-        }
-      }
+      const { head, base: baseSha } = await fetchPrRefs(run, repoPath, { n, headRefspecSource: `pull/${n}/head`, base });
       return { head, base: baseSha, body: view.body ?? "" };
     },
 
     async reviewComments(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      const slug = (await assertGitHub(repoPath)).slice(`${GITHUB_HOST}/`.length);
+      const { slug } = await assertGitHub(repoPath);
       // --jq '.[] | {...}' prints one object per line on every page, so pages concatenate without `][`.
       // Project only the consumed fields: whole objects repeat `diff_hunk` and can overflow the runner's maxBuffer.
       // --hostname: an inherited GH_HOST must not send this to another host once origin proved github.com.

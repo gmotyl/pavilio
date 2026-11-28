@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../../../../test-utils";
 import { preferences } from "../../../../preferences/declarations";
 import { readPreference } from "../../../../preferences/store";
-import FileViewer from "../FileViewer";
+import FileViewer, { type FileViewerProps } from "../FileViewer";
 
 // Paging is the same logic at any page size; a test that pages sets a small one instead of mounting thousands of rows.
 const rowPage = vi.hoisted(() => ({ size: undefined as number | undefined }));
@@ -69,7 +69,7 @@ const FULL = NEW_CONTENT.slice(0, 20).join("\n");
 const DELETE_DIFF = ["--- a/notes.ts", "+++ b/notes.ts", "@@ -3,4 +3,2 @@", " line 3", "-gone 4", "-gone 5", " line 6"].join("\n");
 const AFTER_DELETE = ["line 1", "line 2", "line 3", "line 6", "line 7"].join("\n");
 
-const changed = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
+const changed = (extra: Partial<Omit<FileViewerProps, "comments" | "forge">> = {}) => (
   <FileViewer path="src/geo/area.ts" diff={DIFF} content={FULL} status="M" counts={{ add: 2, del: 1 }} defaultMode="diff" {...extra} />
 );
 
@@ -331,7 +331,7 @@ describe("FileViewer", () => {
   });
 
   it("an old-side jump lands on the removed rows, switching Code to Diff", () => {
-    const viewer = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
+    const viewer = (extra: Partial<Omit<FileViewerProps, "comments" | "forge">> = {}) => (
       <FileViewer path="notes.ts" diff={DELETE_DIFF} content={AFTER_DELETE} status="M" defaultMode="code" {...extra} />
     );
     const { rerender, container } = render(viewer());

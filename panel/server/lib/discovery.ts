@@ -4,6 +4,7 @@ import { getConfig } from "../config.js";
 import { parseOpenSpecConfig, type OpenSpecConfig } from "./openspec.js";
 import { expandHome } from "./paths.js";
 import { isProjectDir } from "./project-dir.js";
+import type { Forge } from "./prs/provider.js";
 import { projectGroup } from "./projects/group.js";
 import { projectKind, type ProjectKind } from "./projects/kind.js";
 
@@ -13,6 +14,7 @@ export interface RepoEntry {
   present: boolean; // the expanded path is a directory on this machine, re-derived on every read
   cloneable?: boolean; // repos.json names a remote; the URL itself never leaves the server
   openspec?: OpenSpecConfig;
+  forge?: Forge; // explicit forge override; only "github" | "gitlab" survive parsing
 }
 
 export interface Project {
@@ -115,6 +117,10 @@ export function readProject(root: string, name: string): Project {
   };
 }
 
+const FORGES: readonly Forge[] = ["github", "gitlab"];
+const parseForge = (r: { forge?: unknown }): Forge | undefined =>
+  FORGES.find((f) => f === r.forge);
+
 const rawRemote = (r: { remote?: unknown }): string | undefined =>
   typeof r.remote === "string" && r.remote.trim() ? r.remote.trim() : undefined;
 
@@ -150,6 +156,8 @@ export function readLinkedRepos(dir: string, name: string): LinkedRepo[] {
         const remote = rawRemote(r);
         if (remote) entry.cloneable = true;
         if (openspec) entry.openspec = openspec;
+        const forge = parseForge(r);
+        if (forge) entry.forge = forge;
         return [remote ? { entry, remote } : { entry }];
       } catch (err) {
         console.warn(

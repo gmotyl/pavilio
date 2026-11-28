@@ -230,7 +230,7 @@ describe("PrsView", () => {
         me: ME,
         prs: [pr({ number: 1 })],
         unavailable: [
-          { repo: "notes", reason: "not-github" },
+          { repo: "notes", reason: "unknown-forge", host: "git.example.org" },
           { repo: "tools", reason: "gh-missing" },
           { repo: "site", reason: "gh-unauthenticated" },
           { repo: "api", reason: "failed" },
@@ -240,7 +240,7 @@ describe("PrsView", () => {
     await waitFor(() => expect(rows()).toHaveLength(1));
     const lines = within(screen.getByRole("list", { name: "Unavailable repositories" })).getAllByRole("listitem");
     expect(lines.map((l) => l.textContent)).toEqual([
-      "notesNo GitHub remote",
+      "notesUnknown forge for git.example.org — run glab auth login --hostname git.example.org or set forge in repos.json",
       "toolsgh is not installed",
       "siteRun gh auth login",
       "apiCouldn't load pull requestsRetry",
@@ -248,6 +248,101 @@ describe("PrsView", () => {
     const before = fetch.mock.calls.length;
     fireEvent.click(within(lines[3]).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(fetch.mock.calls.length).toBe(before + 1));
+  });
+
+  describe("GitHub and GitLab", () => {
+    const GITLAB_URL = "https://git.cps.metro-markets.org/web/web-app-buyer-react/-/merge_requests/244";
+    const mixed = (): PrsResponse => ({
+      me: ME,
+      // The server sorts by last update, newest first, across forges.
+      prs: [
+        pr({ number: 244, repo: "web-app-buyer-react", forge: "gitlab", url: GITLAB_URL, updatedAt: "2026-11-22T12:00:00Z" }),
+        pr({ number: 244, updatedAt: "2026-11-22T11:00:00Z" }),
+        pr({ number: 1881, repo: "monorepo", forge: "gitlab", url: "https://gitlab.com/g/monorepo/-/merge_requests/1881", updatedAt: "2026-11-22T09:00:00Z" }),
+      ],
+      unavailable: [],
+    });
+    const restingLine = async (entry: PrsResponse["unavailable"][number]) => {
+      renderPrs({ me: ME, prs: [pr({ number: 1 })], unavailable: [entry] });
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      const [line] = within(screen.getByRole("list", { name: "Unavailable repositories" })).getAllByRole("listitem");
+      return line;
+    };
+
+    it("lists GitHub and GitLab rows together newest first", async () => {
+      renderPrs(mixed());
+      await waitFor(() => expect(rows()).toHaveLength(3));
+      expect(rows().map((r) => r.getAttribute("data-testid"))).toEqual([
+        "pr-row-web-app-buyer-react#244",
+        "pr-row-pavilio#244",
+        "pr-row-monorepo#1881",
+      ]);
+    });
+
+    it("GitHub row shows #n and GitLab row shows !n", async () => {
+      renderPrs(mixed());
+      await waitFor(() => expect(rows()).toHaveLength(3));
+      const [gl, gh, gl2] = rows();
+      expect(within(gl).getByText("!244")).toBeInTheDocument();
+      expect(within(gl).queryByText("#244")).toBeNull();
+      expect(within(gh).getByText("#244")).toBeInTheDocument();
+      expect(within(gh).queryByText("!244")).toBeNull();
+      expect(within(gl2).getByText("!1881")).toBeInTheDocument();
+    });
+
+    it("GitLab row offers Review and Explain", async () => {
+      renderPrs({ ...mixed(), prs: [mixed().prs[0]] });
+      await waitFor(() => expect(rows()).toHaveLength(1));
+      await waitFor(() => expect(screen.queryAllByTitle("Loading stories…")).toHaveLength(0));
+      const [gl] = rows();
+      expect(await within(gl).findByRole("button", { name: "Explain" })).toBeEnabled();
+      // Review: opening the row switches to the Review view with the MR in the URL.
+      fireEvent.click(gl);
+      const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
+      expect(search.get("view")).toBe("review");
+      expect(search.get("pr")).toBe("web-app-buyer-react#244");
+    });
+
+    it("unknown forge resting line names the host and both fixes", async () => {
+      const line = await restingLine({ repo: "legacy-cms", reason: "unknown-forge", host: "git.example.org" });
+      expect(line).toHaveTextContent(
+        "legacy-cmsUnknown forge for git.example.org — run glab auth login --hostname git.example.org or set forge in repos.json",
+      );
+      expect([...line.querySelectorAll("code")].map((c) => c.textContent)).toEqual([
+        "git.example.org",
+        "glab auth login --hostname git.example.org",
+        "forge",
+      ]);
+      expect(line).not.toHaveTextContent("No GitHub remote");
+    });
+
+    it("a host-less unknown forge resting line asks to fix the origin remote", async () => {
+      // No usable origin: the resolver gives up before the forge override, so the fix is the remote.
+      const line = await restingLine({ repo: "scratch", reason: "unknown-forge" });
+      expect(line).toHaveTextContent("scratchNo usable origin remote — add or fix it");
+      expect(line.querySelector("code")).toHaveTextContent(/^origin$/);
+      expect(line).not.toHaveTextContent("repos.json");
+    });
+
+    it("glab unauthenticated resting line names the host", async () => {
+      const line = await restingLine({ repo: "monorepo", reason: "glab-unauthenticated", host: "git.cps.metro-markets.org" });
+      expect(line).toHaveTextContent("monorepoRun glab auth login --hostname git.cps.metro-markets.org");
+      expect(line.querySelector("code")).toHaveTextContent("glab auth login --hostname git.cps.metro-markets.org");
+    });
+
+    it("glab missing resting line", async () => {
+      const line = await restingLine({ repo: "tools", reason: "glab-missing" });
+      expect(line).toHaveTextContent("toolsglab is not installed");
+      expect(line.querySelector("code")).toHaveTextContent(/^glab$/);
+    });
+
+    it("identity note still names GitHub", async () => {
+      renderPrs({ ...mixed(), me: "" });
+      await waitFor(() => expect(rows()).toHaveLength(3));
+      expect(screen.getByTestId("prs-identity-unknown")).toHaveTextContent(
+        "Couldn't tell who you are on GitHub, so Mine and Review requested are unavailable.",
+      );
+    });
   });
 
   it("opening a PR drops the file and line left from another view", async () => {
@@ -303,6 +398,13 @@ describe("PrsView", () => {
       expect(await within(r).findByRole("button", { name: "Explain" })).toBeEnabled();
       expect(within(r).queryByRole("button", { name: "Story" })).toBeNull();
       expect(within(r).queryByRole("button", { name: /Rebuild/ })).toBeNull();
+    });
+
+    it("GitLab row names its rebuild with the MR's !n", async () => {
+      renderPrs(one({ number: 7, forge: "gitlab", url: "https://gitlab.example.com/grp/pavilio/-/merge_requests/7" }), "pavilio", "?view=prs", [STORY]);
+      const r = await row();
+      expect(await within(r).findByRole("button", { name: "Rebuild story for !7" })).toBeEnabled();
+      expect(within(r).queryByRole("button", { name: "Rebuild story for #7" })).toBeNull();
     });
 
     it("row shows Story and rebuild when the story exists", async () => {

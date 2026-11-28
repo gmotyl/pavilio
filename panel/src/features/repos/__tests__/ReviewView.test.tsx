@@ -237,6 +237,33 @@ describe("ReviewView", () => {
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 
+  it("GitLab review header shows !n and Open on GitLab", async () => {
+    const MR = "https://gitlab.example.com/grp/pavilio/-/merge_requests/7";
+    const glComments = COMMENTS.map((c) => ({ ...c, url: `${MR}#note_${c.id}` }));
+    renderReview({
+      search: "?view=review&pr=pavilio%237&file=src%2Fa.ts",
+      prs: [pr({ number: 7, title: "feat: thing", head: "feat/thing", forge: "gitlab", url: MR })],
+      comments: () => jsonResponse(glComments),
+    });
+    const header = await waitFor(() => screen.getByTestId("review-header"));
+    expect(within(header).getByRole("heading")).toHaveTextContent("feat: thing !7");
+    expect(header).not.toHaveTextContent("#7");
+    const link = within(header).getByRole("link", { name: "Open on GitLab ↗" });
+    expect(link).toHaveAttribute("href", MR);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(within(header).queryByRole("link", { name: "Open on GitHub ↗" })).toBeNull();
+    // The number reads the GitLab way everywhere the review shows it.
+    expect(descEntry()).toHaveTextContent("PR !7");
+    expect(screen.getByTestId("pr-switcher")).toHaveTextContent("!7 feat: thing");
+
+    // The forge reaches the thread popover.
+    const viewer = await waitFor(() => screen.getByTestId("file-viewer"));
+    fireEvent.focus(await within(viewer).findByRole("button", { name: "2 comments on line 15" }));
+    const pop = await screen.findByRole("dialog", { name: "Comments on line 15" });
+    expect(within(pop).getByRole("link", { name: "Reply on GitLab ↗" })).toHaveAttribute("href", `${MR}#note_1`);
+    expect(pop).not.toHaveTextContent("GitHub");
+  });
+
   it("renders tree and the linked file's viewer in Diff", async () => {
     const fetch = renderReview({ search: FILE_A });
     await loaded();
@@ -880,6 +907,20 @@ describe("ReviewView — a Markdown file in Code mode", () => {
     );
     // Images load from the raw file, not GitHub's HTML page for it.
     expect(within(viewer).getByRole("img", { name: "logo" })).toHaveAttribute("src", `https://github.com/gmotyl/pavilio/raw/${HEAD}/docs/img/logo.png`);
+  });
+
+  it("GitLab markdown relative links use -/blob and -/raw", async () => {
+    const MR = "https://gitlab.example.com/grp/sub/pavilio/-/merge_requests/1";
+    renderMd({ prs: [pr({ number: 1, author: ME, forge: "gitlab", url: MR })] });
+    const viewer = await toCode();
+    expect(within(viewer).getByRole("link", { name: "setup" })).toHaveAttribute(
+      "href",
+      `https://gitlab.example.com/grp/sub/pavilio/-/blob/${HEAD}/docs/setup.md`,
+    );
+    expect(within(viewer).getByRole("img", { name: "logo" })).toHaveAttribute(
+      "src",
+      `https://gitlab.example.com/grp/sub/pavilio/-/raw/${HEAD}/docs/img/logo.png`,
+    );
   });
 
   it("Source carries the count of the comments it shows", async () => {

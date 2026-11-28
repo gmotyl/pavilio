@@ -9,13 +9,13 @@ const numbers = (prs: { number: number }[]) => prs.map((p) => p.number);
 
 describe("usePrs", () => {
   it("filter presets and author narrow the list and counts", async () => {
-    const fetch = stubFetch({ "/api/prs": { me: ME, prs: PRS, unavailable: [{ repo: "gone", reason: "not-github" }] } });
+    const fetch = stubFetch({ "/api/prs": { me: ME, prs: PRS, unavailable: [{ repo: "gone", reason: "unknown-forge" }] } });
     const { result, rerender } = renderHook(({ filter }: { filter: PrFilter }) => usePrs("pavilio", filter), {
       initialProps: { filter: { preset: "mine", author: null } },
     });
     await waitFor(() => expect(result.current.me).toBe(ME));
     expect(fetch.mock.calls[0][0]).toBe("/api/prs?project=pavilio");
-    expect(result.current.unavailable).toEqual([{ repo: "gone", reason: "not-github" }]);
+    expect(result.current.unavailable).toEqual([{ repo: "gone", reason: "unknown-forge" }]);
     expect(numbers(result.current.prs)).toEqual([1, 2]);
     expect(result.current.counts).toEqual({ mine: 2, review: 3, all: 6 });
     expect(result.current.reviewRequested).toBe(3);

@@ -67,6 +67,7 @@ describe("GitHubGhProvider", () => {
       base: "main",
       updatedAt: "2026-11-21T10:05:00Z",
       url: "https://github.com/o/r/pull/231",
+      forge: "github",
     });
     expect(prs[1]).toMatchObject({ isDraft: true, reviewers: [], reviewDecision: null, checks: "none" });
     expect(prs[2]).toMatchObject({ reviewers: ["dave"], reviewDecision: "changes", checks: "fail", base: "release" });
@@ -83,6 +84,14 @@ describe("GitHubGhProvider", () => {
     expect(prs.map((p) => p.headSha)).toEqual(["sha1", "sha2", "sha3", "sha4"]);
     const ghCall = calls.find((c) => c.cmd === "gh")!;
     expect(ghCall.args[ghCall.args.indexOf("--json") + 1].split(",")).toContain("headRefOid");
+  });
+
+  it("github rows carry forge github", async () => {
+    const origin = originIs("git@github.com:o/r.git");
+    const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok(fixture("gh-pr-list-mixed.json")));
+    const prs = await createGitHubGhProvider({ run }).listOpen(REPO);
+    expect(prs.length).toBeGreaterThan(0);
+    expect(prs.every((p) => p.forge === "github")).toBe(true);
   });
 
   describe("getPr", () => {
@@ -115,6 +124,7 @@ describe("GitHubGhProvider", () => {
           base: "main",
           updatedAt: "2026-11-21T10:05:00Z",
           url: "https://github.com/o/r/pull/231",
+          forge: "github",
           state,
         });
       }
@@ -240,7 +250,7 @@ describe("GitHubGhProvider", () => {
       const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
       const err = await createGitHubGhProvider({ run }).listOpen(REPO).catch((e) => e);
       expect(err).toBeInstanceOf(PrUnavailableError);
-      expect((err as PrUnavailableError).reason).toBe("not-github");
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
       expect(calls.some((c) => c.cmd === "gh")).toBe(false);
     }
 
@@ -255,6 +265,59 @@ describe("GitHubGhProvider", () => {
       const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
       await expect(createGitHubGhProvider({ run }).listOpen(REPO)).resolves.toEqual([]);
     }
+  });
+
+  it("a non-GitHub origin reports its host so the copy names it", async () => {
+    // A forge: "github" override lands here; the client then names the host instead of
+    // asking for the forge key that is already set.
+    const cases: [string, string][] = [
+      ["git@gitlab.com:o/r.git", "gitlab.com"],
+      ["https://gitlab.example.com/o/r.git", "gitlab.example.com"],
+      ["https://github.com.evil.io/o/r.git", "github.com.evil.io"],
+    ];
+    for (const [url, host] of cases) {
+      const origin = originIs(url);
+      const { run } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
+      const err = await createGitHubGhProvider({ run }).listOpen(REPO).catch((e) => e);
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
+      expect((err as PrUnavailableError).host).toBe(host);
+    }
+  });
+
+  describe("a forge: github override", () => {
+    const alias = "git@github-work:org/repo.git";
+
+    it("a forced alias host runs gh against github.com with a qualified github.com/owner/repo", async () => {
+      const origin = originIs(alias);
+      const { run, calls } = fakeRunner((cmd, args) => {
+        const o = origin(cmd, args);
+        if (o) return o;
+        if (cmd !== "gh") return new Error(`unexpected ${cmd} ${args.join(" ")}`);
+        if (args[0] === "api") return ok("");
+        return ok(args[1] === "list" ? "[]" : JSON.stringify({ ...JSON.parse(fixture("gh-pr-list-mixed.json"))[0], state: "OPEN" }));
+      });
+      const seen: string[] = [];
+      const forced = (p: string) => (seen.push(p), true);
+      const provider = createGitHubGhProvider({ run, forced });
+
+      await expect(provider.listOpen(REPO)).resolves.toEqual([]);
+      await provider.getPr(REPO, 231);
+      await expect(provider.reviewComments(REPO, 231)).resolves.toEqual([]);
+      const ghCalls = calls.filter((c) => c.cmd === "gh");
+      expect(ghCalls[0].args.slice(0, 4)).toEqual(["pr", "list", "--repo", "github.com/org/repo"]);
+      expect(ghCalls[1].args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "github.com/org/repo"]);
+      expect(ghCalls[2].args.slice(0, 5)).toEqual(["api", "--hostname", "github.com", "--paginate", "repos/org/repo/pulls/231/comments"]);
+      expect(seen).toEqual([REPO, REPO, REPO]);
+    });
+
+    it("an unforced alias host is still an unknown forge naming the host", async () => {
+      const origin = originIs(alias);
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
+      const err = await createGitHubGhProvider({ run, forced: () => false }).listOpen(REPO).catch((e) => e);
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
+      expect((err as PrUnavailableError).host).toBe("github-work");
+      expect(calls.some((c) => c.cmd === "gh")).toBe(false);
+    });
   });
 
   it("classifies a missing gh, an unauthenticated gh and other failures", async () => {
@@ -349,6 +412,17 @@ describe("GitHubGhProvider", () => {
     expect(fetch.args.some((a) => a.endsWith("refs/heads/release:refs/pavilio/pr-base/231"))).toBe(true);
     expect(fetch.args).toEqual(expect.arrayContaining(["--no-write-fetch-head", "--recurse-submodules=no", "--refmap="]));
     expect(fetch.args.some((a) => a.includes("refs/remotes/"))).toBe(false);
+    // Pinned whole: the fetchPrRefs extraction must keep GitHub's argv byte for byte.
+    expect(fetch.args).toEqual([
+      "fetch",
+      "--no-tags",
+      "--no-write-fetch-head",
+      "--recurse-submodules=no",
+      "--refmap=",
+      "origin",
+      "+pull/231/head:refs/pavilio/pr/231",
+      "+refs/heads/release:refs/pavilio/pr-base/231",
+    ]);
     // A credential prompt must never hang the request.
     expect(fetch.env?.GIT_TERMINAL_PROMPT).toBe("0");
     expect(calls.filter((c) => c.cmd === "git").every((c) => c.env?.GIT_TERMINAL_PROMPT === "0")).toBe(true);
@@ -468,7 +542,7 @@ describe("GitHubGhProvider", () => {
       const { run, calls } = commentsRunner("", "git@gitlab.com:o/r.git");
       const err = await createGitHubGhProvider({ run }).reviewComments(REPO, 40).catch((e) => e);
       expect(err).toBeInstanceOf(PrUnavailableError);
-      expect((err as PrUnavailableError).reason).toBe("not-github");
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
       expect(calls.some((c) => c.cmd === "gh")).toBe(false);
     });
   });

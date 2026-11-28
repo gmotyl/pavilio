@@ -7,7 +7,7 @@ const speech = vi.hoisted(() => ({ speakDocument: vi.fn(), stopDocument: vi.fn()
 const host = vi.hoisted(() => ({ stateFor: () => "empty", onPause: vi.fn(), onResume: vi.fn() }));
 vi.mock("../../../speech/SpeechHostProvider", () => ({ usePageSpeech: () => speech, usePanelSpeech: () => host }));
 
-import FileViewer from "../FileViewer";
+import FileViewer, { type FileViewerProps } from "../FileViewer";
 
 // Paging is the same logic at any page size; a test that pages sets a small one instead of mounting thousands of rows.
 const rowPage = vi.hoisted(() => ({ size: undefined as number | undefined }));
@@ -70,18 +70,22 @@ const COMMENTS = new Map<string, ReviewThread>([
   ["old:15", thread("old", 15)],
 ]);
 
-const viewer = (extra: Partial<Parameters<typeof FileViewer>[0]> = {}) => (
-  <FileViewer
-    path="src/geo/area.ts"
-    diff={DIFF}
-    content={FULL}
-    status="M"
-    counts={{ add: 2, del: 1 }}
-    defaultMode="diff"
-    commentSpeechKey="pavilio//pr/gmotyl/pavilio/7"
-    {...extra}
-  />
-);
+type Extra = Partial<Omit<FileViewerProps, "comments" | "forge">> & { comments?: Map<string, ReviewThread> };
+const viewer = ({ comments, ...extra }: Extra = {}) => {
+  const base = {
+    path: "src/geo/area.ts",
+    diff: DIFF,
+    content: FULL,
+    status: "M" as const,
+    counts: { add: 2, del: 1 },
+    defaultMode: "diff" as const,
+    commentSpeechKey: "pavilio//pr/gmotyl/pavilio/7",
+    ...extra,
+  };
+  // Threads always come with their forge.
+  const props: FileViewerProps = comments ? { ...base, comments, forge: "github" } : base;
+  return <FileViewer {...props} />;
+};
 
 const body = () => screen.getByTestId("file-viewer-body");
 const markers = () => [...body().querySelectorAll<HTMLButtonElement>("button.fv-cmbtn")];

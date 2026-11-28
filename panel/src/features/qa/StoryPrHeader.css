@@ -6,7 +6,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--bg-elevated);
-  /* Nothing is clipped here: clipping would cut the focus ring of the row's Review / GitHub / ↻ controls.
+  /* Nothing is clipped here: clipping would cut the focus ring of the row's Review / forge link / ↻ controls.
      The row rounds its own hover background to the card's corners instead. */
 }
 .story-pr .pr-row { border-bottom: 0; border-radius: 7px; }

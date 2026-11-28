@@ -2,6 +2,9 @@ export type ChecksState = "pass" | "fail" | "running" | "none";
 
 export type PrState = "open" | "merged" | "closed";
 
+/** The code host a repo's PRs live on: GitHub (`gh`) or GitLab (`glab`). */
+export type Forge = "github" | "gitlab";
+
 export interface PullRequest {
   repo: string;
   repoPath: string;
@@ -18,6 +21,7 @@ export interface PullRequest {
   base: string;
   updatedAt: string;
   url: string;
+  forge: Forge;
 }
 
 /** An inline review comment on a PR diff line; `side` "old" is the base side, "new" the head side. */
@@ -35,7 +39,13 @@ export interface ReviewComment {
   commitId: string;
 }
 
-export type Unavailable = "gh-missing" | "gh-unauthenticated" | "not-github" | "failed";
+export type Unavailable =
+  | "gh-missing"
+  | "gh-unauthenticated"
+  | "glab-missing"
+  | "glab-unauthenticated"
+  | "unknown-forge"
+  | "failed";
 
 export interface PrProvider {
   whoami(): Promise<string>;
@@ -55,10 +65,13 @@ export function redactUrlCredentials(text: string): string {
 
 export class PrUnavailableError extends Error {
   readonly reason: Unavailable;
+  /** The remote host the reason applies to (e.g. a self-hosted GitLab), when known. */
+  readonly host?: string;
 
-  constructor(reason: Unavailable, message: string = reason) {
+  constructor(reason: Unavailable, message: string = reason, host?: string) {
     super(redactUrlCredentials(message));
     this.name = "PrUnavailableError";
     this.reason = reason;
+    if (host !== undefined) this.host = host;
   }
 }

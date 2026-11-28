@@ -65,33 +65,50 @@ export type StoryPrProblem = Unavailable | "unlinked" | "project-missing";
 export interface StoryPrStatus {
   pr: StoryPrData | null;
   problem: StoryPrProblem | null;
+  /** The origin host a forge reason names (`glab-unauthenticated`, `unknown-forge`); null when the 502 carried none. */
+  host: string | null;
   /** A request is in flight (first load or ↻). */
   loading: boolean;
   /** Refetch past the server's cache (`fresh=1`). */
   refresh: () => void;
 }
 
-const UNAVAILABLE: readonly string[] = ["gh-missing", "gh-unauthenticated", "not-github", "failed"];
+/** Every provider reason, keyed so a new `Unavailable` member fails to compile until it is listed here. */
+const IS_UNAVAILABLE: Record<Unavailable, true> = {
+  "gh-missing": true,
+  "gh-unauthenticated": true,
+  "glab-missing": true,
+  "glab-unauthenticated": true,
+  "unknown-forge": true,
+  failed: true,
+};
 
-async function problemOf(res: Response): Promise<StoryPrProblem> {
-  const body = (await res.json().catch(() => null)) as { unavailable?: unknown; error?: unknown } | null;
+function isUnavailable(reason: unknown): reason is Unavailable {
+  return typeof reason === "string" && Object.hasOwn(IS_UNAVAILABLE, reason);
+}
+
+type Failure = { problem: StoryPrProblem; host: string | null };
+/** A finished `/api/prs/one` fetch, tagged with the story key it answers. */
+type Result = { key: string; pr: StoryPrData | null; problem: StoryPrProblem | null; host: string | null };
+
+async function failureOf(res: Response): Promise<Failure> {
+  const body = (await res.json().catch(() => null)) as { unavailable?: unknown; error?: unknown; host?: unknown } | null;
   if (res.status === 404) {
     // `/api/prs/one` 404s for two reasons; its `error` tells them apart.
-    if (body?.error === "Repo not found") return "unlinked";
-    if (body?.error === "Project not found") return "project-missing";
-    return "failed";
+    if (body?.error === "Repo not found") return { problem: "unlinked", host: null };
+    if (body?.error === "Project not found") return { problem: "project-missing", host: null };
+    return { problem: "failed", host: null };
   }
   const reason = body?.unavailable;
-  return typeof reason === "string" && UNAVAILABLE.includes(reason) ? (reason as Unavailable) : "failed";
+  const host = typeof body?.host === "string" && body.host ? body.host : null;
+  return isUnavailable(reason) ? { problem: reason, host } : { problem: "failed", host: null };
 }
 
 /** The PR a story names, live from `/api/prs/one`; fetched on open and on `refresh`. */
 export function useStoryPr(project: string, repo: string, number: number): StoryPrStatus {
   const key = `${project}/${repo}#${number}`;
   // Tagged with its key: a switch to another story must not show the previous PR.
-  const [result, setResult] = useState<{ key: string; pr: StoryPrData | null; problem: StoryPrProblem | null } | null>(
-    null,
-  );
+  const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(true);
   // ↻ presses, tagged like the result: a refresh of one story must not make the next one's first load fresh.
   const [refreshes, setRefreshes] = useState<{ key: string; n: number }>({ key, n: 0 });
@@ -106,9 +123,11 @@ export function useStoryPr(project: string, repo: string, number: number): Story
     if (fresh > 0) qs.set("fresh", "1");
     fetch(`/api/prs/one?${qs}`, { signal: ctrl.signal })
       .then(async (res) =>
-        res.ok ? { pr: (await res.json()) as StoryPrData, problem: null } : { pr: null, problem: await problemOf(res) },
+        res.ok
+          ? { pr: (await res.json()) as StoryPrData, problem: null, host: null }
+          : { pr: null, ...(await failureOf(res)) },
       )
-      .catch(() => ({ pr: null, problem: "failed" as const }))
+      .catch(() => ({ pr: null, problem: "failed" as const, host: null }))
       .then((r) => {
         if (cancelled) return;
         setResult({ key, ...r });
@@ -125,5 +144,5 @@ export function useStoryPr(project: string, repo: string, number: number): Story
     [key],
   );
   const current = result?.key === key ? result : null;
-  return { pr: current?.pr ?? null, problem: current?.problem ?? null, loading, refresh };
+  return { pr: current?.pr ?? null, problem: current?.problem ?? null, host: current?.host ?? null, loading, refresh };
 }

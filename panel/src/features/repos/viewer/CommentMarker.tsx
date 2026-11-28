@@ -7,7 +7,8 @@ import type { CellSpeechState } from "../../speech/types";
 import { closeOpenFence } from "../../speech/strip";
 import { prDescriptionSource } from "../PrDescription";
 import { hue, updatedAgo } from "../PrRow";
-import type { ReviewComment } from "../../../../server/lib/prs/provider";
+import type { Forge, ReviewComment } from "../../../../server/lib/prs/provider";
+import { forgeCopy } from "../forgeCopy";
 import type { ReviewThread } from "../reviewThreads";
 import { CommentSpeechScope } from "./commentSpeech";
 
@@ -23,6 +24,8 @@ interface Props {
   speechKey?: string;
   /** The signed-in login: their comments read as "you". */
   me?: string | null;
+  /** The PR's forge: where "Reply on …" sends you. */
+  forge: Forge;
 }
 
 type Position = { top: number; left: number };
@@ -114,7 +117,7 @@ const ChatIcon = () => (
  * A review thread's marker in the file viewer's comment lane. Hover or focus opens the thread
  * (read-only) in a portal popover; it closes 150 ms after the pointer leaves both, or on Escape.
  */
-export default function CommentMarker({ thread, speechKey, me }: Props) {
+export default function CommentMarker({ thread, speechKey, me, forge }: Props) {
   const speech = usePageSpeech();
   const host = usePanelSpeech();
   const [open, setOpen] = useState(false);
@@ -390,10 +393,10 @@ export default function CommentMarker({ thread, speechKey, me }: Props) {
                   <div className="fv-cmreply">
                     {href ? (
                       <a href={href} target="_blank" rel="noreferrer noopener">
-                        Reply on GitHub ↗
+                        Reply on {forgeCopy(forge).name} ↗
                       </a>
                     ) : (
-                      "Reply on GitHub"
+                      `Reply on ${forgeCopy(forge).name}`
                     )}
                   </div>
                 </section>

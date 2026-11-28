@@ -112,6 +112,61 @@ describe("StoryPrHeader", () => {
     expect(screen.getByTestId("where").textContent).toBe(REVIEW);
   });
 
+  it("GitLab story header shows !n and GitLab link", async () => {
+    const MR = "https://git.cps.metro-markets.org/web/woo-dev-be/-/merge_requests/375";
+    stubFetch({ "/api/prs/one": { ...OPEN, forge: "gitlab", url: MR, state: "merged" } });
+    renderHeader();
+    const gl = await screen.findByRole("link", { name: "GitLab ↗" });
+    expect(gl.getAttribute("href")).toBe(MR);
+    expect(gl.getAttribute("target")).toBe("_blank");
+    expect(gl.getAttribute("rel")).toBe("noreferrer");
+    expect(gl.getAttribute("title")).toBe("Open on GitLab");
+    const row = within(header()).getByTestId("pr-row-woo-dev-be#375");
+    expect(within(row).getByText("!375")).toBeTruthy();
+    expect(within(row).queryByText("#375")).toBeNull();
+    expect(within(header()).queryByRole("link", { name: /GitHub/ })).toBeNull();
+    expect(within(header()).getByRole("link", { name: "Review" }).getAttribute("href")).toBe(REVIEW);
+    expect(within(header()).getByTestId("story-pr-refresh").querySelector("svg")).not.toBeNull();
+  });
+
+  it("glab and unknown-forge failures show a reason without a forge link", async () => {
+    const cases = [
+      [{ unavailable: "glab-missing" }, "glab is not installed"],
+      [
+        { unavailable: "glab-unauthenticated", host: "git.cps.metro-markets.org" },
+        "Run glab auth login --hostname git.cps.metro-markets.org",
+      ],
+      [{ unavailable: "glab-unauthenticated" }, "Run glab auth login"],
+      [{ unavailable: "unknown-forge", host: "git.example.org" }, "Unknown forge for git.example.org"],
+      [{ unavailable: "unknown-forge" }, "No usable origin remote"],
+    ] as const;
+    for (const [body, reason] of cases) {
+      stubFetch({ "/api/prs/one": () => jsonResponse(body, { status: 502 }) });
+      const { unmount } = renderHeader();
+      await within(header()).findByText(reason);
+      expect(within(header()).queryByText("Could not load PR status")).toBeNull();
+      expect(within(header()).getByText(STORY.title as string)).toBeTruthy();
+      expect(within(header()).getByText("woo-dev-be")).toBeTruthy();
+      expect(within(header()).getByText("#375")).toBeTruthy();
+      expect(within(header()).getByRole("link", { name: "Review" }).getAttribute("href")).toBe(REVIEW);
+      expect(within(header()).queryByRole("link", { name: /GitHub|GitLab/ })).toBeNull();
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("GitHub story header unchanged", async () => {
+    stubFetch({ "/api/prs/one": OPEN });
+    renderHeader();
+    const gh = await screen.findByRole("link", { name: "GitHub ↗" });
+    expect(gh.getAttribute("href")).toBe(OPEN.url);
+    expect(gh.getAttribute("title")).toBe("Open on GitHub");
+    const row = within(header()).getByTestId("pr-row-woo-dev-be#375");
+    expect(within(row).getByText("#375")).toBeTruthy();
+    expect(within(row).queryByText("!375")).toBeNull();
+    expect(within(header()).queryByRole("link", { name: /GitLab/ })).toBeNull();
+  });
+
   it("row click opens Review", async () => {
     stubFetch({ "/api/prs/one": OPEN });
     renderHeader();
@@ -219,9 +274,9 @@ describe("StoryPrHeader", () => {
     expect(within(header()).queryByRole("link", { name: /GitHub/ })).toBeNull();
     unmount();
 
-    stubFetch({ "/api/prs/one": () => jsonResponse({ unavailable: "not-github" }, { status: 502 }) });
+    stubFetch({ "/api/prs/one": () => jsonResponse({ unavailable: "unknown-forge" }, { status: 502 }) });
     const second = renderHeader();
-    await within(header()).findByText("No GitHub remote");
+    await within(header()).findByText("No usable origin remote");
     second.unmount();
 
     stubFetch({ "/api/prs/one": () => Promise.reject(new TypeError("network down")) });

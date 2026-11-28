@@ -3,8 +3,11 @@ import { join, resolve } from "path";
 import { getConfig } from "../config.js";
 import { isLiveProject, linkedRepos, readRepos, type RepoEntry } from "../lib/discovery.js";
 import { expandHome } from "../lib/paths.js";
+import { createForgeResolver, type ResolvedForge } from "../lib/prs/forge.js";
 import { createGitHubGhProvider } from "../lib/prs/github-gh.js";
+import { createGitLabGlabProvider } from "../lib/prs/gitlab-glab.js";
 import {
+  type Forge,
   type PrProvider,
   type PrState,
   PrUnavailableError,
@@ -19,24 +22,56 @@ const repoRoot = (r: RepoEntry): string => resolve(expandHome(r.path));
 
 const NOT_LINKED = { error: "repo is not linked to any project" };
 
-/** The resolved path of `repo` when it is a present linked repo, else null: the path comes from the client. */
-function linkedTarget(repo: string): string | null {
-  const target = resolve(expandHome(repo));
-  return linkedRepos().some((r) => r.present && repoRoot(r) === target) ? target : null;
+/**
+ * The present linked entry at `repoPath`, else undefined. When several entries share the
+ * path, the one setting `forge` wins — one rule for the router and the GitLab provider.
+ */
+function linkedEntry(repoPath: string, listRepos: () => RepoEntry[] = linkedRepos): RepoEntry | undefined {
+  const matches = listRepos().filter((r) => r.present && repoRoot(r) === repoPath);
+  return matches.find((r) => r.forge !== undefined) ?? matches[0];
 }
+
+/**
+ * The forge override for a project's own entry: the path-wide `linkedEntry` rule first, so
+ * a repo path has one forge on every route and the path-keyed caches never mix forges.
+ */
+function targetOf(entry: RepoEntry): { repoPath: string; forge?: Forge } {
+  const repoPath = repoRoot(entry);
+  return { repoPath, forge: linkedEntry(repoPath)?.forge ?? entry.forge };
+}
+
+/** The present linked repo at `repo`, else null: the path comes from the client. */
+function linkedTarget(repo: string): { repoPath: string; forge?: Forge } | null {
+  const target = resolve(expandHome(repo));
+  const entry = linkedEntry(target);
+  return entry ? { repoPath: target, forge: entry.forge } : null;
+}
+
+type ResolveForge = (e: { repoPath: string; forge?: Forge }) => Promise<ResolvedForge>;
+
+const reasonOf = (e: unknown): Unavailable => (e instanceof PrUnavailableError ? e.reason : "failed");
+const hostOf = (e: unknown): { host?: string } =>
+  e instanceof PrUnavailableError && e.host !== undefined ? { host: e.host } : {};
 
 /** One provider-failure mapping for every per-PR route. */
 function sendProviderFailure(res: Response, e: unknown): void {
   // Upstream text may echo an origin URL with embedded credentials.
-  const reason: Unavailable = e instanceof PrUnavailableError ? e.reason : "failed";
-  res.status(502).json({ error: redactUrlCredentials((e as Error)?.message ?? String(e)), reason });
+  res.status(502).json({ error: redactUrlCredentials((e as Error)?.message ?? String(e)), reason: reasonOf(e) });
 }
 
 export function createPrsRouter(
-  provider: PrProvider,
-  opts: { now?: () => number } = {},
+  providers: { github: PrProvider; gitlab: PrProvider },
+  opts: { now?: () => number; resolveForge?: ResolveForge } = {},
 ): Router {
   const now = opts.now ?? Date.now;
+  const resolveForge = opts.resolveForge ?? createForgeResolver();
+
+  /** The provider serving `target`; an unknown forge runs no forge CLI and rejects with its host. */
+  async function providerFor(target: { repoPath: string; forge?: Forge }): Promise<PrProvider> {
+    const r = await resolveForge(target);
+    if (r.forge === "unknown") throw new PrUnavailableError("unknown-forge", `unknown forge for ${r.host || "origin"}`, r.host);
+    return providers[r.forge];
+  }
   const router = Router();
   // Successes only: an unavailable repo must recover on the next request (e.g. after `gh auth login`).
   const cache = new Map<string, { at: number; prs: PullRequest[] }>();
@@ -48,24 +83,30 @@ export function createPrsRouter(
   // Latest provider call per key: an older call finishing last must not overwrite a newer result.
   const oneGeneration = new Map<string, number>();
 
-  async function getPr(repoPath: string, n: number, fresh: boolean): Promise<PullRequest & { state: PrState }> {
-    const key = `${repoPath}#${n}`;
+  async function getPr(
+    target: { repoPath: string; forge?: Forge },
+    n: number,
+    fresh: boolean,
+  ): Promise<PullRequest & { state: PrState }> {
+    const key = `${target.repoPath}#${n}`;
     const hit = oneCache.get(key);
     if (!fresh && hit && now() - hit.at < CACHE_TTL_MS) return hit.pr;
     const generation = (oneGeneration.get(key) ?? 0) + 1;
     oneGeneration.set(key, generation);
-    const pr = await provider.getPr(repoPath, n);
+    const pr = await (await providerFor(target)).getPr(target.repoPath, n);
     if (oneGeneration.get(key) === generation) oneCache.set(key, { at: now(), pr });
     return pr;
   }
 
-  function listOpen(repoPath: string): Promise<PullRequest[]> {
+  function listOpen(target: { repoPath: string; forge?: Forge }): Promise<PullRequest[]> {
+    const { repoPath } = target;
     const hit = cache.get(repoPath);
     if (hit && now() - hit.at < CACHE_TTL_MS) return Promise.resolve(hit.prs);
     const pending = inFlight.get(repoPath);
     if (pending) return pending;
-    const p = provider
-      .listOpen(repoPath)
+    // Resolution happens on a miss only: a cache hit runs nothing.
+    const p = providerFor(target)
+      .then((provider) => provider.listOpen(repoPath))
       .then((prs) => {
         cache.set(repoPath, { at: now(), prs });
         return prs;
@@ -85,20 +126,18 @@ export function createPrsRouter(
     // A repo missing on this machine is a resting state: never run anything there.
     const repos = readRepos(join(projectsDir, name), name).filter((r) => r.present);
     const [me, results] = await Promise.all([
-      provider.whoami().catch(() => ""),
-      Promise.allSettled(repos.map((r) => listOpen(repoRoot(r)))),
+      // One identity for every forge, always from gh.
+      providers.github.whoami().catch(() => ""),
+      Promise.allSettled(repos.map((r) => listOpen(targetOf(r)))),
     ]);
 
     const prs: PullRequest[] = [];
-    const unavailable: { repo: string; reason: Unavailable }[] = [];
+    const unavailable: { repo: string; reason: Unavailable; host?: string }[] = [];
     results.forEach((r, i) => {
       // Label by the repos.json name so PR rows and `unavailable` agree.
       if (r.status === "fulfilled") prs.push(...r.value.map((p) => ({ ...p, repo: repos[i].name })));
       else
-        unavailable.push({
-          repo: repos[i].name,
-          reason: r.reason instanceof PrUnavailableError ? r.reason.reason : "failed",
-        });
+        unavailable.push({ repo: repos[i].name, reason: reasonOf(r.reason), ...hostOf(r.reason) });
     });
     prs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
     res.json({ me, prs, unavailable });
@@ -119,12 +158,11 @@ export function createPrsRouter(
     if (!entry) return res.status(404).json({ error: "Repo not found" });
 
     try {
-      const pr = await getPr(repoRoot(entry), Number(raw), req.query.fresh === "1");
+      const pr = await getPr(targetOf(entry), Number(raw), req.query.fresh === "1");
       // Label by the repos.json name, as the list does.
       res.json({ ...pr, repo: entry.name });
     } catch (e) {
-      const reason: Unavailable = e instanceof PrUnavailableError ? e.reason : "failed";
-      res.status(502).json({ unavailable: reason });
+      res.status(502).json({ unavailable: reasonOf(e), ...hostOf(e) });
     }
   });
 
@@ -138,7 +176,7 @@ export function createPrsRouter(
     if (!target) return res.status(400).json(NOT_LINKED);
 
     try {
-      res.json(await provider.openPr(target, number));
+      res.json(await (await providerFor(target)).openPr(target.repoPath, number));
     } catch (e) {
       sendProviderFailure(res, e);
     }
@@ -155,7 +193,7 @@ export function createPrsRouter(
     if (!target) return res.status(400).json(NOT_LINKED);
 
     try {
-      res.json(await provider.reviewComments(target, Number(raw)));
+      res.json(await (await providerFor(target)).reviewComments(target.repoPath, Number(raw)));
     } catch (e) {
       sendProviderFailure(res, e);
     }
@@ -164,4 +202,25 @@ export function createPrsRouter(
   return router;
 }
 
-export default createPrsRouter(createGitHubGhProvider());
+/**
+ * The GitLab provider's `resolve(repoPath)`: glab resolves by path alone, so look up the
+ * repo's repos.json `forge` override — a forced gitlab repo on an unconfigured host still
+ * resolves to GitLab. The entry is picked by `linkedEntry`, as for /open and /comments.
+ */
+export function gitlabResolveFor(
+  resolveForge: ResolveForge,
+  listRepos: () => RepoEntry[] = linkedRepos,
+): (repoPath: string) => Promise<ResolvedForge> {
+  return (repoPath) => resolveForge({ repoPath, forge: linkedEntry(repoPath, listRepos)?.forge });
+}
+
+const defaultResolveForge = createForgeResolver();
+
+export default createPrsRouter(
+  {
+    // Same entry rule as every route: a forced github repo may sit on an SSH host alias.
+    github: createGitHubGhProvider({ forced: (repoPath) => linkedEntry(repoPath)?.forge === "github" }),
+    gitlab: createGitLabGlabProvider({ resolve: gitlabResolveFor(defaultResolveForge) }),
+  },
+  { resolveForge: defaultResolveForge },
+);
