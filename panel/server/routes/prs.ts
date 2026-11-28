@@ -184,20 +184,28 @@ export function createPrsRouter(
   return router;
 }
 
+/**
+ * The GitLab provider's `resolve(repoPath)`: glab resolves by path alone, so look up the
+ * repo's repos.json `forge` override — a forced gitlab repo on an unconfigured host still
+ * resolves to GitLab. When several entries share the path, the one setting `forge` wins.
+ */
+export function gitlabResolveFor(
+  resolveForge: ResolveForge,
+  listRepos: () => RepoEntry[] = linkedRepos,
+): (repoPath: string) => Promise<ResolvedForge> {
+  return (repoPath) => {
+    const matches = listRepos().filter((r) => r.present && repoRoot(r) === repoPath);
+    const forge = (matches.find((r) => r.forge !== undefined) ?? matches[0])?.forge;
+    return resolveForge({ repoPath, forge });
+  };
+}
+
 const defaultResolveForge = createForgeResolver();
 
 export default createPrsRouter(
   {
     github: createGitHubGhProvider(),
-    // glab resolves by path alone: look up the repo's repos.json forge override so a forced
-    // gitlab repo on an unconfigured host still resolves to GitLab.
-    gitlab: createGitLabGlabProvider({
-      resolve: (repoPath) =>
-        defaultResolveForge({
-          repoPath,
-          forge: linkedRepos().find((r) => r.present && repoRoot(r) === repoPath)?.forge,
-        }),
-    }),
+    gitlab: createGitLabGlabProvider({ resolve: gitlabResolveFor(defaultResolveForge) }),
   },
   { resolveForge: defaultResolveForge },
 );

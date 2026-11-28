@@ -3,7 +3,7 @@ import request from "supertest";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { configMock, makeApp, withProjectsDir } from "../../test-kit";
-import type { ResolvedForge } from "../../lib/prs/forge";
+import { createForgeResolver, type ResolvedForge } from "../../lib/prs/forge";
 import {
   type Forge,
   PrUnavailableError,
@@ -15,7 +15,7 @@ import {
 const projects = withProjectsDir("prs-route-");
 vi.mock("../../config", () => configMock(() => projects.dir()));
 
-import { createPrsRouter } from "../prs";
+import { createPrsRouter, gitlabResolveFor } from "../prs";
 
 function pr(repoPath: string, number: number, updatedAt: string): PullRequest {
   return {
@@ -521,5 +521,32 @@ describe("/api/prs", () => {
       expect(res.body).toEqual({ ...pr(gh, 3, "2026-11-22T00:00:00Z"), repo: "GitHub Repo", state: "merged" });
       expect(provider.getPr).toHaveBeenCalledWith(gh, 3);
     });
+  });
+});
+
+describe("gitlabResolveFor", () => {
+  const repo = "/srv/x/forced-repo";
+  // origin on a host neither GitHub nor in glab's config.
+  const resolveForge = createForgeResolver({
+    run: async () => ({ code: 0, stdout: "git@git.example.org:grp/forced-repo.git\n", stderr: "" }),
+    readGlabConfig: () => null,
+  });
+
+  it("resolves a forced-gitlab entry on an unknown host to gitlab", async () => {
+    const resolve = gitlabResolveFor(resolveForge, () => [
+      { name: "forced", path: repo, present: true, forge: "gitlab" },
+    ]);
+    expect(await resolve(repo)).toEqual({ forge: "gitlab", host: "git.example.org", projectPath: "grp/forced-repo" });
+    // Without the override the same remote is an unknown forge.
+    const plain = gitlabResolveFor(resolveForge, () => [{ name: "plain", path: repo, present: true }]);
+    expect(await plain(repo)).toEqual({ forge: "unknown", host: "git.example.org" });
+  });
+
+  it("prefers the entry that sets forge when several share the path", async () => {
+    const resolve = gitlabResolveFor(resolveForge, () => [
+      { name: "plain", path: repo, present: true },
+      { name: "forced", path: repo, present: true, forge: "gitlab" },
+    ]);
+    expect((await resolve(repo)).forge).toBe("gitlab");
   });
 });
