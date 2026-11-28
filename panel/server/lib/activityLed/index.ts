@@ -19,7 +19,8 @@ export interface ActivityLedDeps {
 
 export interface ActivityLed {
   settingsChanged(): void;
-  test(): void;
+  /** Resolves once the send completes; rejects with the send error. */
+  test(): Promise<void>;
   stop(): void;
 }
 
@@ -48,12 +49,18 @@ export function startActivityLed(deps: ActivityLedDeps): ActivityLed {
     deps.log(`activity-led: send failed: ${msg}`);
   };
 
-  const transmit = (buf: Buffer, s: ActivityLedSettings) => {
+  // Logged send; rejects so test() can report it. Background callers use transmit.
+  const sendLogged = async (buf: Buffer, s: ActivityLedSettings): Promise<void> => {
     try {
-      deps.send(buf, s.host, s.port).catch(logError);
+      await deps.send(buf, s.host, s.port);
     } catch (err) {
       logError(err);
+      throw err;
     }
+  };
+
+  const transmit = (buf: Buffer, s: ActivityLedSettings) => {
+    sendLogged(buf, s).catch(() => {});
   };
 
   const clearHeartbeat = () => {
@@ -146,10 +153,10 @@ export function startActivityLed(deps: ActivityLedDeps): ActivityLed {
       reconcile();
       update(true);
     },
-    test() {
+    async test() {
       if (stopped) return;
       const s = deps.getSettings();
-      transmit(encodeReport(s, { attention: 1, busy: 1 }, deps.machineId), s);
+      await sendLogged(encodeReport(s, { attention: 1, busy: 1 }, deps.machineId), s);
     },
     stop() {
       stopped = true;

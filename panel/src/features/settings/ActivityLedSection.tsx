@@ -92,7 +92,7 @@ function NumberField({
  */
 export function ActivityLedSection() {
   const [led, setLed] = usePreference(preferences.activityLed);
-  // `sent` holds the target; a 204 only means the server queued the UDP send.
+  // `sent` holds the target; a 204 means the UDP send left this machine, not that the board got it.
   const [testState, setTestState] = useState<{ sent: string } | string>("idle");
   const [testing, setTesting] = useState(false);
 
@@ -112,7 +112,13 @@ export function ActivityLedSection() {
     const target = `${led.host}:${led.port}`;
     try {
       const res = await fetch("/api/activity-led/test", { method: "POST" });
-      setTestState(res.ok ? { sent: target } : `Test failed: server answered ${res.status}`);
+      if (res.ok) {
+        setTestState({ sent: target });
+      } else {
+        const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        const reason = typeof body?.error === "string" && body.error ? body.error : `server answered ${res.status}`;
+        setTestState(`Test failed: ${reason}`);
+      }
     } catch (err) {
       setTestState(`Test failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {

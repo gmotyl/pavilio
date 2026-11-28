@@ -40,7 +40,7 @@ import {
 } from "../../lib/activityLed/instance.js";
 import { loadPreferences, patchPreferences, _resetPreferencesForTests } from "../../lib/preferences-store.js";
 
-const fakeLed = () => ({ settingsChanged: vi.fn(), test: vi.fn(), stop: vi.fn() });
+const fakeLed = () => ({ settingsChanged: vi.fn(), test: vi.fn(async () => {}), stop: vi.fn() });
 
 let dir = "";
 beforeEach(() => {
@@ -100,6 +100,20 @@ describe("activity LED routes", () => {
     const res = await request(makeApp(activityLedRouter)).post("/api/activity-led/test");
     expect(res.status).toBe(204);
     expect(led.test).toHaveBeenCalledTimes(1);
+  });
+
+  it("test route answers 502 when the send fails", async () => {
+    const led = { ...fakeLed(), test: vi.fn(() => Promise.reject(new Error("EHOSTUNREACH"))) };
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(activityLedRouter)).post("/api/activity-led/test");
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({ error: "EHOSTUNREACH" });
+  });
+
+  it("test route answers 503 when the reporter is not running", async () => {
+    const res = await request(makeApp(activityLedRouter)).post("/api/activity-led/test");
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBeTruthy();
   });
 
   it("startup without an activityLed preference opens no socket and sends nothing", () => {

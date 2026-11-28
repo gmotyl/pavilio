@@ -6,9 +6,19 @@ import { getActivityLed } from "../lib/activityLed/instance.js";
 
 const activityLedRouter = Router();
 
-activityLedRouter.post("/activity-led/test", (_req, res) => {
-  getActivityLed()?.test();
-  res.status(204).end();
+// 204 once the UDP send completes, 502 with the send error, 503 without a reporter.
+activityLedRouter.post("/activity-led/test", async (_req, res) => {
+  const led = getActivityLed();
+  if (!led) {
+    res.status(503).json({ error: "Activity LED reporter is not running" });
+    return;
+  }
+  try {
+    await led.test();
+    res.status(204).end();
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 export default activityLedRouter;

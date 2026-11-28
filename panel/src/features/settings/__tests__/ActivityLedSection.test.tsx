@@ -119,6 +119,25 @@ describe("ActivityLedSection", () => {
     expect(await screen.findByText("Test report sent to 192.168.10.156:4210")).toBeTruthy();
   });
 
+  it("shows the send error", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: "send EHOSTUNREACH 10.0.0.9:4210" }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    render(<ActivityLedSection />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText("Test failed: send EHOSTUNREACH 10.0.0.9:4210")).toBeTruthy();
+    expect(screen.queryByText(/Test report sent/)).toBeNull();
+  });
+
   it("numeric inputs carry their bounds", async () => {
     const user = userEvent.setup();
     stubFetch();

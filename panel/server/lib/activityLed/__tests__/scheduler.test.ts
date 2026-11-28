@@ -184,6 +184,20 @@ describe("activity LED scheduler", () => {
     led.stop();
   });
 
+  it("test() rejects when send fails", async () => {
+    let fail = false;
+    const send = vi.fn<ActivityLedDeps["send"]>(() =>
+      fail ? Promise.reject(new Error("EHOSTUNREACH")) : Promise.resolve(),
+    );
+    const h = makeDeps({ send });
+    const led = startActivityLed(h.deps);
+    await expect(led.test()).resolves.toBeUndefined();
+    fail = true;
+    await expect(led.test()).rejects.toThrow("EHOSTUNREACH");
+    expect(h.log.mock.calls.at(-1)?.[0]).toContain("EHOSTUNREACH");
+    led.stop();
+  });
+
   it("a synchronous throw from send does not propagate", () => {
     const send = vi.fn<ActivityLedDeps["send"]>(() => {
       throw new Error("sync boom");
@@ -193,7 +207,7 @@ describe("activity LED scheduler", () => {
     expect(() => {
       led = startActivityLed(h.deps);
       h.emit("a", "attention");
-      led.test();
+      led.test().catch(() => {});
       vi.advanceTimersByTime(60_000);
     }).not.toThrow();
     expect(h.log.mock.calls[0][0]).toContain("sync boom");
