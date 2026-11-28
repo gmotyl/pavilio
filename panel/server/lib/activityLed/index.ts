@@ -142,6 +142,8 @@ export function startActivityLed(deps: ActivityLedDeps): ActivityLed {
         transmit(encodeReport(settings, { attention: 0, busy: 0 }, deps.machineId), settings);
         return;
       }
+      // Sessions may have exited silently while disabled.
+      reconcile();
       update(true);
     },
     test() {

@@ -87,6 +87,38 @@ describe("ActivityLedSection", () => {
     expect(calls[0][1]?.method).toBe("POST");
   });
 
+  it("Test button is disabled while a request is in flight", async () => {
+    const user = userEvent.setup();
+    let answer: (r: Response) => void = () => {};
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? new Promise<Response>((r) => (answer = r))
+          : Promise.resolve(new Response("{}", { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ActivityLedSection />);
+    const button = screen.getByRole("button", { name: "Test" }) as HTMLButtonElement;
+
+    await user.click(button);
+    expect(button.disabled).toBe(true);
+    await user.click(button);
+    expect(callsTo(fetchMock as unknown as ReturnType<typeof stubFetch>, "/api/activity-led/test")).toHaveLength(1);
+
+    answer(new Response(null, { status: 204 }));
+    await waitFor(() => expect(button.disabled).toBe(false));
+  });
+
+  it("Test success says the report was sent to the host, not received", async () => {
+    const user = userEvent.setup();
+    stubFetch();
+    render(<ActivityLedSection />);
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText("Test report sent to 192.168.10.156:4210")).toBeTruthy();
+  });
+
   it("numeric inputs carry their bounds", async () => {
     const user = userEvent.setup();
     stubFetch();

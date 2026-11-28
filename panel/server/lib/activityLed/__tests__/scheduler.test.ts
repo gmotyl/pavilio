@@ -129,6 +129,19 @@ describe("activity LED scheduler", () => {
     led.stop();
   });
 
+  it("re-enable drops a session that vanished silently while disabled", () => {
+    const h = makeDeps({ snapshot: [{ sessionId: "a", state: "attention" }] });
+    const led = startActivityLed(h.deps);
+    h.setSettings({ enabled: false });
+    led.settingsChanged();
+    h.remove("a");
+    h.setSettings({ enabled: true });
+    led.settingsChanged();
+    expect(h.sent).toHaveLength(3);
+    expect(counts(h.sent[2].buf)).toEqual({ attention: 0, busy: 0 });
+    led.stop();
+  });
+
   it("sends nothing while disabled", () => {
     const h = makeDeps({ settings: { enabled: false } });
     const led = startActivityLed(h.deps);

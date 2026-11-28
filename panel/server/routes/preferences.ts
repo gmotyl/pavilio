@@ -213,6 +213,8 @@ preferencesRouter.post("/preferences/copy-from", async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: `could not write this machine's preferences: ${String(err)}` });
   }
+  // The copy may carry a different activityLed; settingsChanged re-reads it.
+  getActivityLed()?.settingsChanged();
   // No broadcast: the copying tab reloads, and preferences are read once at
   // boot (ADR-0015) — another open tab picks the copy up on its next reload.
   res.status(204).end();

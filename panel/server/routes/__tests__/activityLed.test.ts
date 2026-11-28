@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeApp } from "../../test-kit";
 
 vi.mock("../../watcher", () => ({ broadcast: vi.fn() }));
+// copy-from: this machine is "spock"; no git, so on-disk machine files are offered.
+vi.mock("../../lib/hostname.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/hostname.js")>()),
+  machineId: () => "spock",
+}));
+vi.mock("../../lib/trackedFiles.js", () => ({ trackedFileNames: vi.fn(async () => undefined) }));
 
 // Records socket creation and sends; no packet ever leaves the test.
 const udp = vi.hoisted(() => ({ created: 0, sends: 0 }));
@@ -71,6 +77,21 @@ describe("activity LED routes", () => {
       .send({ "panes.left": "240" });
     expect(res.status).toBe(200);
     expect(led.settingsChanged).not.toHaveBeenCalled();
+  });
+
+  it("preferences copy-from notifies the module", async () => {
+    const prefsDir = join(dir, "preferences");
+    mkdirSync(prefsDir);
+    writeFileSync(join(prefsDir, "spock.json"), '{"version":1}', "utf8");
+    writeFileSync(join(prefsDir, "mac.json"), '{"version":1,"activityLed":{"enabled":true}}', "utf8");
+    loadPreferences(join(prefsDir, "spock.json"));
+    const led = fakeLed();
+    _setActivityLedForTests(led);
+    const res = await request(makeApp(preferencesRouter))
+      .post("/api/preferences/copy-from")
+      .send({ machine: "mac" });
+    expect(res.status).toBe(204);
+    expect(led.settingsChanged).toHaveBeenCalledTimes(1);
   });
 
   it("test route triggers one test report", async () => {

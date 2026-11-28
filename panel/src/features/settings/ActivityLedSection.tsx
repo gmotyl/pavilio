@@ -92,7 +92,9 @@ function NumberField({
  */
 export function ActivityLedSection() {
   const [led, setLed] = usePreference(preferences.activityLed);
-  const [testState, setTestState] = useState<"idle" | "sent" | string>("idle");
+  // `sent` holds the target; a 204 only means the server queued the UDP send.
+  const [testState, setTestState] = useState<{ sent: string } | string>("idle");
+  const [testing, setTesting] = useState(false);
 
   const save = (patch: Partial<ActivityLedSettings>) => setLed((prev) => ({ ...prev, ...patch }));
 
@@ -105,11 +107,16 @@ export function ActivityLedSection() {
   });
 
   const test = async (): Promise<void> => {
+    if (testing) return;
+    setTesting(true);
+    const target = `${led.host}:${led.port}`;
     try {
       const res = await fetch("/api/activity-led/test", { method: "POST" });
-      setTestState(res.ok ? "sent" : `Test failed: server answered ${res.status}`);
+      setTestState(res.ok ? { sent: target } : `Test failed: server answered ${res.status}`);
     } catch (err) {
       setTestState(`Test failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -194,7 +201,8 @@ export function ActivityLedSection() {
             type="button"
             data-testid="activity-led-test"
             onClick={() => void test()}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors"
+            disabled={testing}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded transition-colors disabled:opacity-50"
             style={{
               background: "var(--bg-surface)",
               color: "var(--text-secondary)",
@@ -204,13 +212,13 @@ export function ActivityLedSection() {
             <Lightbulb size={11} />
             Test
           </button>
-          {testState === "sent" && (
+          {typeof testState === "object" && (
             <span className="inline-flex items-center gap-1 text-xs" style={{ color: "var(--text-muted)" }}>
               <Check size={12} />
-              Sent one sample cycle
+              Test report sent to {testState.sent}
             </span>
           )}
-          {testState !== "idle" && testState !== "sent" && (
+          {typeof testState === "string" && testState !== "idle" && (
             <span className="inline-flex items-center gap-1 text-xs" style={{ color: "var(--red)" }}>
               <AlertTriangle size={12} />
               {testState}
