@@ -391,6 +391,16 @@ describe("GitLabGlabProvider", () => {
     expect(result[0].body).toBe(body);
   });
 
+  it("a single escaped quote inside a body does not split pages", async () => {
+    // Serialized as `x\"]`: a parser that ignores escapes closes the string early and mis-splits.
+    const body = 'x"]';
+    const { result } = await comments(
+      discussionsOut([{ id: "d1", notes: [note({ id: 601, body })] }], [{ id: "d2", notes: [note({ id: 602 })] }]),
+    );
+    expect(result.map((c) => c.id)).toEqual([601, 602]);
+    expect(result[0].body).toBe(body);
+  });
+
   it("truncated discussions output is failed", async () => {
     const err = await comments(ok('[{"id":1')).catch((e) => e);
     expect(err).toBeInstanceOf(PrUnavailableError);
@@ -430,6 +440,7 @@ describe("GitLabGlabProvider", () => {
   it("auth failure is glab-unauthenticated with host", async () => {
     for (const stderr of [
       "glab: 401 Unauthorized",
+      "glab: Unauthorized (HTTP 401)",
       "To authenticate, run: glab auth login",
       "error: not authenticated with gitlab.example.com",
     ]) {
