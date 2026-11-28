@@ -16,6 +16,7 @@ const MR_FIELDS =
 
 const LIST_QUERY = `query($path: ID!) { project(fullPath: $path) { mergeRequests(state: opened, first: 100, sort: UPDATED_DESC) { nodes { ${MR_FIELDS} } } } }`;
 const ONE_QUERY = `query($path: ID!, $iid: String!) { project(fullPath: $path) { mergeRequest(iid: $iid) { ${MR_FIELDS} state description } } }`;
+const WEB_URL_QUERY = `query($path: ID!, $iid: String!) { project(fullPath: $path) { mergeRequest(iid: $iid) { webUrl } } }`;
 
 interface RawMr {
   iid: string;
@@ -49,7 +50,8 @@ interface RawDiscussion {
 }
 
 // glab exits non-zero with one of these on stderr when the host has no (valid) token.
-const AUTH_ERROR = /\b401\b|glab auth login|not authenticated/i;
+// 401 counts only as an HTTP status, never as a number inside a path (e.g. MR !401).
+const AUTH_ERROR = /HTTP\s*401|\b401\s+Unauthorized|glab auth login|not authenticated/i;
 
 /**
  * Splits `glab --paginate` output into its top-level JSON values: pages are concatenated
@@ -246,11 +248,19 @@ export function createGitLabGlabProvider(deps: {
     async reviewComments(repoPath, n) {
       assertNumber(n);
       const { host, projectPath } = await target(repoPath);
-      const stdout = await runGlab(
-        ["api", "--hostname", host, "--paginate", `projects/${encodeURIComponent(projectPath)}/merge_requests/${n}/discussions`],
-        repoPath,
-        host,
-      );
+      // The discussions API carries no MR URL, and host + path would miss a relative URL root.
+      const [project, stdout] = await Promise.all([
+        graphql(repoPath, host, ["-f", `query=${WEB_URL_QUERY}`, "-F", `path=${projectPath}`, "-f", `iid=${n}`]) as Promise<{
+          mergeRequest?: { webUrl?: unknown } | null;
+        }>,
+        runGlab(
+          ["api", "--hostname", host, "--paginate", `projects/${encodeURIComponent(projectPath)}/merge_requests/${n}/discussions`],
+          repoPath,
+          host,
+        ),
+      ]);
+      const webUrl = project.mergeRequest?.webUrl;
+      if (typeof webUrl !== "string" || !webUrl) throw new PrUnavailableError("failed", `MR !${n} not found`, host);
       let pages: unknown[];
       try {
         pages = parseConcatenatedJson(stdout);
@@ -258,8 +268,6 @@ export function createGitLabGlabProvider(deps: {
         throw new PrUnavailableError("failed", "glab api returned invalid JSON", host);
       }
       if (!pages.every(Array.isArray)) throw new PrUnavailableError("failed", "glab api returned a non-array page", host);
-      // The discussions API carries no MR URL; GitLab's MR page lives at <host>/<path>/-/merge_requests/<n>.
-      const webUrl = `https://${host}/${projectPath}/-/merge_requests/${n}`;
       const comments: ReviewComment[] = [];
       for (const d of (pages as RawDiscussion[][]).flat()) {
         const notes = (d?.notes ?? []).filter((x): x is RawNote => Boolean(x));

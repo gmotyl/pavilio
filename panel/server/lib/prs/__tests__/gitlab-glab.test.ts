@@ -264,16 +264,39 @@ describe("GitLabGlabProvider", () => {
     ...over,
   });
   const discussionsOut = (...pages: unknown[][]) => ok(pages.map((p) => JSON.stringify(p)).join(""));
-  const WEB = `https://${HOST}/${PROJECT}/-/merge_requests/40`;
+  // A relative URL root: a link built from host + path would miss "/gitlab".
+  const WEB = `https://${HOST}/gitlab/${PROJECT}/-/merge_requests/40`;
+  const webUrlOut = ok(JSON.stringify({ data: { project: { mergeRequest: { webUrl: WEB } } } }));
 
   async function comments(out: RunResult) {
-    const { run, calls } = fakeRunner(() => out);
+    const { run, calls } = fakeRunner((_cmd, args) => (args[1] === "graphql" ? webUrlOut : out));
     return { result: await createGitLabGlabProvider({ run, resolve }).reviewComments(REPO, 40), calls };
   }
 
+  it("reviewComments fetches the MR web URL with one graphql call", async () => {
+    const { calls } = await comments(discussionsOut([]));
+    const gql = calls.filter((c) => c.args[1] === "graphql");
+    expect(gql).toHaveLength(1);
+    expect(gql[0].cmd).toBe("glab");
+    expect(gql[0].cwd).toBe(REPO);
+    expect(gql[0].args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", HOST]);
+    expect(field(gql[0].args, "-F", "path")).toBe(PROJECT);
+    expect(field(gql[0].args, "-f", "iid")).toBe("40");
+    expect(field(gql[0].args, "-F", "iid")).toBeUndefined();
+    expect(field(gql[0].args, "-f", "query")).toMatch(/mergeRequest\(iid: \$iid\)\s*\{\s*webUrl\s*\}/);
+  });
+
+  it("reviewComments without an MR web URL is failed", async () => {
+    const noMr = ok(JSON.stringify({ data: { project: { mergeRequest: null } } }));
+    const { run } = fakeRunner((_cmd, args) => (args[1] === "graphql" ? noMr : discussionsOut([])));
+    const err = await createGitLabGlabProvider({ run, resolve }).reviewComments(REPO, 40).catch((e) => e);
+    expect(err).toBeInstanceOf(PrUnavailableError);
+    expect(err.reason).toBe("failed");
+  });
+
   it("reviewComments requests paginated discussions with an encoded nested path", async () => {
     const { calls } = await comments(discussionsOut([]));
-    const api = calls;
+    const api = calls.filter((c) => c.args[1] !== "graphql");
     expect(api).toHaveLength(1);
     expect(api[0].cmd).toBe("glab");
     expect(api[0].cwd).toBe(REPO);
@@ -349,6 +372,31 @@ describe("GitLabGlabProvider", () => {
     expect(result.map((c) => c.id)).toEqual([205]);
   });
 
+  it("a context-line note with both lines set is on the new side", async () => {
+    const { result } = await comments(
+      discussionsOut([
+        { id: "d1", notes: [note({ id: 401, position: { new_path: "a.ts", new_line: 15, old_line: 13, head_sha: "f".repeat(40) } })] },
+      ]),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: 401, side: "new", line: 15 });
+  });
+
+  it("escaped quotes before ][ inside a body do not split pages", async () => {
+    const body = 'quote \\"][" and \\\\';
+    const { result } = await comments(
+      discussionsOut([{ id: "d1", notes: [note({ id: 501, body })] }], [{ id: "d2", notes: [note({ id: 502 })] }]),
+    );
+    expect(result.map((c) => c.id)).toEqual([501, 502]);
+    expect(result[0].body).toBe(body);
+  });
+
+  it("truncated discussions output is failed", async () => {
+    const err = await comments(ok('[{"id":1')).catch((e) => e);
+    expect(err).toBeInstanceOf(PrUnavailableError);
+    expect(err.reason).toBe("failed");
+  });
+
   it("paginated pages are all parsed", async () => {
     const { result } = await comments(
       discussionsOut(
@@ -401,6 +449,10 @@ describe("GitLabGlabProvider", () => {
     const errored = ok(JSON.stringify({ data: null, errors: [{ message: "Field 'nope' doesn't exist" }] }));
     for (const err of await allErrors(() => errored)) {
       expect(err).toBeInstanceOf(PrUnavailableError);
+      expect(err.reason).toBe("failed");
+    }
+    // A 401 that is not an HTTP status (an id in a path) is not an auth failure.
+    for (const err of await allErrors(() => fail("404 Not Found: merge_requests/401/discussions"))) {
       expect(err.reason).toBe("failed");
     }
     // Non-auth exit is failed too.
