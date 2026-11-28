@@ -287,7 +287,7 @@ describe("GitHubGhProvider", () => {
   describe("a forge: github override", () => {
     const alias = "git@github-work:org/repo.git";
 
-    it("a forced alias host runs gh against github.com with the bare owner/repo", async () => {
+    it("a forced alias host runs gh against github.com with a qualified github.com/owner/repo", async () => {
       const origin = originIs(alias);
       const { run, calls } = fakeRunner((cmd, args) => {
         const o = origin(cmd, args);
@@ -304,8 +304,8 @@ describe("GitHubGhProvider", () => {
       await provider.getPr(REPO, 231);
       await expect(provider.reviewComments(REPO, 231)).resolves.toEqual([]);
       const ghCalls = calls.filter((c) => c.cmd === "gh");
-      expect(ghCalls[0].args.slice(0, 4)).toEqual(["pr", "list", "--repo", "org/repo"]);
-      expect(ghCalls[1].args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "org/repo"]);
+      expect(ghCalls[0].args.slice(0, 4)).toEqual(["pr", "list", "--repo", "github.com/org/repo"]);
+      expect(ghCalls[1].args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "github.com/org/repo"]);
       expect(ghCalls[2].args.slice(0, 5)).toEqual(["api", "--hostname", "github.com", "--paginate", "repos/org/repo/pulls/231/comments"]);
       expect(seen).toEqual([REPO, REPO, REPO]);
     });

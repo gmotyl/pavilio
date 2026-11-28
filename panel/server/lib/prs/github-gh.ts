@@ -204,9 +204,10 @@ export function createGitHubGhProvider(
 
   /**
    * Returns origin's gh --repo value and its `owner/repo`: in a fork clone gh defaults to
-   * upstream, so --repo pins it. A real GitHub host is qualified `github.com/owner/repo`,
-   * since an unqualified slug would resolve against GH_HOST; a forced override on another
-   * host (e.g. an SSH alias gh does not know) passes the bare `owner/repo`.
+   * upstream, so --repo pins it. It is always qualified `github.com/owner/repo`, since an
+   * unqualified slug would resolve against an inherited GH_HOST — also for a forced override
+   * on another host (e.g. an SSH alias gh does not know), so list/view hit the same host the
+   * comments call pins with --hostname. GitHub Enterprise is unsupported.
    */
   async function assertGitHub(repoPath: string): Promise<{ repoArg: string; slug: string }> {
     let url: string;
@@ -224,8 +225,8 @@ export function createGitHubGhProvider(
     }
     const slug = remoteRepo(url);
     if (!slug) throw new PrUnavailableError("unknown-forge", `cannot parse owner/repo from ${url.trim()}`);
-    // GitHub Enterprise stays unsupported: a forced alias host gets no --hostname / GH_HOST, so gh talks to github.com.
-    return { repoArg: githubHost ? `${GITHUB_HOST}/${slug}` : slug, slug };
+    // GitHub Enterprise stays unsupported: a forced alias host is treated as github.com.
+    return { repoArg: `${GITHUB_HOST}/${slug}`, slug };
   }
 
   return {
