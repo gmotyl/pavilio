@@ -284,6 +284,42 @@ describe("GitHubGhProvider", () => {
     }
   });
 
+  describe("a forge: github override", () => {
+    const alias = "git@github-work:org/repo.git";
+
+    it("a forced alias host runs gh against github.com with the bare owner/repo", async () => {
+      const origin = originIs(alias);
+      const { run, calls } = fakeRunner((cmd, args) => {
+        const o = origin(cmd, args);
+        if (o) return o;
+        if (cmd !== "gh") return new Error(`unexpected ${cmd} ${args.join(" ")}`);
+        if (args[0] === "api") return ok("");
+        return ok(args[1] === "list" ? "[]" : JSON.stringify({ ...JSON.parse(fixture("gh-pr-list-mixed.json"))[0], state: "OPEN" }));
+      });
+      const seen: string[] = [];
+      const forced = (p: string) => (seen.push(p), true);
+      const provider = createGitHubGhProvider({ run, forced });
+
+      await expect(provider.listOpen(REPO)).resolves.toEqual([]);
+      await provider.getPr(REPO, 231);
+      await expect(provider.reviewComments(REPO, 231)).resolves.toEqual([]);
+      const ghCalls = calls.filter((c) => c.cmd === "gh");
+      expect(ghCalls[0].args.slice(0, 4)).toEqual(["pr", "list", "--repo", "org/repo"]);
+      expect(ghCalls[1].args.slice(0, 5)).toEqual(["pr", "view", "231", "--repo", "org/repo"]);
+      expect(ghCalls[2].args.slice(0, 5)).toEqual(["api", "--hostname", "github.com", "--paginate", "repos/org/repo/pulls/231/comments"]);
+      expect(seen).toEqual([REPO, REPO, REPO]);
+    });
+
+    it("an unforced alias host is still an unknown forge naming the host", async () => {
+      const origin = originIs(alias);
+      const { run, calls } = fakeRunner((cmd, args) => origin(cmd, args) ?? ok("[]"));
+      const err = await createGitHubGhProvider({ run, forced: () => false }).listOpen(REPO).catch((e) => e);
+      expect((err as PrUnavailableError).reason).toBe("unknown-forge");
+      expect((err as PrUnavailableError).host).toBe("github-work");
+      expect(calls.some((c) => c.cmd === "gh")).toBe(false);
+    });
+  });
+
   it("classifies a missing gh, an unauthenticated gh and other failures", async () => {
     const origin = originIs("https://github.com/o/r.git");
     const reasonFor = async (gh: RunResult | Error) => {

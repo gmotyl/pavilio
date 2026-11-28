@@ -218,7 +218,8 @@ const defaultResolveForge = createForgeResolver();
 
 export default createPrsRouter(
   {
-    github: createGitHubGhProvider(),
+    // Same entry rule as every route: a forced github repo may sit on an SSH host alias.
+    github: createGitHubGhProvider({ forced: (repoPath) => linkedEntry(repoPath)?.forge === "github" }),
     gitlab: createGitLabGlabProvider({ resolve: gitlabResolveFor(defaultResolveForge) }),
   },
   { resolveForge: defaultResolveForge },

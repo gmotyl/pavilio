@@ -155,8 +155,12 @@ const GITHUB_HOST = "github.com";
 // Re-read so `gh auth switch` shows up without a restart.
 const LOGIN_TTL_MS = 5 * 60_000;
 
-export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number } = {}): PrProvider {
+export function createGitHubGhProvider(
+  deps: { run?: Runner; now?: () => number; forced?: (repoPath: string) => boolean } = {},
+): PrProvider {
   const run = deps.run ?? defaultRunner;
+  // A repos.json `forge: "github"` override: origin may sit on an SSH host alias.
+  const forced = deps.forced ?? (() => false);
   const now = deps.now ?? Date.now;
   let login: { at: number; value: Promise<string> } | null = null;
 
@@ -199,10 +203,12 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
   const git = (args: string[], cwd: string) => runGit(run, args, cwd);
 
   /**
-   * Returns `github.com/owner/repo` of origin for gh's --repo: in a fork clone gh defaults
-   * to upstream, and an unqualified slug would resolve against GH_HOST.
+   * Returns origin's gh --repo value and its `owner/repo`: in a fork clone gh defaults to
+   * upstream, so --repo pins it. A real GitHub host is qualified `github.com/owner/repo`,
+   * since an unqualified slug would resolve against GH_HOST; a forced override on another
+   * host (e.g. an SSH alias gh does not know) passes the bare `owner/repo`.
    */
-  async function assertGitHub(repoPath: string): Promise<string> {
+  async function assertGitHub(repoPath: string): Promise<{ repoArg: string; slug: string }> {
     let url: string;
     try {
       url = await git(["remote", "get-url", "origin"], repoPath);
@@ -211,11 +217,15 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
       throw new PrUnavailableError("unknown-forge", "no origin remote");
     }
     const host = remoteHost(url) ?? "";
-    // The host lets the copy name it, e.g. when a forge: "github" override sits on another forge.
-    if (!GITHUB_REMOTE_HOSTS.has(host)) throw new PrUnavailableError("unknown-forge", `origin is ${url.trim()}`, host || undefined);
+    const githubHost = GITHUB_REMOTE_HOSTS.has(host);
+    // The host lets the copy name it.
+    if (!githubHost && !forced(repoPath)) {
+      throw new PrUnavailableError("unknown-forge", `origin is ${url.trim()}`, host || undefined);
+    }
     const slug = remoteRepo(url);
     if (!slug) throw new PrUnavailableError("unknown-forge", `cannot parse owner/repo from ${url.trim()}`);
-    return `${GITHUB_HOST}/${slug}`;
+    // GitHub Enterprise stays unsupported: a forced alias host gets no --hostname / GH_HOST, so gh talks to github.com.
+    return { repoArg: githubHost ? `${GITHUB_HOST}/${slug}` : slug, slug };
   }
 
   return {
@@ -234,10 +244,10 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
     },
 
     async listOpen(repoPath) {
-      const slug = await assertGitHub(repoPath);
+      const { repoArg } = await assertGitHub(repoPath);
       // Without headRefOid the rows carry headSha "", which the UI reads as unknown.
       const { out } = await ghPrFields(
-        (fields) => ["pr", "list", "--repo", slug, "--state", "open", "--limit", "100", "--json", fields],
+        (fields) => ["pr", "list", "--repo", repoArg, "--state", "open", "--limit", "100", "--json", fields],
         repoPath,
       );
       let raw: RawPr[];
@@ -252,7 +262,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
 
     async getPr(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      const slug = await assertGitHub(repoPath);
+      const { repoArg } = await assertGitHub(repoPath);
       // Without headRefOid, the head is the PR's last commit (`commits` lists all of them).
       const { out, hasHeadOid } = await ghPrFields(
         (fields, hasOid) => [
@@ -260,7 +270,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
           "view",
           String(n),
           "--repo",
-          slug,
+          repoArg,
           "--json",
           hasOid ? `${fields},state` : `${fields},state,commits`,
         ],
@@ -281,8 +291,8 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
 
     async openPr(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      const slug = await assertGitHub(repoPath);
-      const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", slug, "--json", "baseRefName,body"], repoPath)) as {
+      const { repoArg } = await assertGitHub(repoPath);
+      const view = JSON.parse(await gh(["pr", "view", String(n), "--repo", repoArg, "--json", "baseRefName,body"], repoPath)) as {
         baseRefName?: string;
         body?: string;
       };
@@ -294,7 +304,7 @@ export function createGitHubGhProvider(deps: { run?: Runner; now?: () => number 
 
     async reviewComments(repoPath, n) {
       if (!Number.isSafeInteger(n) || n <= 0) throw new PrUnavailableError("failed", `invalid PR number ${n}`);
-      const slug = (await assertGitHub(repoPath)).slice(`${GITHUB_HOST}/`.length);
+      const { slug } = await assertGitHub(repoPath);
       // --jq '.[] | {...}' prints one object per line on every page, so pages concatenate without `][`.
       // Project only the consumed fields: whole objects repeat `diff_hunk` and can overflow the runner's maxBuffer.
       // --hostname: an inherited GH_HOST must not send this to another host once origin proved github.com.
