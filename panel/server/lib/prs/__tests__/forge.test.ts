@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createForgeResolver, remotePath } from "../forge.js";
-import type { RunResult, Runner } from "../github-gh.js";
+import type { RunResult, Runner } from "../run.js";
 
 const REPO = "/work/acme-web";
 

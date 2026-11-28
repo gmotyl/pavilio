@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { defaultRunner, type Runner } from "./github-gh.js";
 import type { Forge } from "./provider.js";
+import { defaultRunner, GIT_ENV, type Runner } from "./run.js";
 
 export type ResolvedForge =
   | { forge: Forge; host: string; projectPath: string }
@@ -12,8 +12,6 @@ export type ResolvedForge =
 // GitHub's SSH-over-443 endpoint is the same github.com.
 export const GITHUB_REMOTE_HOSTS: ReadonlySet<string> = new Set(["github.com", "ssh.github.com"]);
 const GITLAB_COM = "gitlab.com";
-// A credential prompt would hang the resolution; fail fast instead.
-const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" };
 
 /** Host of a git remote URL: https://, ssh://, git:// or scp-style `user@host:path`. */
 export function remoteHost(url: string): string | null {

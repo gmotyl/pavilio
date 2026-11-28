@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
 import { basename } from "node:path";
-import { gitSafeEnv } from "../gitEnv.js";
 import { GITHUB_REMOTE_HOSTS, remoteHost } from "./forge.js";
 import {
   type ChecksState,
@@ -10,21 +8,11 @@ import {
   type PullRequest,
   type ReviewComment,
 } from "./provider.js";
+import { defaultRunner, GIT_ENV, type RunResult, type Runner } from "./run.js";
 
-export interface RunResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
+// Re-exported: the runner moved to run.ts; existing imports keep working.
+export { defaultRunner, type RunResult, type Runner };
 
-/** Resolves with the exit code for any exit; rejects only when the process could not start (e.g. ENOENT). */
-export type Runner = (
-  cmd: string,
-  args: string[],
-  opts: { cwd: string; env?: Record<string, string> },
-) => Promise<RunResult>;
-
-const TIMEOUT_MS = 30_000;
 // Shallow clones: up to DEEPEN_ROUNDS × DEEPEN_BY extra commits per side before giving up.
 const DEEPEN_ROUNDS = 5;
 const DEEPEN_BY = 200;
@@ -44,20 +32,6 @@ export function __resetGhFieldSupportForTests(): void {
 const GH_AUTH_EXIT = 4;
 const AUTH_ERROR = /gh auth login|not logged in|authentication required|HTTP 401|bad credentials/i;
 
-export const defaultRunner: Runner = (cmd, args, { cwd, env }) =>
-  new Promise((resolve, reject) => {
-    // gitSafeEnv: an inherited GIT_DIR would retarget git (and gh's git calls) away from `cwd`.
-    execFile(
-      cmd,
-      args,
-      { cwd, env: { ...gitSafeEnv(), ...env }, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: "utf-8" },
-      (err, stdout, stderr) => {
-        if (err && typeof err.code === "string") return reject(err);
-        const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
-        resolve({ code, stdout, stderr });
-      },
-    );
-  });
 
 interface RawCheck {
   __typename?: string;
@@ -180,8 +154,6 @@ export function remoteRepo(url: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
-// A credential prompt would hang the request until the timeout; fail fast instead.
-const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" };
 const GITHUB_HOST = "github.com";
 // Re-read so `gh auth switch` shows up without a restart.
 const LOGIN_TTL_MS = 5 * 60_000;
